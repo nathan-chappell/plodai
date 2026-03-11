@@ -12,6 +12,11 @@ The agent should feel investigative instead of chatbot-like. It should list file
 - Render charts on the client and pass chart images back for visual reasoning when useful.
 - Keep auth simple and explainable for a demo setting.
 
+## Workspace shape
+- Keep the frontend/tooling root at the repo root for editor friendliness.
+- Keep Python application code under `backend/`.
+- Keep shared build and release files easy to discover from the repo root.
+
 ## Auth direction
 - Use `itsdangerous` for signed bearer tokens.
 - Keep a real SQLite `users` table with hashed passwords.

@@ -4,12 +4,15 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.frontend.example
 *.pyc
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+backend/.venv/
 backend/report_foundry.db
+frontend/node_modules/
 frontend/.vite/
 .DS_Store
 Thumbs.db

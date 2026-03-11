@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
-from pathlib import Path
 
+from chatkit.server import StreamingResult
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
@@ -11,9 +11,6 @@ from app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
 from app.core.auth import AuthenticatedUser, require_current_user
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal, Base, engine
-from app.models.chatkit import ChatItem, ChatThread
-from app.models.report import ReportRun
-from app.models.user import User
 from app.services.auth_service import AuthService
 
 
@@ -24,6 +21,7 @@ async def lifespan(_: FastAPI):
 
     async with AsyncSessionLocal() as db:
         await AuthService(db).bootstrap()
+        await db.commit()
 
     yield
 
@@ -64,7 +62,14 @@ async def chatkit_entrypoint(
     user: AuthenticatedUser = Depends(require_current_user),
     chatkit_server: ReportFoundryChatKitServer = Depends(build_chatkit_server),
 ):
-    return await chatkit_server.handle_request(request, user_email=user.email)
+    raw_request = await request.body()
+    context = await chatkit_server.build_request_context(
+        raw_request, user_email=user.email
+    )
+    result = await chatkit_server.process(raw_request, context)
+    if isinstance(result, StreamingResult):
+        return StreamingResponse(result, media_type="text/event-stream")
+    return Response(content=result.json, media_type="application/json")
 
 
 @app.get("/{full_path:path}")

@@ -1,19 +1,5 @@
-from pydantic import SecretStr
-from sqlalchemy import Text, TypeDecorator
+"""Legacy module kept only for import stability.
 
-
-class SecretStrText(TypeDecorator[SecretStr]):
-    impl = Text
-    cache_ok = True
-
-    def process_bind_param(self, value: SecretStr | str | None, dialect):
-        if value is None:
-            return None
-        if isinstance(value, SecretStr):
-            return value.get_secret_value()
-        return str(value)
-
-    def process_result_value(self, value: str | None, dialect):
-        if value is None:
-            return None
-        return SecretStr(value)
+Password hashes are stored as plain strings in the SQLAlchemy model and are
+produced by passlib's bcrypt context in auth_service.py.
+"""

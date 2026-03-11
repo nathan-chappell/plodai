@@ -1,132 +1,250 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime
-from uuid import uuid4
+from typing import cast
 
-from sqlalchemy import select
+from pydantic import TypeAdapter
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.models.chatkit import ChatItem, ChatThread
+from chatkit.store import NotFoundError, Store
+from chatkit.types import Attachment, Page, ThreadItem, ThreadMetadata, ThreadStatus
+
+from app.agents.context import ReportAgentContext
+from app.models.chatkit import ChatAttachment, ChatItem, ChatThread
 
 
-class DatabaseMemoryStore:
+THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
+ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
+
+
+class DatabaseMemoryStore(Store[ReportAgentContext]):
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def generate_thread_id(self) -> str:
-        return str(uuid4())
+    async def load_thread(
+        self, thread_id: str, context: ReportAgentContext
+    ) -> ThreadMetadata:
+        thread = await self._get_thread(thread_id)
+        return self._to_thread_metadata(thread)
 
-    def generate_item_id(self) -> str:
-        return str(uuid4())
-
-    async def list_threads(self, user_id: str | None = None) -> list[dict]:
-        query = select(ChatThread).options(selectinload(ChatThread.items)).order_by(ChatThread.updated_at.desc())
-        if user_id:
-            query = query.where(ChatThread.user_id == user_id)
-        result = await self.db.execute(query)
-        threads = result.scalars().all()
-        return [self._serialize_thread(thread) for thread in threads]
-
-    async def get_thread(self, thread_id: str) -> dict | None:
-        result = await self.db.execute(
-            select(ChatThread).options(selectinload(ChatThread.items)).where(ChatThread.id == thread_id)
-        )
-        thread = result.scalar_one_or_none()
-        return self._serialize_thread(thread) if thread else None
-
-    async def get_or_create_thread(
-        self,
-        user_id: str,
-        thread_id: str | None = None,
-        title: str = "New report",
-        metadata: dict | None = None,
-    ) -> dict:
-        if thread_id:
-            existing = await self.get_thread(thread_id)
-            if existing is not None:
-                if metadata:
-                    existing["metadata"] = {**existing.get("metadata", {}), **metadata}
-                    return await self.save_thread(existing)
-                return existing
-        return await self.create_thread(user_id=user_id, title=title, metadata=metadata)
-
-    async def create_thread(self, user_id: str, title: str = "New report", metadata: dict | None = None) -> dict:
-        thread = ChatThread(
-            id=self.generate_thread_id(),
-            user_id=user_id,
-            title=title,
-            metadata_json=metadata or {},
-        )
-        self.db.add(thread)
-        await self.db.commit()
-        await self.db.refresh(thread)
-        return self._serialize_thread(thread)
-
-    async def save_thread(self, thread: dict) -> dict:
-        result = await self.db.execute(select(ChatThread).where(ChatThread.id == thread["id"]))
-        current = result.scalar_one()
-        current.title = thread.get("title", current.title)
-        current.metadata_json = thread.get("metadata", current.metadata_json)
-        current.updated_at = datetime.now(UTC)
-        await self.db.commit()
-        await self.db.refresh(current)
-        return self._serialize_thread(current)
-
-    async def append_item(self, thread_id: str, role: str, item_type: str, payload: dict) -> dict:
-        item = ChatItem(
-            id=self.generate_item_id(),
-            thread_id=thread_id,
-            role=role,
-            kind=item_type,
-            payload=payload,
-        )
-        self.db.add(item)
-        result = await self.db.execute(select(ChatThread).where(ChatThread.id == thread_id))
-        thread = result.scalar_one()
-        thread.updated_at = datetime.now(UTC)
-        await self.db.commit()
-        await self.db.refresh(item)
-        return self._serialize_item(item)
-
-    async def replace_items(self, thread_id: str, items: list[dict]) -> dict:
-        result = await self.db.execute(
-            select(ChatThread).options(selectinload(ChatThread.items)).where(ChatThread.id == thread_id)
-        )
-        thread = result.scalar_one()
-        for item in list(thread.items):
-            await self.db.delete(item)
-        await self.db.flush()
-        for raw in items:
+    async def save_thread(
+        self, thread: ThreadMetadata, context: ReportAgentContext
+    ) -> None:
+        existing = await self.db.get(ChatThread, thread.id)
+        next_sequence = await self._next_sequence(ChatThread.updated_sequence)
+        if existing is None:
             self.db.add(
-                ChatItem(
-                    id=raw.get("id") or self.generate_item_id(),
-                    thread_id=thread_id,
-                    role=raw.get("role", "assistant"),
-                    kind=raw.get("type", raw.get("kind", "message")),
-                    payload=raw.get("payload", {}),
+                ChatThread(
+                    id=thread.id,
+                    user_id=context.user_email,
+                    title=thread.title,
+                    metadata_json=thread.metadata,
+                    status_json=thread.status.model_dump(),
+                    allowed_image_domains_json=thread.allowed_image_domains,
+                    updated_sequence=next_sequence,
                 )
             )
-        thread.updated_at = datetime.now(UTC)
+        else:
+            existing.title = thread.title
+            existing.metadata_json = thread.metadata
+            existing.status_json = thread.status.model_dump()
+            existing.allowed_image_domains_json = thread.allowed_image_domains
+            existing.updated_sequence = next_sequence
+            existing.updated_at = datetime.now(UTC)
         await self.db.commit()
-        await self.db.refresh(thread)
-        return self._serialize_thread(thread)
 
-    def _serialize_thread(self, thread: ChatThread) -> dict:
-        return {
-            "id": thread.id,
-            "user_id": thread.user_id,
-            "title": thread.title,
-            "metadata": thread.metadata_json,
-            "items": [self._serialize_item(item) for item in sorted(thread.items, key=lambda item: item.created_at)],
-            "created_at": thread.created_at.isoformat(),
-            "updated_at": thread.updated_at.isoformat(),
-        }
+    async def load_thread_items(
+        self,
+        thread_id: str,
+        after: str | None,
+        limit: int,
+        order: str,
+        context: ReportAgentContext,
+    ) -> Page[ThreadItem]:
+        await self._get_thread(thread_id)
+        query = select(ChatItem).where(ChatItem.thread_id == thread_id)
+        query = await self._apply_item_cursor(query, after, order)
+        query = query.order_by(
+            ChatItem.sequence.desc() if order == "desc" else ChatItem.sequence.asc()
+        )
+        query = query.limit(limit + 1)
+        result = await self.db.execute(query)
+        records = list(result.scalars().all())
 
-    def _serialize_item(self, item: ChatItem) -> dict:
-        return {
-            "id": item.id,
-            "thread_id": item.thread_id,
-            "role": item.role,
-            "type": item.kind,
-            "payload": item.payload,
-            "created_at": item.created_at.isoformat(),
-        }
+        has_more = len(records) > limit
+        page_records = records[:limit]
+        next_after = page_records[-1].id if has_more and page_records else None
+        return Page[ThreadItem](
+            data=[self._to_thread_item(item) for item in page_records],
+            has_more=has_more,
+            after=next_after,
+        )
+
+    async def save_attachment(
+        self, attachment: Attachment, context: ReportAgentContext
+    ) -> None:
+        payload = attachment.model_dump(mode="json")
+        existing = await self.db.get(ChatAttachment, attachment.id)
+        if existing is None:
+            self.db.add(
+                ChatAttachment(
+                    id=attachment.id,
+                    kind=attachment.type,
+                    payload=payload,
+                )
+            )
+        else:
+            existing.kind = attachment.type
+            existing.payload = payload
+        await self.db.commit()
+
+    async def load_attachment(
+        self, attachment_id: str, context: ReportAgentContext
+    ) -> Attachment:
+        attachment = await self.db.get(ChatAttachment, attachment_id)
+        if attachment is None:
+            raise NotFoundError(f"Attachment {attachment_id} was not found")
+        return ATTACHMENT_ADAPTER.validate_python(attachment.payload)
+
+    async def delete_attachment(
+        self, attachment_id: str, context: ReportAgentContext
+    ) -> None:
+        attachment = await self.db.get(ChatAttachment, attachment_id)
+        if attachment is not None:
+            await self.db.delete(attachment)
+            await self.db.commit()
+
+    async def load_threads(
+        self,
+        limit: int,
+        after: str | None,
+        order: str,
+        context: ReportAgentContext,
+    ) -> Page[ThreadMetadata]:
+        query = select(ChatThread).where(ChatThread.user_id == context.user_email)
+        query = await self._apply_thread_cursor(query, after, order)
+        query = query.order_by(
+            ChatThread.updated_sequence.desc()
+            if order == "desc"
+            else ChatThread.updated_sequence.asc()
+        )
+        query = query.limit(limit + 1)
+        result = await self.db.execute(query)
+        records = list(result.scalars().all())
+
+        has_more = len(records) > limit
+        page_records = records[:limit]
+        next_after = page_records[-1].id if has_more and page_records else None
+        return Page[ThreadMetadata](
+            data=[self._to_thread_metadata(thread) for thread in page_records],
+            has_more=has_more,
+            after=next_after,
+        )
+
+    async def add_thread_item(
+        self, thread_id: str, item: ThreadItem, context: ReportAgentContext
+    ) -> None:
+        existing = await self.db.get(ChatItem, item.id)
+        payload = item.model_dump(mode="json")
+        if existing is None:
+            self.db.add(
+                ChatItem(
+                    id=item.id,
+                    thread_id=thread_id,
+                    kind=item.type,
+                    payload=payload,
+                    sequence=await self._next_sequence(ChatItem.sequence),
+                )
+            )
+        else:
+            existing.thread_id = thread_id
+            existing.kind = item.type
+            existing.payload = payload
+        await self._touch_thread(thread_id)
+        await self.db.commit()
+
+    async def save_item(
+        self, thread_id: str, item: ThreadItem, context: ReportAgentContext
+    ) -> None:
+        await self.add_thread_item(thread_id, item, context)
+
+    async def load_item(
+        self, thread_id: str, item_id: str, context: ReportAgentContext
+    ) -> ThreadItem:
+        item = await self.db.get(ChatItem, item_id)
+        if item is None or item.thread_id != thread_id:
+            raise NotFoundError(f"Thread item {item_id} was not found")
+        return self._to_thread_item(item)
+
+    async def delete_thread(self, thread_id: str, context: ReportAgentContext) -> None:
+        thread = await self.db.get(ChatThread, thread_id)
+        if thread is None:
+            return
+        await self.db.delete(thread)
+        await self.db.commit()
+
+    async def delete_thread_item(
+        self, thread_id: str, item_id: str, context: ReportAgentContext
+    ) -> None:
+        item = await self.db.get(ChatItem, item_id)
+        if item is None or item.thread_id != thread_id:
+            return
+        await self.db.delete(item)
+        await self._touch_thread(thread_id)
+        await self.db.commit()
+
+    async def _get_thread(self, thread_id: str) -> ChatThread:
+        result = await self.db.execute(
+            select(ChatThread).where(ChatThread.id == thread_id)
+        )
+        thread = result.scalar_one_or_none()
+        if thread is None:
+            raise NotFoundError(f"Thread {thread_id} was not found")
+        return thread
+
+    async def _touch_thread(self, thread_id: str) -> None:
+        thread = await self.db.get(ChatThread, thread_id)
+        if thread is not None:
+            thread.updated_sequence = await self._next_sequence(
+                ChatThread.updated_sequence
+            )
+            thread.updated_at = datetime.now(UTC)
+
+    async def _apply_thread_cursor(self, query, after: str | None, order: str):
+        if after is None:
+            return query
+        cursor = await self.db.get(ChatThread, after)
+        if cursor is None:
+            return query
+        if order == "desc":
+            return query.where(ChatThread.updated_sequence < cursor.updated_sequence)
+        return query.where(ChatThread.updated_sequence > cursor.updated_sequence)
+
+    async def _apply_item_cursor(self, query, after: str | None, order: str):
+        if after is None:
+            return query
+        cursor = await self.db.get(ChatItem, after)
+        if cursor is None:
+            return query
+        if order == "desc":
+            return query.where(ChatItem.sequence < cursor.sequence)
+        return query.where(ChatItem.sequence > cursor.sequence)
+
+    async def _next_sequence(self, column) -> int:
+        result = await self.db.execute(select(func.max(column)))
+        current = result.scalar_one()
+        return int(current or 0) + 1
+
+    def _to_thread_metadata(self, thread: ChatThread) -> ThreadMetadata:
+        return ThreadMetadata(
+            id=thread.id,
+            title=thread.title,
+            created_at=thread.created_at,
+            status=TypeAdapter(ThreadStatus).validate_python(thread.status_json),
+            allowed_image_domains=thread.allowed_image_domains_json,
+            metadata=cast(dict, thread.metadata_json),
+        )
+
+    def _to_thread_item(self, item: ChatItem) -> ThreadItem:
+        return THREAD_ITEM_ADAPTER.validate_python(item.payload)

@@ -48,7 +48,6 @@ async def get_chatkit_config(
         "model": chatkit_server.frontend_config.model,
         "tools": chatkit_server.frontend_config.tools,
         "notes": chatkit_server.frontend_config.notes,
-        "server_ready": chatkit_server.server is not None,
     }
 
 

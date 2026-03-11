@@ -3,7 +3,6 @@ from pathlib import Path
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from passlib.context import CryptContext
-from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +28,7 @@ class AuthService:
         user = await self._get_user_by_email(email)
         if user is None or not user.is_active:
             return None
-        if not pwd_context.verify(password, user.password_hash.get_secret_value()):
+        if not pwd_context.verify(password, user.password_hash):
             return None
         return self.issue_token(user), user
 
@@ -69,12 +68,13 @@ class AuthService:
             return
 
         admin = await self._get_user_by_email(self.settings.bootstrap_admin_email)
+        admin_password_hash = pwd_context.hash(self.settings.bootstrap_admin_password)
         if admin is None:
             self.db.add(
                 User(
                     email=self.settings.bootstrap_admin_email.lower(),
                     full_name=self.settings.bootstrap_admin_name,
-                    password_hash=SecretStr(pwd_context.hash(self.settings.bootstrap_admin_password)),
+                    password_hash=admin_password_hash,
                     role="admin",
                     is_active=True,
                 )
@@ -84,8 +84,8 @@ class AuthService:
         admin.full_name = self.settings.bootstrap_admin_name
         admin.role = "admin"
         admin.is_active = True
-        if not pwd_context.verify(self.settings.bootstrap_admin_password, admin.password_hash.get_secret_value()):
-            admin.password_hash = SecretStr(pwd_context.hash(self.settings.bootstrap_admin_password))
+        if not pwd_context.verify(self.settings.bootstrap_admin_password, admin.password_hash):
+            admin.password_hash = admin_password_hash
 
     async def _sync_seed_users(self, seed_path: Path) -> None:
         try:
@@ -101,12 +101,13 @@ class AuthService:
 
             role: UserRole = "admin" if raw_user.get("role") == "admin" else "user"
             user = await self._get_user_by_email(email)
+            user_password_hash = pwd_context.hash(password)
             if user is None:
                 self.db.add(
                     User(
                         email=email,
                         full_name=str(raw_user.get("full_name", "")).strip(),
-                        password_hash=SecretStr(pwd_context.hash(password)),
+                        password_hash=user_password_hash,
                         role=role,
                         is_active=bool(raw_user.get("is_active", True)),
                     )
@@ -116,8 +117,8 @@ class AuthService:
             user.full_name = str(raw_user.get("full_name", user.full_name)).strip()
             user.role = role
             user.is_active = bool(raw_user.get("is_active", user.is_active))
-            if not pwd_context.verify(password, user.password_hash.get_secret_value()):
-                user.password_hash = SecretStr(pwd_context.hash(password))
+            if not pwd_context.verify(password, user.password_hash):
+                user.password_hash = user_password_hash
 
     def _ensure_seed_file_exists(self, seed_path: Path) -> None:
         seed_path.parent.mkdir(parents=True, exist_ok=True)

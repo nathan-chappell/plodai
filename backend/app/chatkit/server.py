@@ -1,19 +1,36 @@
-from typing import Any
+from __future__ import annotations
 
-from fastapi import Depends, HTTPException, Request, status
+import json
+from typing import Any, AsyncIterator, Literal, cast
+
+from agents import Runner
+from chatkit.actions import Action
+from chatkit.agents import AgentContext as ChatKitAgentContext
+from chatkit.agents import simple_to_agent_input, stream_agent_response
+from chatkit.server import ChatKitServer
+from chatkit.types import (
+    ProgressUpdateEvent,
+    SyncCustomActionResponse,
+    ThreadMetadata,
+    ThreadStreamEvent,
+    UserMessageItem,
+    WidgetItem,
+)
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.context import ReportAgentContext
-from app.agents.report_analyst import report_analyst
+from app.agents.context import DatasetMetadata, ReportAgentContext
+from app.agents.query_models import build_query_plan_model
+from app.agents.report_analyst import build_report_analyst
 from app.chatkit.memory_store import DatabaseMemoryStore
+from app.chatkit.metadata import (
+    ThreadMetadataPatch,
+    datasets_from_thread_metadata,
+    merge_thread_metadata,
+    normalize_thread_metadata,
+)
 from app.core.config import get_settings
 from app.db.session import get_db
-
-try:
-    from chatkit.server import ChatKitServer, stream_agent_response
-except ImportError:  # pragma: no cover - exercised once dependency is installed
-    ChatKitServer = None
-    stream_agent_response = None
 
 
 class ChatKitFrontendConfig:
@@ -23,11 +40,18 @@ class ChatKitFrontendConfig:
         self.notes = notes
 
 
-class ReportFoundryChatKitServer:
+class UpdateThreadMetadataAction(
+    Action[Literal["update_thread_metadata"], ThreadMetadataPatch]
+):
+    pass
+
+
+class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
     def __init__(self, db: AsyncSession):
         self.settings = get_settings()
         self.db = db
-        self.store = DatabaseMemoryStore(db)
+        store = DatabaseMemoryStore(db)
+        super().__init__(store=store)
         self.frontend_config = ChatKitFrontendConfig(
             model=self.settings.chatkit_default_model,
             tools=[
@@ -36,86 +60,231 @@ class ReportFoundryChatKitServer:
                 "run_aggregate_query",
                 "request_chart_render",
                 "append_report_section",
+                "name_current_thread",
             ],
             notes=[
                 "Always stream agent responses.",
-                "Client is responsible for chart rendering and chart image return.",
-                "Conversation persistence uses the main SQLite database.",
-                "Interesting per-thread state can live in thread metadata.",
+                "Keep row-scoped filters, projections, and group keys separate from aggregate measures.",
+                "Prefer describe_numeric when you need descriptive statistics for a numeric column.",
+                "The client executes validated plans against loaded CSV rows and renders charts locally.",
+                "Thread metadata persists app state such as datasets, chart cache, and OpenAI conversation identifiers.",
             ],
         )
-        self.server = self._build_server()
 
-    def _build_server(self):
-        if ChatKitServer is None:
-            return None
-        return ChatKitServer(store=self.store, respond=self.respond)
-
-    async def build_agent_context(self, request: Request, user_email: str) -> ReportAgentContext:
-        payload = await self._request_json(request)
-        thread_id = payload.get("threadId") or payload.get("thread_id")
-        input_items = payload.get("inputItems") or payload.get("items") or []
-        metadata = payload.get("metadata") or {}
-        title = metadata.get("title") or payload.get("title") or "New report"
-        dataset_ids = list(metadata.get("dataset_ids") or payload.get("dataset_ids") or [])
-        chart_cache = dict(metadata.get("chart_cache") or {})
-
-        thread = await self.store.get_or_create_thread(
-            user_id=user_email,
-            thread_id=thread_id,
-            title=title,
-            metadata=metadata,
+    async def build_request_context(
+        self,
+        raw_request: bytes | str,
+        user_email: str,
+    ) -> ReportAgentContext:
+        payload = self._coerce_payload(raw_request)
+        metadata = normalize_thread_metadata(payload.get("metadata"))
+        thread_id = self._extract_thread_id(payload)
+        datasets = self._coerce_datasets(
+            metadata.get("datasets") or payload.get("datasets") or []
         )
-        thread_metadata = dict(thread.get("metadata") or {})
-        if dataset_ids and not thread_metadata.get("dataset_ids"):
-            thread_metadata["dataset_ids"] = dataset_ids
-            thread["metadata"] = thread_metadata
-            thread = await self.store.save_thread(thread)
-            thread_metadata = dict(thread.get("metadata") or {})
+        dataset_ids = list(
+            metadata.get("dataset_ids") or [dataset.id for dataset in datasets]
+        )
+        chart_cache = dict(metadata.get("chart_cache") or {})
+        query_plan_model, query_plan_schema = build_query_plan_model(datasets)
 
         return ReportAgentContext(
-            report_id=thread["id"],
+            report_id=thread_id or "pending_thread",
             user_email=user_email,
             db=self.db,
-            dataset_ids=list(thread_metadata.get("dataset_ids") or dataset_ids),
+            dataset_ids=dataset_ids,
             chart_cache=chart_cache,
-            thread_metadata=thread_metadata,
+            thread_metadata=metadata,
+            available_datasets=datasets,
+            query_plan_model=query_plan_model,
+            query_plan_schema=query_plan_schema,
         )
 
-    async def handle_request(self, request: Request, user_email: str):
-        if self.server is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="chatkit is not installed in the active environment.",
+    async def respond(
+        self,
+        thread: ThreadMetadata,
+        input_user_message: UserMessageItem | None,
+        context: ReportAgentContext,
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        typed_metadata = normalize_thread_metadata(thread.metadata)
+        context.report_id = thread.id
+        context.thread_metadata = typed_metadata
+        context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
+        context.dataset_ids = list(
+            typed_metadata.get("dataset_ids") or context.dataset_ids
+        )
+        if not context.available_datasets:
+            context.available_datasets = datasets_from_thread_metadata(typed_metadata)
+            context.query_plan_model, context.query_plan_schema = (
+                build_query_plan_model(context.available_datasets)
             )
 
-        context = await self.build_agent_context(request, user_email=user_email)
-        handler = getattr(self.server, "handle", None) or getattr(self.server, "handle_request", None)
-        if handler is None:
-            raise RuntimeError("ChatKit server object does not expose a request handler.")
-        return await handler(request, context=context)
-
-    async def respond(self, turn_event: Any, context: ReportAgentContext):
-        if stream_agent_response is None:
-            raise RuntimeError("chatkit is not installed in the active environment.")
-
-        return stream_agent_response(
-            agent=report_analyst,
-            input=getattr(turn_event, "items", []),
+        items_page = await self.store.load_thread_items(
+            thread.id,
+            after=None,
+            limit=1000,
+            order="asc",
             context=context,
-            model=self.settings.chatkit_default_model,
+        )
+        agent_input = await simple_to_agent_input(items_page.data)
+        agent = build_report_analyst(context)
+        chatkit_context = ChatKitAgentContext[ReportAgentContext](
+            thread=thread,
+            store=self.store,
+            request_context=context,
+        )
+        context.emit_event = chatkit_context.stream
+
+        result = Runner.run_streamed(
+            agent,
+            agent_input,
+            context=context,
+            conversation_id=typed_metadata.get("openai_conversation_id"),
+            previous_response_id=typed_metadata.get("openai_previous_response_id"),
+        )
+        async for event in stream_agent_response(chatkit_context, result):
+            yield event
+
+        if context.requested_thread_title:
+            thread.title = context.requested_thread_title
+
+        updated_metadata = merge_thread_metadata(
+            typed_metadata,
+            cast(
+                ThreadMetadataPatch,
+                {
+                    "title": context.requested_thread_title
+                    or typed_metadata.get("title"),
+                    "openai_conversation_id": getattr(result, "_conversation_id", None),
+                    "openai_previous_response_id": result.last_response_id,
+                    "chart_cache": context.chart_cache,
+                    "dataset_ids": context.dataset_ids,
+                    "datasets": [
+                        self._dataset_to_dict(dataset)
+                        for dataset in context.available_datasets
+                    ],
+                },
+            ),
+        )
+        thread.metadata = updated_metadata
+        await self.store.save_thread(thread, context=context)
+
+    async def action(
+        self,
+        thread: ThreadMetadata,
+        action: Action[str, Any],
+        sender: WidgetItem | None,
+        context: ReportAgentContext,
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
+            current_metadata = normalize_thread_metadata(thread.metadata)
+            patch = cast(ThreadMetadataPatch, action.payload)
+            thread.metadata = merge_thread_metadata(current_metadata, patch)
+            if patch.get("title"):
+                thread.title = patch["title"]
+            await self.store.save_thread(thread, context=context)
+            yield ProgressUpdateEvent(text="Saved thread metadata update.")
+            return
+
+        yield ProgressUpdateEvent(text=f"Unhandled action: {action.type}")
+
+    async def sync_action(
+        self,
+        thread: ThreadMetadata,
+        action: Action[str, Any],
+        sender: WidgetItem | None,
+        context: ReportAgentContext,
+    ) -> SyncCustomActionResponse:
+        if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
+            current_metadata = normalize_thread_metadata(thread.metadata)
+            patch = cast(ThreadMetadataPatch, action.payload)
+            thread.metadata = merge_thread_metadata(current_metadata, patch)
+            if patch.get("title"):
+                thread.title = patch["title"]
+            await self.store.save_thread(thread, context=context)
+        return SyncCustomActionResponse(updated_item=sender)
+
+    async def list_threads_for_user(self, user_email: str):
+        context = ReportAgentContext(
+            report_id="list", user_email=user_email, db=self.db
+        )
+        return await self.store.load_threads(
+            limit=100, after=None, order="desc", context=context
         )
 
-    async def list_threads_for_user(self, user_id: str) -> list[dict]:
-        return await self.store.list_threads(user_id=user_id)
-
-    async def _request_json(self, request: Request) -> dict:
+    def _coerce_payload(self, raw_request: bytes | str) -> dict[str, Any]:
+        if isinstance(raw_request, bytes):
+            raw_request = raw_request.decode("utf-8")
         try:
-            payload = await request.json()
-        except Exception:
+            payload = json.loads(raw_request)
+        except (TypeError, ValueError):
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _extract_thread_id(self, payload: dict[str, Any]) -> str | None:
+        params = payload.get("params")
+        if isinstance(params, dict):
+            thread_id = params.get("thread_id")
+            if isinstance(thread_id, str) and thread_id:
+                return thread_id
+        for key in ("threadId", "thread_id"):
+            candidate = payload.get(key)
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        return None
 
-async def build_chatkit_server(db: AsyncSession = Depends(get_db)) -> ReportFoundryChatKitServer:
+    def _coerce_datasets(
+        self, raw_datasets: list[dict[str, Any]]
+    ) -> list[DatasetMetadata]:
+        datasets: list[DatasetMetadata] = []
+        for raw in raw_datasets:
+            columns = [str(column) for column in raw.get("columns", [])]
+            sample_rows = [dict(row) for row in raw.get("sample_rows", [])]
+            datasets.append(
+                DatasetMetadata(
+                    id=str(raw.get("id", "")),
+                    name=str(raw.get("name", "dataset")),
+                    columns=columns,
+                    sample_rows=sample_rows,
+                    row_count=int(raw.get("row_count", 0)),
+                    numeric_columns=self._infer_numeric_columns(columns, sample_rows),
+                )
+            )
+        return [dataset for dataset in datasets if dataset.id]
+
+    def _infer_numeric_columns(
+        self, columns: list[str], sample_rows: list[dict[str, Any]]
+    ) -> list[str]:
+        numeric_columns: list[str] = []
+        for column in columns:
+            values = [
+                row.get(column)
+                for row in sample_rows
+                if row.get(column) not in (None, "")
+            ]
+            if values and all(self._is_number(value) for value in values):
+                numeric_columns.append(column)
+        return numeric_columns
+
+    def _is_number(self, value: Any) -> bool:
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def _dataset_to_dict(self, dataset: DatasetMetadata) -> dict[str, object]:
+        return {
+            "id": dataset.id,
+            "name": dataset.name,
+            "columns": dataset.columns,
+            "sample_rows": dataset.sample_rows,
+            "row_count": dataset.row_count,
+            "numeric_columns": dataset.numeric_columns,
+        }
+
+
+async def build_chatkit_server(
+    db: AsyncSession = Depends(get_db),
+) -> ReportFoundryChatKitServer:
     return ReportFoundryChatKitServer(db)

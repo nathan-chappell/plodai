@@ -182,6 +182,7 @@ export function App() {
           name: file.name,
           row_count: preview.rowCount,
           columns: preview.columns,
+          numeric_columns: preview.numericColumns,
           sample_rows: preview.sampleRows,
         } satisfies DatasetSummary;
       }),
@@ -261,6 +262,7 @@ export function App() {
                       {dataset.row_count} rows · {dataset.columns.length} columns
                     </Meta>
                     <Meta>{dataset.columns.join(", ")}</Meta>
+                    <Meta>Numeric: {dataset.numeric_columns.length ? dataset.numeric_columns.join(", ") : "none inferred yet"}</Meta>
                   </FileCard>
                 ))}
               </FilesList>

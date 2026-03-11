@@ -6,9 +6,9 @@ import typer
 
 
 app = typer.Typer(help="Build and release Report Foundry artifacts.")
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
-FRONTEND = ROOT / "frontend"
+FRONTEND = ROOT
 STATIC_DIR = BACKEND / "app" / "static"
 
 
@@ -35,7 +35,7 @@ def publish(version: str = typer.Argument(..., help="Application version and doc
 def sync_frontend_dist() -> None:
     dist_dir = FRONTEND / "dist"
     if not dist_dir.exists():
-        raise typer.BadParameter("frontend/dist does not exist. Run the frontend build first.")
+        raise typer.BadParameter("dist does not exist. Run the frontend build first.")
 
     if STATIC_DIR.exists():
         for child in STATIC_DIR.iterdir():

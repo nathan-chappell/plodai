@@ -5,6 +5,7 @@ export type DatasetSummary = {
   name: string;
   row_count: number;
   columns: string[];
+  numeric_columns: string[];
   sample_rows: Record<string, string>[];
 };
 
