@@ -15,7 +15,7 @@ Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI bac
 - Frontend/tooling root: `package.json`, `vite.config.ts`, `tsconfig.json`, `src/`
 - Python app: `backend/app/`
 - Python runtime config: `requirements.txt`, `requirements-dev.txt`
-- Release automation: `backend/scripts/release.py`
+- Release automation: `release.py`
 
 ## Build and run
 
@@ -43,27 +43,28 @@ npm run dev
 2. Copy `dist/` into `backend/app/static`.
 3. Run gunicorn from `backend/`.
 
-The repo includes VS Code tasks for each of these steps in `.vscode/tasks.json`.
+The repo includes VS Code launch configs for backend debugging and tasks for the frontend build/dev loop.
 
 ## Docker and release
 
-- `Dockerfile` builds the frontend first at the repo root.
-- It then copies `backend/` plus the built `dist/` output into the runtime image.
-- The production container runs `gunicorn` with `uvicorn.workers.UvicornWorker`.
-- `backend/scripts/release.py` is a Typer-based release entrypoint.
-- The intended image tag is the app version you pass to `release.py build`, for example `report-foundry:0.4.0`.
+- `Dockerfile` expects prebuilt frontend assets in `dist/` and copies them into the runtime image.
+- The runtime image copies `backend/` plus the prebuilt frontend output and runs `gunicorn`.
+- `release.py` is the Typer-based release entrypoint at the repo root.
+- `release.py set-version <version>` keeps the frontend package version and backend FastAPI version aligned.
+- `release.py build <version>` updates versions, builds the frontend, syncs static assets, and builds the Docker image.
+- `release.py publish <version>` also pushes the image to Docker Hub.
 
-Example:
+Examples:
 
 ```bash
-cd backend
-.venv\Scripts\activate
-python scripts\release.py build 0.4.0
+python release.py build 0.4.0
+python release.py publish 0.4.0 --image nathanschappell/report-foundry
 ```
 
 ## Railway notes
 
 - Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
+- Railway supports deploying public container images, including Docker Hub images, so a pushed image can be part of the deployment flow.
 - The current user bootstrap design is intentionally simple and operationally friendly.
 - Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
 - Thread metadata is a good place for small pieces of report state that should travel with the conversation.
@@ -80,4 +81,4 @@ This scaffold provides:
 - a React UI with styled-components, ChatKit scaffolding, Chart.js, and client analysis tooling
 - Docker, VS Code tasks, and a Typer release script scaffold
 
-The biggest missing pieces are real query execution over CSVs, actual Agents SDK runs, chart rendering image capture, and verification of the exact installed ChatKit request handler API after dependency install.
+The biggest missing pieces are real query execution over CSVs, fuller local file processing for client-side tools, and deeper verification of the exact installed ChatKit request handler API after dependency install.

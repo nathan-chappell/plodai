@@ -12,6 +12,7 @@ __pycache__/
 .venv/
 backend/.venv/
 backend/report_foundry.db
+backend/dev-certs/*.pem
 frontend/node_modules/
 frontend/.vite/
 .DS_Store

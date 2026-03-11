@@ -11,13 +11,100 @@
         "-vv",
         "-s"
       ],
-      // "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
         "PYTHONPATH": "${workspaceFolder}/backend"
       }
+    },
+    {
+      "name": "Backend: Uvicorn",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.main:app",
+        "--reload",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--ssl-certfile",
+        "${workspaceFolder}/backend/dev-certs/dev-cert.pem",
+        "--ssl-keyfile",
+        "${workspaceFolder}/backend/dev-certs/dev-key.pem"
+      ],
+      "cwd": "${workspaceFolder}/backend",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      }
+    },
+    {
+      "name": "Backend: Gunicorn",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gunicorn",
+      "args": [
+        "-c",
+        "../gunicorn.conf.py",
+        "app.main:app"
+      ],
+      "cwd": "${workspaceFolder}/backend",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "preLaunchTask": "backend: sync static",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      }
+    },
+    {
+      "name": "Frontend: Chrome (Vite)",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "https://127.0.0.1:5173",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
+    },
+    {
+      "name": "Frontend: Chrome with Vite task",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "https://127.0.0.1:5173",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "preLaunchTask": "frontend: dev",
+      "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
+    },
+    {
+      "name": "Frontend: Chrome (served by backend)",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "https://127.0.0.1:8000",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "App: Uvicorn + Chrome",
+      "configurations": [
+        "Backend: Uvicorn",
+        "Frontend: Chrome with Vite task"
+      ]
+    },
+    {
+      "name": "App: Gunicorn + served frontend",
+      "configurations": [
+        "Backend: Gunicorn",
+        "Frontend: Chrome (served by backend)"
+      ]
     }
   ]
 }

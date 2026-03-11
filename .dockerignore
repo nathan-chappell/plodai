@@ -3,10 +3,10 @@ __pycache__/
 .venv/
 backend/.venv/
 node_modules/
-dist/
 frontend/node_modules/
 backend/app/static/assets/
 backend/app/static/index.html
 backend/report_foundry.db
+backend/dev-certs/*.pem
 .git/
 .vscode/

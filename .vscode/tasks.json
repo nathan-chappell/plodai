@@ -2,21 +2,13 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "backend: uvicorn",
-      "type": "shell",
-      "command": ".\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --reload",
-      "options": {
-        "cwd": "${workspaceFolder}/backend"
-      },
-      "problemMatcher": []
-    },
-    {
       "label": "frontend: dev",
       "type": "shell",
       "command": "npm run dev",
       "options": {
         "cwd": "${workspaceFolder}"
       },
+      "isBackground": true,
       "problemMatcher": []
     },
     {
@@ -36,16 +28,6 @@
         "cwd": "${workspaceFolder}"
       },
       "dependsOn": ["frontend: build"],
-      "problemMatcher": []
-    },
-    {
-      "label": "backend: gunicorn",
-      "type": "shell",
-      "command": ".\\.venv\\Scripts\\python.exe -m gunicorn -c gunicorn.conf.py app.main:app",
-      "options": {
-        "cwd": "${workspaceFolder}/backend"
-      },
-      "dependsOn": ["backend: sync static"],
       "problemMatcher": []
     }
   ]
