@@ -1,5 +1,5 @@
-from functools import lru_cache
 from pathlib import Path
+from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = ""
     bootstrap_admin_name: str = "Built-in Admin"
     chatkit_default_model: str = "gpt-5.1"
+    static_dir: str = "./app/static"
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -36,6 +37,10 @@ class Settings(BaseSettings):
     @property
     def user_seed_path(self) -> Path:
         return Path(self.user_seed_file)
+
+    @property
+    def static_path(self) -> Path:
+        return Path(self.static_dir)
 
 
 @lru_cache

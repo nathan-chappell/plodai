@@ -1,0 +1,52 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend: uvicorn",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --reload",
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "backend: sync static",
+      "type": "shell",
+      "command": "@'\n$target = Join-Path (Resolve-Path .\\backend).Path 'app\\static'\nif (Test-Path $target) { Get-ChildItem -Path $target -Force | Remove-Item -Recurse -Force }\nNew-Item -ItemType Directory -Force -Path $target | Out-Null\nCopy-Item -Path .\\frontend\\dist\\* -Destination $target -Recurse -Force\n'@ | powershell -NoProfile -Command -",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": ["frontend: build"],
+      "problemMatcher": []
+    },
+    {
+      "label": "backend: gunicorn",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe -m gunicorn -c gunicorn.conf.py app.main:app",
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "dependsOn": ["backend: sync static"],
+      "problemMatcher": []
+    }
+  ]
+}

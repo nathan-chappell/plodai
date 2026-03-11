@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
@@ -43,6 +46,12 @@ app.add_middleware(
 
 app.include_router(router)
 
+static_path = settings.static_path
+if static_path.exists():
+    assets_path = static_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
 
 @app.get("/health")
 async def healthcheck() -> dict[str, str]:
@@ -56,3 +65,15 @@ async def chatkit_entrypoint(
     chatkit_server: ReportFoundryChatKitServer = Depends(build_chatkit_server),
 ):
     return await chatkit_server.handle_request(request, user_email=user.email)
+
+
+@app.get("/{full_path:path}")
+async def spa_entrypoint(full_path: str):
+    index_path = static_path / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Frontend build not found.")
+
+    candidate = static_path / full_path
+    if full_path and candidate.exists() and candidate.is_file():
+        return FileResponse(candidate)
+    return FileResponse(index_path)

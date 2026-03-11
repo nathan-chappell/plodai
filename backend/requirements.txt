@@ -1,6 +1,7 @@
 aiosqlite
 email-validator
 fastapi
+gunicorn
 itsdangerous
 openai
 openai-agents
@@ -9,4 +10,5 @@ passlib[bcrypt]
 pydantic-settings
 python-multipart
 sqlalchemy
+typer
 uvicorn[standard]

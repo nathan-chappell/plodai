@@ -1,28 +1,30 @@
 [project]
 name = "report-foundry-backend"
-version = "0.2.0"
+version = "0.4.0"
 description = "FastAPI backend for an agentic CSV reporting demo."
 requires-python = ">=3.14"
 dependencies = [
-  "fastapi>=0.116.0",
-  "uvicorn[standard]>=0.35.0",
-  "sqlalchemy>=2.0.40",
-  "aiosqlite>=0.21.0",
-  "pydantic-settings>=2.10.1",
-  "python-multipart>=0.0.20",
-  "itsdangerous>=2.2.0",
-  "passlib[bcrypt]>=1.7.4",
-  "email-validator>=2.2.0",
-  "openai>=1.0.0",
-  "openai-agents>=0.2.0",
-  "openai-chatkit>=1.0.0"
+  "aiosqlite",
+  "email-validator",
+  "fastapi",
+  "gunicorn",
+  "itsdangerous",
+  "openai",
+  "openai-agents",
+  "openai-chatkit",
+  "passlib[bcrypt]",
+  "pydantic-settings",
+  "python-multipart",
+  "sqlalchemy",
+  "typer",
+  "uvicorn[standard]"
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.3.5",
-  "httpx>=0.28.1",
-  "ruff>=0.11.2",
+  "httpx",
+  "pytest",
+  "ruff"
 ]
 
 [build-system]
