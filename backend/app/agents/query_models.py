@@ -43,11 +43,14 @@ AggregateOpLiteral: TypeAlias = Literal[
     "stddev",
 ]
 ChartTypeLiteral: TypeAlias = Literal["bar", "line", "pie", "doughnut", "scatter"]
-ChartStylePresetLiteral: TypeAlias = Literal["editorial", "sunrise", "ocean", "forest", "mono"]
+ChartStylePresetLiteral: TypeAlias = Literal[
+    "editorial", "sunrise", "ocean", "forest", "mono"
+]
 
 
 def _literal_type(values: tuple[str, ...]):
-    return Literal.__getitem__(values)
+    # NOTE: prefer this syntax
+    return Literal[values]
 
 
 class QueryModelBase(BaseModel):

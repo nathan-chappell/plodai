@@ -6,9 +6,11 @@ from typing import Any, AsyncIterator, Literal, cast
 from agents import Runner
 from chatkit.actions import Action
 from chatkit.agents import AgentContext as ChatKitAgentContext
-from chatkit.agents import simple_to_agent_input, stream_agent_response
+from chatkit.agents import ThreadItemConverter, stream_agent_response
 from chatkit.server import ChatKitServer
 from chatkit.types import (
+    ChatKitReq,
+    ClientToolCallItem,
     ProgressUpdateEvent,
     SyncCustomActionResponse,
     ThreadMetadata,
@@ -17,6 +19,9 @@ from chatkit.types import (
     WidgetItem,
 )
 from fastapi import Depends
+from openai.types.responses import ResponseInputImageParam, ResponseInputTextParam
+from openai.types.responses.response_input_item_param import Message
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context import DatasetMetadata, ReportAgentContext
@@ -25,12 +30,48 @@ from app.agents.report_analyst import build_report_analyst
 from app.chatkit.memory_store import DatabaseMemoryStore
 from app.chatkit.metadata import (
     ThreadMetadataPatch,
+    ThreadDatasetMetadata,
     datasets_from_thread_metadata,
     merge_thread_metadata,
     normalize_thread_metadata,
 )
 from app.core.config import get_settings
 from app.db.session import get_db
+
+
+class ClientToolResultConverter(ThreadItemConverter):
+    async def client_tool_call_to_input(self, item: ClientToolCallItem):
+        if item.status == "pending" or item.output is None:
+            return None
+        return self.client_tool_result_to_input(item.output, tool_name=item.name)
+
+    def client_tool_result_to_input(self, result: Any, tool_name: str | None = None):
+        output = result if isinstance(result, dict) else {"value": result}
+        image_url = output.get("imageDataUrl") or output.get("image_data_url")
+        query_id = output.get("query_id") or output.get("queryId")
+        row_count = output.get("row_count")
+
+        description = "A client-side tool completed successfully."
+        if tool_name:
+            description = f"The client tool '{tool_name}' completed successfully."
+        if isinstance(query_id, str) and query_id:
+            description += f" Query id: {query_id}."
+        if isinstance(row_count, int):
+            description += f" Result row count: {row_count}."
+        if image_url:
+            description += " A rendered chart image is attached for visual inspection."
+
+        content: list[ResponseInputTextParam | ResponseInputImageParam] = [
+            ResponseInputTextParam(type="input_text", text=description),
+            ResponseInputTextParam(type="input_text", text=json.dumps(output, ensure_ascii=True)),
+        ]
+
+        if isinstance(image_url, str) and image_url:
+            content.append(
+                ResponseInputImageParam(type="input_image", image_url=image_url, detail="auto")
+            )
+
+        return Message(role="user", type="message", content=content)
 
 
 class ChatKitFrontendConfig:
@@ -40,9 +81,7 @@ class ChatKitFrontendConfig:
         self.notes = notes
 
 
-class UpdateThreadMetadataAction(
-    Action[Literal["update_thread_metadata"], ThreadMetadataPatch]
-):
+class UpdateThreadMetadataAction(Action[Literal["update_thread_metadata"], ThreadMetadataPatch]):
     pass
 
 
@@ -52,6 +91,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         self.db = db
         store = DatabaseMemoryStore(db)
         super().__init__(store=store)
+        self.converter = ClientToolResultConverter()
         self.frontend_config = ChatKitFrontendConfig(
             model=self.settings.chatkit_default_model,
             tools=[
@@ -71,20 +111,12 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             ],
         )
 
-    async def build_request_context(
-        self,
-        raw_request: bytes | str,
-        user_email: str,
-    ) -> ReportAgentContext:
-        payload = self._coerce_payload(raw_request)
-        metadata = normalize_thread_metadata(payload.get("metadata"))
-        thread_id = self._extract_thread_id(payload)
-        datasets = self._coerce_datasets(
-            metadata.get("datasets") or payload.get("datasets") or []
-        )
-        dataset_ids = list(
-            metadata.get("dataset_ids") or [dataset.id for dataset in datasets]
-        )
+    async def build_request_context(self, raw_request: bytes | str, user_email: str) -> ReportAgentContext:
+        parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
+        metadata = normalize_thread_metadata(parsed_request.metadata)
+        thread_id = getattr(parsed_request.params, "thread_id", None)
+        datasets = self._coerce_datasets(metadata.get("datasets") or [])
+        dataset_ids = list(metadata.get("dataset_ids") or [dataset.id for dataset in datasets])
         chart_cache = dict(metadata.get("chart_cache") or {})
         query_plan_model, query_plan_schema = build_query_plan_model(datasets)
 
@@ -98,6 +130,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             available_datasets=datasets,
             query_plan_model=query_plan_model,
             query_plan_schema=query_plan_schema,
+            current_tool_result=getattr(parsed_request.params, "result", None),
         )
 
     async def respond(
@@ -110,29 +143,21 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         context.report_id = thread.id
         context.thread_metadata = typed_metadata
         context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
-        context.dataset_ids = list(
-            typed_metadata.get("dataset_ids") or context.dataset_ids
-        )
+        context.dataset_ids = list(typed_metadata.get("dataset_ids") or context.dataset_ids)
         if not context.available_datasets:
             context.available_datasets = datasets_from_thread_metadata(typed_metadata)
-            context.query_plan_model, context.query_plan_schema = (
-                build_query_plan_model(context.available_datasets)
-            )
+            context.query_plan_model, context.query_plan_schema = build_query_plan_model(context.available_datasets)
 
-        items_page = await self.store.load_thread_items(
-            thread.id,
-            after=None,
-            limit=1000,
-            order="asc",
-            context=context,
-        )
-        agent_input = await simple_to_agent_input(items_page.data)
+        if input_user_message is not None:
+            agent_input = await self.converter.to_agent_input(input_user_message)
+        elif context.current_tool_result is not None:
+            tool_result_input = self.converter.client_tool_result_to_input(context.current_tool_result)
+            agent_input = [tool_result_input] if tool_result_input is not None else []
+        else:
+            agent_input = []
+
         agent = build_report_analyst(context)
-        chatkit_context = ChatKitAgentContext[ReportAgentContext](
-            thread=thread,
-            store=self.store,
-            request_context=context,
-        )
+        chatkit_context = ChatKitAgentContext[ReportAgentContext](thread=thread, store=self.store, request_context=context)
         context.emit_event = chatkit_context.stream
 
         result = Runner.run_streamed(
@@ -142,7 +167,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             conversation_id=typed_metadata.get("openai_conversation_id"),
             previous_response_id=typed_metadata.get("openai_previous_response_id"),
         )
-        async for event in stream_agent_response(chatkit_context, result):
+        async for event in self._stream_agent_response(chatkit_context, result):
             yield event
 
         if context.requested_thread_title:
@@ -153,21 +178,20 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             cast(
                 ThreadMetadataPatch,
                 {
-                    "title": context.requested_thread_title
-                    or typed_metadata.get("title"),
+                    "title": context.requested_thread_title or typed_metadata.get("title"),
                     "openai_conversation_id": getattr(result, "_conversation_id", None),
                     "openai_previous_response_id": result.last_response_id,
                     "chart_cache": context.chart_cache,
                     "dataset_ids": context.dataset_ids,
-                    "datasets": [
-                        self._dataset_to_dict(dataset)
-                        for dataset in context.available_datasets
-                    ],
+                    "datasets": [self._dataset_to_dict(dataset) for dataset in context.available_datasets],
                 },
             ),
         )
-        thread.metadata = updated_metadata
-        await self.store.save_thread(thread, context=context)
+        thread.metadata = dict(updated_metadata)
+
+    async def _stream_agent_response(self, chatkit_context: ChatKitAgentContext[ReportAgentContext], result) -> AsyncIterator[ThreadStreamEvent]:
+        async for event in stream_agent_response(chatkit_context, result):
+            yield event
 
     async def action(
         self,
@@ -179,9 +203,9 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
             current_metadata = normalize_thread_metadata(thread.metadata)
             patch = cast(ThreadMetadataPatch, action.payload)
-            thread.metadata = merge_thread_metadata(current_metadata, patch)
-            if patch.get("title"):
-                thread.title = patch["title"]
+            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
+            if title := patch.get("title"):
+                thread.title = title
             await self.store.save_thread(thread, context=context)
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
@@ -198,93 +222,40 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
             current_metadata = normalize_thread_metadata(thread.metadata)
             patch = cast(ThreadMetadataPatch, action.payload)
-            thread.metadata = merge_thread_metadata(current_metadata, patch)
-            if patch.get("title"):
-                thread.title = patch["title"]
+            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
+            if title := patch.get("title"):
+                thread.title = title
             await self.store.save_thread(thread, context=context)
         return SyncCustomActionResponse(updated_item=sender)
 
     async def list_threads_for_user(self, user_email: str):
-        context = ReportAgentContext(
-            report_id="list", user_email=user_email, db=self.db
-        )
-        return await self.store.load_threads(
-            limit=100, after=None, order="desc", context=context
-        )
+        context = ReportAgentContext(report_id="list", user_email=user_email, db=self.db)
+        return await self.store.load_threads(limit=100, after=None, order="desc", context=context)
 
-    def _coerce_payload(self, raw_request: bytes | str) -> dict[str, Any]:
-        if isinstance(raw_request, bytes):
-            raw_request = raw_request.decode("utf-8")
-        try:
-            payload = json.loads(raw_request)
-        except (TypeError, ValueError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    def _extract_thread_id(self, payload: dict[str, Any]) -> str | None:
-        params = payload.get("params")
-        if isinstance(params, dict):
-            thread_id = params.get("thread_id")
-            if isinstance(thread_id, str) and thread_id:
-                return thread_id
-        for key in ("threadId", "thread_id"):
-            candidate = payload.get(key)
-            if isinstance(candidate, str) and candidate:
-                return candidate
-        return None
-
-    def _coerce_datasets(
-        self, raw_datasets: list[dict[str, Any]]
-    ) -> list[DatasetMetadata]:
-        datasets: list[DatasetMetadata] = []
-        for raw in raw_datasets:
-            columns = [str(column) for column in raw.get("columns", [])]
-            sample_rows = [dict(row) for row in raw.get("sample_rows", [])]
-            datasets.append(
-                DatasetMetadata(
-                    id=str(raw.get("id", "")),
-                    name=str(raw.get("name", "dataset")),
-                    columns=columns,
-                    sample_rows=sample_rows,
-                    row_count=int(raw.get("row_count", 0)),
-                    numeric_columns=self._infer_numeric_columns(columns, sample_rows),
-                )
+    def _coerce_datasets(self, raw_datasets: list[ThreadDatasetMetadata]) -> list[DatasetMetadata]:
+        return [
+            DatasetMetadata(
+                id=raw_dataset["id"],
+                name=raw_dataset["name"],
+                columns=list(raw_dataset["columns"]),
+                sample_rows=[dict(row) for row in raw_dataset["sample_rows"]],
+                row_count=raw_dataset["row_count"],
+                numeric_columns=list(raw_dataset["numeric_columns"]),
             )
-        return [dataset for dataset in datasets if dataset.id]
+            for raw_dataset in raw_datasets
+            if raw_dataset["id"]
+        ]
 
-    def _infer_numeric_columns(
-        self, columns: list[str], sample_rows: list[dict[str, Any]]
-    ) -> list[str]:
-        numeric_columns: list[str] = []
-        for column in columns:
-            values = [
-                row.get(column)
-                for row in sample_rows
-                if row.get(column) not in (None, "")
-            ]
-            if values and all(self._is_number(value) for value in values):
-                numeric_columns.append(column)
-        return numeric_columns
-
-    def _is_number(self, value: Any) -> bool:
-        try:
-            float(value)
-        except (TypeError, ValueError):
-            return False
-        return True
-
-    def _dataset_to_dict(self, dataset: DatasetMetadata) -> dict[str, object]:
+    def _dataset_to_dict(self, dataset: DatasetMetadata) -> ThreadDatasetMetadata:
         return {
             "id": dataset.id,
             "name": dataset.name,
             "columns": dataset.columns,
-            "sample_rows": dataset.sample_rows,
+            "sample_rows": [{str(key): str(value) for key, value in row.items()} for row in dataset.sample_rows],
             "row_count": dataset.row_count,
             "numeric_columns": dataset.numeric_columns,
         }
 
 
-async def build_chatkit_server(
-    db: AsyncSession = Depends(get_db),
-) -> ReportFoundryChatKitServer:
+async def build_chatkit_server(db: AsyncSession = Depends(get_db)) -> ReportFoundryChatKitServer:
     return ReportFoundryChatKitServer(db)

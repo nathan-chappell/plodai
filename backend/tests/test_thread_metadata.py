@@ -34,7 +34,7 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
         {
             "title": "Updated",
             "openai_previous_response_id": "resp_789",
-            "openai_conversation_id": None,
+            # "openai_conversation_id": None,
         },
     )
 

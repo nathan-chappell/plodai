@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from chatkit.types import ThreadStreamEvent
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chatkit.metadata import AppThreadMetadata
 
-
-ThreadEventEmitter = Callable[[object], Awaitable[None]]
+ThreadEventEmitter = Callable[[ThreadStreamEvent], Awaitable[None]]
 
 
 @dataclass
@@ -33,9 +33,17 @@ class ReportAgentContext:
     query_plan_schema: dict[str, Any] = field(default_factory=dict)
     emit_event: ThreadEventEmitter | None = None
     requested_thread_title: str | None = None
+    current_tool_result: Any | None = None
 
     def get_dataset(self, dataset_id: str) -> DatasetMetadata | None:
-        return next((dataset for dataset in self.available_datasets if dataset.id == dataset_id), None)
+        return next(
+            (
+                dataset
+                for dataset in self.available_datasets
+                if dataset.id == dataset_id
+            ),
+            None,
+        )
 
     def validate_query_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.query_plan_model is None:
