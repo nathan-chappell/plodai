@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr
 
-from app.models.types import UserRole
+from backend.app.models.types import UserRole
 
 
 class LoginRequest(BaseModel):

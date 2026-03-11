@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.session import Base
+from backend.app.db.session import Base
 
 
 class ChatThread(Base):

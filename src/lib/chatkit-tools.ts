@@ -1,6 +1,5 @@
 import type {
   ClientEffect,
-  ClientToolArgsMap,
   ClientToolCall,
   ClientToolName,
   DataRow,
@@ -11,6 +10,7 @@ import type {
 import type { DatasetSummary } from "../types/report";
 
 import { executeQueryPlan } from "./analysis";
+import { renderChartToDataUrl } from "./chart";
 
 export type LoadedDataset = DatasetSummary & {
   rows?: DataRow[];
@@ -59,18 +59,21 @@ export async function executeClientTool<Name extends ClientToolName>(
       const dataset = findDataset(datasets, args.query_plan.dataset_id);
       const rows = dataset.rows ?? dataset.sample_rows;
       const result = executeQueryPlan(rows, args.query_plan);
+      const imageDataUrl = await renderChartToDataUrl(args.chart_plan, result.rows);
       return {
         payload: {
           rows: result.rows,
           row_count: result.rows.length,
           chart: args.chart_plan,
           query_id: args.query_id,
+          imageDataUrl,
         },
         effects: [
           {
             type: "chart_rendered",
             queryId: args.query_id,
             chart: args.chart_plan,
+            imageDataUrl: imageDataUrl ?? undefined,
             rows: result.rows,
           },
         ],

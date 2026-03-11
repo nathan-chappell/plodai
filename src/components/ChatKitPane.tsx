@@ -1,22 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ComponentType } from "react";
+import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
-import * as ChatKitReact from "@openai/chatkit-react";
+import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { DatasetChart } from "./DatasetChart";
-import { apiRequest, authenticatedFetch, getChatKitConfig } from "../lib/api";
+import { authenticatedFetch, getChatKitConfig } from "../lib/api";
 import { executeClientTool } from "../lib/chatkit-tools";
 import { buildInitialThreadMetadata, buildThreadMetadataUpdateAction } from "../lib/thread-metadata";
-import type { ChatKitConfig } from "../types/auth";
-import type {
-  AppThreadMetadata,
-  ChartRenderedEffect,
-  ClientEffect,
-  ClientToolCall,
-  ClientToolName,
-  DataRow,
-} from "../types/analysis";
+import type { AppThreadMetadata, ChartRenderedEffect, ClientEffect, ClientToolCall, ClientToolName, DataRow } from "../types/analysis";
 import type { DatasetSummary } from "../types/report";
+import { emptyStateCss } from "../ui/primitives";
+
+const CHATKIT_MODEL_ID = import.meta.env.VITE_CHATKIT_MODEL ?? "default";
+const CHATKIT_MODEL_LABEL = import.meta.env.VITE_CHATKIT_MODEL_LABEL ?? "Foundry Analyst";
+const CHATKIT_NOTES = [
+  "Always stream agent responses.",
+  "The agent should explore, compare segments, validate anomalies, and draft findings proactively.",
+  "Client chart rendering returns both structured chart data and a rendered image for follow-up reasoning.",
+  "Thread metadata carries dataset summaries and other app state for the active conversation.",
+] as const;
+const CHATKIT_TOOLS: ClientToolName[] = ["list_accessible_datasets", "run_aggregate_query", "request_chart_render"];
 
 const Card = styled.section`
   background: linear-gradient(135deg, rgba(44, 62, 80, 0.94), rgba(26, 36, 47, 0.96));
@@ -63,10 +65,8 @@ const Surface = styled.div`
 `;
 
 const Empty = styled.div`
+  ${emptyStateCss};
   min-height: 360px;
-  display: grid;
-  place-items: center;
-  text-align: center;
   color: rgba(248, 246, 242, 0.74);
   padding: 1.5rem;
 `;
@@ -83,6 +83,8 @@ const EffectCard = styled.div`
   padding: 0.9rem;
 `;
 
+
+
 function formatToolLabel(tool: string): string {
   return tool
     .split("_")
@@ -90,118 +92,170 @@ function formatToolLabel(tool: string): string {
     .join(" ");
 }
 
+function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" {
+  switch (tool) {
+    case "list_accessible_datasets":
+      return "cube";
+    case "run_aggregate_query":
+      return "analytics";
+    case "request_chart_render":
+      return "chart";
+  }
+}
+
 function isChartRenderedEffect(effect: ClientEffect): effect is ChartRenderedEffect {
   return effect.type === "chart_rendered";
 }
 
-export function ChatKitPane({ enabled, datasets }: { enabled: boolean; datasets: DatasetSummary[] }) {
-  const [config, setConfig] = useState<ChatKitConfig | null>(null);
-  const [message, setMessage] = useState("Sign in to inspect ChatKit settings.");
-  const [effects, setEffects] = useState<ClientEffect[]>([]);
-  const metadataRef = useRef<AppThreadMetadata>({});
+function ConfiguredChatKit({ datasets, onEffects }: { datasets: DatasetSummary[]; onEffects: (effects: ClientEffect[]) => void }) {
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
 
-  const ChatKitComponent = (ChatKitReact as unknown as { ChatKit?: ComponentType<any> }).ChatKit;
-  const useChatKitHook =
-    (ChatKitReact as unknown as { useChatKit?: (options: unknown) => unknown }).useChatKit ??
-    (() => ({
-      session: null,
-    }));
+  const loadedDatasets = useMemo(
+    () => datasets.map((dataset) => ({ ...dataset, rows: dataset.sample_rows as DataRow[] })),
+    [datasets],
+  );
 
-  useEffect(() => {
-    async function loadConfig() {
-      if (!enabled) {
-        setConfig(null);
-        setMessage("Sign in to inspect ChatKit settings.");
-        return;
-      }
-
-      try {
-        const nextConfig = await apiRequest<ChatKitConfig>("/chatkit/config");
-        setConfig(nextConfig);
-        setMessage(nextConfig.server_ready ? "ChatKit server adapter is ready." : "ChatKit dependency not installed yet.");
-      } catch (error) {
-        setConfig(null);
-        setMessage(error instanceof Error ? error.message : "Unable to load ChatKit config.");
-      }
-    }
-
-    void loadConfig();
-  }, [enabled]);
-
-  const loadedDatasets = useMemo(() => datasets.map((dataset) => ({ ...dataset, rows: dataset.sample_rows as DataRow[] })), [datasets]);
   const metadata = useMemo<AppThreadMetadata>(
     () =>
       buildInitialThreadMetadata({
         title: datasets.length ? `Analysis of ${datasets.length} datasets` : "New report",
         dataset_ids: datasets.map((dataset) => dataset.id),
         datasets,
-        chart_cache: metadataRef.current.chart_cache ?? {},
-        openai_conversation_id: metadataRef.current.openai_conversation_id,
-        openai_previous_response_id: metadataRef.current.openai_previous_response_id,
       }),
     [datasets],
   );
 
-  const chatKit = useChatKitHook({
-    api: {
-      url: getChatKitConfig().url,
-      domainKey: getChatKitConfig().domainKey,
-      fetch: authenticatedFetch,
-    },
-    composer: config
-      ? {
-          models: [{ value: config.model, label: config.model }],
-          tools: config.tools.map((tool) => ({ value: tool, label: formatToolLabel(tool) })),
+  const options = useMemo<UseChatKitOptions>(
+    () => ({
+      api: {
+        url: getChatKitConfig().url,
+        domainKey: getChatKitConfig().domainKey,
+        fetch: authenticatedFetch,
+      },
+      theme: {
+        colorScheme: "dark",
+        radius: "round",
+        density: "normal",
+      },
+      history: {
+        enabled: true,
+        showDelete: false,
+        showRename: true,
+      },
+      header: {
+        title: {
+          enabled: true,
+          text: "Report Foundry",
+        },
+      },
+      startScreen: {
+        greeting: "What should we investigate in these CSVs?",
+        prompts: [
+          {
+            label: "Find anomalies",
+            prompt: "Explore the uploaded datasets, find meaningful anomalies, validate them, and build a concise report.",
+            icon: "analytics",
+          },
+          {
+            label: "Compare segments",
+            prompt: "Compare the most important segments in the uploaded datasets and explain the strongest differences.",
+            icon: "chart",
+          },
+          {
+            label: "Executive summary",
+            prompt: "Investigate the uploaded datasets thoroughly and prepare an executive summary with charts and caveats.",
+            icon: "sparkle",
+          },
+        ],
+      },
+      composer: {
+        placeholder: "Ask the analyst to investigate your datasets",
+        models: [
+          {
+            id: CHATKIT_MODEL_ID,
+            label: CHATKIT_MODEL_LABEL,
+            description: "Exploratory CSV analyst",
+            default: true,
+          },
+        ],
+        tools: CHATKIT_TOOLS.map((tool) => ({
+          id: tool,
+          label: formatToolLabel(tool),
+          icon: toolIcon(tool),
+        })),
+      },
+      onClientTool: async ({ name, params }) => {
+        const result = await executeClientTool(
+          {
+            name: name as ClientToolName,
+            arguments: params as ClientToolCall<ClientToolName>["arguments"],
+          },
+          loadedDatasets,
+        );
+        if (result.effects.length) {
+          onEffects(result.effects);
         }
-      : undefined,
-    metadata,
-    onClientTool: async (toolCall: { name?: string; arguments?: Record<string, unknown> }) => {
-      const name = (toolCall.name ?? "list_accessible_datasets") as ClientToolName;
-      const result = await executeClientTool(
-        {
-          name,
-          arguments: (toolCall.arguments ?? {}) as never,
-        } as ClientToolCall,
-        loadedDatasets,
-      );
-      if (result.effects.length) {
-        setEffects((current) => [...result.effects, ...current].slice(0, 6));
-      }
-      return result.payload;
-    },
-  });
+        return result.payload;
+      },
+      onEffect: (event) => {
+        if (event.name !== "chart_rendered" || !event.data) {
+          return;
+        }
+        onEffects([event.data as ClientEffect]);
+      },
+      onThreadChange: ({ threadId }) => {
+        setActiveThreadId(threadId);
+      },
+    }),
+    [loadedDatasets, onEffects],
+  );
+
+  const chatKit = useChatKit(options);
 
   useEffect(() => {
-    metadataRef.current = metadata;
-    const sendCustomAction = (chatKit as { sendCustomAction?: (action: { type: string; payload?: Record<string, unknown> }) => Promise<unknown> }).sendCustomAction;
-    if (!sendCustomAction || !datasets.length) {
+    if (!activeThreadId || !datasets.length) {
       return;
     }
 
-    void sendCustomAction(buildThreadMetadataUpdateAction({ dataset_ids: metadata.dataset_ids, datasets: metadata.datasets })).catch(() => undefined);
-  }, [chatKit, datasets, metadata]);
+    void chatKit.sendCustomAction(
+      buildThreadMetadataUpdateAction({
+        title: metadata.title,
+        dataset_ids: metadata.dataset_ids,
+        datasets: metadata.datasets,
+      }),
+    );
+  }, [activeThreadId, chatKit, datasets.length, metadata]);
+
+  return <ChatKit control={chatKit.control} />;
+}
+
+export function ChatKitPane({ enabled, datasets }: { enabled: boolean; datasets: DatasetSummary[] }) {
+  const [effects, setEffects] = useState<ClientEffect[]>([]);
 
   return (
     <Card>
       <Pill>ChatKit Surface</Pill>
       <h2>Conversation Surface</h2>
-      {config ? (
-        <>
-          <Meta>Model: {config.model}</Meta>
-          <List>
-            {config.tools.map((tool) => (
-              <li key={tool}>{tool}</li>
-            ))}
-          </List>
-          <List>
-            {config.notes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </List>
-        </>
-      ) : null}
+      <Meta>Model: {CHATKIT_MODEL_LABEL}</Meta>
+      <List>
+        {CHATKIT_TOOLS.map((tool) => (
+          <li key={tool}>{formatToolLabel(tool)}</li>
+        ))}
+      </List>
+      <List>
+        {CHATKIT_NOTES.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </List>
       <Surface>
-        {enabled && config && ChatKitComponent ? <ChatKitComponent {...(chatKit as Record<string, unknown>)} /> : <Empty>{message}</Empty>}
+        {enabled ? (
+          <ConfiguredChatKit
+            datasets={datasets}
+            onEffects={(nextEffects) => setEffects((current) => [...nextEffects, ...current].slice(0, 6))}
+          />
+        ) : (
+          <Empty>Sign in to start an investigation.</Empty>
+        )}
       </Surface>
       {effects.length ? (
         <EffectPanel>
@@ -212,7 +266,8 @@ export function ChatKitPane({ enabled, datasets }: { enabled: boolean; datasets:
           ))}
         </EffectPanel>
       ) : null}
-      <Meta>{message}</Meta>
+      <Meta>{enabled ? "ChatKit is ready." : "Sign in to inspect ChatKit settings."}</Meta>
     </Card>
   );
 }
+

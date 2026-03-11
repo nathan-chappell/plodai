@@ -1,8 +1,8 @@
 from agents import RunContextWrapper, function_tool
 from chatkit.types import ProgressUpdateEvent
 
-from app.agents.context import ReportAgentContext
-from app.agents.query_models import ChartPlan, ToolQueryPlan
+from backend.app.agents.context import ReportAgentContext
+from backend.app.agents.query_models import ChartPlan, ToolQueryPlan
 
 
 def _ctx(wrapper: RunContextWrapper[ReportAgentContext]) -> ReportAgentContext:

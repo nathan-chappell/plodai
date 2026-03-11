@@ -1,4 +1,7 @@
-from app.chatkit.metadata import merge_thread_metadata, normalize_thread_metadata
+from backend.app.chatkit.metadata import (
+    merge_thread_metadata,
+    normalize_thread_metadata,
+)
 
 
 def test_normalize_thread_metadata_filters_expected_fields() -> None:
@@ -6,7 +9,16 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
         {
             "title": "Quarterly review",
             "dataset_ids": ["sales_csv", 42],
-            "datasets": [{"id": "sales_csv", "columns": ["region"]}, "skip-me"],
+            "datasets": [
+                {
+                    "id": "sales_csv",
+                    "columns": ["region"],
+                    "row_count": 12,
+                    "sample_rows": [{"region": "North", "amount": 7}],
+                    "numeric_columns": ["amount"],
+                },
+                "skip-me",
+            ],
             "chart_cache": {"chart-1": "data:image/png;base64,abc", 2: "bad"},
             "openai_conversation_id": "conv_123",
             "openai_previous_response_id": "resp_456",
@@ -17,7 +29,16 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
     assert metadata == {
         "title": "Quarterly review",
         "dataset_ids": ["sales_csv", "42"],
-        "datasets": [{"id": "sales_csv", "columns": ["region"]}],
+        "datasets": [
+            {
+                "id": "sales_csv",
+                "name": "dataset",
+                "row_count": 12,
+                "columns": ["region"],
+                "numeric_columns": ["amount"],
+                "sample_rows": [{"region": "North", "amount": "7"}],
+            }
+        ],
         "chart_cache": {"chart-1": "data:image/png;base64,abc"},
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_456",
@@ -34,7 +55,7 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
         {
             "title": "Updated",
             "openai_previous_response_id": "resp_789",
-            # "openai_conversation_id": None,
+            # "openai_conversation_id": None, # NOTE: None is not okay, but it's a partial dict...
         },
     )
 

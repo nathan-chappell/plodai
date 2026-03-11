@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.session import Base
+from backend.app.db.session import Base
 
 
 class ReportRun(Base):

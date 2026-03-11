@@ -3,19 +3,18 @@ import styled from "styled-components";
 import { DatasetChart } from "./DatasetChart";
 import type { ClientChartSpec } from "../types/analysis";
 import type { ReportChart } from "../types/report";
+import { displayHeadingCss, strongSurfaceCss } from "../ui/primitives";
 
 const Card = styled.article`
+  ${strongSurfaceCss};
   background: linear-gradient(180deg, rgba(255, 253, 249, 0.98), rgba(248, 241, 234, 0.96));
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
   padding: 1.2rem;
   min-height: 280px;
-  box-shadow: var(--shadow);
 `;
 
 const Heading = styled.h3`
+  ${displayHeadingCss};
   margin: 0 0 0.75rem;
-  font-family: var(--font-display);
   font-size: 1.25rem;
 `;
 
@@ -29,6 +28,12 @@ const Preview = styled.div`
   color: var(--muted);
   padding: 1rem;
   text-align: center;
+`;
+
+const PreviewImage = styled.img`
+  display: block;
+  max-width: 100%;
+  border-radius: calc(var(--radius-md) - 4px);
 `;
 
 const Code = styled.pre`
@@ -51,7 +56,7 @@ export function ChartCard({ chart }: { chart: ReportChart }) {
       <Heading>{chart.title}</Heading>
       <Preview>
         {chart.image_data_url ? (
-          <img alt={chart.title} src={chart.image_data_url} style={{ maxWidth: "100%" }} />
+          <PreviewImage alt={chart.title} src={chart.image_data_url} />
         ) : isClientChartSpec(chart.spec) ? (
           <DatasetChart spec={chart.spec} rows={[]} />
         ) : (

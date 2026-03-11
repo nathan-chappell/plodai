@@ -3,11 +3,10 @@ import styled from "styled-components";
 
 import { apiRequest, storeToken } from "../lib/api";
 import type { AuthUser, LoginResponse } from "../types/auth";
+import { MetaText, inputSurfaceCss, panelSurfaceCss, primaryButtonCss } from "../ui/primitives";
 
 const Card = styled.section`
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  ${panelSurfaceCss};
   padding: 1.2rem;
   display: grid;
   gap: 0.8rem;
@@ -19,25 +18,13 @@ const Row = styled.div`
 `;
 
 const Input = styled.input`
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  padding: 0.8rem 0.9rem;
+  ${inputSurfaceCss};
 `;
 
 const Button = styled.button`
-  appearance: none;
-  border: 0;
-  border-radius: 999px;
+  ${primaryButtonCss};
   padding: 0.8rem 1rem;
   background: var(--ink);
-  color: white;
-  font-weight: 700;
-  cursor: pointer;
-`;
-
-const Meta = styled.div`
-  color: var(--muted);
-  font-size: 0.92rem;
 `;
 
 export function AuthPanel({
@@ -79,9 +66,9 @@ export function AuthPanel({
       {user ? (
         <>
           <strong>{user.full_name || user.email}</strong>
-          <Meta>
+          <MetaText as="div">
             {user.email} · {user.role}
-          </Meta>
+          </MetaText>
           <Button onClick={handleLogout} type="button">
             Sign out
           </Button>
@@ -104,7 +91,7 @@ export function AuthPanel({
           <Button type="submit">Sign in</Button>
         </form>
       )}
-      <Meta>{message}</Meta>
+      <MetaText as="div">{message}</MetaText>
     </Card>
   );
 }

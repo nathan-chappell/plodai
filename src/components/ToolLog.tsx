@@ -1,15 +1,15 @@
 import styled from "styled-components";
 
 import type { ToolEvent } from "../types/report";
+import { MetaText, displayHeadingCss, stackedListCss, warmSurfaceCss } from "../ui/primitives";
 
 const Card = styled.aside`
-  background: rgba(255, 251, 245, 0.86);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  ${warmSurfaceCss};
   padding: 1rem 1.2rem;
 `;
 
 const Heading = styled.h3`
+  ${displayHeadingCss};
   margin: 0 0 0.8rem;
   font-size: 1rem;
   letter-spacing: 0.08em;
@@ -18,10 +18,9 @@ const Heading = styled.h3`
 `;
 
 const List = styled.ul`
-  margin: 0;
+  ${stackedListCss};
   padding-left: 1.1rem;
   color: var(--muted);
-  display: grid;
   gap: 0.7rem;
 `;
 
@@ -36,7 +35,7 @@ export function ToolLog({ events }: { events: ToolEvent[] }) {
       <List>
         {events.map((event) => (
           <li key={`${event.tool}-${event.detail}`}>
-            <ToolName>{event.tool}</ToolName>: {event.detail}
+            <ToolName>{event.tool}</ToolName>: <MetaText as="span">{event.detail}</MetaText>
           </li>
         ))}
       </List>

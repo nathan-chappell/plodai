@@ -9,6 +9,7 @@ import {
   LinearScale,
   PointElement,
   Tooltip,
+  type Plugin,
 } from "chart.js";
 
 import type { ClientChartSpec, DataRow } from "../types/analysis";
@@ -70,6 +71,9 @@ const PRESETS: Record<NonNullable<ClientChartSpec["style_preset"]>, ChartPresetT
     background: "rgba(249, 250, 251, 0.96)",
   },
 };
+
+const HIDDEN_CHART_WIDTH = 1200;
+const HIDDEN_CHART_HEIGHT = 720;
 
 export function buildChartData(spec: ClientChartSpec, rows: DataRow[]) {
   const theme = getTheme(spec);
@@ -203,6 +207,71 @@ export function buildChartOptions(spec: ClientChartSpec) {
       },
     },
   };
+}
+
+export function buildChartPlugins(spec: ClientChartSpec): Plugin[] {
+  const theme = getTheme(spec);
+  return [
+    {
+      id: "reportFoundryBackground",
+      beforeDraw(chart) {
+        const { ctx, width, height } = chart;
+        ctx.save();
+        ctx.fillStyle = theme.background;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      },
+    },
+  ];
+}
+
+export async function renderChartToDataUrl(spec: ClientChartSpec, rows: DataRow[]): Promise<string | null> {
+  if (typeof document === "undefined" || rows.length === 0) {
+    return null;
+  }
+
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.position = "fixed";
+  host.style.left = "-10000px";
+  host.style.top = "0";
+  host.style.width = `${HIDDEN_CHART_WIDTH}px`;
+  host.style.height = `${HIDDEN_CHART_HEIGHT}px`;
+  host.style.pointerEvents = "none";
+  host.style.opacity = "0";
+
+  const canvas = document.createElement("canvas");
+  canvas.width = HIDDEN_CHART_WIDTH;
+  canvas.height = HIDDEN_CHART_HEIGHT;
+  canvas.style.width = `${HIDDEN_CHART_WIDTH}px`;
+  canvas.style.height = `${HIDDEN_CHART_HEIGHT}px`;
+  host.appendChild(canvas);
+  document.body.appendChild(host);
+
+  const chart = new ChartJS(
+    canvas,
+    {
+      type: spec.type,
+      data: buildChartData(spec, rows) as never,
+      options: {
+        ...buildChartOptions(spec),
+        responsive: false,
+        maintainAspectRatio: false,
+        animation: false,
+      } as never,
+      plugins: buildChartPlugins(spec),
+    } as never,
+  );
+
+  try {
+    chart.resize(HIDDEN_CHART_WIDTH, HIDDEN_CHART_HEIGHT);
+    chart.update("none");
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    return canvas.toDataURL("image/png");
+  } finally {
+    chart.destroy();
+    host.remove();
+  }
 }
 
 export function getChartSurfaceStyle(spec: ClientChartSpec): { background: string; border: string } {

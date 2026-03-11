@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chatkit.store import NotFoundError, Store
 from chatkit.types import Attachment, Page, ThreadItem, ThreadMetadata, ThreadStatus
 
-from app.agents.context import ReportAgentContext
-from app.models.chatkit import ChatAttachment, ChatItem, ChatThread
+from backend.app.agents.context import ReportAgentContext
+from backend.app.models.chatkit import ChatAttachment, ChatItem, ChatThread
 
 
 THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)

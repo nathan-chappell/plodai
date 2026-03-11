@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
-from app.core.auth import AuthenticatedUser, require_current_user
-from app.db.session import get_db
-from app.schemas.auth import AuthTokenResponse, LoginRequest, UserResponse
-from app.schemas.report import CreateReportRequest, CreateReportResponse, ReportResponse
-from app.services.auth_service import AuthService
-from app.services.report_service import ReportService
+from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
+from backend.app.core.auth import AuthenticatedUser, require_current_user
+from backend.app.db.session import get_db
+from backend.app.schemas.auth import AuthTokenResponse, LoginRequest, UserResponse
+from backend.app.schemas.report import CreateReportRequest, CreateReportResponse, ReportResponse
+from backend.app.services.auth_service import AuthService
+from backend.app.services.report_service import ReportService
 
 
 router = APIRouter(prefix="/api")

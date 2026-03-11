@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.models.types import UserRole
-from app.services.auth_service import AuthService
+from backend.app.db.session import get_db
+from backend.app.models.types import UserRole
+from backend.app.services.auth_service import AuthService
 
 
 @dataclass

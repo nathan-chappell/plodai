@@ -1,5 +1,5 @@
-from app.agents.context import DatasetMetadata
-from app.agents.query_models import ChartPlan, ToolQueryPlan, build_query_plan_model
+from backend.app.agents.DatasetMetadata import DatasetMetadata
+from backend.app.agents.query_models import ChartPlan, ToolQueryPlan, build_query_plan_model
 
 
 def build_datasets() -> list[DatasetMetadata]:

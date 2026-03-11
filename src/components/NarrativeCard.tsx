@@ -2,18 +2,16 @@ import ReactMarkdown from "react-markdown";
 import styled from "styled-components";
 
 import type { ReportSection } from "../types/report";
+import { displayHeadingCss, strongSurfaceCss } from "../ui/primitives";
 
 const Card = styled.article`
-  background: var(--panel-strong);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  ${strongSurfaceCss};
   padding: 1.2rem;
-  box-shadow: var(--shadow);
 `;
 
 const Heading = styled.h3`
+  ${displayHeadingCss};
   margin: 0 0 1rem;
-  font-family: var(--font-display);
   font-size: 1.35rem;
 `;
 

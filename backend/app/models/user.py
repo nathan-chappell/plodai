@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 from sqlalchemy import Boolean, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.session import Base
-from app.models.types import UserRole
+from backend.app.db.session import Base
+from backend.app.models.types import UserRole
 
 
 class User(Base):

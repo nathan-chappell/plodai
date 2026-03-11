@@ -10,6 +10,7 @@ import { apiRequest, getStoredToken, storeToken } from "./lib/api";
 import { parseCsvPreview } from "./lib/csv";
 import type { AuthUser } from "./types/auth";
 import type { CreateReportResponse, DatasetSummary } from "./types/report";
+import { MetaText, dashedInputSurfaceCss, displayHeadingCss, panelSurfaceCss, primaryButtonCss } from "./ui/primitives";
 
 const Page = styled.main`
   padding: 2rem;
@@ -40,8 +41,8 @@ const Eyebrow = styled.div`
 `;
 
 const Title = styled.h1`
+  ${displayHeadingCss};
   margin: 0;
-  font-family: var(--font-display);
   font-size: clamp(2.2rem, 5vw, 4.5rem);
   line-height: 0.95;
 `;
@@ -65,11 +66,9 @@ const Grid = styled.section`
 `;
 
 const Panel = styled.section`
-  background: var(--panel);
-  border: 1px solid var(--line);
+  ${panelSurfaceCss};
   border-radius: var(--radius-xl);
   padding: 1.4rem;
-  box-shadow: var(--shadow);
 `;
 
 const Label = styled.label`
@@ -90,21 +89,12 @@ const Textarea = styled.textarea`
 `;
 
 const Input = styled.input`
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--line);
-  padding: 0.9rem;
-  background: rgba(255, 255, 255, 0.72);
+  ${dashedInputSurfaceCss};
 `;
 
 const Button = styled.button`
-  appearance: none;
-  border: 0;
-  border-radius: 999px;
-  padding: 0.95rem 1.25rem;
+  ${primaryButtonCss};
   background: linear-gradient(135deg, var(--accent), var(--accent-deep));
-  color: white;
-  font-weight: 700;
-  cursor: pointer;
 `;
 
 const FilesList = styled.ul`
@@ -122,11 +112,6 @@ const FileCard = styled.li`
   border: 1px solid rgba(201, 111, 59, 0.18);
 `;
 
-const Meta = styled.div`
-  color: var(--muted);
-  font-size: 0.92rem;
-`;
-
 const ReportGrid = styled.section`
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -135,11 +120,6 @@ const ReportGrid = styled.section`
   @media (max-width: 900px) {
     grid-template-columns: 1fr;
   }
-`;
-
-const Notice = styled.p`
-  margin: 0;
-  color: var(--muted);
 `;
 
 export function App() {
@@ -258,16 +238,18 @@ export function App() {
                 {datasets.map((dataset) => (
                   <FileCard key={dataset.id}>
                     <strong>{dataset.name}</strong>
-                    <Meta>
+                    <MetaText as="div">
                       {dataset.row_count} rows · {dataset.columns.length} columns
-                    </Meta>
-                    <Meta>{dataset.columns.join(", ")}</Meta>
-                    <Meta>Numeric: {dataset.numeric_columns.length ? dataset.numeric_columns.join(", ") : "none inferred yet"}</Meta>
+                    </MetaText>
+                    <MetaText as="div">{dataset.columns.join(", ")}</MetaText>
+                    <MetaText as="div">
+                      Numeric: {dataset.numeric_columns.length ? dataset.numeric_columns.join(", ") : "none inferred yet"}
+                    </MetaText>
                   </FileCard>
                 ))}
               </FilesList>
             ) : (
-              <Notice>No files yet. Upload one or more CSVs to create safe dataset summaries.</Notice>
+              <MetaText>No files yet. Upload one or more CSVs to create safe dataset summaries.</MetaText>
             )}
           </Panel>
 
@@ -288,7 +270,7 @@ export function App() {
         ) : (
           <Panel>
             <h2>Report canvas</h2>
-            <Notice>{status}</Notice>
+            <MetaText>{status}</MetaText>
           </Panel>
         )}
       </Shell>

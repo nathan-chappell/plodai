@@ -5,19 +5,11 @@ from chatkit.types import ThreadStreamEvent
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chatkit.metadata import AppThreadMetadata
+from backend.app.agents.DatasetMetadata import DatasetMetadata
+from backend.app.chatkit.client_tools import ClientToolResultPayload
+from backend.app.chatkit.metadata import AppThreadMetadata
 
 ThreadEventEmitter = Callable[[ThreadStreamEvent], Awaitable[None]]
-
-
-@dataclass
-class DatasetMetadata:
-    id: str
-    name: str
-    columns: list[str]
-    sample_rows: list[dict[str, Any]] = field(default_factory=list)
-    row_count: int = 0
-    numeric_columns: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -33,7 +25,7 @@ class ReportAgentContext:
     query_plan_schema: dict[str, Any] = field(default_factory=dict)
     emit_event: ThreadEventEmitter | None = None
     requested_thread_title: str | None = None
-    current_tool_result: Any | None = None
+    current_tool_result: ClientToolResultPayload | None = None
 
     def get_dataset(self, dataset_id: str) -> DatasetMetadata | None:
         return next(

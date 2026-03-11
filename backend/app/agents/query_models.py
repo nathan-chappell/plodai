@@ -3,7 +3,7 @@ from typing import Any, Literal, TypeAlias, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.context import DatasetMetadata
+from backend.app.agents.DatasetMetadata import DatasetMetadata
 
 UnaryOpLiteral: TypeAlias = Literal["not", "negate"]
 BinaryOpLiteral: TypeAlias = Literal[

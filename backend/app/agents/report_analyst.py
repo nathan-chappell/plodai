@@ -1,8 +1,8 @@
 from agents import Agent
 
-from app.agents.context import ReportAgentContext
-from app.agents.query_models import summarize_query_schema
-from app.agents.tools import (
+from backend.app.agents.context import ReportAgentContext
+from backend.app.agents.query_models import summarize_query_schema
+from backend.app.agents.tools import (
     append_report_section,
     inspect_dataset_schema,
     list_accessible_datasets,
@@ -13,10 +13,13 @@ from app.agents.tools import (
 
 
 def build_report_analyst(context: ReportAgentContext) -> Agent[ReportAgentContext]:
-    dataset_summary = "\n".join(
-        f"- {dataset.id}: columns={', '.join(dataset.columns)}; numeric={', '.join(dataset.numeric_columns) or 'none'}"
-        for dataset in context.available_datasets
-    ) or "- No datasets available"
+    dataset_summary = (
+        "\n".join(
+            f"- {dataset.id}: columns={', '.join(dataset.columns)}; numeric={', '.join(dataset.numeric_columns) or 'none'}"
+            for dataset in context.available_datasets
+        )
+        or "- No datasets available"
+    )
     schema_summary = summarize_query_schema(context.query_plan_schema)
 
     return Agent[ReportAgentContext](

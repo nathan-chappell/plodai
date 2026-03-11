@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 from typing import TypedDict
 
-from app.agents.context import DatasetMetadata
+from backend.app.agents.DatasetMetadata import DatasetMetadata
 
 
 class ThreadDatasetMetadata(TypedDict):
@@ -44,7 +42,9 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
 
     dataset_ids = raw_metadata.get("dataset_ids")
     if isinstance(dataset_ids, list):
-        metadata["dataset_ids"] = [str(dataset_id) for dataset_id in dataset_ids if str(dataset_id)]
+        metadata["dataset_ids"] = [
+            str(dataset_id) for dataset_id in dataset_ids if str(dataset_id)
+        ]
 
     datasets = raw_metadata.get("datasets")
     if isinstance(datasets, list):
@@ -59,7 +59,9 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
                     "name": str(dataset.get("name", "dataset")),
                     "row_count": int(dataset.get("row_count", 0)),
                     "columns": [str(column) for column in dataset.get("columns", [])],
-                    "numeric_columns": [str(column) for column in dataset.get("numeric_columns", [])],
+                    "numeric_columns": [
+                        str(column) for column in dataset.get("numeric_columns", [])
+                    ],
                     "sample_rows": [
                         {str(key): str(value) for key, value in row.items()}
                         for row in sample_rows
@@ -67,7 +69,9 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
                     ],
                 }
             )
-        metadata["datasets"] = [dataset for dataset in normalized_datasets if dataset["id"]]
+        metadata["datasets"] = [
+            dataset for dataset in normalized_datasets if dataset["id"]
+        ]
 
     chart_cache = raw_metadata.get("chart_cache")
     if isinstance(chart_cache, dict):
@@ -88,7 +92,9 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     return metadata
 
 
-def merge_thread_metadata(current: AppThreadMetadata, patch: ThreadMetadataPatch) -> AppThreadMetadata:
+def merge_thread_metadata(
+    current: AppThreadMetadata, patch: ThreadMetadataPatch
+) -> AppThreadMetadata:
     merged: AppThreadMetadata = {**current}
     for key, value in patch.items():
         if value is None:

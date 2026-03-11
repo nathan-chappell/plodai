@@ -3,8 +3,8 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.report import ReportRun
-from app.schemas.report import (
+from backend.app.models.report import ReportRun
+from backend.app.schemas.report import (
     CreateReportRequest,
     CreateReportResponse,
     ReportChart,
