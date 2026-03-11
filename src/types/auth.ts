@@ -11,11 +11,3 @@ export type LoginResponse = {
   token_type: string;
   user: AuthUser;
 };
-
-export type ChatKitConfig = {
-  user: string;
-  model: string;
-  tools: string[];
-  notes: string[];
-  server_ready: boolean;
-};

@@ -38,19 +38,6 @@ async def me(user: AuthenticatedUser = Depends(require_current_user)):
     )
 
 
-@router.get("/chatkit/config")
-async def get_chatkit_config(
-    user: AuthenticatedUser = Depends(require_current_user),
-    chatkit_server: ReportFoundryChatKitServer = Depends(build_chatkit_server),
-) -> dict:
-    return {
-        "user": user.email,
-        "model": chatkit_server.frontend_config.model,
-        "tools": chatkit_server.frontend_config.tools,
-        "notes": chatkit_server.frontend_config.notes,
-    }
-
-
 @router.get("/chatkit/threads")
 async def list_chat_threads(
     user: AuthenticatedUser = Depends(require_current_user),

@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.DatasetMetadata import DatasetMetadata
-from backend.app.chatkit.client_tools import ClientToolResultPayload
 from backend.app.chatkit.metadata import AppThreadMetadata
 
 ThreadEventEmitter = Callable[[ThreadStreamEvent], Awaitable[None]]
@@ -25,7 +24,6 @@ class ReportAgentContext:
     query_plan_schema: dict[str, Any] = field(default_factory=dict)
     emit_event: ThreadEventEmitter | None = None
     requested_thread_title: str | None = None
-    current_tool_result: ClientToolResultPayload | None = None
 
     def get_dataset(self, dataset_id: str) -> DatasetMetadata | None:
         return next(

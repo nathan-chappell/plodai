@@ -9,10 +9,12 @@ from chatkit.agents import AgentContext as ChatKitAgentContext
 from chatkit.agents import ThreadItemConverter, stream_agent_response
 from chatkit.server import ChatKitServer
 from chatkit.types import (
+    Attachment,
     ChatKitReq,
     ClientToolCallItem,
     ProgressUpdateEvent,
     SyncCustomActionResponse,
+    ThreadItem,
     ThreadMetadata,
     ThreadStreamEvent,
     UserMessageItem,
@@ -45,6 +47,11 @@ from backend.app.db.session import get_db
 
 
 class ClientToolResultConverter(ThreadItemConverter):
+    async def attachment_to_message_content(self, attachment: Attachment):
+        raise NotImplementedError(
+            "ChatKit attachments are disabled for this app. Files are selected and processed locally, then exposed to the agent through client tools."
+        )
+
     async def client_tool_call_to_input(self, item: ClientToolCallItem):
         if item.status == "pending" or item.output is None:
             return None
@@ -92,13 +99,6 @@ class ClientToolResultConverter(ThreadItemConverter):
         return Message(role="user", type="message", content=list(content))
 
 
-class ChatKitFrontendConfig:
-    def __init__(self, model: str, tools: list[str], notes: list[str]):
-        self.model = model
-        self.tools = tools
-        self.notes = notes
-
-
 class UpdateThreadMetadataAction(
     Action[Literal["update_thread_metadata"], ThreadMetadataPatch]
 ):
@@ -112,24 +112,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         store = DatabaseMemoryStore(db)
         super().__init__(store=store)
         self.converter = ClientToolResultConverter()
-        self.frontend_config = ChatKitFrontendConfig(
-            model=self.settings.chatkit_default_model,
-            tools=[
-                "list_accessible_datasets",
-                "inspect_dataset_schema",
-                "run_aggregate_query",
-                "request_chart_render",
-                "append_report_section",
-                "name_current_thread",
-            ],
-            notes=[
-                "Always stream agent responses.",
-                "Keep row-scoped filters, projections, and group keys separate from aggregate measures.",
-                "Prefer describe_numeric when you need descriptive statistics for a numeric column.",
-                "The client executes validated plans against loaded CSV rows and renders charts locally.",
-                "Thread metadata persists app state such as datasets, chart cache, and OpenAI conversation identifiers.",
-            ],
-        )
 
     async def build_request_context(
         self, raw_request: bytes | str, user_email: str
@@ -154,9 +136,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             available_datasets=datasets,
             query_plan_model=query_plan_model,
             query_plan_schema=query_plan_schema,
-            current_tool_result=coerce_client_tool_result(
-                getattr(parsed_request.params, "result", None)
-            ),
         )
 
     async def respond(
@@ -178,15 +157,12 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 build_query_plan_model(context.available_datasets)
             )
 
-        if input_user_message is not None:
-            agent_input = await self.converter.to_agent_input(input_user_message)
-        elif context.current_tool_result is not None:
-            tool_result_input = self.converter.client_tool_result_to_input(
-                context.current_tool_result
-            )
-            agent_input = [tool_result_input] if tool_result_input is not None else []
-        else:
-            agent_input = []
+        agent_input = await self._build_agent_input(
+            thread=thread,
+            context=context,
+            has_openai_conversation=bool(typed_metadata.get("openai_conversation_id")),
+            input_user_message=input_user_message,
+        )
 
         agent = build_report_analyst(context)
         chatkit_context = ChatKitAgentContext[ReportAgentContext](
@@ -199,7 +175,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             agent_input,
             context=context,
             conversation_id=typed_metadata.get("openai_conversation_id"),
-            previous_response_id=typed_metadata.get("openai_previous_response_id"),
         )
         async for event in self._stream_agent_response(chatkit_context, result):
             yield event
@@ -229,6 +204,61 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             ),
         )
         thread.metadata = dict(updated_metadata)
+
+    async def _build_agent_input(
+        self,
+        thread: ThreadMetadata,
+        context: ReportAgentContext,
+        *,
+        has_openai_conversation: bool,
+        input_user_message: UserMessageItem | None,
+    ) -> list[Any]:
+        recent_items = await self.store.load_thread_items(
+            thread.id,
+            after=None,
+            limit=20,
+            order="desc",
+            context=context,
+        )
+        pending_items = self._collect_pending_items(
+            recent_items.data,
+            has_openai_conversation=has_openai_conversation,
+        )
+        if input_user_message is not None and not any(
+            item.id == input_user_message.id for item in pending_items
+        ):
+            pending_items.append(input_user_message)
+        return await self.converter.to_agent_input(pending_items)
+
+    def _collect_pending_items(
+        self,
+        recent_items: list[ThreadItem],
+        *,
+        has_openai_conversation: bool,
+    ) -> list[ThreadItem]:
+        chronological_items = list(reversed(recent_items))
+        boundary_index = -1
+        for index, item in enumerate(chronological_items):
+            if item.type in {"assistant_message", "client_tool_call"}:
+                boundary_index = index
+
+        if boundary_index < 0:
+            if has_openai_conversation:
+                raise RuntimeError(
+                    "Unable to recover recent thread context: no previous OpenAI output found in the last 20 thread items."
+                )
+            return chronological_items
+
+        boundary_item = chronological_items[boundary_index]
+        if boundary_index == len(chronological_items) - 1:
+            if (
+                boundary_item.type == "client_tool_call"
+                and boundary_item.status == "completed"
+            ):
+                return [boundary_item]
+            return []
+
+        return chronological_items[boundary_index + 1 :]
 
     async def _stream_agent_response(
         self, chatkit_context: ChatKitAgentContext[ReportAgentContext], result
