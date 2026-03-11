@@ -1,0 +1,23 @@
+[project]
+name = "report-foundry-backend"
+version = "0.1.0"
+description = "FastAPI backend for an agentic CSV reporting demo."
+requires-python = ">=3.14"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "sqlalchemy>=2.0.40",
+  "pydantic-settings>=2.10.1",
+  "python-multipart>=0.0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.5",
+  "httpx>=0.28.1",
+  "ruff>=0.11.2",
+]
+
+[build-system]
+requires = ["setuptools>=80.0"]
+build-backend = "setuptools.build_meta"
