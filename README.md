@@ -6,8 +6,9 @@ Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI bac
 
 - Backend: FastAPI on Python 3.14 keeps the agent orchestration surface simple and deployable on Railway.
 - Frontend: React plus Vite keeps iteration fast and gives us an easy place to host ChatKit client effects, chart rendering, and result caching.
-- Persistence: SQLite on a Railway volume is the best fit for this demo stage. It is enough for report metadata, users, tool logs, and a lightweight admin story. If the app graduates beyond a short-lived demo, the SQLAlchemy seam makes a later Postgres move straightforward.
+- Persistence: SQLite on a Railway volume is the best fit for this demo stage. It now backs users, report runs, and ChatKit conversation memory.
 - Auth: tokens are signed with `itsdangerous`, users live in SQLite, and the app can bootstrap an admin from env while also syncing a server-editable `backend/data/users.json` file.
+- Database access: the backend now uses async SQLAlchemy sessions end to end.
 
 ## Architecture
 
@@ -36,14 +37,16 @@ The scaffold now includes dependency placeholders for:
 - `openai-chatkit`
 - `@openai/chatkit-react`
 
-Backend agent scaffolding lives under `backend/app/agents/` and the ChatKit pause point lives in `backend/app/chatkit/server.py`.
+Backend agent scaffolding lives under `backend/app/agents/`.
+ChatKit persistence now uses SQLAlchemy models in `backend/app/models/chatkit.py`, a request-scoped async store in `backend/app/chatkit/memory_store.py`, and a request-scoped server adapter in `backend/app/chatkit/server.py`.
+The FastAPI ChatKit entrypoint lives at `POST /chatkit`, where request-scoped dependencies and thread metadata are folded into the generic agent context.
 
 This is the intended next implementation sequence:
 
 1. Replace the stub Agents SDK tool functions with real dataset inventory and aggregate query execution.
 2. Add CSV storage plus a query layer, likely DuckDB for analysis over uploaded files.
 3. Wire ChatKit client tools and client effects for chart rendering and report assembly.
-4. Stop before ChatKit conversation persistence until the storage design is decided.
+4. Verify the exact installed ChatKit server handler method once the local venv contains the package.
 
 ## Local development
 
@@ -82,16 +85,19 @@ Set these environment variables before running:
 
 - Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
 - The current user bootstrap design is intentionally simple and operationally friendly.
-- If you later split auth or reporting persistence out, the SQLAlchemy seam keeps that migration manageable.
+- Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
+- Thread metadata is a good place for small pieces of report state that should travel with the conversation.
 
 ## Current status
 
 This scaffold provides:
 
-- a FastAPI API with SQLite-backed users and signed auth tokens
+- a FastAPI API with async SQLAlchemy and SQLite-backed users
+- signed auth tokens with a typed `admin | user` role model
+- DB-backed ChatKit memory models and a request-scoped server adapter
+- a `/chatkit` entrypoint that builds per-request agent context
 - a React UI with styled-components and CSS variables
 - client-side CSV preview parsing to keep raw data out of the backend request
-- an Agents SDK tool scaffold and a ChatKit integration pause point
-- a report surface for tool logs, markdown sections, and chart placeholders
+- a report surface for tool logs, markdown sections, chart placeholders, and ChatKit config visibility
 
-The biggest missing pieces are real query execution over CSVs, actual Agents SDK runs, chart rendering, and the ChatKit conversation persistence layer.
+The biggest missing pieces are real query execution over CSVs, actual Agents SDK runs, chart rendering, and verification of the exact installed ChatKit request handler API after dependency install.

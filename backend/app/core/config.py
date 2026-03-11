@@ -21,10 +21,17 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = "admin@example.com"
     bootstrap_admin_password: str = ""
     bootstrap_admin_name: str = "Built-in Admin"
+    chatkit_default_model: str = "gpt-5.1"
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+
+    @property
+    def async_database_url(self) -> str:
+        if self.database_url.startswith("sqlite:///"):
+            return self.database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+        return self.database_url
 
     @property
     def user_seed_path(self) -> Path:

@@ -1,4 +1,8 @@
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr
+
+from app.models.types import UserRole
 
 
 class LoginRequest(BaseModel):
@@ -10,11 +14,11 @@ class UserResponse(BaseModel):
     id: int
     email: EmailStr
     full_name: str
-    role: str
+    role: UserRole
     is_active: bool
 
 
 class AuthTokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: Literal["bearer"] = "bearer"
     user: UserResponse

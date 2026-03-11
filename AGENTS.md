@@ -18,8 +18,13 @@ The agent should feel investigative instead of chatbot-like. It should list file
 - Allow a Railway-volume-backed `backend/data/users.json` seed file for operational edits.
 - Bootstrap an admin from env on startup.
 
+## Persistence direction
+- Use async SQLAlchemy for the app database.
+- Keep ChatKit conversation memory in the same database through mapped dataclass models.
+- Build the ChatKit server/store per request so it can attach to the request-scoped async session.
+
 ## Near-term next steps
 - Add real Agents SDK orchestration and replace stub tool definitions.
 - Add CSV storage plus a query layer, likely DuckDB for analysis over uploaded files.
 - Add ChatKit client tools and client effects for chart rendering and report assembly.
-- Pause before implementing ChatKit persistence until the storage idea is finalized.
+- Finish the concrete ChatKit SDK endpoint wiring once the local venv contains the installed package.

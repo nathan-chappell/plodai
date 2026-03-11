@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.types import UserRole
 from app.services.auth_service import AuthService
 
 
@@ -12,14 +13,13 @@ class AuthenticatedUser:
     id: int
     email: str
     full_name: str
-    role: str
+    role: UserRole
     is_active: bool
 
 
-
-def require_current_user(
+async def require_current_user(
     authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> AuthenticatedUser:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
@@ -28,7 +28,7 @@ def require_current_user(
         )
 
     token = authorization.removeprefix("Bearer ").strip()
-    user = AuthService(db).authenticate_token(token)
+    user = await AuthService(db).authenticate_token(token)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
