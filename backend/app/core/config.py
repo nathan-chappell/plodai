@@ -1,6 +1,6 @@
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,22 +14,21 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./report_foundry.db"
     openai_api_key: str = ""
-    allowed_users_raw: str = Field(
-        default="demo@example.com",
-        alias="ALLOWED_USERS",
-    )
+    auth_secret_key: str = "replace-me"
+    auth_salt: str = "report-foundry-auth"
+    auth_token_max_age_seconds: int = 60 * 60 * 12
+    user_seed_file: str = "./data/users.json"
+    bootstrap_admin_email: str = "admin@example.com"
+    bootstrap_admin_password: str = ""
+    bootstrap_admin_name: str = "Built-in Admin"
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
 
     @property
-    def allowed_users(self) -> set[str]:
-        return {
-            item.strip().lower()
-            for item in self.allowed_users_raw.split(",")
-            if item.strip()
-        }
+    def user_seed_path(self) -> Path:
+        return Path(self.user_seed_file)
 
 
 @lru_cache

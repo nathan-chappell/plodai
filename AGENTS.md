@@ -12,8 +12,14 @@ The agent should feel investigative instead of chatbot-like. It should list file
 - Render charts on the client and pass chart images back for visual reasoning when useful.
 - Keep auth simple and explainable for a demo setting.
 
+## Auth direction
+- Use `itsdangerous` for signed bearer tokens.
+- Keep a real SQLite `users` table with hashed passwords.
+- Allow a Railway-volume-backed `backend/data/users.json` seed file for operational edits.
+- Bootstrap an admin from env on startup.
+
 ## Near-term next steps
-- Add Agents SDK orchestration and real tool definitions.
+- Add real Agents SDK orchestration and replace stub tool definitions.
 - Add CSV storage plus a query layer, likely DuckDB for analysis over uploaded files.
-- Add ChatKit client tools/effects for chart rendering and report assembly.
-- Decide whether SQLite remains enough or whether Postgres is needed for multi-user persistence.
+- Add ChatKit client tools and client effects for chart rendering and report assembly.
+- Pause before implementing ChatKit persistence until the storage idea is finalized.

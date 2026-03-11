@@ -6,8 +6,8 @@ Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI bac
 
 - Backend: FastAPI on Python 3.14 keeps the agent orchestration surface simple and deployable on Railway.
 - Frontend: React plus Vite keeps iteration fast and gives us an easy place to host ChatKit client effects, chart rendering, and result caching.
-- Persistence: SQLite is the best fit for this demo stage. It is enough for report metadata, uploaded file manifests, tool logs, and a lightweight user allowlist. If the app graduates beyond a short-lived demo, the SQLAlchemy seam makes a later Postgres move straightforward.
-- Auth: a user allowlist is intentionally simple here. The backend expects an `X-Demo-User` header and checks it against `ALLOWED_USERS`.
+- Persistence: SQLite on a Railway volume is the best fit for this demo stage. It is enough for report metadata, users, tool logs, and a lightweight admin story. If the app graduates beyond a short-lived demo, the SQLAlchemy seam makes a later Postgres move straightforward.
+- Auth: tokens are signed with `itsdangerous`, users live in SQLite, and the app can bootstrap an admin from env while also syncing a server-editable `backend/data/users.json` file.
 
 ## Architecture
 
@@ -20,18 +20,30 @@ The intended flow is:
 5. The rendered chart can be cached by query id and sent back as image input so the model can reason over the visual output.
 6. The UI assembles the final report from chart artifacts and markdown sections.
 
-## Tooling direction
+## Auth model
 
-The scaffold includes the beginnings of a tool contract, and the next real implementation step is to replace the placeholder report builder with actual Agents SDK tools such as:
+- `POST /api/auth/login` accepts email and password.
+- `GET /api/auth/me` resolves the current bearer token.
+- `backend/data/users.json` is a deliberate operational escape hatch for server-side edits.
+- `BOOTSTRAP_ADMIN_*` env vars create or refresh a built-in admin account on startup.
+- Tokens are simple signed payloads with expiry, not full JWT infrastructure.
 
-- `list_accessible_datasets`
-- `inspect_dataset_schema`
-- `run_aggregate_query`
-- `request_chart_render`
-- `append_report_section`
-- `close_report`
+## OpenAI scaffolding
 
-A practical guardrail is to ensure `run_aggregate_query` only returns aggregated tables, grouped metrics, top-N slices, and capped previews.
+The scaffold now includes dependency placeholders for:
+
+- `openai-agents`
+- `openai-chatkit`
+- `@openai/chatkit-react`
+
+Backend agent scaffolding lives under `backend/app/agents/` and the ChatKit pause point lives in `backend/app/chatkit/server.py`.
+
+This is the intended next implementation sequence:
+
+1. Replace the stub Agents SDK tool functions with real dataset inventory and aggregate query execution.
+2. Add CSV storage plus a query layer, likely DuckDB for analysis over uploaded files.
+3. Wire ChatKit client tools and client effects for chart rendering and report assembly.
+4. Stop before ChatKit conversation persistence until the storage design is decided.
 
 ## Local development
 
@@ -58,23 +70,28 @@ Set these environment variables before running:
 
 - `OPENAI_API_KEY`
 - `DATABASE_URL`
-- `ALLOWED_USERS`
+- `AUTH_SECRET_KEY`
+- `AUTH_SALT`
+- `USER_SEED_FILE`
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD`
+- `BOOTSTRAP_ADMIN_NAME`
 - `VITE_API_BASE_URL`
-- `VITE_DEMO_USER`
 
 ## Railway notes
 
-- Railway can host the FastAPI service and the frontend separately, or the frontend can be built to static assets and served another way.
-- SQLite is fine for demos, but use Railway volumes if you want persistence across redeploys.
-- If you move to Postgres later, start by migrating report runs, tool logs, uploaded file metadata, and any cached query manifests.
+- Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
+- The current user bootstrap design is intentionally simple and operationally friendly.
+- If you later split auth or reporting persistence out, the SQLAlchemy seam keeps that migration manageable.
 
 ## Current status
 
 This scaffold provides:
 
-- a FastAPI API with demo auth and report persistence
+- a FastAPI API with SQLite-backed users and signed auth tokens
 - a React UI with styled-components and CSS variables
 - client-side CSV preview parsing to keep raw data out of the backend request
+- an Agents SDK tool scaffold and a ChatKit integration pause point
 - a report surface for tool logs, markdown sections, and chart placeholders
 
-The biggest missing pieces are Agents SDK integration, real query execution over CSVs, chart rendering, and the ChatKit client effect loop.
+The biggest missing pieces are real query execution over CSVs, actual Agents SDK runs, chart rendering, and the ChatKit conversation persistence layer.

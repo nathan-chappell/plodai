@@ -1,0 +1,1 @@
+# ChatKit scaffolding package.

@@ -1,11 +1,14 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import styled from "styled-components";
 
+import { AuthPanel } from "./components/AuthPanel";
 import { ChartCard } from "./components/ChartCard";
+import { ChatKitPane } from "./components/ChatKitPane";
 import { NarrativeCard } from "./components/NarrativeCard";
 import { ToolLog } from "./components/ToolLog";
-import { apiRequest } from "./lib/api";
+import { apiRequest, getStoredToken, storeToken } from "./lib/api";
 import { parseCsvPreview } from "./lib/csv";
+import type { AuthUser } from "./types/auth";
 import type { CreateReportResponse, DatasetSummary } from "./types/report";
 
 const Page = styled.main`
@@ -147,6 +150,23 @@ export function App() {
   const [report, setReport] = useState<CreateReportResponse | null>(null);
   const [status, setStatus] = useState<string>("Drop in CSVs and ask the analyst to investigate.");
   const [busy, setBusy] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    async function hydrateUser() {
+      if (!getStoredToken()) {
+        return;
+      }
+      try {
+        const me = await apiRequest<AuthUser>("/auth/me");
+        setUser(me);
+      } catch {
+        storeToken(null);
+      }
+    }
+
+    void hydrateUser();
+  }, []);
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) {
@@ -173,6 +193,11 @@ export function App() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!user) {
+      setStatus("Sign in before requesting a report.");
+      return;
+    }
+
     setBusy(true);
     setStatus("Requesting a report plan from the backend analyst agent.");
 
@@ -215,12 +240,16 @@ export function App() {
                 <Input type="file" accept=".csv" multiple onChange={(event) => void handleFiles(event.target.files)} />
               </Label>
 
-              <Button disabled={busy} type="submit">
+              <Button disabled={busy || !user} type="submit">
                 {busy ? "Building report..." : "Generate report scaffold"}
               </Button>
             </form>
           </Panel>
 
+          <AuthPanel user={user} onAuthenticated={setUser} />
+        </Grid>
+
+        <Grid>
           <Panel>
             <h2>Dataset inventory</h2>
             {datasets.length ? (
@@ -239,6 +268,8 @@ export function App() {
               <Notice>No files yet. Upload one or more CSVs to create safe dataset summaries.</Notice>
             )}
           </Panel>
+
+          <ChatKitPane />
         </Grid>
 
         <ToolLog events={report?.tool_log ?? []} />
@@ -255,9 +286,7 @@ export function App() {
         ) : (
           <Panel>
             <h2>Report canvas</h2>
-            <Notice>
-              {status}
-            </Notice>
+            <Notice>{status}</Notice>
           </Panel>
         )}
       </Shell>
