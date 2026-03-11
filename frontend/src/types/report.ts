@@ -1,3 +1,5 @@
+import type { ClientChartSpec } from "./analysis";
+
 export type DatasetSummary = {
   id: string;
   name: string;
@@ -16,7 +18,7 @@ export type ReportChart = {
   id: string;
   title: string;
   chart_type: string;
-  spec: Record<string, unknown>;
+  spec: ClientChartSpec | Record<string, unknown>;
   image_data_url?: string | null;
   query_id?: string | null;
 };

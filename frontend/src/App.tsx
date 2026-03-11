@@ -269,7 +269,7 @@ export function App() {
             )}
           </Panel>
 
-          <ChatKitPane enabled={Boolean(user)} />
+          <ChatKitPane enabled={Boolean(user)} datasets={datasets} />
         </Grid>
 
         <ToolLog events={report?.tool_log ?? []} />

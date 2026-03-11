@@ -1,5 +1,7 @@
 import styled from "styled-components";
 
+import { DatasetChart } from "./DatasetChart";
+import type { ClientChartSpec, DataRow } from "../types/analysis";
 import type { ReportChart } from "../types/report";
 
 const Card = styled.article`
@@ -39,6 +41,10 @@ const Code = styled.pre`
   font-size: 0.85rem;
 `;
 
+function isClientChartSpec(spec: ReportChart["spec"]): spec is ClientChartSpec {
+  return typeof spec === "object" && spec !== null && "type" in spec && "labelKey" in spec && "series" in spec;
+}
+
 export function ChartCard({ chart }: { chart: ReportChart }) {
   return (
     <Card>
@@ -46,6 +52,8 @@ export function ChartCard({ chart }: { chart: ReportChart }) {
       <Preview>
         {chart.image_data_url ? (
           <img alt={chart.title} src={chart.image_data_url} style={{ maxWidth: "100%" }} />
+        ) : isClientChartSpec(chart.spec) ? (
+          <DatasetChart spec={chart.spec} rows={[]} />
         ) : (
           <div>
             <strong>{chart.chart_type.toUpperCase()} chart placeholder</strong>

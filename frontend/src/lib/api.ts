@@ -1,4 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
+const CHATKIT_DOMAIN_KEY = import.meta.env.VITE_CHATKIT_DOMAIN_KEY ?? "local-dev";
 const TOKEN_KEY = "report-foundry-token";
 
 export function getStoredToken(): string | null {
@@ -14,18 +16,34 @@ export function storeToken(token: string | null): void {
   window.localStorage.removeItem(TOKEN_KEY);
 }
 
-export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+export function getChatKitConfig() {
+  return {
+    url: CHATKIT_URL,
+    domainKey: CHATKIT_DOMAIN_KEY,
+  };
+}
+
+export async function authenticatedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers ?? {});
   const token = getStoredToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+}
+
+export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
 
   if (!headers.has("Content-Type") && init?.body) {
     headers.set("Content-Type", "application/json");
   }
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers,
   });
@@ -36,4 +54,11 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   }
 
   return (await response.json()) as T;
+}
+
+function deriveChatKitUrl(apiBaseUrl: string): string {
+  if (apiBaseUrl.endsWith("/api")) {
+    return `${apiBaseUrl.slice(0, -4)}/chatkit`;
+  }
+  return `${apiBaseUrl}/chatkit`;
 }
