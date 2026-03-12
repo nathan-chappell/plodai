@@ -9,6 +9,7 @@ app = typer.Typer(help="Version bump and release checklist helper for Report Fou
 PACKAGE_JSON = Path() / "package.json"
 PACKAGE_LOCK_JSON = Path() / "package-lock.json"
 BACKEND_MAIN = Path() / "backend" / "app" / "main.py"
+DEFAULT_IMAGE = "nathanschappell/report-foundry"
 
 
 @app.command()
@@ -52,12 +53,13 @@ def release(
         help="Application version. Leave empty to choose a p/m/M semver bump.",
     ),
     remote: str = typer.Option("origin", "--remote", help="Git remote to push to."),
+    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
 ) -> None:
     resolved_version = resolve_release_version(version)
     update_all_versions(resolved_version)
     typer.echo(f"Prepared release version {resolved_version}")
     typer.echo("")
-    typer.echo(release_instructions(version=resolved_version, remote=remote))
+    typer.echo(release_instructions(version=resolved_version, remote=remote, image=image))
 
 
 def update_all_versions(version: str) -> None:
@@ -103,7 +105,7 @@ def release_commit_message(*, version: str) -> str:
     return f"chore(release): {version}"
 
 
-def release_instructions(*, version: str, remote: str) -> str:
+def release_instructions(*, version: str, remote: str, image: str) -> str:
     message = release_commit_message(version=version)
     return "\n".join(
         [
@@ -112,13 +114,15 @@ def release_instructions(*, version: str, remote: str) -> str:
             "Run these commands manually:",
             "",
             "npm run build",
+            f"docker build -t {image}:{version} .",
+            f"docker push {image}:{version}",
             "git add -A",
             f'git commit -m "{message}"',
             f"git tag v{version}",
             f"git push {remote}",
             f"git push {remote} v{version}",
-            "",
-            "Then run your Docker build/push flow from WSL.",
+            f"docker tag {image}:{version} {image}:latest",
+            f"docker push {image}:latest",
         ]
     )
 

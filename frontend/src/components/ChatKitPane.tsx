@@ -70,12 +70,12 @@ const Pill = styled.div`
   text-transform: uppercase;
 `;
 
-const Surface = styled.div`
+const Surface = styled.div<{ $light?: boolean }>`
   min-height: 560px;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.08)")};
+  border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.1)" : "rgba(255, 255, 255, 0.12)")};
 `;
 
 const Empty = styled.div`
@@ -95,6 +95,29 @@ const EffectCard = styled.div`
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 0.9rem;
+`;
+
+const InlineToolbar = styled.div`
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+`;
+
+const InlineButton = styled.button`
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  color: #1f2937;
+  border-radius: 999px;
+  padding: 0.65rem 0.95rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+const HarnessMeta = styled.p<{ $light?: boolean }>`
+  margin: 0;
+  color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.74)")};
+  line-height: 1.6;
 `;
 
 function isChartRenderedEffect(effect: ClientEffect): effect is ChartRenderedEffect {
@@ -147,16 +170,38 @@ function buildStarterPrompts(investigationBrief: string) {
   ] as const;
 }
 
-function ConfiguredChatKit({
+export type ChatKitQuickAction = {
+  label: string;
+  prompt: string;
+  model?: string;
+};
+
+export function ChatKitHarness({
   datasets,
   investigationBrief,
   onEffects,
+  headerTitle = "Report Foundry",
+  greeting,
+  prompts,
+  composerPlaceholder,
+  quickActions,
+  colorScheme = "dark",
+  showDictation = true,
 }: {
   datasets: LocalDataset[];
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
+  headerTitle?: string;
+  greeting?: string;
+  prompts?: ReadonlyArray<{ label: string; prompt: string; icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle" }>;
+  composerPlaceholder?: string;
+  quickActions?: ChatKitQuickAction[];
+  colorScheme?: "dark" | "light";
+  showDictation?: boolean;
 }) {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
 
   const loadedDatasets = useMemo(
     () => datasets.map((dataset) => ({ ...dataset, rows: (dataset.rows as DataRow[]) ?? dataset.sample_rows })),
@@ -186,7 +231,10 @@ function ConfiguredChatKit({
     [datasets.length, investigationBrief],
   );
 
-  const starterPrompts = useMemo(() => buildStarterPrompts(investigationBrief), [investigationBrief]);
+  const starterPrompts = useMemo(
+    () => prompts ?? buildStarterPrompts(investigationBrief),
+    [investigationBrief, prompts],
+  );
 
   const options = useMemo<UseChatKitOptions>(
     () => ({
@@ -196,7 +244,7 @@ function ConfiguredChatKit({
         fetch: authenticatedFetch,
       },
       theme: {
-        colorScheme: "dark",
+        colorScheme,
         radius: "round",
         density: "normal",
       },
@@ -208,13 +256,15 @@ function ConfiguredChatKit({
       header: {
         title: {
           enabled: true,
-          text: "Report Foundry",
+          text: headerTitle,
         },
       },
       startScreen: {
-        greeting: datasets.length
-          ? `Investigate ${datasets.length} attached file${datasets.length === 1 ? "" : "s"}.`
-          : "Add CSV files to start the investigation.",
+        greeting:
+          greeting ??
+          (datasets.length
+            ? `Investigate ${datasets.length} attached file${datasets.length === 1 ? "" : "s"}.`
+            : "Add CSV files to start the investigation."),
         prompts: starterPrompts.map((prompt) => ({
           label: prompt.label,
           prompt: prompt.prompt,
@@ -222,13 +272,15 @@ function ConfiguredChatKit({
         })),
       },
       composer: {
-        placeholder: investigationBrief.trim()
-          ? `Work toward this goal: ${investigationBrief.trim().slice(0, 80)}`
-          : "Ask the analyst to summarize, compare, or investigate your CSV files",
+        placeholder:
+          composerPlaceholder ??
+          (investigationBrief.trim()
+            ? `Work toward this goal: ${investigationBrief.trim().slice(0, 80)}`
+            : "Ask the analyst to summarize, compare, or investigate your CSV files"),
         attachments: {
           enabled: false,
         },
-        dictation: { enabled: true },
+        dictation: { enabled: showDictation },
         models: CHATKIT_MODEL_CHOICES.map((choice) => ({
           ...choice,
           default: choice.id === CHATKIT_DEFAULT_MODEL_ID,
@@ -238,6 +290,17 @@ function ConfiguredChatKit({
           label: formatToolLabel(tool),
           icon: toolIcon(tool),
         })),
+      },
+      onReady: () => {
+        setStatus("ChatKit ready.");
+      },
+      onResponseStart: () => {
+        setRunning(true);
+        setStatus("Agent run in progress.");
+      },
+      onResponseEnd: () => {
+        setRunning(false);
+        setStatus("Agent run finished.");
       },
       onClientTool: async ({ name, params }) => {
         const result = await executeClientTool(
@@ -265,7 +328,7 @@ function ConfiguredChatKit({
         setActiveThreadId(threadId);
       },
     }),
-    [datasets.length, investigationBrief, starterPrompts],
+    [colorScheme, composerPlaceholder, datasets.length, greeting, headerTitle, investigationBrief, showDictation, starterPrompts],
   );
 
   const chatKit = useChatKit(options);
@@ -283,7 +346,37 @@ function ConfiguredChatKit({
     );
   }, [activeThreadId, chatKit, metadata]);
 
-  return <ChatKit control={chatKit.control} />;
+  async function handleQuickAction(action: ChatKitQuickAction) {
+    setStatus(`Starting ${action.label.toLowerCase()}.`);
+    await chatKit.sendUserMessage({
+      text: action.prompt,
+      model: action.model ?? CHATKIT_DEFAULT_MODEL_ID,
+      newThread: true,
+    });
+  }
+
+  return (
+    <>
+      {quickActions?.length ? (
+        <InlineToolbar>
+          {quickActions.map((action) => (
+            <InlineButton
+              key={action.label}
+              type="button"
+              onClick={() => void handleQuickAction(action)}
+              disabled={running}
+            >
+              {action.label}
+            </InlineButton>
+          ))}
+        </InlineToolbar>
+      ) : null}
+      {status ? <HarnessMeta $light={colorScheme === "light"}>{status}</HarnessMeta> : null}
+      <Surface $light={colorScheme === "light"}>
+        <ChatKit control={chatKit.control} />
+      </Surface>
+    </>
+  );
 }
 
 export function ChatKitPane({
@@ -310,21 +403,21 @@ export function ChatKitPane({
             : "Sign in to start analyzing local CSV files."}
       </Meta>
       <Meta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</Meta>
-      <Surface>
-        {canInvestigate ? (
-          <ConfiguredChatKit
-            datasets={datasets}
-            investigationBrief={investigationBrief}
-            onEffects={(nextEffects) => setEffects((current) => [...nextEffects, ...current].slice(0, 6))}
-          />
-        ) : (
+      {canInvestigate ? (
+        <ChatKitHarness
+          datasets={datasets}
+          investigationBrief={investigationBrief}
+          onEffects={(nextEffects) => setEffects((current) => [...nextEffects, ...current].slice(0, 6))}
+        />
+      ) : (
+        <Surface>
           <Empty>
             {enabled
               ? "The agent is ready once you add local CSV files."
               : "Sign in to open the analyst workspace."}
           </Empty>
-        )}
-      </Surface>
+        </Surface>
+      )}
       {effects.length ? (
         <EffectPanel>
           {effects.map((effect, index) => (

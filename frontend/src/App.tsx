@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { AdminPanel } from "./components/AdminPanel";
 import { AuthPanel } from "./components/AuthPanel";
 import { ChatKitPane } from "./components/ChatKitPane";
+import { SmokeTestPane } from "./components/SmokeTestPane";
 import { DatasetInventoryPane } from "./components/DatasetInventoryPane";
 import { apiRequest, getStoredToken, storeToken } from "./lib/api";
 import { parseCsvPreview } from "./lib/csv";
@@ -13,7 +14,7 @@ import { MetaText, displayHeadingCss, panelSurfaceCss } from "./ui/primitives";
 
 const BRIEF_STORAGE_KEY = "report-foundry-investigation-brief";
 
-type WorkspaceTab = "report" | "datasets" | "goal" | "admin";
+type WorkspaceTab = "report" | "datasets" | "goal" | "smoke" | "admin";
 
 const Page = styled.main`
   padding: 2rem;
@@ -258,6 +259,12 @@ export function App() {
     setStatus("Cleared dataset inventory. Add CSV files to begin another investigation.");
   }
 
+  function handleLoadSmokeDatasets(nextDatasets: LocalDataset[]) {
+    setDatasets(nextDatasets);
+    setStatus(`Loaded ${nextDatasets.length} smoke dataset${nextDatasets.length === 1 ? "" : "s"} into the workspace.`);
+    setActiveWorkspaceTab("report");
+  }
+
   if (!user) {
     return (
       <Page>
@@ -328,6 +335,9 @@ export function App() {
           <TabButton $active={activeWorkspaceTab === "goal"} onClick={() => setActiveWorkspaceTab("goal")} type="button">
             Goal
           </TabButton>
+          <TabButton $active={activeWorkspaceTab === "smoke"} onClick={() => setActiveWorkspaceTab("smoke")} type="button">
+            Smoke
+          </TabButton>
           {user.role === "admin" ? (
             <TabButton $active={activeWorkspaceTab === "admin"} onClick={() => setActiveWorkspaceTab("admin")} type="button">
               Admin
@@ -375,6 +385,8 @@ export function App() {
             setInvestigationBrief={setInvestigationBrief}
           />
         ) : null}
+
+        {activeWorkspaceTab === "smoke" ? <SmokeTestPane onLoadFixtures={handleLoadSmokeDatasets} /> : null}
 
         {activeWorkspaceTab === "admin" && user.role === "admin" ? <AdminPanel currentUser={user} /> : null}
       </Shell>
