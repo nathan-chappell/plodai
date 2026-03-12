@@ -1,7 +1,6 @@
 from agents import Agent
 
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.query_models import summarize_query_schema
 from backend.app.agents.tools import (
     append_report_section,
     inspect_dataset_schema,
@@ -27,12 +26,31 @@ Important operating rules:
 8. Surface uncertainty explicitly. Call out missing fields, weak samples, suspicious values, or reasons a conclusion may be tentative.
 
 Tool guidance:
-- `list_accessible_datasets`: Start here when you need a dataset inventory, safe schema details, row counts, numeric columns, or a small familiarization sample. This is also the easiest way to see the current query-plan schema summary payload.
+- `list_accessible_datasets`: Start here when you need a dataset inventory, safe schema details, row counts, numeric columns, or a small familiarization sample.
 - `inspect_dataset_schema`: Use this before writing or revising a query plan for a specific dataset. Re-check schemas when switching datasets or when a hypothesis depends on exact columns.
-- `run_aggregate_query`: Use this to validate a structured query plan for client-side execution. Follow the provided query schema exactly. Prefer grouped aggregate results over row-level outputs.
-- `request_chart_render`: Use this after you have a query result shape that deserves visualization. Choose a chart type that fits the result and use clear labels/aliases so the chart is easy to interpret.
+- `run_aggregate_query`: Use this to validate a structured query plan for client-side execution. Prefer grouped aggregate results over row-level outputs.
+- `request_chart_render`: Use this after you have a query result shape that deserves visualization. Choose a chart type that fits the result and use clear labels and aliases so the chart is easy to interpret.
 - `append_report_section`: Use this to leave behind concise markdown narrative sections during the investigation, not only at the very end.
 - `name_current_thread`: Use this early once the investigation has a clear focus.
+
+High-level query-plan guidance:
+- Each query plan targets exactly one dataset.
+- A plan can filter rows, optionally compute row-level derived fields, optionally group rows, and then compute explicit aggregate measures.
+- `where`, `project`, and `group_by` are row-scoped. Use them when you need to filter records, derive labels, or define segment keys.
+- `aggregates` are aggregate-scoped. Use them for metrics like counts, sums, averages, distinct counts, null counts, medians, variance, and standard deviation.
+- If you use aggregates without `group_by`, expect a single summary row.
+- If you use `group_by`, alias the group keys and measures clearly because those aliases become the result columns and chart fields.
+- If you want a numeric descriptive summary quickly, prefer the baked-in descriptive aggregate rather than manually recreating every statistic.
+
+Important query quirks and need-to-knows:
+- This is not SQL. Do not ask for joins, arbitrary reducers, freeform code, or unconstrained query text.
+- Column names must match the inspected dataset schema exactly.
+- Keep row-scoped expressions simple and purposeful. Build only the expressions needed for the current hypothesis.
+- Grouping only makes sense together with aggregate output. Do not group rows unless you are actually segmenting a metric.
+- Descriptive numeric summaries only make sense for numeric columns.
+- Prefer one or two grouping dimensions at a time. If a breakdown becomes too wide or noisy, narrow it.
+- Use clear aliases like `total_revenue`, `avg_margin`, `region`, or `category_share` so downstream charting is easy.
+- After validating a query plan, request a chart only when the result shape supports a meaningful visual comparison.
 
 Suggested investigation pattern:
 - Inspect the dataset inventory.
@@ -52,23 +70,18 @@ def build_report_analyst(
     model: str | None = None,
 ) -> Agent[ReportAgentContext]:
     dataset_summary = (
-        "\n".join(
+        "".join(
             f"- {dataset.id}: columns={', '.join(dataset.columns)}; numeric={', '.join(dataset.numeric_columns) or 'none'}"
             for dataset in context.available_datasets
         )
         or "- No datasets available"
     )
-    schema_summary = summarize_query_schema(context.query_plan_schema)
 
     return Agent[ReportAgentContext](
         name="Report Foundry Analyst",
         model=model,
         instructions=(
-            f"{REPORT_ANALYST_INSTRUCTIONS}\n\n"
-            "Available datasets:\n"
-            f"{dataset_summary}\n\n"
-            "Structured query schema to follow exactly:\n"
-            f"{schema_summary}"
+            f"{REPORT_ANALYST_INSTRUCTIONS}Available datasets:{dataset_summary}"
         ),
         tools=[
             name_current_thread,
