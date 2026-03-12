@@ -19,6 +19,22 @@
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "backend: sync static",
+      "type": "shell",
+      "command": "Copy-Item -Path frontend/dist/* -Destination backend/app/static -Recurse -Force",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-Command"
+          ]
+        }
+      },
+      "dependsOn": "frontend: build",
+      "problemMatcher": []
     }
   ]
 }

@@ -22,11 +22,10 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = ""
     bootstrap_admin_name: str = "Built-in Admin"
     static_dir: str = "./app/static"
+    port: int = 8000
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://localhost:5173",
-        "https://127.0.0.1:5173",
     ]
 
     @property

@@ -1,4 +1,5 @@
 from agents import Agent
+from agents.model_settings import ModelSettings
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.tools import build_report_tools
@@ -80,6 +81,5 @@ def build_report_analyst(
         model=model,
         instructions=instructions,
         tools=list(build_report_tools(context)),
+        model_settings=ModelSettings(parallel_tool_calls=False),
     )
-
-

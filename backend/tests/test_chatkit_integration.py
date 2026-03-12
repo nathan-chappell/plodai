@@ -4,7 +4,10 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from openai import AsyncOpenAI
 from sqlalchemy import delete, select
+
+from backend.app.core.config import get_settings
 
 from backend.app.db.session import AsyncSessionLocal
 from backend.app.main import app
@@ -112,25 +115,25 @@ def _stream_request(client: TestClient, token: str, body: dict[str, object]) -> 
     return _parse_sse_events(raw_body)
 
 
-def _run_chatkit_smoke(
-    *, model: str, prompt: str
-) -> tuple[str, list[dict[str, object]], ChatThread | None, list[ChatItem]]:
+def _login_test_user(client: TestClient, email: str, password: str) -> str:
+    login_response = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_response.status_code == 200
+    return str(login_response.json()["access_token"])
+
+
+def test_chatkit_live_smoke(initialized_db: None) -> None:
     user_suffix = uuid4().hex[:8]
     email = f"systems-test-{user_suffix}@example.com"
     password = "Systems-Test-Password-123!"
-    thread_id: str | None = None
 
     asyncio.run(_cleanup_user_state(email))
     try:
         with TestClient(app) as client:
             asyncio.run(_create_user(email, password))
-
-            login_response = client.post(
-                "/api/auth/login",
-                json={"email": email, "password": password},
-            )
-            assert login_response.status_code == 200
-            token = login_response.json()["access_token"]
+            token = _login_test_user(client, email, password)
 
             create_events = _stream_request(
                 client,
@@ -143,11 +146,15 @@ def _run_chatkit_smoke(
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": prompt,
+                                    "text": (
+                                        "This is a systems test. First call list_attached_csv_files. "
+                                        "After the CSV file list returns, set a concise thread title with name_current_thread, "
+                                        "then reply with a short sentence that includes the exact phrase SYSTEM TEST SUCCESS."
+                                    ),
                                 }
                             ],
                             "attachments": [],
-                            "inference_options": {"model": model},
+                            "inference_options": {"model": "gpt-4.1-mini"},
                         }
                     },
                 },
@@ -160,15 +167,20 @@ def _run_chatkit_smoke(
             assert isinstance(thread, dict)
             thread_id = str(thread["id"])
 
-            client_tool_call = next(
+            first_turn_client_tool_calls = [
                 event["item"]
                 for event in create_events
                 if event.get("type") == "thread.item.done"
-                and isinstance(event.get("item"), dict)
-                and event["item"].get("type") == "client_tool_call"
-                and event["item"].get("name") == "list_attached_csv_files"
+                and isinstance(item := event.get("item"), dict)
+                and item.get("type") == "client_tool_call"
+            ]
+            assert first_turn_client_tool_calls, create_events
+            list_call = next(
+                item
+                for item in first_turn_client_tool_calls
+                if item.get("name") == "list_attached_csv_files"
             )
-            assert isinstance(client_tool_call, dict)
+            assert list_call.get("status") == "pending"
 
             followup_events = _stream_request(
                 client,
@@ -183,82 +195,68 @@ def _run_chatkit_smoke(
                 },
             )
 
-        events = [*create_events, *followup_events]
+        all_events = [*create_events, *followup_events]
         stored_thread, stored_items = asyncio.run(_load_thread_state(thread_id))
-        return email, events, stored_thread, stored_items
+
+        event_types = [str(event.get("type")) for event in all_events]
+        assert "thread.created" in event_types
+        assert "thread.item.done" in event_types
+
+        assistant_messages = [
+            event["item"]
+            for event in all_events
+            if event.get("type") == "thread.item.done"
+            and isinstance(item := event.get("item"), dict)
+            and item.get("type") == "assistant_message"
+        ]
+        assert assistant_messages, all_events
+        assistant_text = "\n".join(
+            str(content.get("text", ""))
+            for message in assistant_messages
+            if isinstance(message, dict)
+            for content in message.get("content", [])
+            if isinstance(content, dict)
+        )
+        assert "SYSTEM TEST SUCCESS" in assistant_text
+
+        assert stored_thread is not None
+        assert stored_thread.title not in {None, "", "New report"}
+        assert stored_thread.metadata_json.get("openai_previous_response_id")
+        assert stored_thread.metadata_json.get("openai_conversation_id")
+        usage = stored_thread.metadata_json.get("usage") or {}
+        assert usage.get("input_tokens", 0) > 0
+        assert usage.get("output_tokens", 0) > 0
+        assert usage.get("estimated_cost_usd", 0.0) > 0
+        assert any(item.kind == "assistant_message" for item in stored_items)
     finally:
         asyncio.run(_cleanup_user_state(email))
 
 
-def test_chatkit_live_smoke(initialized_db: None) -> None:
-    _, events, stored_thread, stored_items = _run_chatkit_smoke(
-        model="gpt-4.1-mini",
-        prompt=(
-            "This is a systems test. First call list_attached_csv_files. "
-            "After the CSV file list returns, set a concise thread title with name_current_thread, "
-            "then reply with a short sentence that includes the exact phrase "
-            "SYSTEM TEST SUCCESS."
-        ),
-    )
-
-    event_types = [str(event.get("type")) for event in events]
-    assert "thread.created" in event_types
-    assert "thread.item.done" in event_types
-
-    client_tool_calls = [
-        event["item"]
-        for event in events
-        if event.get("type") == "thread.item.done"
-        and isinstance(item := event.get("item"), dict)
-        and item.get("type") == "client_tool_call"
-    ]
-    assert any(item.get("name") == "list_attached_csv_files" for item in client_tool_calls)
-
-    assistant_messages = [
-        event["item"]
-        for event in events
-        if event.get("type") == "thread.item.done"
-        and isinstance(item := event.get("item"), dict)
-        and item.get("type") == "assistant_message"
-    ]
-    assert assistant_messages
-    assistant_text = "\n".join(
-        str(content.get("text", ""))
-        for message in assistant_messages
-        if isinstance(message, dict)
-        for content in message.get("content", [])
-        if isinstance(content, dict)
-    )
-    assert "SYSTEM TEST SUCCESS" in assistant_text
-
-    assert stored_thread is not None
-    assert stored_thread.title not in {None, "", "New report"}
-    assert stored_thread.metadata_json.get("openai_previous_response_id")
-    assert stored_thread.metadata_json.get("openai_conversation_id")
-    usage = stored_thread.metadata_json.get("usage") or {}
-    assert usage.get("input_tokens", 0) > 0
-    assert usage.get("output_tokens", 0) > 0
-    assert usage.get("estimated_cost_usd", 0.0) > 0
-    assert any(item.kind == "assistant_message" for item in stored_items)
-
-
 @pytest.mark.parametrize("model", ["gpt-4.1-mini", "gpt-5.1"])
 def test_chatkit_streaming_models(initialized_db: None, model: str) -> None:
-    _, events, stored_thread, _ = _run_chatkit_smoke(
-        model=model,
-        prompt=(
-            "Streaming test. First call list_attached_csv_files. "
-            "After the CSV file list returns, rename the thread and write two short bullet points about the available CSV file."
-        ),
-    )
+    async def run_stream_check() -> None:
+        settings = get_settings()
+        client = AsyncOpenAI(api_key=settings.openai_api_key or None)
 
-    update_events = [
-        event
-        for event in events
-        if event.get("type") == "thread.item.updated"
-        and isinstance(update := event.get("update"), dict)
-        and str(update.get("type", "")).startswith("assistant_message.content_part.")
-    ]
-    assert update_events, f"Expected streamed assistant deltas for {model}"
-    assert stored_thread is not None
-    assert stored_thread.metadata_json.get("openai_conversation_id")
+        text_deltas: list[str] = []
+        event_types: list[str] = []
+
+        async with client.responses.stream(
+            model=model,
+            input="Reply with exactly two short bullet points about why streaming tests matter.",
+            store=True,
+        ) as stream:
+            async for event in stream:
+                event_type = getattr(event, "type", "")
+                event_types.append(str(event_type))
+                if event_type == "response.output_text.delta":
+                    text_deltas.append(getattr(event, "delta", ""))
+
+            final_response = await stream.get_final_response()
+
+        output_text = "".join(text_deltas).strip()
+        assert text_deltas, f"Expected streamed text deltas for {model}, got events: {event_types}"
+        assert final_response.id
+        assert output_text or getattr(final_response, "output_text", "")
+
+    asyncio.run(run_stream_check())

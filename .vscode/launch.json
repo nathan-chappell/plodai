@@ -18,22 +18,18 @@
       "request": "launch",
       "module": "uvicorn",
       "args": [
-        "app.main:app",
+        "backend.app.main:app",
         "--reload",
         "--host",
         "0.0.0.0",
         "--port",
-        "8000",
-        "--ssl-certfile",
-        "${workspaceFolder}/backend/dev-certs/dev-cert.pem",
-        "--ssl-keyfile",
-        "${workspaceFolder}/backend/dev-certs/dev-key.pem"
+        "8000"
       ],
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/backend"
+        "PYTHONPATH": "${workspaceFolder}"
       }
     },
     {
@@ -43,22 +39,23 @@
       "module": "gunicorn",
       "args": [
         "-c",
-        "../gunicorn.conf.py",
-        "app.main:app"
+        "gunicorn.conf.py",
+        "backend.app.main:app"
       ],
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
       "justMyCode": false,
       "preLaunchTask": "backend: sync static",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/backend"
+        "PYTHONPATH": "${workspaceFolder}",
+        "PORT": "8000"
       }
     },
     {
       "name": "Frontend: Chrome with Vite task",
       "type": "chrome",
       "request": "launch",
-      "url": "https://127.0.0.1:5173",
+      "url": "http://127.0.0.1:5173",
       "webRoot": "${workspaceFolder}/frontend",
       "sourceMaps": true,
       "preLaunchTask": "frontend: dev",
