@@ -24,12 +24,15 @@ from chatkit.types import (
 )
 from fastapi import Depends
 from openai import AsyncOpenAI
-from openai.types.responses.response_input_item_param import FunctionCallOutput
+from openai.types.responses.response_input_item_param import (
+    FunctionCallOutput,
+    ResponseInputItemParam,
+)
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.context import ReportAgentContext
+from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.query_models import build_query_plan_model
 from backend.app.agents.report_analyst import build_report_analyst
 from backend.app.chatkit.client_tools import (
@@ -100,7 +103,9 @@ class ClientToolResultConverter(ThreadItemConverter):
         }
 
         if isinstance(image_url, str) and image_url:
-            description = "A rendered client-side chart is attached for visual inspection."
+            description = (
+                "A rendered client-side chart is attached for visual inspection."
+            )
             if tool_name:
                 description = f"The client tool '{tool_name}' completed successfully. A rendered chart image is attached for visual inspection."
             if isinstance(query_id, str) and query_id:
@@ -116,7 +121,7 @@ class ClientToolResultConverter(ThreadItemConverter):
                 {"type": "input_image", "image_url": image_url, "detail": "auto"},
             ]
 
-        return [function_call_output]
+        return cast(list[ResponseInputItemParam], [function_call_output])
 
 
 class UpdateThreadMetadataAction(

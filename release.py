@@ -111,7 +111,7 @@ def docker_tag_command(*, image: str, source_tag: str, target_tag: str) -> str:
 
 
 def docker_run_command(*, image: str, tag: str) -> str:
-    return f"docker run --rm -p 8080:8080 {image}:{tag}"
+    return f"docker run --rm -p 8000:8000 {image}:{tag}"
 
 
 def docker_push_command(*, image: str, tag: str) -> str:

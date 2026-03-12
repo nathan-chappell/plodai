@@ -7,5 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py ./
 COPY backend ./backend
 COPY frontend/dist ./backend/app/static
-EXPOSE 8080
+EXPOSE 8000
 CMD ["python", "main.py"]
