@@ -2,16 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
-import { DatasetChart } from "./DatasetChart";
-import { NarrativeCard } from "./NarrativeCard";
 import { authenticatedFetch, getChatKitConfig } from "../lib/api";
 import { executeClientTool } from "../lib/chatkit-tools";
 import { buildInitialThreadMetadata, buildThreadMetadataUpdateAction } from "../lib/thread-metadata";
 import type {
   AppThreadMetadata,
-  ChartRenderedEffect,
   ClientEffect,
-  ReportSectionEffect,
   ClientToolCall,
   ClientToolName,
   DataRow,
@@ -44,6 +40,7 @@ const CHATKIT_TOOLS: ClientToolName[] = ["list_attached_csv_files", "run_aggrega
 const Card = styled.section`
   position: sticky;
   top: 1.5rem;
+  min-width: 0;
   background: linear-gradient(135deg, rgba(44, 62, 80, 0.96), rgba(26, 36, 47, 0.98));
   color: #f8f6f2;
   border-radius: var(--radius-xl);
@@ -71,11 +68,21 @@ const Pill = styled.div`
 `;
 
 const Surface = styled.div<{ $light?: boolean }>`
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   min-height: 560px;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.08)")};
   border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.1)" : "rgba(255, 255, 255, 0.12)")};
+
+  openai-chatkit {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
 `;
 
 const Empty = styled.div`
@@ -83,18 +90,6 @@ const Empty = styled.div`
   min-height: 560px;
   color: rgba(248, 246, 242, 0.74);
   padding: 1.5rem;
-`;
-
-const EffectPanel = styled.div`
-  display: grid;
-  gap: 0.8rem;
-`;
-
-const EffectCard = styled.div`
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  padding: 0.9rem;
 `;
 
 const InlineToolbar = styled.div`
@@ -119,14 +114,6 @@ const HarnessMeta = styled.p<{ $light?: boolean }>`
   color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.74)")};
   line-height: 1.6;
 `;
-
-function isChartRenderedEffect(effect: ClientEffect): effect is ChartRenderedEffect {
-  return effect.type === "chart_rendered";
-}
-
-function isReportSectionEffect(effect: ClientEffect): effect is ReportSectionEffect {
-  return effect.type === "report_section_appended";
-}
 
 function formatToolLabel(tool: string): string {
   return tool
@@ -383,12 +370,13 @@ export function ChatKitPane({
   enabled,
   datasets,
   investigationBrief,
+  onEffects,
 }: {
   enabled: boolean;
   datasets: LocalDataset[];
   investigationBrief: string;
+  onEffects: (effects: ClientEffect[]) => void;
 }) {
-  const [effects, setEffects] = useState<ClientEffect[]>([]);
   const canInvestigate = enabled && datasets.length > 0;
 
   return (
@@ -407,7 +395,7 @@ export function ChatKitPane({
         <ChatKitHarness
           datasets={datasets}
           investigationBrief={investigationBrief}
-          onEffects={(nextEffects) => setEffects((current) => [...nextEffects, ...current].slice(0, 6))}
+          onEffects={onEffects}
         />
       ) : (
         <Surface>
@@ -418,24 +406,6 @@ export function ChatKitPane({
           </Empty>
         </Surface>
       )}
-      {effects.length ? (
-        <EffectPanel>
-          {effects.map((effect, index) => (
-            <EffectCard key={`${effect.type}-${index}`}>
-              {isChartRenderedEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : null}
-              {isReportSectionEffect(effect) ? (
-                <NarrativeCard
-                  section={{
-                    id: `${effect.type}-${index}`,
-                    title: effect.title,
-                    markdown: effect.markdown,
-                  }}
-                />
-              ) : null}
-            </EffectCard>
-          ))}
-        </EffectPanel>
-      ) : null}
     </Card>
   );
 }

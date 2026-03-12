@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = "admin@example.com"
     bootstrap_admin_name: str = "Built-in Admin"
     static_dir: str = "./dist"
+    openai_max_retries: int = 5
 
     BOOTSTRAP_ADMIN_PASSWORD: str = Field(init=False)
     AUTH_SECRET_KEY: str = Field(init=False)

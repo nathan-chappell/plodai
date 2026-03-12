@@ -4,11 +4,14 @@ import styled from "styled-components";
 import { AdminPanel } from "./components/AdminPanel";
 import { AuthPanel } from "./components/AuthPanel";
 import { ChatKitPane } from "./components/ChatKitPane";
+import { DatasetChart } from "./components/DatasetChart";
+import { NarrativeCard } from "./components/NarrativeCard";
 import { SmokeTestPane } from "./components/SmokeTestPane";
 import { DatasetInventoryPane } from "./components/DatasetInventoryPane";
 import { apiRequest, getStoredToken, storeToken } from "./lib/api";
 import { parseCsvPreview } from "./lib/csv";
 import type { AuthUser } from "./types/auth";
+import type { ClientEffect } from "./types/analysis";
 import type { LocalDataset } from "./types/report";
 import { MetaText, displayHeadingCss, panelSurfaceCss } from "./ui/primitives";
 
@@ -116,6 +119,7 @@ const ReportLayout = styled.section`
 `;
 
 const ReportColumn = styled.div`
+  min-width: 0;
   display: grid;
   gap: 1rem;
 `;
@@ -159,6 +163,28 @@ const Highlight = styled.div`
   border: 1px solid rgba(201, 111, 59, 0.18);
 `;
 
+const EffectPanel = styled.div`
+  display: grid;
+  gap: 1rem;
+`;
+
+const EffectCard = styled.section`
+  ${panelSurfaceCss};
+  border-radius: var(--radius-xl);
+  padding: 1rem;
+  display: grid;
+  gap: 0.8rem;
+  min-width: 0;
+`;
+
+function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "chart_rendered" }> {
+  return effect.type === "chart_rendered";
+}
+
+function isReportEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "report_section_appended" }> {
+  return effect.type === "report_section_appended";
+}
+
 function InvestigationBriefPanel({
   investigationBrief,
   setInvestigationBrief,
@@ -194,6 +220,7 @@ export function App() {
     "Summarize the attached files, identify the strongest trends and anomalies, and explain what deserves follow-up.",
   );
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("report");
+  const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
 
   useEffect(() => {
     const savedBrief = window.localStorage.getItem(BRIEF_STORAGE_KEY);
@@ -251,16 +278,19 @@ export function App() {
     );
 
     setDatasets(nextDatasets);
+    setReportEffects([]);
     setStatus(`Prepared ${nextDatasets.length} dataset summary${nextDatasets.length === 1 ? "" : "ies"} for analysis.`);
   }
 
   function handleClearDatasets() {
     setDatasets([]);
+    setReportEffects([]);
     setStatus("Cleared dataset inventory. Add CSV files to begin another investigation.");
   }
 
   function handleLoadSmokeDatasets(nextDatasets: LocalDataset[]) {
     setDatasets(nextDatasets);
+    setReportEffects([]);
     setStatus(`Loaded ${nextDatasets.length} smoke dataset${nextDatasets.length === 1 ? "" : "s"} into the workspace.`);
     setActiveWorkspaceTab("report");
   }
@@ -364,9 +394,33 @@ export function App() {
                   Current goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the investigation."}
                 </MetaText>
               </Panel>
+
+              {reportEffects.length ? (
+                <EffectPanel>
+                  {reportEffects.map((effect, index) => (
+                    <EffectCard key={`${effect.type}-${index}`}>
+                      {isChartEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : null}
+                      {isReportEffect(effect) ? (
+                        <NarrativeCard
+                          section={{
+                            id: `${effect.type}-${index}`,
+                            title: effect.title,
+                            markdown: effect.markdown,
+                          }}
+                        />
+                      ) : null}
+                    </EffectCard>
+                  ))}
+                </EffectPanel>
+              ) : null}
             </ReportColumn>
             <ChatColumn>
-              <ChatKitPane enabled={Boolean(user)} datasets={datasets} investigationBrief={investigationBrief} />
+              <ChatKitPane
+                enabled={Boolean(user)}
+                datasets={datasets}
+                investigationBrief={investigationBrief}
+                onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              />
             </ChatColumn>
           </ReportLayout>
         ) : null}

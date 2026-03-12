@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Report Foundry">
+  <defs>
+    <linearGradient id="rf-bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff7ef" />
+      <stop offset="1" stop-color="#f1dcc8" />
+    </linearGradient>
+    <linearGradient id="rf-bars" x1="18" y1="20" x2="47" y2="45" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c96f3b" />
+      <stop offset="1" stop-color="#497fa2" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#rf-bg)" />
+  <path d="M18 44h28" stroke="#22303c" stroke-width="3" stroke-linecap="round" opacity=".22" />
+  <rect x="18" y="30" width="7" height="14" rx="3.5" fill="url(#rf-bars)" />
+  <rect x="29" y="22" width="7" height="22" rx="3.5" fill="url(#rf-bars)" />
+  <rect x="40" y="16" width="7" height="28" rx="3.5" fill="url(#rf-bars)" />
+  <path d="M18 18c4-4 9-6 14-6 6 0 11 2 15 7" fill="none" stroke="#22303c" stroke-width="3" stroke-linecap="round" opacity=".85" />
+</svg>

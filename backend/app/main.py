@@ -3,11 +3,13 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from agents import set_default_openai_client
 from chatkit.server import StreamingResult
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from openai import AsyncOpenAI
 
 from backend.app.api.routes import router
 from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
@@ -39,7 +41,9 @@ async def lifespan(_: FastAPI):
         await AuthService(db).bootstrap()
         await db.commit()
 
-    logger.info(f"startup.complete database_url={settings.database_url}")
+    logger.info(
+        f"startup.complete database_url={settings.database_url} openai_max_retries={settings.openai_max_retries}"
+    )
     yield
 
 
@@ -50,6 +54,14 @@ settings = get_settings()
 logger = get_logger("main")
 if settings.OPENAI_API_KEY:
     os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
+    default_openai_client = AsyncOpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        max_retries=settings.openai_max_retries,
+    )
+    set_default_openai_client(default_openai_client)
+    logger.info(
+        f"openai.default_client_configured max_retries={settings.openai_max_retries}"
+    )
 
 app = FastAPI(
     title="Report Foundry API",

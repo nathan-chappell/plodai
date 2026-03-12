@@ -96,11 +96,14 @@ class ClientToolResultConverter(ThreadItemConverter):
         query_id = result.get("query_id") or result.get("queryId")
         row_count = result.get("row_count")
         csv_files = result.get("csv_files")
+        sanitized_result = dict(result)
+        sanitized_result.pop("imageDataUrl", None)
+        sanitized_result.pop("image_data_url", None)
 
         function_call_output: FunctionCallOutput = {
             "type": "function_call_output",
             "call_id": call_id,
-            "output": json.dumps(result, ensure_ascii=True),
+            "output": json.dumps(sanitized_result, ensure_ascii=True),
         }
 
         if isinstance(image_url, str) and image_url:
@@ -117,9 +120,11 @@ class ClientToolResultConverter(ThreadItemConverter):
                 description += f" CSV files available: {len(csv_files)}."
 
             function_call_output["output"] = [
-                {"type": "input_text", "text": description},
-                {"type": "input_text", "text": json.dumps(result, ensure_ascii=True)},
-                {"type": "input_image", "image_url": image_url, "detail": "auto"},
+                {
+                    "type": "input_text",
+                    "text": f"{description}\n\n{json.dumps(sanitized_result, ensure_ascii=True)}",
+                },
+                {"type": "input_image", "image_url": image_url, "detail": "high"},
             ]
 
         return cast(list[ResponseInputItemParam], [function_call_output])
@@ -135,7 +140,10 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
     def __init__(self, db: AsyncSession):
         self.settings = get_settings()
         self.db = db
-        self.openai_client = AsyncOpenAI(api_key=self.settings.OPENAI_API_KEY or None)
+        self.openai_client = AsyncOpenAI(
+            api_key=self.settings.OPENAI_API_KEY or None,
+            max_retries=self.settings.openai_max_retries,
+        )
         store = DatabaseMemoryStore(db)
         super().__init__(store=store)
         self.converter = ClientToolResultConverter()
