@@ -84,6 +84,7 @@ def release_commit_message(*, version: str, image: str, latest: bool) -> str:
         "",
         "WSL publish commands:",
         docker_build_command(image=image, version=version),
+        docker_run_command(image=image, tag=version),
         docker_push_command(image=image, tag=version),
     ]
     if latest:
@@ -102,6 +103,10 @@ def docker_build_command(*, image: str, version: str) -> str:
 
 def docker_tag_command(*, image: str, source_tag: str, target_tag: str) -> str:
     return f"docker tag {image}:{source_tag} {image}:{target_tag}"
+
+
+def docker_run_command(*, image: str, tag: str) -> str:
+    return f"docker run --rm -e PORT=8000 -p 8000:8000 {image}:{tag}"
 
 
 def docker_push_command(*, image: str, tag: str) -> str:

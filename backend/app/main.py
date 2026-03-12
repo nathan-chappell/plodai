@@ -35,7 +35,7 @@ if settings.openai_api_key:
 
 app = FastAPI(
     title="Report Foundry API",
-    version="0.4.1",
+    version="0.4.2",
     description="Agentic CSV analysis demo backend.",
     lifespan=lifespan,
 )
