@@ -1,6 +1,7 @@
 from typing import Literal
 
 from agents import FunctionTool, RunContextWrapper, function_tool
+from chatkit.agents import ClientToolCall
 from chatkit.types import ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
@@ -56,30 +57,21 @@ async def _emit_progress(context: ReportAgentContext, text: str) -> None:
 
 async def _list_attached_csv_files_impl(
     request_context: ReportAgentContext,
-) -> dict:
+) -> ClientToolCall:
     _log_tool_start(
         request_context,
         "list_attached_csv_files",
-        csv_file_count=len(request_context.available_datasets),
+        known_csv_file_count=len(request_context.available_datasets),
     )
-    await _emit_progress(request_context, "Inspecting available CSV files.")
-    result = {
-        "csv_files": [
-            {
-                "id": dataset.id,
-                "name": dataset.name,
-                "columns": dataset.columns,
-                "numeric_columns": dataset.numeric_columns,
-                "row_count": dataset.row_count,
-                "sample_rows": dataset.sample_rows[:5],
-            }
-            for dataset in request_context.available_datasets
-        ],
-    }
+    await _emit_progress(request_context, "Requesting the current CSV file inventory from the client.")
+    result = ClientToolCall(
+        name="list_attached_csv_files",
+        arguments={"includeSamples": True},
+    )
     _log_tool_end(
         request_context,
         "list_attached_csv_files",
-        returned_csv_file_ids=[dataset["id"] for dataset in result["csv_files"]],
+        mode="client_tool_call",
     )
     return result
 
@@ -113,7 +105,7 @@ async def _inspect_csv_file_schema_impl(
 async def _run_aggregate_query_impl(
     request_context: ReportAgentContext,
     query_plan,
-) -> dict:
+) -> ClientToolCall:
     raw_query_plan = query_plan.model_dump(by_alias=True)
     _log_tool_start(
         request_context,
@@ -126,19 +118,16 @@ async def _run_aggregate_query_impl(
     )
     await _emit_progress(request_context, "Validating an aggregate query plan.")
     validated_plan = request_context.validate_query_plan(raw_query_plan)
-    result = {
-        "status": "validated",
-        "query_plan": validated_plan,
-        "note": "The frontend should execute this plan against loaded CSV rows and return aggregate results only.",
-    }
+    result = ClientToolCall(
+        name="run_aggregate_query",
+        arguments={"query_plan": validated_plan},
+    )
     _log_tool_end(
         request_context,
         "run_aggregate_query",
         dataset_id=validated_plan.get("dataset_id"),
         aggregate_count=len(validated_plan.get("aggregates") or []),
-        sort_fields=[
-            sort_spec.get("field") for sort_spec in validated_plan.get("sort") or []
-        ],
+        mode="client_tool_call",
     )
     return result
 
@@ -146,30 +135,37 @@ async def _run_aggregate_query_impl(
 async def _request_chart_render_impl(
     request_context: ReportAgentContext,
     query_id: str,
+    query_plan,
     chart_plan: ChartPlan,
-) -> dict:
+) -> ClientToolCall:
+    raw_query_plan = query_plan.model_dump(by_alias=True)
+    validated_plan = request_context.validate_query_plan(raw_query_plan)
     raw_chart_plan = chart_plan.model_dump(by_alias=True)
     _log_tool_start(
         request_context,
         "request_chart_render",
         query_id=query_id,
+        dataset_id=validated_plan.get("dataset_id"),
         chart_type=raw_chart_plan.get("type"),
         title=raw_chart_plan.get("title"),
     )
     await _emit_progress(
         request_context, f"Requesting chart render for query {query_id}."
     )
-    result = {
-        "query_id": query_id,
-        "chart_plan": raw_chart_plan,
-        "report_id": request_context.report_id,
-        "note": "Frontend should render the chart locally from structured results and may return an image for model inspection.",
-    }
+    result = ClientToolCall(
+        name="request_chart_render",
+        arguments={
+            "query_id": query_id,
+            "query_plan": validated_plan,
+            "chart_plan": raw_chart_plan,
+        },
+    )
     _log_tool_end(
         request_context,
         "request_chart_render",
         query_id=query_id,
         series_count=len(raw_chart_plan.get("series") or []),
+        mode="client_tool_call",
     )
     return result
 
@@ -220,46 +216,22 @@ async def _name_current_thread_impl(
 
 
 def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
-    query_plan_model = context.query_plan_model
-    dataset_ids = tuple(dataset.id for dataset in context.available_datasets) or (
-        "unknown_dataset",
-    )
-    DatasetIdLiteral = Literal[*dataset_ids]
+    tools: list[FunctionTool] = []
+
+    @function_tool(name_override="name_current_thread")
+    async def name_current_thread_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        title: str,
+    ) -> dict:
+        """Rename the current thread to a concise, descriptive title for the investigation."""
+        return await _name_current_thread_impl(_ctx(wrapper), title)
 
     @function_tool(name_override="list_attached_csv_files")
     async def list_attached_csv_files_tool(
         wrapper: RunContextWrapper[ReportAgentContext],
-    ) -> dict:
-        """List the CSV files currently available to analyze, including safe schema details and a small sample."""
+    ) -> ClientToolCall:
+        """List the CSV files currently available to analyze by asking the client for its local file inventory."""
         return await _list_attached_csv_files_impl(_ctx(wrapper))
-
-    @function_tool(name_override="inspect_csv_file_schema")
-    async def inspect_csv_file_schema_tool(
-        wrapper: RunContextWrapper[ReportAgentContext],
-        dataset_id: DatasetIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
-    ) -> dict:
-        """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
-        return await _inspect_csv_file_schema_impl(_ctx(wrapper), dataset_id)
-
-    if query_plan_model is None:
-        raise RuntimeError("Query plan model must be built before constructing tools.")
-
-    @function_tool(name_override="run_aggregate_query")
-    async def run_aggregate_query_tool(
-        wrapper: RunContextWrapper[ReportAgentContext],
-        query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-    ) -> dict:
-        """Validate a structured row/filter/group/aggregate query plan for client-side execution against a CSV file."""
-        return await _run_aggregate_query_impl(_ctx(wrapper), query_plan)
-
-    @function_tool(name_override="request_chart_render")
-    async def request_chart_render_tool(
-        wrapper: RunContextWrapper[ReportAgentContext],
-        query_id: str,
-        chart_plan: ChartPlan,
-    ) -> dict:
-        """Ask the client to render a chart from a validated CSV query result and optionally send back an image."""
-        return await _request_chart_render_impl(_ctx(wrapper), query_id, chart_plan)
 
     @function_tool(name_override="append_report_section")
     async def append_report_section_tool(
@@ -270,19 +242,57 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
         """Append a markdown narrative section to the in-progress report."""
         return await _append_report_section_impl(_ctx(wrapper), title, markdown)
 
-    @function_tool(name_override="name_current_thread")
-    async def name_current_thread_tool(
-        wrapper: RunContextWrapper[ReportAgentContext],
-        title: str,
-    ) -> dict:
-        """Rename the current thread to a concise, descriptive title for the investigation."""
-        return await _name_current_thread_impl(_ctx(wrapper), title)
+    tools.extend(
+        [
+            name_current_thread_tool,
+            list_attached_csv_files_tool,
+            append_report_section_tool,
+        ]
+    )
 
-    return [
-        name_current_thread_tool,
-        list_attached_csv_files_tool,
-        inspect_csv_file_schema_tool,
-        run_aggregate_query_tool,
-        request_chart_render_tool,
-        append_report_section_tool,
-    ]
+    if not context.available_datasets:
+        return tools
+
+    query_plan_model = context.query_plan_model
+    if query_plan_model is None:
+        raise RuntimeError("Query plan model must be built before constructing tools.")
+
+    dataset_ids = tuple(dataset.id for dataset in context.available_datasets)
+    DatasetIdLiteral = Literal[*dataset_ids]
+
+    @function_tool(name_override="inspect_csv_file_schema")
+    async def inspect_csv_file_schema_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        dataset_id: DatasetIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> dict:
+        """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
+        return await _inspect_csv_file_schema_impl(_ctx(wrapper), dataset_id)
+
+    @function_tool(name_override="run_aggregate_query")
+    async def run_aggregate_query_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> ClientToolCall:
+        """Validate a structured row/filter/group/aggregate query plan, then ask the client to execute it against local CSV rows."""
+        return await _run_aggregate_query_impl(_ctx(wrapper), query_plan)
+
+    @function_tool(name_override="request_chart_render")
+    async def request_chart_render_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        query_id: str,
+        query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
+        chart_plan: ChartPlan,
+    ) -> ClientToolCall:
+        """Validate the query plan, then ask the client to render a chart locally and optionally send back an image."""
+        return await _request_chart_render_impl(
+            _ctx(wrapper), query_id, query_plan, chart_plan
+        )
+
+    tools.extend(
+        [
+            inspect_csv_file_schema_tool,
+            run_aggregate_query_tool,
+            request_chart_render_tool,
+        ]
+    )
+    return tools

@@ -88,3 +88,4 @@ async def spa_entrypoint(full_path: str):
     if full_path and candidate.exists() and candidate.is_file():
         return FileResponse(candidate)
     return FileResponse(index_path)
+

@@ -30,7 +30,7 @@ export async function executeClientTool<Name extends ClientToolName>(
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       return {
         payload: {
-          datasets: datasets.map((dataset) => ({
+          csv_files: datasets.map((dataset) => ({
             id: dataset.id,
             name: dataset.name,
             row_count: dataset.row_count,
@@ -89,5 +89,6 @@ function findDataset(datasets: LoadedDataset[], datasetId: string): LoadedDatase
   }
   return dataset;
 }
+
 
 

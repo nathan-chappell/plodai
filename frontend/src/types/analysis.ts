@@ -86,20 +86,9 @@ export type ClientChartSpec = {
   interactive?: boolean;
 };
 
-export type ThreadDatasetMetadata = {
-  id: string;
-  name: string;
-  row_count: number;
-  columns: string[];
-  numeric_columns: string[];
-  sample_rows: Record<string, string>[];
-};
-
 export type AppThreadMetadata = {
   title?: string;
   investigation_brief?: string;
-  dataset_ids?: string[];
-  datasets?: ThreadDatasetMetadata[];
   chart_cache?: Record<string, string>;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
@@ -149,5 +138,3 @@ export type ReportSectionEffect = {
 };
 
 export type ClientEffect = ChartRenderedEffect | ReportSectionEffect;
-
-

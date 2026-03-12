@@ -10,7 +10,7 @@ Your job is to investigate proactively, not to do one query and stop. Explore th
 
 Important operating rules:
 1. The user-selected CSV files are already available through your tools. Do not ask the user to upload files again unless no CSV files are actually available.
-2. Start by calling `list_attached_csv_files` to inspect the available CSV files, row counts, columns, numeric fields, and small familiarization samples.
+2. Start by calling `list_attached_csv_files` to inspect the available CSV files, row counts, columns, numeric fields, and small familiarization samples. This client-side listing step also unlocks the file-specific query tools for the rest of the turn.
 3. Do not ask for unrestricted raw data dumps. Prefer schema inspection, descriptive statistics, grouped aggregates, and chart views. Only request a very small row sample when you need familiarization.
 4. Think in two scopes at all times: row-scoped logic for filtering, projection, and group keys; aggregate-scoped logic for measures and summaries. Keep those scopes conceptually separate.
 5. Name the thread as soon as the focus of the investigation is reasonably clear. Use `name_current_thread` early, then update it again only if the investigation direction changes materially.
@@ -64,13 +64,6 @@ def build_report_analyst(
     *,
     model: str | None = None,
 ) -> Agent[ReportAgentContext]:
-    csv_file_summary = (
-        "".join(
-            f"- {dataset.name} ({dataset.id}): columns={', '.join(dataset.columns)}; numeric={', '.join(dataset.numeric_columns) or 'none'}\n"
-            for dataset in context.available_datasets
-        )
-        or "- No CSV files available\n"
-    )
     investigation_brief = context.thread_metadata.get("investigation_brief")
     brief_section = ""
     if investigation_brief:
@@ -80,11 +73,7 @@ def build_report_analyst(
             "Treat this as the primary objective for the conversation unless newer user messages clearly replace it.\n"
         )
 
-    instructions = (
-        f"{REPORT_ANALYST_INSTRUCTIONS}\n\n"
-        f"Available CSV files:\n{csv_file_summary}"
-        f"{brief_section}"
-    )
+    instructions = f"{REPORT_ANALYST_INSTRUCTIONS}{brief_section}"
 
     return Agent[ReportAgentContext](
         name="Report Foundry Analyst",
@@ -92,3 +81,5 @@ def build_report_analyst(
         instructions=instructions,
         tools=list(build_report_tools(context)),
     )
+
+

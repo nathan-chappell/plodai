@@ -29,19 +29,18 @@ from openai.types.responses.response_input_item_param import Message
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.DatasetMetadata import DatasetMetadata
+from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import build_query_plan_model
 from backend.app.agents.report_analyst import build_report_analyst
 from backend.app.chatkit.client_tools import (
+    ClientToolCsvFile,
     ClientToolResultPayload,
     coerce_client_tool_result,
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
-    ThreadDatasetMetadata,
     ThreadMetadataPatch,
-    datasets_from_thread_metadata,
     merge_thread_metadata,
     normalize_thread_metadata,
 )
@@ -90,6 +89,7 @@ class ClientToolResultConverter(ThreadItemConverter):
         image_url = result.get("imageDataUrl") or result.get("image_data_url")
         query_id = result.get("query_id") or result.get("queryId")
         row_count = result.get("row_count")
+        csv_files = result.get("csv_files")
 
         description = "A client-side tool completed successfully."
         if tool_name:
@@ -98,6 +98,8 @@ class ClientToolResultConverter(ThreadItemConverter):
             description += f" Query id: {query_id}."
         if isinstance(row_count, int):
             description += f" Result row count: {row_count}."
+        if isinstance(csv_files, list):
+            description += f" CSV files available: {len(csv_files)}."
         if isinstance(image_url, str) and image_url:
             description += " A rendered chart image is attached for visual inspection."
 
@@ -140,11 +142,8 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
         metadata = normalize_thread_metadata(parsed_request.metadata)
         thread_id = getattr(parsed_request.params, "thread_id", None)
-        datasets = self._coerce_datasets(metadata.get("datasets") or [])
-        dataset_ids = list(
-            metadata.get("dataset_ids") or [dataset.id for dataset in datasets]
-        )
-        chart_cache = dict(metadata.get("chart_cache") or {})
+        recent_items = await self._load_recent_items(thread_id, user_email)
+        datasets = self._datasets_from_recent_items(recent_items)
         query_plan_model, query_plan_schema = build_query_plan_model(datasets)
 
         self.logger.info(
@@ -159,8 +158,8 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             report_id=thread_id or "pending_thread",
             user_email=user_email,
             db=self.db,
-            dataset_ids=dataset_ids,
-            chart_cache=chart_cache,
+            dataset_ids=[dataset.id for dataset in datasets],
+            chart_cache=dict(metadata.get("chart_cache") or {}),
             thread_metadata=metadata,
             available_datasets=datasets,
             query_plan_model=query_plan_model,
@@ -177,14 +176,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         context.report_id = thread.id
         context.thread_metadata = typed_metadata
         context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
-        context.dataset_ids = list(
-            typed_metadata.get("dataset_ids") or context.dataset_ids
-        )
-        if not context.available_datasets:
-            context.available_datasets = datasets_from_thread_metadata(typed_metadata)
-            context.query_plan_model, context.query_plan_schema = (
-                build_query_plan_model(context.available_datasets)
-            )
 
         recent_items = await self.store.load_thread_items(
             thread.id,
@@ -193,8 +184,15 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             order="desc",
             context=context,
         )
+        recent_item_data = recent_items.data
+        context.available_datasets = self._datasets_from_recent_items(recent_item_data)
+        context.dataset_ids = [dataset.id for dataset in context.available_datasets]
+        context.query_plan_model, context.query_plan_schema = build_query_plan_model(
+            context.available_datasets
+        )
+
         pending_items = self._collect_pending_items(
-            recent_items.data,
+            recent_item_data,
             has_openai_conversation=bool(typed_metadata.get("openai_conversation_id")),
         )
         if input_user_message is not None and not any(
@@ -204,7 +202,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         agent_input = await self.converter.to_agent_input(pending_items)
         requested_model = self._resolve_requested_model(
             input_user_message=input_user_message,
-            recent_items=recent_items.data,
+            recent_items=recent_item_data,
         )
         conversation_id = typed_metadata.get("openai_conversation_id")
         previous_response_id = typed_metadata.get("openai_previous_response_id")
@@ -274,11 +272,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                     "openai_conversation_id": result_conversation_id,
                     "openai_previous_response_id": result_response_id,
                     "chart_cache": context.chart_cache,
-                    "dataset_ids": context.dataset_ids,
-                    "datasets": [
-                        self._dataset_to_dict(dataset)
-                        for dataset in context.available_datasets
-                    ],
                     "usage": updated_usage,
                 },
             ),
@@ -347,6 +340,75 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             platform_logs_url(conversation.id),
         )
         return conversation.id
+
+    async def _load_recent_items(
+        self, thread_id: str | None, user_email: str
+    ) -> list[ThreadItem]:
+        if not thread_id:
+            return []
+        context = ReportAgentContext(
+            report_id=thread_id, user_email=user_email, db=self.db
+        )
+        try:
+            page = await self.store.load_thread_items(
+                thread_id,
+                after=None,
+                limit=20,
+                order="desc",
+                context=context,
+            )
+        except Exception:
+            return []
+        return page.data
+
+    def _datasets_from_recent_items(
+        self, recent_items: list[ThreadItem]
+    ) -> list[DatasetMetadata]:
+        for item in recent_items:
+            if item.type != "client_tool_call":
+                continue
+            if item.name != "list_attached_csv_files" or item.status != "completed":
+                continue
+            result = coerce_client_tool_result(item.output)
+            datasets = self._datasets_from_client_tool_result(result)
+            if datasets:
+                return datasets
+        return []
+
+    def _datasets_from_client_tool_result(
+        self, result: ClientToolResultPayload | None
+    ) -> list[DatasetMetadata]:
+        if result is None:
+            return []
+        raw_csv_files = result.get("csv_files")
+        if not isinstance(raw_csv_files, list):
+            return []
+
+        datasets: list[DatasetMetadata] = []
+        for raw_file in raw_csv_files:
+            if not isinstance(raw_file, dict):
+                continue
+            csv_file = cast(ClientToolCsvFile, raw_file)
+            dataset_id = str(csv_file.get("id", "")).strip()
+            if not dataset_id:
+                continue
+            datasets.append(
+                DatasetMetadata(
+                    id=dataset_id,
+                    name=str(csv_file.get("name", "CSV file")),
+                    columns=[str(column) for column in csv_file.get("columns", [])],
+                    sample_rows=[
+                        {str(key): value for key, value in row.items()}
+                        for row in csv_file.get("sample_rows", [])
+                        if isinstance(row, dict)
+                    ],
+                    row_count=int(csv_file.get("row_count", 0)),
+                    numeric_columns=[
+                        str(column) for column in csv_file.get("numeric_columns", [])
+                    ],
+                )
+            )
+        return datasets
 
     def _collect_pending_items(
         self,
@@ -472,35 +534,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             len(result.text),
         )
         return TranscriptionResult(text=result.text)
-
-    def _coerce_datasets(
-        self, raw_datasets: list[ThreadDatasetMetadata]
-    ) -> list[DatasetMetadata]:
-        return [
-            DatasetMetadata(
-                id=raw_dataset["id"],
-                name=raw_dataset["name"],
-                columns=list(raw_dataset["columns"]),
-                sample_rows=[dict(row) for row in raw_dataset["sample_rows"]],
-                row_count=raw_dataset["row_count"],
-                numeric_columns=list(raw_dataset["numeric_columns"]),
-            )
-            for raw_dataset in raw_datasets
-            if raw_dataset["id"]
-        ]
-
-    def _dataset_to_dict(self, dataset: DatasetMetadata) -> ThreadDatasetMetadata:
-        return {
-            "id": dataset.id,
-            "name": dataset.name,
-            "columns": dataset.columns,
-            "sample_rows": [
-                {str(key): str(value) for key, value in row.items()}
-                for row in dataset.sample_rows
-            ],
-            "row_count": dataset.row_count,
-            "numeric_columns": dataset.numeric_columns,
-        }
 
 
 async def build_chatkit_server(

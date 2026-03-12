@@ -13,6 +13,33 @@ from backend.app.models.user import User
 from backend.app.services.auth_service import hash_password
 
 
+CSV_FILES_PAYLOAD = {
+    "csv_files": [
+        {
+            "id": "sales_csv",
+            "name": "Sales dataset",
+            "row_count": 4,
+            "columns": ["region", "category", "revenue", "units"],
+            "numeric_columns": ["revenue", "units"],
+            "sample_rows": [
+                {
+                    "region": "North",
+                    "category": "Hardware",
+                    "revenue": "120",
+                    "units": "4",
+                },
+                {
+                    "region": "South",
+                    "category": "Software",
+                    "revenue": "240",
+                    "units": "6",
+                },
+            ],
+        }
+    ]
+}
+
+
 async def _create_user(email: str, password: str) -> None:
     async with AsyncSessionLocal() as db:
         db.add(
@@ -72,6 +99,19 @@ def _parse_sse_events(raw_body: str) -> list[dict[str, object]]:
     return events
 
 
+def _stream_request(client: TestClient, token: str, body: dict[str, object]) -> list[dict[str, object]]:
+    with client.stream(
+        "POST",
+        "/chatkit",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        raw_body = "".join(response.iter_text())
+    return _parse_sse_events(raw_body)
+
+
 def _run_chatkit_smoke(
     *, model: str, prompt: str
 ) -> tuple[str, list[dict[str, object]], ChatThread | None, list[ChatItem]]:
@@ -92,65 +132,58 @@ def _run_chatkit_smoke(
             assert login_response.status_code == 200
             token = login_response.json()["access_token"]
 
-            request_body = {
-                "type": "threads.create",
-                "metadata": {
-                    "dataset_ids": ["sales_csv"],
-                    "datasets": [
-                        {
-                            "id": "sales_csv",
-                            "name": "Sales dataset",
-                            "row_count": 4,
-                            "columns": ["region", "category", "revenue", "units"],
-                            "numeric_columns": ["revenue", "units"],
-                            "sample_rows": [
+            create_events = _stream_request(
+                client,
+                token,
+                {
+                    "type": "threads.create",
+                    "metadata": {},
+                    "params": {
+                        "input": {
+                            "content": [
                                 {
-                                    "region": "North",
-                                    "category": "Hardware",
-                                    "revenue": "120",
-                                    "units": "4",
-                                },
-                                {
-                                    "region": "South",
-                                    "category": "Software",
-                                    "revenue": "240",
-                                    "units": "6",
-                                },
+                                    "type": "input_text",
+                                    "text": prompt,
+                                }
                             ],
+                            "attachments": [],
+                            "inference_options": {"model": model},
                         }
-                    ],
+                    },
                 },
-                "params": {
-                    "input": {
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": prompt,
-                            }
-                        ],
-                        "attachments": [],
-                        "inference_options": {"model": model},
-                    }
+            )
+
+            thread_created = next(
+                event for event in create_events if event.get("type") == "thread.created"
+            )
+            thread = thread_created["thread"]
+            assert isinstance(thread, dict)
+            thread_id = str(thread["id"])
+
+            client_tool_call = next(
+                event["item"]
+                for event in create_events
+                if event.get("type") == "thread.item.done"
+                and isinstance(event.get("item"), dict)
+                and event["item"].get("type") == "client_tool_call"
+                and event["item"].get("name") == "list_attached_csv_files"
+            )
+            assert isinstance(client_tool_call, dict)
+
+            followup_events = _stream_request(
+                client,
+                token,
+                {
+                    "type": "threads.add_client_tool_output",
+                    "metadata": {},
+                    "params": {
+                        "thread_id": thread_id,
+                        "result": CSV_FILES_PAYLOAD,
+                    },
                 },
-            }
+            )
 
-            with client.stream(
-                "POST",
-                "/chatkit",
-                json=request_body,
-                headers={"Authorization": f"Bearer {token}"},
-            ) as response:
-                assert response.status_code == 200
-                assert response.headers["content-type"].startswith("text/event-stream")
-                raw_body = "".join(response.iter_text())
-
-        events = _parse_sse_events(raw_body)
-        thread_created = next(
-            event for event in events if event.get("type") == "thread.created"
-        )
-        thread = thread_created["thread"]
-        assert isinstance(thread, dict)
-        thread_id = str(thread["id"])
+        events = [*create_events, *followup_events]
         stored_thread, stored_items = asyncio.run(_load_thread_state(thread_id))
         return email, events, stored_thread, stored_items
     finally:
@@ -161,16 +194,25 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
     _, events, stored_thread, stored_items = _run_chatkit_smoke(
         model="gpt-4.1-mini",
         prompt=(
-            "This is a systems test. Use list_attached_csv_files first, "
-            "then set a concise thread title with name_current_thread, "
+            "This is a systems test. First call list_attached_csv_files. "
+            "After the CSV file list returns, set a concise thread title with name_current_thread, "
             "then reply with a short sentence that includes the exact phrase "
-            "SYSTEM TEST SUCCESS. Do not call any client-side tools."
+            "SYSTEM TEST SUCCESS."
         ),
     )
 
     event_types = [str(event.get("type")) for event in events]
     assert "thread.created" in event_types
     assert "thread.item.done" in event_types
+
+    client_tool_calls = [
+        event["item"]
+        for event in events
+        if event.get("type") == "thread.item.done"
+        and isinstance(item := event.get("item"), dict)
+        and item.get("type") == "client_tool_call"
+    ]
+    assert any(item.get("name") == "list_attached_csv_files" for item in client_tool_calls)
 
     assistant_messages = [
         event["item"]
@@ -205,9 +247,8 @@ def test_chatkit_streaming_models(initialized_db: None, model: str) -> None:
     _, events, stored_thread, _ = _run_chatkit_smoke(
         model=model,
         prompt=(
-            "Streaming test. First rename the thread. "
-            "Then write two short bullet points about the available dataset. "
-            "Do not call client tools."
+            "Streaming test. First call list_attached_csv_files. "
+            "After the CSV file list returns, rename the thread and write two short bullet points about the available CSV file."
         ),
     )
 

@@ -11,8 +11,6 @@ export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThre
   return {
     title: metadata.title,
     investigation_brief: metadata.investigation_brief,
-    dataset_ids: metadata.dataset_ids,
-    datasets: metadata.datasets,
     chart_cache: metadata.chart_cache,
     openai_conversation_id: metadata.openai_conversation_id,
     openai_previous_response_id: metadata.openai_previous_response_id,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
@@ -14,7 +14,7 @@ import type {
   ClientToolName,
   DataRow,
 } from "../types/analysis";
-import type { DatasetSummary, LocalDataset } from "../types/report";
+import type { LocalDataset } from "../types/report";
 import { emptyStateCss } from "../ui/primitives";
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
@@ -156,6 +156,16 @@ function ConfiguredChatKit({
     () => datasets.map((dataset) => ({ ...dataset, rows: (dataset.rows as DataRow[]) ?? dataset.sample_rows })),
     [datasets],
   );
+  const loadedDatasetsRef = useRef(loadedDatasets);
+  const onEffectsRef = useRef(onEffects);
+
+  useEffect(() => {
+    loadedDatasetsRef.current = loadedDatasets;
+  }, [loadedDatasets]);
+
+  useEffect(() => {
+    onEffectsRef.current = onEffects;
+  }, [onEffects]);
 
   const metadata = useMemo<AppThreadMetadata>(
     () =>
@@ -163,13 +173,11 @@ function ConfiguredChatKit({
         title: investigationBrief.trim()
           ? investigationBrief.trim().slice(0, 80)
           : datasets.length
-            ? `Analysis of ${datasets.length} datasets`
+            ? `Analysis of ${datasets.length} CSV files`
             : "New report",
         investigation_brief: investigationBrief.trim() || undefined,
-        dataset_ids: datasets.map((dataset) => dataset.id),
-        datasets,
       }),
-    [datasets, investigationBrief],
+    [datasets.length, investigationBrief],
   );
 
   const starterPrompts = useMemo(() => buildStarterPrompts(investigationBrief), [investigationBrief]);
@@ -230,10 +238,10 @@ function ConfiguredChatKit({
             name: name as ClientToolName,
             arguments: params as ClientToolCall<ClientToolName>["arguments"],
           },
-          loadedDatasets,
+          loadedDatasetsRef.current,
         );
         if (result.effects.length) {
-          onEffects(result.effects);
+          onEffectsRef.current(result.effects);
         }
         return result.payload;
       },
@@ -241,13 +249,13 @@ function ConfiguredChatKit({
         if (event.name !== "chart_rendered" || !event.data) {
           return;
         }
-        onEffects([event.data as ClientEffect]);
+        onEffectsRef.current([event.data as ClientEffect]);
       },
       onThreadChange: ({ threadId }) => {
         setActiveThreadId(threadId);
       },
     }),
-    [investigationBrief, loadedDatasets, onEffects, starterPrompts, datasets.length],
+    [datasets.length, investigationBrief, starterPrompts],
   );
 
   const chatKit = useChatKit(options);
@@ -261,8 +269,6 @@ function ConfiguredChatKit({
       buildThreadMetadataUpdateAction({
         title: metadata.title,
         investigation_brief: metadata.investigation_brief,
-        dataset_ids: metadata.dataset_ids,
-        datasets: metadata.datasets,
       }),
     );
   }, [activeThreadId, chatKit, metadata]);
@@ -321,6 +327,3 @@ export function ChatKitPane({
     </Card>
   );
 }
-
-
-
