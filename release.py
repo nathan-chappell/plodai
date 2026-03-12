@@ -54,6 +54,19 @@ def publish(
 
 
 @app.command()
+def release(
+    version: str = typer.Argument(..., help="Application version and docker tag."),
+    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
+    latest: bool = typer.Option(False, "--latest", help="Also tag and push :latest."),
+) -> None:
+    publish(version=version, image=image, latest=latest)
+    typer.echo("")
+    typer.echo("Release commit message:")
+    typer.echo("")
+    typer.echo(release_commit_message(version=version, image=image, latest=latest))
+
+
+@app.command()
 def commit_message(
     version: str = typer.Argument(..., help="Application version and docker tag."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),

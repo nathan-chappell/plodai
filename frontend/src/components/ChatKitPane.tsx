@@ -228,6 +228,7 @@ function ConfiguredChatKit({
         attachments: {
           enabled: false,
         },
+        dictation: { enabled: true },
         models: CHATKIT_MODEL_CHOICES.map((choice) => ({
           ...choice,
           default: choice.id === CHATKIT_DEFAULT_MODEL_ID,
