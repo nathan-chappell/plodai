@@ -1,5 +1,7 @@
+import json
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from chatkit.server import StreamingResult
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -15,6 +17,18 @@ from backend.app.core.logging import configure_logging, get_logger
 from backend.app.db.session import AsyncSessionLocal, Base, engine
 from backend.app.services.auth_service import AuthService
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+PACKAGE_JSON = ROOT_DIR / "package.json"
+
+
+def _read_version() -> str:
+    try:
+        data = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return "unknown"
+    version = data.get("version")
+    return version if isinstance(version, str) and version else "unknown"
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -25,13 +39,13 @@ async def lifespan(_: FastAPI):
         await AuthService(db).bootstrap()
         await db.commit()
 
-    logger.info(
-        f"startup.complete static_path={settings.static_path} database_url={settings.database_url}"
-    )
+    logger.info(f"startup.complete database_url={settings.database_url}")
     yield
 
 
 configure_logging()
+print(f"report-foundry api version={_read_version()}")
+print(f"report-foundry api root={ROOT_DIR}")
 settings = get_settings()
 logger = get_logger("main")
 if settings.OPENAI_API_KEY:
@@ -54,11 +68,13 @@ app.add_middleware(
 
 app.include_router(router)
 
-static_path = settings.static_path
-if static_path.exists():
-    assets_path = static_path / "assets"
-    if assets_path.exists():
-        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+static_path = Path() / "dist"
+assets_path = static_path / "assets"
+
+if static_path.exists() and assets_path.exists():
+    app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+else:
+    raise RuntimeError(f"Missing static or assets path: {assets_path.exists()=}")
 
 
 @app.get("/health")

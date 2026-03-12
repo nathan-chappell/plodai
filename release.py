@@ -1,6 +1,5 @@
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -9,12 +8,9 @@ import typer
 
 app = typer.Typer(help="Build and publish Report Foundry artifacts.")
 ROOT = Path(__file__).resolve().parent
-BACKEND = ROOT / "backend"
-FRONTEND = ROOT / "frontend"
-STATIC_DIR = BACKEND / "app" / "static"
 PACKAGE_JSON = ROOT / "package.json"
 PACKAGE_LOCK_JSON = ROOT / "package-lock.json"
-BACKEND_MAIN = BACKEND / "app" / "main.py"
+BACKEND_MAIN = ROOT / "backend" / "app" / "main.py"
 DEFAULT_IMAGE = "nathanschappell/report-foundry"
 
 
@@ -28,12 +24,6 @@ def set_version(version: str = typer.Argument(..., help="Application version."))
 
 
 @app.command()
-def sync_static() -> None:
-    copy_frontend_dist()
-    typer.echo("Frontend assets copied into backend/app/static")
-
-
-@app.command()
 def build(
     version: str = typer.Argument(..., help="Application version and docker tag."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
@@ -41,7 +31,6 @@ def build(
 ) -> None:
     set_version(version)
     run(["npm", "run", "build"], cwd=ROOT)
-    copy_frontend_dist()
     typer.echo(f"Prepared release artifacts for {version}")
     typer.echo("")
     typer.echo("Suggested release commit message:")
@@ -122,30 +111,6 @@ def git_tag_command(*, version: str) -> str:
     return f"git tag v{version}"
 
 
-def copy_frontend_dist() -> None:
-    dist_dir = FRONTEND / "dist"
-    if not dist_dir.exists():
-        raise typer.BadParameter("dist does not exist. Run the frontend build first.")
-
-    if STATIC_DIR.exists():
-        for child in STATIC_DIR.iterdir():
-            if child.name == ".gitkeep":
-                continue
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-    else:
-        STATIC_DIR.mkdir(parents=True, exist_ok=True)
-
-    for child in dist_dir.iterdir():
-        destination = STATIC_DIR / child.name
-        if child.is_dir():
-            shutil.copytree(child, destination, dirs_exist_ok=True)
-        else:
-            shutil.copy2(child, destination)
-
-
 def read_package_version(path: Path) -> str:
     data = json.loads(path.read_text())
     version = data.get("version")
@@ -187,5 +152,3 @@ def run(command: list[str], cwd: Path) -> None:
 
 if __name__ == "__main__":
     app()
-
-

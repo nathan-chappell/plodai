@@ -266,7 +266,7 @@ export function App() {
             <Eyebrow>Agentic CSV Intelligence Demo</Eyebrow>
             <Title>Report Foundry</Title>
             <Subhead>
-              Analyze arbitrary CSV files locally, let an agent explore them through safe aggregations and charts, and turn the
+              Analyze some CSV files locally, let an agent explore them through safe aggregations and charts, and turn the
               findings into a clean narrative report.
             </Subhead>
           </Hero>

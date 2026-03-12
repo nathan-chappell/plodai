@@ -1,11 +1,11 @@
 # Report Foundry
 
-Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI backend and a Vite TypeScript React frontend. The repo root acts as the frontend and tooling root, while the Python app code lives under `backend/`.
+Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI backend and a Vite TypeScript React frontend. The Python app code lives under `backend/`, while the frontend source lives under `frontend/`.
 
 ## Why this shape
 
 - Backend: FastAPI on Python 3.14 keeps the agent orchestration surface simple and deployable on Railway.
-- Frontend: React plus Vite lives at the repo root, which tends to play more nicely with editors and workspace tooling.
+- Frontend: React plus Vite lives in `frontend/`, and Vite emits production assets to the repo-root `dist/` directory.
 - Persistence: SQLite on a Railway volume is the best fit for this demo stage. It backs users, report runs, and ChatKit conversation memory.
 - Auth: tokens are signed with `itsdangerous`, users live in SQLite, and the app can bootstrap an admin from env while also syncing a server-editable `backend/data/users.json` file.
 - Database access: the backend uses async SQLAlchemy sessions end to end.
@@ -13,6 +13,7 @@ Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI bac
 ## Layout
 
 - Frontend/tooling root: `package.json`, `frontend/vite.config.ts`, `frontend/tsconfig.json`, `frontend/src/`
+- Built frontend assets: `dist/`
 - Python app: `backend/app/`
 - Python runtime config: `requirements.txt`, `requirements-dev.txt`
 - Release automation: `release.py`
@@ -40,20 +41,19 @@ npm run dev
 
 ### Production-style local run
 
-1. Build the frontend at the repo root.
-2. Copy `frontend/dist/` into `backend/app/static`.
-3. Run `python main.py` or use the default `Backend: Uvicorn` VS Code launch, which first builds and syncs the frontend assets.
+1. Build the frontend with `npm run build`.
+2. Run `python main.py` or use the default `Backend: Uvicorn` VS Code launch, which builds the frontend first and then serves the repo-root `dist/` directory.
 
 The repo includes VS Code launch configs for both API-only development and production-style Uvicorn serving with freshly built frontend assets. Generated frontend assets are treated as disposable build output and are ignored by git.
 
 ## Docker and release
 
-- `Dockerfile` expects prebuilt frontend assets in `frontend/dist/` and copies them into the runtime image.
-- The runtime image copies `backend/` plus the prebuilt frontend output and runs the root `main.py` entrypoint.
-- The root `main.py` starts Uvicorn directly on `0.0.0.0:8000`.
+- `Dockerfile` expects prebuilt frontend assets in the repo-root `dist/` directory and copies them into the runtime image.
+- The runtime image copies `backend/`, `dist/`, and the root `main.py` entrypoint.
+- The root `main.py` prints version/runtime details first, then starts Uvicorn directly on `0.0.0.0:8000`.
 - `release.py` is the release entrypoint at the repo root.
 - `release.py set-version <version>` keeps the frontend package version and backend FastAPI version aligned.
-- `release.py build <version>` updates versions, builds the frontend, and syncs static assets.
+- `release.py build <version>` updates versions and builds the frontend.
 - `release.py publish <version>` also builds and pushes the Docker image.
 
 Examples:

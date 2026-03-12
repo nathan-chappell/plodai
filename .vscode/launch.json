@@ -16,55 +16,8 @@
       "name": "Backend: Uvicorn",
       "type": "debugpy",
       "request": "launch",
-      "module": "uvicorn",
-      "args": [
-        "backend.app.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8001"
-      ],
-      "preLaunchTask": "backend: sync static",
-    },
-    {
-      "name": "Backend: Uvicorn (reload, API only)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "uvicorn",
-      "args": [
-        "backend.app.main:app",
-        "--reload",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8000"
-      ],
-      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "console": "integratedTerminal",
       "justMyCode": false,
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Frontend: Chrome with Vite task",
-      "type": "chrome",
-      "request": "launch",
-      "url": "http://127.0.0.1:5173",
-      "webRoot": "${workspaceFolder}/frontend",
-      "sourceMaps": true,
-      "preLaunchTask": "frontend: dev",
-      "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
+      "module": "main"
     }
   ],
-  "compounds": [
-    {
-      "name": "App: Uvicorn + Chrome",
-      "configurations": [
-        "Backend: Uvicorn (reload, API only)",
-        "Frontend: Chrome with Vite task"
-      ]
-    }
-  ]
 }

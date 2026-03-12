@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "https://127.0.0.1:8000/api";
+const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
 const CHATKIT_DOMAIN_KEY = import.meta.env.VITE_CHATKIT_DOMAIN_KEY ?? "local-dev";
 const TOKEN_KEY = "report-foundry-token";
@@ -61,4 +61,11 @@ function deriveChatKitUrl(apiBaseUrl: string): string {
     return `${apiBaseUrl.slice(0, -4)}/chatkit`;
   }
   return `${apiBaseUrl}/chatkit`;
+}
+
+function normalizeBase(baseUrl: string): string {
+  if (baseUrl === "/api") {
+    return baseUrl;
+  }
+  return baseUrl.replace(/\/$/, "");
 }
