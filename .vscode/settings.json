@@ -1,5 +1,4 @@
 {
-  "python.envFile": "${workspaceFolder}\\.env",
   "python.terminal.useEnvFile": true,
-  "terminal.integrated.defaultProfile.windows": "Git Bash"
+  "python.testing.pytestEnabled": true,
 }

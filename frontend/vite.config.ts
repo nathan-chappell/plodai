@@ -10,6 +10,7 @@ const keyFile = path.join(certDir, "dev-key.pem");
 const hasDevTls = fs.existsSync(certFile) && fs.existsSync(keyFile);
 
 export default defineConfig({
+  root: __dirname,
   plugins: [react()],
   server: {
     host: "127.0.0.1",

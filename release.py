@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parent
 BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
 STATIC_DIR = BACKEND / "app" / "static"
-PACKAGE_JSON = FRONTEND / "package.json"
-PACKAGE_LOCK_JSON = FRONTEND / "package-lock.json"
+PACKAGE_JSON = ROOT / "package.json"
+PACKAGE_LOCK_JSON = ROOT / "package-lock.json"
 BACKEND_MAIN = BACKEND / "app" / "main.py"
 DEFAULT_IMAGE = "nathanschappell/report-foundry"
 
@@ -39,7 +39,7 @@ def build(
     image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
 ) -> None:
     set_version(version)
-    run(["npm", "run", "build"], cwd=FRONTEND)
+    run(["npm", "run", "build"], cwd=ROOT)
     copy_frontend_dist()
     run(["docker", "build", "-t", f"{image}:{version}", "."], cwd=ROOT)
     typer.echo(f"Built docker image {image}:{version}")
