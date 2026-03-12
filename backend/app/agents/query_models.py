@@ -49,8 +49,7 @@ ChartStylePresetLiteral: TypeAlias = Literal[
 
 
 def _literal_type(values: tuple[str, ...]):
-    # NOTE: prefer this syntax
-    return Literal[values]
+    return Literal[*values]
 
 
 class QueryModelBase(BaseModel):

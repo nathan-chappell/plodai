@@ -1,14 +1,7 @@
 from agents import Agent
 
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.tools import (
-    append_report_section,
-    inspect_csv_file_schema,
-    list_attached_csv_files,
-    name_current_thread,
-    request_chart_render,
-    run_aggregate_query,
-)
+from backend.app.agents.tools import build_report_tools
 
 
 REPORT_ANALYST_INSTRUCTIONS = """
@@ -97,14 +90,5 @@ def build_report_analyst(
         name="Report Foundry Analyst",
         model=model,
         instructions=instructions,
-        tools=[
-            name_current_thread,
-            list_attached_csv_files,
-            inspect_csv_file_schema,
-            run_aggregate_query,
-            request_chart_render,
-            append_report_section,
-        ],
+        tools=list(build_report_tools(context)),
     )
-
-

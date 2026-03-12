@@ -1,8 +1,10 @@
-from agents import RunContextWrapper, function_tool
+from typing import Literal
+
+from agents import FunctionTool, RunContextWrapper, function_tool
 from chatkit.types import ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.query_models import ChartPlan, ToolQueryPlan
+from backend.app.agents.query_models import ChartPlan
 from backend.app.core.logging import get_logger, summarize_for_log
 
 
@@ -52,10 +54,9 @@ async def _emit_progress(context: ReportAgentContext, text: str) -> None:
         await context.emit_event(ProgressUpdateEvent(text=text))
 
 
-@function_tool
-async def list_attached_csv_files(context: RunContextWrapper[ReportAgentContext]) -> dict:
-    """List the CSV files currently available to analyze, including safe schema details and a small sample."""
-    request_context = _ctx(context)
+async def _list_attached_csv_files_impl(
+    request_context: ReportAgentContext,
+) -> dict:
     _log_tool_start(
         request_context,
         "list_attached_csv_files",
@@ -83,15 +84,14 @@ async def list_attached_csv_files(context: RunContextWrapper[ReportAgentContext]
     return result
 
 
-@function_tool
-async def inspect_csv_file_schema(
-    context: RunContextWrapper[ReportAgentContext],
+async def _inspect_csv_file_schema_impl(
+    request_context: ReportAgentContext,
     dataset_id: str,
 ) -> dict:
-    """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
-    request_context = _ctx(context)
     _log_tool_start(request_context, "inspect_csv_file_schema", dataset_id=dataset_id)
-    await _emit_progress(request_context, f"Inspecting schema for CSV file {dataset_id}.")
+    await _emit_progress(
+        request_context, f"Inspecting schema for CSV file {dataset_id}."
+    )
     dataset = request_context.get_dataset(dataset_id)
     result = {
         "dataset_id": dataset_id,
@@ -110,20 +110,19 @@ async def inspect_csv_file_schema(
     return result
 
 
-@function_tool
-async def run_aggregate_query(
-    context: RunContextWrapper[ReportAgentContext],
-    query_plan: ToolQueryPlan,
+async def _run_aggregate_query_impl(
+    request_context: ReportAgentContext,
+    query_plan,
 ) -> dict:
-    """Validate a structured row/filter/group/aggregate query plan for client-side execution against a CSV file."""
-    request_context = _ctx(context)
     raw_query_plan = query_plan.model_dump(by_alias=True)
     _log_tool_start(
         request_context,
         "run_aggregate_query",
         dataset_id=raw_query_plan.get("dataset_id"),
         group_by=len(raw_query_plan.get("group_by") or []),
-        aggregates=[measure.get("op") for measure in raw_query_plan.get("aggregates") or []],
+        aggregates=[
+            measure.get("op") for measure in raw_query_plan.get("aggregates") or []
+        ],
     )
     await _emit_progress(request_context, "Validating an aggregate query plan.")
     validated_plan = request_context.validate_query_plan(raw_query_plan)
@@ -137,19 +136,18 @@ async def run_aggregate_query(
         "run_aggregate_query",
         dataset_id=validated_plan.get("dataset_id"),
         aggregate_count=len(validated_plan.get("aggregates") or []),
-        sort_fields=[sort_spec.get("field") for sort_spec in validated_plan.get("sort") or []],
+        sort_fields=[
+            sort_spec.get("field") for sort_spec in validated_plan.get("sort") or []
+        ],
     )
     return result
 
 
-@function_tool
-async def request_chart_render(
-    context: RunContextWrapper[ReportAgentContext],
+async def _request_chart_render_impl(
+    request_context: ReportAgentContext,
     query_id: str,
     chart_plan: ChartPlan,
 ) -> dict:
-    """Ask the client to render a chart from a validated CSV query result and optionally send back an image."""
-    request_context = _ctx(context)
     raw_chart_plan = chart_plan.model_dump(by_alias=True)
     _log_tool_start(
         request_context,
@@ -158,7 +156,9 @@ async def request_chart_render(
         chart_type=raw_chart_plan.get("type"),
         title=raw_chart_plan.get("title"),
     )
-    await _emit_progress(request_context, f"Requesting chart render for query {query_id}.")
+    await _emit_progress(
+        request_context, f"Requesting chart render for query {query_id}."
+    )
     result = {
         "query_id": query_id,
         "chart_plan": raw_chart_plan,
@@ -174,14 +174,11 @@ async def request_chart_render(
     return result
 
 
-@function_tool
-async def append_report_section(
-    context: RunContextWrapper[ReportAgentContext],
+async def _append_report_section_impl(
+    request_context: ReportAgentContext,
     title: str,
     markdown: str,
 ) -> dict:
-    """Append a markdown narrative section to the in-progress report."""
-    request_context = _ctx(context)
     _log_tool_start(
         request_context,
         "append_report_section",
@@ -204,13 +201,10 @@ async def append_report_section(
     return result
 
 
-@function_tool
-async def name_current_thread(
-    context: RunContextWrapper[ReportAgentContext],
+async def _name_current_thread_impl(
+    request_context: ReportAgentContext,
     title: str,
 ) -> dict:
-    """Rename the current thread to a concise, descriptive title for the investigation."""
-    request_context = _ctx(context)
     cleaned_title = title.strip()
     _log_tool_start(request_context, "name_current_thread", title=cleaned_title)
     request_context.requested_thread_title = cleaned_title
@@ -225,3 +219,70 @@ async def name_current_thread(
     return result
 
 
+def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
+    query_plan_model = context.query_plan_model
+    dataset_ids = tuple(dataset.id for dataset in context.available_datasets) or (
+        "unknown_dataset",
+    )
+    DatasetIdLiteral = Literal[*dataset_ids]
+
+    @function_tool(name_override="list_attached_csv_files")
+    async def list_attached_csv_files_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+    ) -> dict:
+        """List the CSV files currently available to analyze, including safe schema details and a small sample."""
+        return await _list_attached_csv_files_impl(_ctx(wrapper))
+
+    @function_tool(name_override="inspect_csv_file_schema")
+    async def inspect_csv_file_schema_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        dataset_id: DatasetIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> dict:
+        """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
+        return await _inspect_csv_file_schema_impl(_ctx(wrapper), dataset_id)
+
+    if query_plan_model is None:
+        raise RuntimeError("Query plan model must be built before constructing tools.")
+
+    @function_tool(name_override="run_aggregate_query")
+    async def run_aggregate_query_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> dict:
+        """Validate a structured row/filter/group/aggregate query plan for client-side execution against a CSV file."""
+        return await _run_aggregate_query_impl(_ctx(wrapper), query_plan)
+
+    @function_tool(name_override="request_chart_render")
+    async def request_chart_render_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        query_id: str,
+        chart_plan: ChartPlan,
+    ) -> dict:
+        """Ask the client to render a chart from a validated CSV query result and optionally send back an image."""
+        return await _request_chart_render_impl(_ctx(wrapper), query_id, chart_plan)
+
+    @function_tool(name_override="append_report_section")
+    async def append_report_section_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        title: str,
+        markdown: str,
+    ) -> dict:
+        """Append a markdown narrative section to the in-progress report."""
+        return await _append_report_section_impl(_ctx(wrapper), title, markdown)
+
+    @function_tool(name_override="name_current_thread")
+    async def name_current_thread_tool(
+        wrapper: RunContextWrapper[ReportAgentContext],
+        title: str,
+    ) -> dict:
+        """Rename the current thread to a concise, descriptive title for the investigation."""
+        return await _name_current_thread_impl(_ctx(wrapper), title)
+
+    return [
+        name_current_thread_tool,
+        list_attached_csv_files_tool,
+        inspect_csv_file_schema_tool,
+        run_aggregate_query_tool,
+        request_chart_render_tool,
+        append_report_section_tool,
+    ]

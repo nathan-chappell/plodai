@@ -29,8 +29,8 @@ from openai.types.responses.response_input_item_param import Message
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.context import ReportAgentContext
+from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.query_models import build_query_plan_model
 from backend.app.agents.report_analyst import build_report_analyst
 from backend.app.chatkit.client_tools import (
@@ -39,19 +39,30 @@ from backend.app.chatkit.client_tools import (
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
-    ThreadMetadataPatch,
     ThreadDatasetMetadata,
+    ThreadMetadataPatch,
     datasets_from_thread_metadata,
     merge_thread_metadata,
     normalize_thread_metadata,
 )
+from backend.app.chatkit.usage import (
+    accumulate_transcription_usage,
+    accumulate_usage,
+    platform_logs_url,
+)
 from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger, summarize_for_log
-from backend.app.chatkit.usage import accumulate_transcription_usage, accumulate_usage, platform_logs_url
 from backend.app.db.session import get_db
 
-
 logger = get_logger("chatkit.server")
+
+MODEL_ALIASES = {
+    "default": "gpt-5.1",
+    "lightweight": "gpt-4.1-mini",
+    "balanced": "gpt-4.1",
+    "powerful": "gpt-5.1",
+}
+DEFAULT_MODEL = MODEL_ALIASES["default"]
 
 
 class ClientToolResultConverter(ThreadItemConverter):
@@ -201,7 +212,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             conversation_id = await self._ensure_openai_conversation(thread, context)
 
         self.logger.info(
-            "respond.start thread_id=%s user_email=%s model=%s pending_items=%s agent_input_items=%s datasets=%s conversation_id=%s conversation_logs=%s previous_response_id=%s response_logs=%s",
+            "respond.start thread_id %s user_email %s model %s pending_items %s agent_input_items %s datasets %s conversation_id %s conversation_logs %s previous_response_id %s response_logs %s",
             thread.id,
             context.user_email,
             requested_model,
@@ -306,17 +317,11 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
 
         return self._map_requested_model(None)
 
-    def _map_requested_model(self, requested_model: str | None) -> str:
-        settings = getattr(self, "settings", None) or self._get_settings()
-        model_aliases = {
-            "default": settings.chatkit_default_model,
-            "lightweight": settings.chatkit_lightweight_model,
-            "balanced": settings.chatkit_balanced_model,
-            "powerful": settings.chatkit_default_model,
-        }
+    @classmethod
+    def _map_requested_model(cls, requested_model: str | None) -> str:
         if requested_model is None:
-            return settings.chatkit_default_model
-        return model_aliases.get(requested_model, requested_model)
+            return DEFAULT_MODEL
+        return MODEL_ALIASES.get(requested_model, requested_model)
 
     async def _ensure_openai_conversation(
         self,
@@ -502,9 +507,3 @@ async def build_chatkit_server(
     db: AsyncSession = Depends(get_db),
 ) -> ReportFoundryChatKitServer:
     return ReportFoundryChatKitServer(db)
-
-
-
-
-
-
