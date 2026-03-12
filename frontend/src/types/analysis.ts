@@ -86,9 +86,17 @@ export type ClientChartSpec = {
   interactive?: boolean;
 };
 
+export type AnalysisPlan = {
+  focus: string;
+  planned_steps: string[];
+  chart_opportunities?: string[];
+  success_criteria?: string[];
+};
+
 export type AppThreadMetadata = {
   title?: string;
   investigation_brief?: string;
+  analysis_plan?: AnalysisPlan;
   chart_cache?: Record<string, string>;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;

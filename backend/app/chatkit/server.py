@@ -64,6 +64,7 @@ MODEL_ALIASES = {
     "powerful": "gpt-5.1",
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
+MAX_AGENT_TURNS = 30
 
 
 class ClientToolResultConverter(ThreadItemConverter):
@@ -223,6 +224,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 agent,
                 agent_input,
                 context=agent_context,
+                max_turns=MAX_AGENT_TURNS,
                 conversation_id=conversation_id,
             )
             async for event in stream_agent_response(agent_context, result):

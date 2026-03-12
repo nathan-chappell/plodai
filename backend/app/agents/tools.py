@@ -7,6 +7,7 @@ from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import ChartPlan
+from backend.app.chatkit.metadata import AnalysisPlan
 from backend.app.core.logging import get_logger, summarize_for_log
 
 
@@ -63,6 +64,59 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
             "report_id": request_context.report_id,
         }
         _log_tool_end(request_context, "name_current_thread", title=cleaned_title)
+        return result
+
+    @function_tool(name_override="plan_analysis")
+    async def plan_analysis_tool(
+        ctx: ChatKitToolContext,
+        focus: str,
+        planned_steps: list[str],
+        chart_opportunities: list[str] | None = None,
+        success_criteria: list[str] | None = None,
+    ) -> dict:
+        """Write down a concise analysis plan, then continue the investigation by executing the planned tool calls."""
+        request_context = ctx.context.request_context
+        cleaned_focus = focus.strip()
+        cleaned_steps = [step.strip() for step in planned_steps if step.strip()]
+        cleaned_chart_opportunities = [
+            item.strip() for item in chart_opportunities or [] if item.strip()
+        ]
+        cleaned_success_criteria = [
+            item.strip() for item in success_criteria or [] if item.strip()
+        ]
+        _log_tool_start(
+            request_context,
+            "plan_analysis",
+            focus=cleaned_focus,
+            planned_steps=len(cleaned_steps),
+            chart_opportunities=len(cleaned_chart_opportunities),
+            success_criteria=len(cleaned_success_criteria),
+        )
+        plan: AnalysisPlan = {
+            "focus": cleaned_focus,
+            "planned_steps": cleaned_steps,
+        }
+        if cleaned_chart_opportunities:
+            plan["chart_opportunities"] = cleaned_chart_opportunities
+        if cleaned_success_criteria:
+            plan["success_criteria"] = cleaned_success_criteria
+        # Reserved for future UI display and to keep lighter models oriented mid-investigation.
+        request_context.thread_metadata["analysis_plan"] = plan
+        ctx.context.thread.metadata = dict(request_context.thread_metadata)
+        await ctx.context.stream(
+            ProgressUpdateEvent(
+                text=f"Analysis plan saved with {len(cleaned_steps)} planned steps. Continue executing it now."
+            )
+        )
+        result = {
+            "analysis_plan": plan,
+            "report_id": request_context.report_id,
+        }
+        _log_tool_end(
+            request_context,
+            "plan_analysis",
+            planned_steps=len(cleaned_steps),
+        )
         return result
 
     @function_tool(name_override="list_attached_csv_files")
@@ -136,6 +190,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
     tools.extend(
         [
             name_current_thread_tool,
+            plan_analysis_tool,
             list_attached_csv_files_tool,
             append_report_section_tool,
         ]

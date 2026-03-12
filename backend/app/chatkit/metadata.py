@@ -1,11 +1,19 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from backend.app.chatkit.usage import ThreadUsageTotals, empty_usage_totals
+
+
+class AnalysisPlan(TypedDict):
+    focus: str
+    planned_steps: list[str]
+    chart_opportunities: NotRequired[list[str]]
+    success_criteria: NotRequired[list[str]]
 
 
 class ThreadMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
+    analysis_plan: AnalysisPlan
     chart_cache: dict[str, str]
     openai_conversation_id: str
     openai_previous_response_id: str
@@ -15,6 +23,7 @@ class ThreadMetadataPatch(TypedDict, total=False):
 class AppThreadMetadata(TypedDict, total=False):
     title: str
     investigation_brief: str
+    analysis_plan: AnalysisPlan
     chart_cache: dict[str, str]
     openai_conversation_id: str
     openai_previous_response_id: str
@@ -35,6 +44,53 @@ def _normalize_usage(raw_usage: object) -> ThreadUsageTotals | None:
     return usage
 
 
+def _normalize_analysis_plan(raw_plan: object) -> AnalysisPlan | None:
+    if not isinstance(raw_plan, dict):
+        return None
+
+    focus = raw_plan.get("focus")
+    planned_steps = raw_plan.get("planned_steps")
+    if not isinstance(focus, str) or not focus.strip():
+        return None
+    if not isinstance(planned_steps, list):
+        return None
+
+    normalized_steps = [
+        str(step).strip()
+        for step in planned_steps
+        if isinstance(step, str) and step.strip()
+    ]
+    if not normalized_steps:
+        return None
+
+    plan: AnalysisPlan = {
+        "focus": focus.strip(),
+        "planned_steps": normalized_steps,
+    }
+
+    raw_chart_opportunities = raw_plan.get("chart_opportunities")
+    if isinstance(raw_chart_opportunities, list):
+        chart_opportunities = [
+            str(item).strip()
+            for item in raw_chart_opportunities
+            if isinstance(item, str) and item.strip()
+        ]
+        if chart_opportunities:
+            plan["chart_opportunities"] = chart_opportunities
+
+    raw_success_criteria = raw_plan.get("success_criteria")
+    if isinstance(raw_success_criteria, list):
+        success_criteria = [
+            str(item).strip()
+            for item in raw_success_criteria
+            if isinstance(item, str) and item.strip()
+        ]
+        if success_criteria:
+            plan["success_criteria"] = success_criteria
+
+    return plan
+
+
 def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if not isinstance(raw_metadata, dict):
         return {}
@@ -48,6 +104,10 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     investigation_brief = raw_metadata.get("investigation_brief")
     if isinstance(investigation_brief, str) and investigation_brief.strip():
         metadata["investigation_brief"] = investigation_brief.strip()
+
+    analysis_plan = _normalize_analysis_plan(raw_metadata.get("analysis_plan"))
+    if analysis_plan is not None:
+        metadata["analysis_plan"] = analysis_plan
 
     chart_cache = raw_metadata.get("chart_cache")
     if isinstance(chart_cache, dict):

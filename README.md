@@ -51,16 +51,15 @@ The repo includes VS Code launch configs for both API-only development and produ
 - `Dockerfile` expects prebuilt frontend assets in the repo-root `dist/` directory and copies them into the runtime image.
 - The runtime image copies `backend/`, `dist/`, and the root `main.py` entrypoint.
 - The root `main.py` prints version/runtime details first, then starts Uvicorn directly on `0.0.0.0:8000`.
-- `release.py` is the release entrypoint at the repo root.
-- `release.py set-version <version>` keeps the frontend package version and backend FastAPI version aligned.
-- `release.py build <version>` updates versions and builds the frontend.
-- `release.py publish <version>` also builds and pushes the Docker image.
+- `release.py` is the release helper at the repo root.
+- `release.py bump` prompts for `p/m/M` and updates the frontend package version plus the backend FastAPI version.
+- `release.py release` updates the version and prints the manual release checklist, including the `npm run build` and Git commands to run.
 
 Examples:
 
 ```bash
-python release.py build 0.4.0
-python release.py publish 0.4.0 --image nathanschappell/report-foundry
+python release.py bump
+python release.py release
 ```
 
 ## Railway notes

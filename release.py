@@ -1,78 +1,14 @@
-import json
+﻿import json
 import re
-import subprocess
 from pathlib import Path
 
 import typer
 
 
-app = typer.Typer(help="Build and publish Report Foundry artifacts.")
-ROOT = Path(__file__).resolve().parent
-PACKAGE_JSON = ROOT / "package.json"
-PACKAGE_LOCK_JSON = ROOT / "package-lock.json"
-BACKEND_MAIN = ROOT / "backend" / "app" / "main.py"
-DEFAULT_IMAGE = "nathanschappell/report-foundry"
-
-
-@app.command()
-def set_version(version: str = typer.Argument(..., help="Application version.")) -> None:
-    update_package_version(PACKAGE_JSON, version)
-    if PACKAGE_LOCK_JSON.exists():
-        update_package_lock_version(PACKAGE_LOCK_JSON, version)
-    update_backend_version(BACKEND_MAIN, version)
-    typer.echo(f"Updated app version to {version}")
-
-
-@app.command()
-def build(
-    version: str = typer.Argument(..., help="Application version and docker tag."),
-    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
-    latest: bool = typer.Option(False, "--latest", help="Include latest-tag commands in the release commit message."),
-) -> None:
-    set_version(version)
-    run(["npm", "run", "build"], cwd=ROOT)
-    typer.echo(f"Prepared release artifacts for {version}")
-    typer.echo("")
-    typer.echo("Suggested release commit message:")
-    typer.echo("")
-    typer.echo(release_commit_message(version=version, image=image, latest=latest))
-
-
-@app.command()
-def publish(
-    version: str = typer.Argument(..., help="Application version and docker tag."),
-    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
-    latest: bool = typer.Option(False, "--latest", help="Also tag and push :latest."),
-) -> None:
-    build(version=version, image=image, latest=latest)
-    run(["docker", "build", "-t", f"{image}:{version}", "."], cwd=ROOT)
-    run(["docker", "push", f"{image}:{version}"], cwd=ROOT)
-    if latest:
-        run(["docker", "tag", f"{image}:{version}", f"{image}:latest"], cwd=ROOT)
-        run(["docker", "push", f"{image}:latest"], cwd=ROOT)
-    typer.echo(f"Published docker image {image}:{version}")
-
-
-@app.command()
-def release(
-    version: str = typer.Argument(..., help="Application version and docker tag."),
-    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
-    latest: bool = typer.Option(False, "--latest", help="Also tag and push :latest."),
-) -> None:
-    publish(version=version, image=image, latest=latest)
-    typer.echo("")
-    typer.echo("Release commit message:")
-    typer.echo("")
-    typer.echo(release_commit_message(version=version, image=image, latest=latest))
-
-
-@app.command()
-def commit_message(
-    version: str = typer.Argument(..., help="Application version and docker tag."),
-    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
-    latest: bool = typer.Option(False, "--latest", help="Include latest-tag commands in the message."),
-) -> None:
-    typer.echo(release_commit_message(version=version, image=image, latest=latest))
+app = typer.Typer(help="Version bump and release checklist helper for Report Foundry.")
+PACKAGE_JSON = Path() / "package.json"
+PACKAGE_LOCK_JSON = Path() / "package-lock.json"
+BACKEND_MAIN = Path() / "backend" / "app" / "main.py"
 
 
 @app.command()
@@ -80,48 +16,111 @@ def show_version() -> None:
     typer.echo(read_package_version(PACKAGE_JSON))
 
 
-def release_commit_message(*, version: str, image: str, latest: bool) -> str:
-    lines = [
-        f"chore(release): {version}",
-        "",
-        "WSL run command:",
-        "",
-        docker_run_command(image=image, tag=version),
-        "",
-        "WSL publish commands:",
-        "",
-        docker_build_command(image=image, version=version),
-        docker_push_command(image=image, tag=version),
-        git_tag_command(version=version),
-    ]
-    if latest:
-        lines.extend(
-            [
-                docker_tag_command(image=image, source_tag=version, target_tag="latest"),
-                docker_push_command(image=image, tag="latest"),
-            ]
-        )
-    return "\n".join(lines)
+@app.command()
+def set_version(
+    version: str = typer.Argument(..., help="Application version."),
+) -> None:
+    update_all_versions(version)
+    typer.echo(f"Updated app version to {version}")
 
 
-def docker_build_command(*, image: str, version: str) -> str:
-    return f"docker build -t {image}:{version} ."
+@app.command()
+def bump(
+    bump_kind: str | None = typer.Argument(
+        None,
+        help="Semver bump kind: p for patch, m for minor, M for major. Leave empty to be prompted.",
+    ),
+) -> None:
+    resolved_bump_kind = resolve_bump_kind(bump_kind)
+    current_version = read_package_version(PACKAGE_JSON)
+    next_version = bump_semver(current_version, resolved_bump_kind)
+    update_all_versions(next_version)
+    typer.echo(f"Bumped version from {current_version} to {next_version}")
 
 
-def docker_tag_command(*, image: str, source_tag: str, target_tag: str) -> str:
-    return f"docker tag {image}:{source_tag} {image}:{target_tag}"
+@app.command()
+def commit_message(
+    version: str = typer.Argument(..., help="Application version."),
+) -> None:
+    typer.echo(release_commit_message(version=version))
 
 
-def docker_run_command(*, image: str, tag: str) -> str:
-    return f"docker run --rm -p 8000:8000 {image}:{tag}"
+@app.command()
+def release(
+    version: str | None = typer.Argument(
+        None,
+        help="Application version. Leave empty to choose a p/m/M semver bump.",
+    ),
+    remote: str = typer.Option("origin", "--remote", help="Git remote to push to."),
+) -> None:
+    resolved_version = resolve_release_version(version)
+    update_all_versions(resolved_version)
+    typer.echo(f"Prepared release version {resolved_version}")
+    typer.echo("")
+    typer.echo(release_instructions(version=resolved_version, remote=remote))
 
 
-def docker_push_command(*, image: str, tag: str) -> str:
-    return f"docker push {image}:{tag}"
+def update_all_versions(version: str) -> None:
+    update_package_version(PACKAGE_JSON, version)
+    if PACKAGE_LOCK_JSON.exists():
+        update_package_lock_version(PACKAGE_LOCK_JSON, version)
+    update_backend_version(BACKEND_MAIN, version)
 
 
-def git_tag_command(*, version: str) -> str:
-    return f"git tag v{version}"
+def resolve_release_version(version: str | None) -> str:
+    if version:
+        return version
+    current_version = read_package_version(PACKAGE_JSON)
+    bump_kind = resolve_bump_kind(None)
+    return bump_semver(current_version, bump_kind)
+
+
+def resolve_bump_kind(bump_kind: str | None) -> str:
+    if bump_kind is None:
+        bump_kind = typer.prompt(
+            "Version bump [p/m/M]",
+            default="p",
+            show_default=True,
+        ).strip()
+    if bump_kind not in {"p", "m", "M"}:
+        raise typer.BadParameter("Version bump must be one of: p, m, M")
+    return bump_kind
+
+
+def bump_semver(version: str, bump_kind: str) -> str:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    if match is None:
+        raise typer.BadParameter(f"Version '{version}' is not valid semver.")
+    major, minor, patch = (int(part) for part in match.groups())
+    if bump_kind == "M":
+        return f"{major + 1}.0.0"
+    if bump_kind == "m":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def release_commit_message(*, version: str) -> str:
+    return f"chore(release): {version}"
+
+
+def release_instructions(*, version: str, remote: str) -> str:
+    message = release_commit_message(version=version)
+    return "\n".join(
+        [
+            message,
+            "",
+            "Run these commands manually:",
+            "",
+            "npm run build",
+            "git add -A",
+            f'git commit -m "{message}"',
+            f"git tag v{version}",
+            f"git push {remote}",
+            f"git push {remote} v{version}",
+            "",
+            "Then run your Docker build/push flow from WSL.",
+        ]
+    )
 
 
 def read_package_version(path: Path) -> str:
@@ -154,13 +153,6 @@ def update_backend_version(path: Path, version: str) -> None:
     if updated == content:
         raise typer.BadParameter("Could not find FastAPI version assignment to update.")
     path.write_text(updated)
-
-
-def run(command: list[str], cwd: Path) -> None:
-    typer.echo(f"Running: {' '.join(command)}")
-    completed = subprocess.run(command, cwd=cwd, check=False)
-    if completed.returncode != 0:
-        raise typer.Exit(completed.returncode)
 
 
 if __name__ == "__main__":
