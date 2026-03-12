@@ -6,7 +6,7 @@ itsdangerous
 openai
 openai-agents
 openai-chatkit
-passlib[bcrypt]
+bcrypt
 pydantic-settings
 python-multipart
 sqlalchemy

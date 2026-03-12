@@ -11,6 +11,7 @@
         "-vv",
         "-s"
       ],
+      "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -67,7 +68,7 @@
       "type": "pwa-chrome",
       "request": "launch",
       "url": "https://127.0.0.1:5173",
-      "webRoot": "${workspaceFolder}",
+      "webRoot": "${workspaceFolder}/frontend",
       "sourceMaps": true,
       "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
     },
@@ -76,7 +77,7 @@
       "type": "pwa-chrome",
       "request": "launch",
       "url": "https://127.0.0.1:5173",
-      "webRoot": "${workspaceFolder}",
+      "webRoot": "${workspaceFolder}/frontend",
       "sourceMaps": true,
       "preLaunchTask": "frontend: dev",
       "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
@@ -86,7 +87,7 @@
       "type": "pwa-chrome",
       "request": "launch",
       "url": "https://127.0.0.1:8000",
-      "webRoot": "${workspaceFolder}",
+      "webRoot": "${workspaceFolder}/frontend",
       "sourceMaps": true,
       "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
     }

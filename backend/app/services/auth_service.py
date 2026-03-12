@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
+import bcrypt
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,15 @@ from backend.app.models.user import User
 from backend.app.schemas.auth import UserResponse
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(
+        password.encode("utf-8"),
+        password_hash.encode("utf-8"),
+    )
 
 
 class AuthService:
@@ -28,16 +36,21 @@ class AuthService:
         user = await self._get_user_by_email(email)
         if user is None or not user.is_active:
             return None
-        if not pwd_context.verify(password, user.password_hash):
+        if not verify_password(password, user.password_hash):
             return None
         return self.issue_token(user), user
 
     def issue_token(self, user: User) -> str:
-        return self.serializer.dumps({"sub": user.id, "email": user.email, "role": user.role})
+        return self.serializer.dumps(
+            {"sub": user.id, "email": user.email, "role": user.role}
+        )
 
     async def authenticate_token(self, token: str) -> User | None:
         try:
-            payload = self.serializer.loads(token, max_age=self.settings.auth_token_max_age_seconds)
+            payload = self.serializer.loads(
+                token,
+                max_age=self.settings.auth_token_max_age_seconds,
+            )
         except (BadSignature, SignatureExpired):
             return None
 
@@ -45,7 +58,9 @@ class AuthService:
         if user_id is None:
             return None
 
-        result = await self.db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
+        result = await self.db.execute(
+            select(User).where(User.id == user_id, User.is_active.is_(True))
+        )
         return result.scalar_one_or_none()
 
     async def bootstrap(self) -> None:
@@ -68,7 +83,7 @@ class AuthService:
             return
 
         admin = await self._get_user_by_email(self.settings.bootstrap_admin_email)
-        admin_password_hash = pwd_context.hash(self.settings.bootstrap_admin_password)
+        admin_password_hash = hash_password(self.settings.bootstrap_admin_password)
         if admin is None:
             self.db.add(
                 User(
@@ -84,7 +99,7 @@ class AuthService:
         admin.full_name = self.settings.bootstrap_admin_name
         admin.role = "admin"
         admin.is_active = True
-        if not pwd_context.verify(self.settings.bootstrap_admin_password, admin.password_hash):
+        if not verify_password(self.settings.bootstrap_admin_password, admin.password_hash):
             admin.password_hash = admin_password_hash
 
     async def _sync_seed_users(self, seed_path: Path) -> None:
@@ -101,7 +116,7 @@ class AuthService:
 
             role: UserRole = "admin" if raw_user.get("role") == "admin" else "user"
             user = await self._get_user_by_email(email)
-            user_password_hash = pwd_context.hash(password)
+            user_password_hash = hash_password(password)
             if user is None:
                 self.db.add(
                     User(
@@ -117,7 +132,7 @@ class AuthService:
             user.full_name = str(raw_user.get("full_name", user.full_name)).strip()
             user.role = role
             user.is_active = bool(raw_user.get("is_active", user.is_active))
-            if not pwd_context.verify(password, user.password_hash):
+            if not verify_password(password, user.password_hash):
                 user.password_hash = user_password_hash
 
     def _ensure_seed_file_exists(self, seed_path: Path) -> None:

@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from chatkit.server import StreamingResult
@@ -27,6 +28,9 @@ async def lifespan(_: FastAPI):
 
 
 settings = get_settings()
+if settings.openai_api_key:
+    os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
+
 app = FastAPI(
     title="Report Foundry API",
     version="0.4.0",

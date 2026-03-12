@@ -157,14 +157,24 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 build_query_plan_model(context.available_datasets)
             )
 
-        agent_input = await self._build_agent_input(
-            thread=thread,
+        recent_items = await self.store.load_thread_items(
+            thread.id,
+            after=None,
+            limit=20,
+            order="desc",
             context=context,
+        )
+        agent_input = await self._build_agent_input(
+            recent_items=recent_items.data,
             has_openai_conversation=bool(typed_metadata.get("openai_conversation_id")),
             input_user_message=input_user_message,
         )
+        requested_model = self._resolve_requested_model(
+            input_user_message=input_user_message,
+            recent_items=recent_items.data,
+        )
 
-        agent = build_report_analyst(context)
+        agent = build_report_analyst(context, model=requested_model)
         chatkit_context = ChatKitAgentContext[ReportAgentContext](
             thread=thread, store=self.store, request_context=context
         )
@@ -207,21 +217,13 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
 
     async def _build_agent_input(
         self,
-        thread: ThreadMetadata,
-        context: ReportAgentContext,
+        recent_items: list[ThreadItem],
         *,
         has_openai_conversation: bool,
         input_user_message: UserMessageItem | None,
     ) -> list[Any]:
-        recent_items = await self.store.load_thread_items(
-            thread.id,
-            after=None,
-            limit=20,
-            order="desc",
-            context=context,
-        )
         pending_items = self._collect_pending_items(
-            recent_items.data,
+            recent_items,
             has_openai_conversation=has_openai_conversation,
         )
         if input_user_message is not None and not any(
@@ -229,6 +231,24 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         ):
             pending_items.append(input_user_message)
         return await self.converter.to_agent_input(pending_items)
+
+    def _resolve_requested_model(
+        self,
+        *,
+        input_user_message: UserMessageItem | None,
+        recent_items: list[ThreadItem],
+    ) -> str | None:
+        if (
+            input_user_message is not None
+            and input_user_message.inference_options.model
+        ):
+            return input_user_message.inference_options.model
+
+        for item in recent_items:
+            if item.type == "user_message" and item.inference_options.model:
+                return item.inference_options.model
+
+        return None
 
     def _collect_pending_items(
         self,

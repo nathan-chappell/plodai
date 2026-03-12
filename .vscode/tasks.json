@@ -6,7 +6,7 @@
       "type": "shell",
       "command": "npm run dev",
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}/frontend"
       },
       "isBackground": true,
       "problemMatcher": []
@@ -16,18 +16,20 @@
       "type": "shell",
       "command": "npm run build",
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}/frontend"
       },
       "problemMatcher": []
     },
     {
       "label": "backend: sync static",
       "type": "shell",
-      "command": "@'\n$target = Join-Path (Resolve-Path .\\backend).Path 'app\\static'\nif (Test-Path $target) { Get-ChildItem -Path $target -Force | Where-Object { $_.Name -ne '.gitkeep' } | Remove-Item -Recurse -Force }\nNew-Item -ItemType Directory -Force -Path $target | Out-Null\nCopy-Item -Path .\\dist\\* -Destination $target -Recurse -Force\n'@ | powershell -NoProfile -Command -",
+      "command": "@'\n$target = Join-Path (Resolve-Path .\\backend).Path 'app\\static'\nif (Test-Path $target) { Get-ChildItem -Path $target -Force | Where-Object { $_.Name -ne '.gitkeep' } | Remove-Item -Recurse -Force }\nNew-Item -ItemType Directory -Force -Path $target | Out-Null\nCopy-Item -Path .\\frontend\\dist\\* -Destination $target -Recurse -Force\n'@ | powershell -NoProfile -Command -",
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "dependsOn": ["frontend: build"],
+      "dependsOn": [
+        "frontend: build"
+      ],
       "problemMatcher": []
     }
   ]

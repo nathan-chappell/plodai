@@ -62,5 +62,6 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
     assert merged == {
         "title": "Updated",
         "dataset_ids": ["sales_csv"],
+        "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_789",
     }

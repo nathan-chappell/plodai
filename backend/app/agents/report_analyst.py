@@ -46,7 +46,11 @@ Suggested investigation pattern:
 """.strip()
 
 
-def build_report_analyst(context: ReportAgentContext) -> Agent[ReportAgentContext]:
+def build_report_analyst(
+    context: ReportAgentContext,
+    *,
+    model: str | None = None,
+) -> Agent[ReportAgentContext]:
     dataset_summary = (
         "\n".join(
             f"- {dataset.id}: columns={', '.join(dataset.columns)}; numeric={', '.join(dataset.numeric_columns) or 'none'}"
@@ -58,6 +62,7 @@ def build_report_analyst(context: ReportAgentContext) -> Agent[ReportAgentContex
 
     return Agent[ReportAgentContext](
         name="Report Foundry Analyst",
+        model=model,
         instructions=(
             f"{REPORT_ANALYST_INSTRUCTIONS}\n\n"
             "Available datasets:\n"

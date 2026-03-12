@@ -10,10 +10,10 @@ import typer
 app = typer.Typer(help="Build and publish Report Foundry artifacts.")
 ROOT = Path(__file__).resolve().parent
 BACKEND = ROOT / "backend"
-FRONTEND = ROOT
+FRONTEND = ROOT / "frontend"
 STATIC_DIR = BACKEND / "app" / "static"
-PACKAGE_JSON = ROOT / "package.json"
-PACKAGE_LOCK_JSON = ROOT / "package-lock.json"
+PACKAGE_JSON = FRONTEND / "package.json"
+PACKAGE_LOCK_JSON = FRONTEND / "package-lock.json"
 BACKEND_MAIN = BACKEND / "app" / "main.py"
 DEFAULT_IMAGE = "nathanschappell/report-foundry"
 
