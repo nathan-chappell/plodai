@@ -26,9 +26,7 @@ async def lifespan(_: FastAPI):
         await db.commit()
 
     logger.info(
-        "startup.complete env=%s port=%s static_path=%s database_url=%s",
-        settings.static_path,
-        settings.database_url,
+        f"startup.complete static_path={settings.static_path} database_url={settings.database_url}"
     )
     yield
 

@@ -2,7 +2,7 @@ from typing import Literal
 
 from agents import FunctionTool, function_tool
 from agents.tool_context import ToolContext
-from chatkit.agents import AgentContext, ClientToolCall
+from chatkit.agents import AgentContext as ChatKitAgentContext, ClientToolCall
 from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
@@ -11,7 +11,7 @@ from backend.app.core.logging import get_logger, summarize_for_log
 
 
 logger = get_logger("agents.tools")
-ClientToolContext = ToolContext[AgentContext[ReportAgentContext]]
+ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
 
 
 def _log_tool_start(
@@ -23,11 +23,7 @@ def _log_tool_start(
         f"{key}={summarize_for_log(value)}" for key, value in details.items()
     )
     logger.info(
-        "tool.start name=%s report_id=%s user_email=%s %s",
-        tool_name,
-        context.report_id,
-        context.user_email,
-        detail_text,
+        f"tool.start name={tool_name} report_id={context.report_id} user_email={context.user_email} {detail_text}"
     )
 
 
@@ -40,11 +36,7 @@ def _log_tool_end(
         f"{key}={summarize_for_log(value)}" for key, value in details.items()
     )
     logger.info(
-        "tool.end name=%s report_id=%s user_email=%s %s",
-        tool_name,
-        context.report_id,
-        context.user_email,
-        detail_text,
+        f"tool.end name={tool_name} report_id={context.report_id} user_email={context.user_email} {detail_text}"
     )
 
 
@@ -53,7 +45,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     @function_tool(name_override="name_current_thread")
     async def name_current_thread_tool(
-        ctx: ClientToolContext,
+        ctx: ChatKitToolContext,
         title: str,
     ) -> dict:
         """Rename the current thread to a concise, descriptive title for the investigation."""
@@ -75,7 +67,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     @function_tool(name_override="list_attached_csv_files")
     async def list_attached_csv_files_tool(
-        ctx: ClientToolContext,
+        ctx: ChatKitToolContext,
     ) -> dict:
         """List the CSV files currently available to analyze by asking the client for its local file inventory."""
         request_context = ctx.context.request_context
@@ -103,7 +95,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     @function_tool(name_override="append_report_section")
     async def append_report_section_tool(
-        ctx: ClientToolContext,
+        ctx: ChatKitToolContext,
         title: str,
         markdown: str,
     ) -> dict:
@@ -161,7 +153,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     @function_tool(name_override="inspect_csv_file_schema")
     async def inspect_csv_file_schema_tool(
-        ctx: ClientToolContext,
+        ctx: ChatKitToolContext,
         dataset_id: DatasetIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
     ) -> dict:
         """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
@@ -191,7 +183,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     @function_tool(name_override="run_aggregate_query")
     async def run_aggregate_query_tool(
-        ctx: ClientToolContext,
+        ctx: ChatKitToolContext,
         query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
     ) -> dict:
         """Validate a structured row/filter/group/aggregate query plan, then ask the client to execute it against local CSV rows."""
@@ -225,7 +217,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     @function_tool(name_override="request_chart_render")
     async def request_chart_render_tool(
-        ctx: ClientToolContext,
+        ctx: ChatKitToolContext,
         query_id: str,
         query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
         chart_plan: ChartPlan,

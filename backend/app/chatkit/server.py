@@ -24,8 +24,7 @@ from chatkit.types import (
 )
 from fastapi import Depends
 from openai import AsyncOpenAI
-from openai.types.responses import ResponseInputImageParam, ResponseInputTextParam
-from openai.types.responses.response_input_item_param import Message
+from openai.types.responses.response_input_item_param import FunctionCallOutput
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,14 +74,17 @@ class ClientToolResultConverter(ThreadItemConverter):
             return None
         return self.client_tool_result_to_input(
             coerce_client_tool_result(item.output),
+            call_id=item.call_id,
             tool_name=item.name,
         )
 
     def client_tool_result_to_input(
         self,
         result: ClientToolResultPayload | None,
+        *,
+        call_id: str,
         tool_name: str | None = None,
-    ) -> Message | None:
+    ):
         if result is None:
             return None
 
@@ -91,33 +93,30 @@ class ClientToolResultConverter(ThreadItemConverter):
         row_count = result.get("row_count")
         csv_files = result.get("csv_files")
 
-        description = "A client-side tool completed successfully."
-        if tool_name:
-            description = f"The client tool '{tool_name}' completed successfully."
-        if isinstance(query_id, str) and query_id:
-            description += f" Query id: {query_id}."
-        if isinstance(row_count, int):
-            description += f" Result row count: {row_count}."
-        if isinstance(csv_files, list):
-            description += f" CSV files available: {len(csv_files)}."
-        if isinstance(image_url, str) and image_url:
-            description += " A rendered chart image is attached for visual inspection."
-
-        content: list[ResponseInputTextParam | ResponseInputImageParam] = [
-            ResponseInputTextParam(type="input_text", text=description),
-            ResponseInputTextParam(
-                type="input_text", text=json.dumps(result, ensure_ascii=True)
-            ),
-        ]
+        function_call_output: FunctionCallOutput = {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json.dumps(result, ensure_ascii=True),
+        }
 
         if isinstance(image_url, str) and image_url:
-            content.append(
-                ResponseInputImageParam(
-                    type="input_image", image_url=image_url, detail="auto"
-                )
-            )
+            description = "A rendered client-side chart is attached for visual inspection."
+            if tool_name:
+                description = f"The client tool '{tool_name}' completed successfully. A rendered chart image is attached for visual inspection."
+            if isinstance(query_id, str) and query_id:
+                description += f" Query id: {query_id}."
+            if isinstance(row_count, int):
+                description += f" Result row count: {row_count}."
+            if isinstance(csv_files, list):
+                description += f" CSV files available: {len(csv_files)}."
 
-        return Message(role="user", type="message", content=list(content))
+            function_call_output["output"] = [
+                {"type": "input_text", "text": description},
+                {"type": "input_text", "text": json.dumps(result, ensure_ascii=True)},
+                {"type": "input_image", "image_url": image_url, "detail": "auto"},
+            ]
+
+        return [function_call_output]
 
 
 class UpdateThreadMetadataAction(
@@ -147,11 +146,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         query_plan_model, _ = build_query_plan_model(datasets)
 
         self.logger.info(
-            "request_context.build op=%s thread_id=%s user_email=%s dataset_count=%s",
-            parsed_request.type,
-            thread_id,
-            user_email,
-            len(datasets),
+            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_email={user_email} dataset_count={len(datasets)}"
         )
 
         return ReportAgentContext(
@@ -207,39 +202,29 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             conversation_id = await self._ensure_openai_conversation(thread, context)
 
         self.logger.info(
-            "respond.start thread_id %s user_email %s model %s pending_items %s agent_input_items %s datasets %s conversation_id %s conversation_logs %s previous_response_id %s response_logs %s",
-            thread.id,
-            context.user_email,
-            requested_model,
-            len(pending_items),
-            len(agent_input),
-            summarize_for_log(context.dataset_ids),
-            conversation_id,
-            platform_logs_url(conversation_id),
-            previous_response_id,
-            platform_logs_url(previous_response_id),
+            f"respond.start thread_id={thread.id} user_email={context.user_email} model={requested_model} "
+            f"pending_items={len(pending_items)} agent_input_items={len(agent_input)} "
+            f"datasets={summarize_for_log(context.dataset_ids)} conversation_id={conversation_id} "
+            f"conversation_logs={platform_logs_url(conversation_id)} previous_response_id={previous_response_id} "
+            f"response_logs={platform_logs_url(previous_response_id)}"
         )
 
         agent = build_report_analyst(context, model=requested_model)
-        chatkit_context = ChatKitAgentContext[ReportAgentContext](
+        agent_context = ChatKitAgentContext[ReportAgentContext](
             thread=thread, store=self.store, request_context=context
         )
         try:
             result = Runner.run_streamed(
                 agent,
                 agent_input,
-                context=context,
+                context=agent_context,
                 conversation_id=conversation_id,
             )
-            async for event in stream_agent_response(chatkit_context, result):
+            async for event in stream_agent_response(agent_context, result):
                 yield event
         except Exception:
             self.logger.exception(
-                "respond.error thread_id=%s user_email=%s conversation_id=%s previous_response_id=%s",
-                thread.id,
-                context.user_email,
-                conversation_id,
-                previous_response_id,
+                f"respond.error thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} previous_response_id={previous_response_id}"
             )
             raise
 
@@ -270,17 +255,11 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         thread.metadata = dict(updated_metadata)
 
         self.logger.info(
-            "respond.end thread_id=%s user_email=%s conversation_id=%s conversation_logs=%s response_id=%s response_logs=%s input_tokens=%s output_tokens=%s est_cost_usd=%s title=%s",
-            thread.id,
-            context.user_email,
-            result_conversation_id,
-            platform_logs_url(result_conversation_id),
-            result_response_id,
-            platform_logs_url(result_response_id),
-            updated_usage.get("input_tokens", 0),
-            updated_usage.get("output_tokens", 0),
-            updated_usage.get("estimated_cost_usd", 0.0),
-            summarize_for_log(thread.title or ""),
+            f"respond.end thread_id={thread.id} user_email={context.user_email} "
+            f"conversation_id={result_conversation_id} conversation_logs={platform_logs_url(result_conversation_id)} "
+            f"response_id={result_response_id} response_logs={platform_logs_url(result_response_id)} "
+            f"input_tokens={updated_usage.get('input_tokens', 0)} output_tokens={updated_usage.get('output_tokens', 0)} "
+            f"est_cost_usd={updated_usage.get('estimated_cost_usd', 0.0)} title={summarize_for_log(thread.title or '')}"
         )
 
     def _resolve_requested_model(
@@ -324,11 +303,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
 
         conversation = await self.openai_client.conversations.create(metadata=metadata)
         self.logger.info(
-            "respond.conversation_created thread_id=%s user_email=%s conversation_id=%s conversation_logs=%s",
-            thread.id,
-            context.user_email,
-            conversation.id,
-            platform_logs_url(conversation.id),
+            f"respond.conversation_created thread_id={thread.id} user_email={context.user_email} conversation_id={conversation.id} conversation_logs={platform_logs_url(conversation.id)}"
         )
         return conversation.id
 
@@ -446,10 +421,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 thread.title = title
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                "thread_metadata.updated thread_id=%s user_email=%s title=%s",
-                thread.id,
-                context.user_email,
-                summarize_for_log(thread.title or ""),
+                f"thread_metadata.updated thread_id={thread.id} user_email={context.user_email} title={summarize_for_log(thread.title or '')}"
             )
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
@@ -471,10 +443,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 thread.title = title
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                "thread_metadata.sync_updated thread_id=%s user_email=%s title=%s",
-                thread.id,
-                context.user_email,
-                summarize_for_log(thread.title or ""),
+                f"thread_metadata.sync_updated thread_id={thread.id} user_email={context.user_email} title={summarize_for_log(thread.title or '')}"
             )
         return SyncCustomActionResponse(updated_item=sender)
 
@@ -491,12 +460,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
     ) -> TranscriptionResult:
         model = "gpt-4o-mini-transcribe"
         self.logger.info(
-            "transcribe.start report_id=%s user_email=%s mime_type=%s bytes=%s model=%s",
-            context.report_id,
-            context.user_email,
-            audio_input.mime_type,
-            len(audio_input.data),
-            model,
+            f"transcribe.start report_id={context.report_id} user_email={context.user_email} mime_type={audio_input.mime_type} bytes={len(audio_input.data)} model={model}"
         )
         result = await self.openai_client.audio.transcriptions.create(
             file=("dictation.webm", audio_input.data, audio_input.media_type),
@@ -510,13 +474,8 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             seconds=seconds,
         )
         self.logger.info(
-            "transcribe.end report_id=%s user_email=%s model=%s seconds=%s est_cost_usd=%s text_chars=%s",
-            context.report_id,
-            context.user_email,
-            model,
-            seconds,
-            context.thread_metadata.get("usage", {}).get("estimated_cost_usd", 0.0),
-            len(result.text),
+            f"transcribe.end report_id={context.report_id} user_email={context.user_email} model={model} seconds={seconds} "
+            f"est_cost_usd={context.thread_metadata.get('usage', {}).get('estimated_cost_usd', 0.0)} text_chars={len(result.text)}"
         )
         return TranscriptionResult(text=result.text)
 

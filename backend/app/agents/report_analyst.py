@@ -1,4 +1,5 @@
 from agents import Agent
+from chatkit.agents import AgentContext as ChatKitAgentContext
 from agents.model_settings import ModelSettings
 
 from backend.app.agents.context import ReportAgentContext
@@ -64,7 +65,7 @@ def build_report_analyst(
     context: ReportAgentContext,
     *,
     model: str | None = None,
-) -> Agent[ReportAgentContext]:
+) -> Agent[ChatKitAgentContext[ReportAgentContext]]:
     investigation_brief = context.thread_metadata.get("investigation_brief")
     brief_section = ""
     if investigation_brief:
@@ -76,7 +77,7 @@ def build_report_analyst(
 
     instructions = f"{REPORT_ANALYST_INSTRUCTIONS}{brief_section}"
 
-    return Agent[ReportAgentContext](
+    return Agent[ChatKitAgentContext[ReportAgentContext]](
         name="Report Foundry Analyst",
         model=model,
         instructions=instructions,
