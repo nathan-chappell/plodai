@@ -3,9 +3,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt ./
-COPY gunicorn.conf.py ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 COPY frontend/dist ./backend/app/static
 EXPOSE 8000
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "backend.app.main:app"]
+CMD ["sh", "-c", "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

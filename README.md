@@ -41,15 +41,15 @@ npm run dev
 
 1. Build the frontend at the repo root.
 2. Copy `frontend/dist/` into `backend/app/static`.
-3. Run Gunicorn from `backend/`.
+3. Run Uvicorn without `--reload`.
 
 The repo includes VS Code launch configs for backend debugging and tasks for the frontend build/dev loop.
 
 ## Docker and release
 
 - `Dockerfile` expects prebuilt frontend assets in `frontend/dist/` and copies them into the runtime image.
-- The runtime image copies `backend/` plus the prebuilt frontend output and runs `gunicorn`.
-- `gunicorn.conf.py` binds to `0.0.0.0:$PORT`, defaulting to `8000` locally.
+- The runtime image copies `backend/` plus the prebuilt frontend output and runs Uvicorn.
+- Railway injects `PORT`, and the container entrypoint uses that value with a local fallback to `8000`.
 - `release.py` is the release entrypoint at the repo root.
 - `release.py set-version <version>` keeps the frontend package version and backend FastAPI version aligned.
 - `release.py build <version>` updates versions, builds the frontend, and syncs static assets.

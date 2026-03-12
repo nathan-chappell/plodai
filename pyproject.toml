@@ -7,7 +7,6 @@ dependencies = [
   "aiosqlite",
   "email-validator",
   "fastapi",
-  "gunicorn",
   "itsdangerous",
   "openai",
   "openai-agents",
