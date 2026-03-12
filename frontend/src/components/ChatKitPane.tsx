@@ -3,6 +3,7 @@ import styled from "styled-components";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { DatasetChart } from "./DatasetChart";
+import { NarrativeCard } from "./NarrativeCard";
 import { authenticatedFetch, getChatKitConfig } from "../lib/api";
 import { executeClientTool } from "../lib/chatkit-tools";
 import { buildInitialThreadMetadata, buildThreadMetadataUpdateAction } from "../lib/thread-metadata";
@@ -10,6 +11,7 @@ import type {
   AppThreadMetadata,
   ChartRenderedEffect,
   ClientEffect,
+  ReportSectionEffect,
   ClientToolCall,
   ClientToolName,
   DataRow,
@@ -97,6 +99,10 @@ const EffectCard = styled.div`
 
 function isChartRenderedEffect(effect: ClientEffect): effect is ChartRenderedEffect {
   return effect.type === "chart_rendered";
+}
+
+function isReportSectionEffect(effect: ClientEffect): effect is ReportSectionEffect {
+  return effect.type === "report_section_appended";
 }
 
 function formatToolLabel(tool: string): string {
@@ -246,7 +252,10 @@ function ConfiguredChatKit({
         return result.payload;
       },
       onEffect: (event) => {
-        if (event.name !== "chart_rendered" || !event.data) {
+        if (!event.data) {
+          return;
+        }
+        if (event.name !== "chart_rendered" && event.name !== "report_section_appended") {
           return;
         }
         onEffectsRef.current([event.data as ClientEffect]);
@@ -319,7 +328,16 @@ export function ChatKitPane({
         <EffectPanel>
           {effects.map((effect, index) => (
             <EffectCard key={`${effect.type}-${index}`}>
-              {isChartRenderedEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : <Meta>{effect.type}</Meta>}
+              {isChartRenderedEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : null}
+              {isReportSectionEffect(effect) ? (
+                <NarrativeCard
+                  section={{
+                    id: `${effect.type}-${index}`,
+                    title: effect.title,
+                    markdown: effect.markdown,
+                  }}
+                />
+              ) : null}
             </EffectCard>
           ))}
         </EffectPanel>

@@ -27,8 +27,6 @@ async def lifespan(_: FastAPI):
 
     logger.info(
         "startup.complete env=%s port=%s static_path=%s database_url=%s",
-        settings.app_env,
-        settings.port,
         settings.static_path,
         settings.database_url,
     )

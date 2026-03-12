@@ -93,8 +93,6 @@ class AuthService:
         return True
 
     async def bootstrap(self) -> None:
-        self._ensure_seed_file_exists(self.settings.user_seed_path)
-        await self._sync_seed_users(self.settings.user_seed_path)
         await self._bootstrap_admin()
         await self.db.commit()
 

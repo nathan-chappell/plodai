@@ -3,6 +3,7 @@ import json
 from uuid import uuid4
 
 import pytest
+from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 from sqlalchemy import delete, select
@@ -15,7 +16,6 @@ from backend.app.main import app
 from backend.app.models.chatkit import ChatItem, ChatThread
 from backend.app.models.user import User
 from backend.app.services.auth_service import hash_password
-
 
 CSV_FILES_PAYLOAD = {
     "csv_files": [
@@ -122,7 +122,9 @@ def _parse_sse_events(raw_body: str) -> list[dict[str, object]]:
     return events
 
 
-def _stream_request(client: TestClient, token: str, body: dict[str, object]) -> list[dict[str, object]]:
+def _stream_request(
+    client: TestClient, token: str, body: dict[str, object]
+) -> list[dict[str, object]]:
     with client.stream(
         "POST",
         "/chatkit",
@@ -179,9 +181,13 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
                     },
                 },
             )
+            for event in create_events:
+                print(json.dumps(jsonable_encoder(event), indent=2))
 
             thread_created = next(
-                event for event in create_events if event.get("type") == "thread.created"
+                event
+                for event in create_events
+                if event.get("type") == "thread.created"
             )
             thread = thread_created["thread"]
             assert isinstance(thread, dict)
@@ -205,7 +211,9 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
             assert pending_list_call is not None, {
                 "events": create_events,
                 "persisted_kinds": [item.kind for item in stored_items_after_create],
-                "persisted_payloads": [item.payload for item in stored_items_after_create],
+                "persisted_payloads": [
+                    item.payload for item in stored_items_after_create
+                ],
             }
             assert pending_list_call.payload.get("status") == "pending"
 
@@ -223,7 +231,7 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
             )
 
         all_events = [*create_events, *followup_events]
-        stored_thread, stored_items = asyncio.run(_load_thread_state(thread_id))
+        stored_thread, stored_items = asyncio.run(_load_thread_state(thread_id, email))
 
         event_types = [str(event.get("type")) for event in all_events]
         assert event_types.count("thread.created") == 1
@@ -305,9 +313,10 @@ def test_chatkit_streaming_models(initialized_db: None, model: str) -> None:
             final_response = await stream.get_final_response()
 
         output_text = "".join(text_deltas).strip()
-        assert text_deltas, f"Expected streamed text deltas for {model}, got events: {event_types}"
+        assert text_deltas, (
+            f"Expected streamed text deltas for {model}, got events: {event_types}"
+        )
         assert final_response.id
         assert output_text or getattr(final_response, "output_text", "")
 
     asyncio.run(run_stream_check())
-

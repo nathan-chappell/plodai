@@ -144,7 +144,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         thread_id = getattr(parsed_request.params, "thread_id", None)
         recent_items = await self._load_recent_items(thread_id, user_email)
         datasets = self._datasets_from_recent_items(recent_items)
-        query_plan_model, query_plan_schema = build_query_plan_model(datasets)
+        query_plan_model, _ = build_query_plan_model(datasets)
 
         self.logger.info(
             "request_context.build op=%s thread_id=%s user_email=%s dataset_count=%s",
@@ -163,7 +163,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             thread_metadata=metadata,
             available_datasets=datasets,
             query_plan_model=query_plan_model,
-            query_plan_schema=query_plan_schema,
         )
 
     async def respond(
@@ -187,9 +186,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         recent_item_data = recent_items.data
         context.available_datasets = self._datasets_from_recent_items(recent_item_data)
         context.dataset_ids = [dataset.id for dataset in context.available_datasets]
-        context.query_plan_model, context.query_plan_schema = build_query_plan_model(
-            context.available_datasets
-        )
+        context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
 
         pending_items = self._collect_pending_items(
             recent_item_data,
@@ -227,8 +224,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         chatkit_context = ChatKitAgentContext[ReportAgentContext](
             thread=thread, store=self.store, request_context=context
         )
-        context.emit_event = chatkit_context.stream
-
         try:
             result = Runner.run_streamed(
                 agent,
@@ -236,7 +231,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 context=context,
                 conversation_id=conversation_id,
             )
-            async for event in self._stream_agent_response(chatkit_context, result):
+            async for event in stream_agent_response(chatkit_context, result):
                 yield event
         except Exception:
             self.logger.exception(
@@ -247,9 +242,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 previous_response_id,
             )
             raise
-
-        if context.requested_thread_title:
-            thread.title = context.requested_thread_title
 
         result_conversation_id = (
             getattr(result, "conversation_id", None)
@@ -267,8 +259,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             cast(
                 ThreadMetadataPatch,
                 {
-                    "title": context.requested_thread_title
-                    or typed_metadata.get("title"),
+                    "title": thread.title or typed_metadata.get("title"),
                     "openai_conversation_id": result_conversation_id,
                     "openai_previous_response_id": result_response_id,
                     "chart_cache": context.chart_cache,
@@ -289,7 +280,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             updated_usage.get("input_tokens", 0),
             updated_usage.get("output_tokens", 0),
             updated_usage.get("estimated_cost_usd", 0.0),
-            summarize_for_log(context.requested_thread_title or thread.title or ""),
+            summarize_for_log(thread.title or ""),
         )
 
     def _resolve_requested_model(
@@ -439,12 +430,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             return []
 
         return chronological_items[boundary_index + 1 :]
-
-    async def _stream_agent_response(
-        self, chatkit_context: ChatKitAgentContext[ReportAgentContext], result
-    ) -> AsyncIterator[ThreadStreamEvent]:
-        async for event in stream_agent_response(chatkit_context, result):
-            yield event
 
     async def action(
         self,

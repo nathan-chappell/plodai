@@ -69,7 +69,6 @@ python release.py publish 0.4.0 --image nathanschappell/report-foundry
 - Railway provides the public HTTPS endpoint, so the container should serve plain HTTP only.
 - This app is currently hardcoded to listen on `0.0.0.0:8080` to match the current Railway setup.
 - Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
-- The current user bootstrap design is intentionally simple and operationally friendly.
 - Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
 
 ## Current status
