@@ -42,3 +42,14 @@ async def require_current_user(
         role=user.role,
         is_active=user.is_active,
     )
+
+
+async def require_admin_user(
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> AuthenticatedUser:
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
+    return user

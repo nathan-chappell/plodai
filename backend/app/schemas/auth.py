@@ -10,12 +10,24 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class CreateUserRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str = ""
+    role: UserRole = "user"
+    is_active: bool = True
+
+
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
     full_name: str
     role: UserRole
     is_active: bool
+
+
+class UserListResponse(BaseModel):
+    users: list[UserResponse]
 
 
 class AuthTokenResponse(BaseModel):

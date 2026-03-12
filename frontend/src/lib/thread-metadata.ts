@@ -10,6 +10,7 @@ export function buildThreadMetadataUpdateAction(payload: UpdateThreadMetadataPay
 export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThreadMetadata {
   return {
     title: metadata.title,
+    investigation_brief: metadata.investigation_brief,
     dataset_ids: metadata.dataset_ids,
     datasets: metadata.datasets,
     chart_cache: metadata.chart_cache,

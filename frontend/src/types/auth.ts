@@ -11,3 +11,15 @@ export type LoginResponse = {
   token_type: string;
   user: AuthUser;
 };
+
+export type UserListResponse = {
+  users: AuthUser[];
+};
+
+export type CreateUserRequest = {
+  email: string;
+  password: string;
+  full_name: string;
+  role: "admin" | "user";
+  is_active: boolean;
+};

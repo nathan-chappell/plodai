@@ -3,19 +3,30 @@ export type CsvPreview = {
   columns: string[];
   numericColumns: string[];
   sampleRows: Record<string, string>[];
+  rows: Record<string, string>[];
+  previewRows: Record<string, string>[];
 };
 
 export function parseCsvText(text: string): CsvPreview {
   const rows = parseCsvRows(text);
   if (!rows.length) {
-    return { rowCount: 0, columns: [], numericColumns: [], sampleRows: [] };
+    return {
+      rowCount: 0,
+      columns: [],
+      numericColumns: [],
+      sampleRows: [],
+      rows: [],
+      previewRows: [],
+    };
   }
 
   const [header, ...dataRows] = rows;
   const columns = header.map((column) => column.trim());
-  const sampleRows = dataRows.slice(0, 5).map((cells) =>
+  const mappedRows = dataRows.map((cells) =>
     Object.fromEntries(columns.map((column, index) => [column, cells[index] ?? ""])),
   );
+  const sampleRows = mappedRows.slice(0, 5);
+  const previewRows = mappedRows.slice(0, 100);
   const numericColumns = columns.filter((column) =>
     sampleRows.length > 0 && sampleRows.every((row) => row[column] === "" || isFiniteNumber(row[column])),
   );
@@ -25,6 +36,8 @@ export function parseCsvText(text: string): CsvPreview {
     columns,
     numericColumns,
     sampleRows,
+    rows: mappedRows,
+    previewRows,
   };
 }
 

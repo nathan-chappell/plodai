@@ -8,6 +8,14 @@ describe("csv parsing", () => {
       rowCount: 2,
       columns: ["region", "revenue"],
       numericColumns: ["revenue"],
+      rows: [
+        { region: "North", revenue: "100" },
+        { region: "South", revenue: "50" },
+      ],
+      previewRows: [
+        { region: "North", revenue: "100" },
+        { region: "South", revenue: "50" },
+      ],
       sampleRows: [
         { region: "North", revenue: "100" },
         { region: "South", revenue: "50" },
@@ -20,6 +28,8 @@ describe("csv parsing", () => {
       rowCount: 1,
       columns: ["name", "notes"],
       numericColumns: [],
+      rows: [{ name: "Widget, Deluxe", notes: 'He said "hello"' }],
+      previewRows: [{ name: "Widget, Deluxe", notes: 'He said "hello"' }],
       sampleRows: [{ name: "Widget, Deluxe", notes: 'He said "hello"' }],
     });
   });

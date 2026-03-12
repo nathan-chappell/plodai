@@ -29,7 +29,6 @@
         "--ssl-keyfile",
         "${workspaceFolder}/backend/dev-certs/dev-key.pem"
       ],
-      "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -47,7 +46,6 @@
         "../gunicorn.conf.py",
         "app.main:app"
       ],
-      "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
       "justMyCode": false,

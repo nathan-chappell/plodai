@@ -53,17 +53,17 @@ async def _emit_progress(context: ReportAgentContext, text: str) -> None:
 
 
 @function_tool
-async def list_accessible_datasets(context: RunContextWrapper[ReportAgentContext]) -> dict:
-    """List the datasets currently available to analyze, including safe schema details and a small sample."""
+async def list_attached_csv_files(context: RunContextWrapper[ReportAgentContext]) -> dict:
+    """List the CSV files currently available to analyze, including safe schema details and a small sample."""
     request_context = _ctx(context)
     _log_tool_start(
         request_context,
-        'list_accessible_datasets',
-        dataset_count=len(request_context.available_datasets),
+        "list_attached_csv_files",
+        csv_file_count=len(request_context.available_datasets),
     )
-    await _emit_progress(request_context, "Inspecting available datasets.")
+    await _emit_progress(request_context, "Inspecting available CSV files.")
     result = {
-        "datasets": [
+        "csv_files": [
             {
                 "id": dataset.id,
                 "name": dataset.name,
@@ -77,21 +77,21 @@ async def list_accessible_datasets(context: RunContextWrapper[ReportAgentContext
     }
     _log_tool_end(
         request_context,
-        'list_accessible_datasets',
-        returned_dataset_ids=[dataset['id'] for dataset in result['datasets']],
+        "list_attached_csv_files",
+        returned_csv_file_ids=[dataset["id"] for dataset in result["csv_files"]],
     )
     return result
 
 
 @function_tool
-async def inspect_dataset_schema(
+async def inspect_csv_file_schema(
     context: RunContextWrapper[ReportAgentContext],
     dataset_id: str,
 ) -> dict:
-    """Inspect one dataset before writing a query plan so columns and numeric fields are used correctly."""
+    """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
     request_context = _ctx(context)
-    _log_tool_start(request_context, 'inspect_dataset_schema', dataset_id=dataset_id)
-    await _emit_progress(request_context, f"Inspecting schema for {dataset_id}.")
+    _log_tool_start(request_context, "inspect_csv_file_schema", dataset_id=dataset_id)
+    await _emit_progress(request_context, f"Inspecting schema for CSV file {dataset_id}.")
     dataset = request_context.get_dataset(dataset_id)
     result = {
         "dataset_id": dataset_id,
@@ -102,10 +102,10 @@ async def inspect_dataset_schema(
     }
     _log_tool_end(
         request_context,
-        'inspect_dataset_schema',
+        "inspect_csv_file_schema",
         found=bool(dataset),
-        column_count=len(result['columns']),
-        numeric_count=len(result['numeric_columns']),
+        column_count=len(result["columns"]),
+        numeric_count=len(result["numeric_columns"]),
     )
     return result
 
@@ -115,15 +115,15 @@ async def run_aggregate_query(
     context: RunContextWrapper[ReportAgentContext],
     query_plan: ToolQueryPlan,
 ) -> dict:
-    """Validate a structured row/filter/group/aggregate query plan for client-side execution."""
+    """Validate a structured row/filter/group/aggregate query plan for client-side execution against a CSV file."""
     request_context = _ctx(context)
     raw_query_plan = query_plan.model_dump(by_alias=True)
     _log_tool_start(
         request_context,
-        'run_aggregate_query',
-        dataset_id=raw_query_plan.get('dataset_id'),
-        group_by=len(raw_query_plan.get('group_by') or []),
-        aggregates=[measure.get('op') for measure in raw_query_plan.get('aggregates') or []],
+        "run_aggregate_query",
+        dataset_id=raw_query_plan.get("dataset_id"),
+        group_by=len(raw_query_plan.get("group_by") or []),
+        aggregates=[measure.get("op") for measure in raw_query_plan.get("aggregates") or []],
     )
     await _emit_progress(request_context, "Validating an aggregate query plan.")
     validated_plan = request_context.validate_query_plan(raw_query_plan)
@@ -134,10 +134,10 @@ async def run_aggregate_query(
     }
     _log_tool_end(
         request_context,
-        'run_aggregate_query',
-        dataset_id=validated_plan.get('dataset_id'),
-        aggregate_count=len(validated_plan.get('aggregates') or []),
-        sort_fields=[sort_spec.get('field') for sort_spec in validated_plan.get('sort') or []],
+        "run_aggregate_query",
+        dataset_id=validated_plan.get("dataset_id"),
+        aggregate_count=len(validated_plan.get("aggregates") or []),
+        sort_fields=[sort_spec.get("field") for sort_spec in validated_plan.get("sort") or []],
     )
     return result
 
@@ -148,17 +148,17 @@ async def request_chart_render(
     query_id: str,
     chart_plan: ChartPlan,
 ) -> dict:
-    """Ask the client to render a chart from a validated query result and optionally send back an image."""
+    """Ask the client to render a chart from a validated CSV query result and optionally send back an image."""
     request_context = _ctx(context)
     raw_chart_plan = chart_plan.model_dump(by_alias=True)
     _log_tool_start(
         request_context,
-        'request_chart_render',
+        "request_chart_render",
         query_id=query_id,
-        chart_type=raw_chart_plan.get('type'),
-        title=raw_chart_plan.get('title'),
+        chart_type=raw_chart_plan.get("type"),
+        title=raw_chart_plan.get("title"),
     )
-    await _emit_progress(request_context, f"Requesting chart render for {query_id}.")
+    await _emit_progress(request_context, f"Requesting chart render for query {query_id}.")
     result = {
         "query_id": query_id,
         "chart_plan": raw_chart_plan,
@@ -167,9 +167,9 @@ async def request_chart_render(
     }
     _log_tool_end(
         request_context,
-        'request_chart_render',
+        "request_chart_render",
         query_id=query_id,
-        series_count=len(raw_chart_plan.get('series') or []),
+        series_count=len(raw_chart_plan.get("series") or []),
     )
     return result
 
@@ -184,7 +184,7 @@ async def append_report_section(
     request_context = _ctx(context)
     _log_tool_start(
         request_context,
-        'append_report_section',
+        "append_report_section",
         title=title,
         markdown_chars=len(markdown),
     )
@@ -197,7 +197,7 @@ async def append_report_section(
     }
     _log_tool_end(
         request_context,
-        'append_report_section',
+        "append_report_section",
         title=title,
         markdown_chars=len(markdown),
     )
@@ -212,14 +212,16 @@ async def name_current_thread(
     """Rename the current thread to a concise, descriptive title for the investigation."""
     request_context = _ctx(context)
     cleaned_title = title.strip()
-    _log_tool_start(request_context, 'name_current_thread', title=cleaned_title)
+    _log_tool_start(request_context, "name_current_thread", title=cleaned_title)
     request_context.requested_thread_title = cleaned_title
-    request_context.thread_metadata['title'] = cleaned_title
+    request_context.thread_metadata["title"] = cleaned_title
     await _emit_progress(request_context, f"Renaming thread to: {cleaned_title}.")
     result = {
         "title": cleaned_title,
         "report_id": request_context.report_id,
         "note": "Use short, specific titles that reflect the investigation focus.",
     }
-    _log_tool_end(request_context, 'name_current_thread', title=cleaned_title)
+    _log_tool_end(request_context, "name_current_thread", title=cleaned_title)
     return result
+
+

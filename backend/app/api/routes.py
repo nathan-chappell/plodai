@@ -1,10 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
-from backend.app.core.auth import AuthenticatedUser, require_current_user
+from backend.app.core.auth import (
+    AuthenticatedUser,
+    require_admin_user,
+    require_current_user,
+)
 from backend.app.db.session import get_db
-from backend.app.schemas.auth import AuthTokenResponse, LoginRequest, UserResponse
+from backend.app.schemas.auth import (
+    AuthTokenResponse,
+    CreateUserRequest,
+    LoginRequest,
+    UserListResponse,
+    UserResponse,
+)
 from backend.app.schemas.report import CreateReportRequest, CreateReportResponse, ReportResponse
 from backend.app.services.auth_service import AuthService
 from backend.app.services.report_service import ReportService
@@ -36,6 +46,54 @@ async def me(user: AuthenticatedUser = Depends(require_current_user)):
         role=user.role,
         is_active=user.is_active,
     )
+
+
+@router.get("/auth/users", response_model=UserListResponse)
+async def list_users(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AuthService(db)
+    users = await service.list_users()
+    return UserListResponse(users=[service.to_user_response(user) for user in users])
+
+
+@router.post("/auth/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: CreateUserRequest,
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AuthService(db)
+    try:
+        user = await service.create_user(payload)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    return service.to_user_response(user)
+
+
+@router.delete("/auth/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: int,
+    admin_user: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if admin_user.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete the currently signed-in admin user.",
+        )
+
+    deleted = await AuthService(db).delete_user(user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/chatkit/threads")

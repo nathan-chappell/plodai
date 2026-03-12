@@ -37,12 +37,16 @@ def sync_static() -> None:
 def build(
     version: str = typer.Argument(..., help="Application version and docker tag."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
+    latest: bool = typer.Option(False, "--latest", help="Include latest-tag commands in the release commit message."),
 ) -> None:
     set_version(version)
     run(["npm", "run", "build"], cwd=ROOT)
     copy_frontend_dist()
-    run(["docker", "build", "-t", f"{image}:{version}", "."], cwd=ROOT)
-    typer.echo(f"Built docker image {image}:{version}")
+    typer.echo(f"Prepared release artifacts for {version}")
+    typer.echo("")
+    typer.echo("Suggested release commit message:")
+    typer.echo("")
+    typer.echo(release_commit_message(version=version, image=image, latest=latest))
 
 
 @app.command()
@@ -51,7 +55,8 @@ def publish(
     image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
     latest: bool = typer.Option(False, "--latest", help="Also tag and push :latest."),
 ) -> None:
-    build(version=version, image=image)
+    build(version=version, image=image, latest=latest)
+    run(["docker", "build", "-t", f"{image}:{version}", "."], cwd=ROOT)
     run(["docker", "push", f"{image}:{version}"], cwd=ROOT)
     if latest:
         run(["docker", "tag", f"{image}:{version}", f"{image}:latest"], cwd=ROOT)
@@ -60,8 +65,47 @@ def publish(
 
 
 @app.command()
+def commit_message(
+    version: str = typer.Argument(..., help="Application version and docker tag."),
+    image: str = typer.Option(DEFAULT_IMAGE, "--image", help="Docker image repository."),
+    latest: bool = typer.Option(False, "--latest", help="Include latest-tag commands in the message."),
+) -> None:
+    typer.echo(release_commit_message(version=version, image=image, latest=latest))
+
+
+@app.command()
 def show_version() -> None:
     typer.echo(read_package_version(PACKAGE_JSON))
+
+
+def release_commit_message(*, version: str, image: str, latest: bool) -> str:
+    lines = [
+        f"chore(release): {version}",
+        "",
+        "WSL publish commands:",
+        docker_build_command(image=image, version=version),
+        docker_push_command(image=image, tag=version),
+    ]
+    if latest:
+        lines.extend(
+            [
+                docker_tag_command(image=image, source_tag=version, target_tag="latest"),
+                docker_push_command(image=image, tag="latest"),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def docker_build_command(*, image: str, version: str) -> str:
+    return f"docker build -t {image}:{version} ."
+
+
+def docker_tag_command(*, image: str, source_tag: str, target_tag: str) -> str:
+    return f"docker tag {image}:{source_tag} {image}:{target_tag}"
+
+
+def docker_push_command(*, image: str, tag: str) -> str:
+    return f"docker push {image}:{tag}"
 
 
 def copy_frontend_dist() -> None:

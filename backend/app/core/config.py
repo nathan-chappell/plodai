@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = "admin@example.com"
     bootstrap_admin_password: str = ""
     bootstrap_admin_name: str = "Built-in Admin"
+    chatkit_lightweight_model: str = "gpt-4.1-mini"
+    chatkit_balanced_model: str = "gpt-4.1"
     chatkit_default_model: str = "gpt-5.1"
     static_dir: str = "./app/static"
     cors_origins: list[str] = [
@@ -48,3 +50,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+

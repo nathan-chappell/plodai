@@ -26,7 +26,7 @@ export async function executeClientTool<Name extends ClientToolName>(
   datasets: LoadedDataset[],
 ): Promise<ClientToolExecutionResult> {
   switch (toolCall.name) {
-    case "list_accessible_datasets": {
+    case "list_attached_csv_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       return {
         payload: {
@@ -89,3 +89,5 @@ function findDataset(datasets: LoadedDataset[], datasetId: string): LoadedDatase
   }
   return dataset;
 }
+
+

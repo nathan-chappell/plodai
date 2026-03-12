@@ -66,8 +66,8 @@ class ReportService:
     def _build_tool_log(self, payload: CreateReportRequest) -> list[ToolEvent]:
         dataset_names = ", ".join(dataset.name for dataset in payload.datasets) or "no files"
         return [
-            ToolEvent(tool="list_accessible_datasets", detail=f"Loaded {dataset_names}."),
-            ToolEvent(tool="inspect_dataset_schema", detail="Reviewed columns, row counts, and representative samples."),
+            ToolEvent(tool="list_attached_csv_files", detail=f"Loaded {dataset_names}."),
+            ToolEvent(tool="inspect_csv_file_schema", detail="Reviewed columns, row counts, and representative samples."),
             ToolEvent(tool="run_aggregate_query", detail="Generated report-safe summaries without exposing raw tables."),
             ToolEvent(tool="request_chart_render", detail="Prepared frontend chart specs for client-side rendering and image return."),
         ]
@@ -124,3 +124,5 @@ class ReportService:
                 },
             )
         ]
+
+

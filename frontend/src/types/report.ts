@@ -9,6 +9,11 @@ export type DatasetSummary = {
   sample_rows: Record<string, string>[];
 };
 
+export type LocalDataset = DatasetSummary & {
+  rows: Record<string, string>[];
+  preview_rows: Record<string, string>[];
+};
+
 export type ReportSection = {
   id: string;
   title: string;

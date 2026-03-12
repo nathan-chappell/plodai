@@ -1,23 +1,26 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import styled from "styled-components";
 
+import { AdminPanel } from "./components/AdminPanel";
 import { AuthPanel } from "./components/AuthPanel";
-import { ChartCard } from "./components/ChartCard";
 import { ChatKitPane } from "./components/ChatKitPane";
-import { NarrativeCard } from "./components/NarrativeCard";
-import { ToolLog } from "./components/ToolLog";
+import { DatasetInventoryPane } from "./components/DatasetInventoryPane";
 import { apiRequest, getStoredToken, storeToken } from "./lib/api";
 import { parseCsvPreview } from "./lib/csv";
 import type { AuthUser } from "./types/auth";
-import type { CreateReportResponse, DatasetSummary } from "./types/report";
-import { MetaText, dashedInputSurfaceCss, displayHeadingCss, panelSurfaceCss, primaryButtonCss } from "./ui/primitives";
+import type { LocalDataset } from "./types/report";
+import { MetaText, displayHeadingCss, panelSurfaceCss } from "./ui/primitives";
+
+const BRIEF_STORAGE_KEY = "report-foundry-investigation-brief";
+
+type WorkspaceTab = "report" | "datasets" | "goal" | "admin";
 
 const Page = styled.main`
   padding: 2rem;
 `;
 
 const Shell = styled.div`
-  width: min(1180px, 100%);
+  width: min(1320px, 100%);
   margin: 0 auto;
   display: grid;
   gap: 1.5rem;
@@ -55,7 +58,7 @@ const Subhead = styled.p`
   line-height: 1.75;
 `;
 
-const Grid = styled.section`
+const LoginGrid = styled.section`
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
   gap: 1.5rem;
@@ -65,72 +68,142 @@ const Grid = styled.section`
   }
 `;
 
+const FeatureList = styled.ul`
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.8rem;
+  color: var(--ink);
+`;
+
+const WorkspaceHeader = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1rem;
+  align-items: start;
+
+  @media (max-width: 1000px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const TabBar = styled.div`
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+`;
+
+const TabButton = styled.button<{ $active: boolean }>`
+  border: 1px solid ${({ $active }) => ($active ? "rgba(201, 111, 59, 0.38)" : "var(--line)")};
+  background: ${({ $active }) => ($active ? "rgba(201, 111, 59, 0.14)" : "rgba(255, 255, 255, 0.55)")};
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.65rem 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+const ReportLayout = styled.section`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 430px;
+  gap: 1.5rem;
+  align-items: start;
+
+  @media (max-width: 1180px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ReportColumn = styled.div`
+  display: grid;
+  gap: 1rem;
+`;
+
+const ChatColumn = styled.div`
+  min-width: 0;
+`;
+
 const Panel = styled.section`
   ${panelSurfaceCss};
   border-radius: var(--radius-xl);
   padding: 1.4rem;
+  display: grid;
+  gap: 0.95rem;
 `;
 
-const Label = styled.label`
+const SectionHeader = styled.div`
   display: grid;
-  gap: 0.55rem;
-  margin-bottom: 1rem;
-  color: var(--ink);
-  font-weight: 600;
+  gap: 0.4rem;
+`;
+
+const SectionTitle = styled.h2`
+  margin: 0;
+  font-size: 1.2rem;
 `;
 
 const Textarea = styled.textarea`
-  min-height: 160px;
+  min-height: 260px;
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
   padding: 0.95rem 1rem;
   background: rgba(255, 255, 255, 0.75);
   resize: vertical;
+  font: inherit;
 `;
 
-const Input = styled.input`
-  ${dashedInputSurfaceCss};
-`;
-
-const Button = styled.button`
-  ${primaryButtonCss};
-  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
-`;
-
-const FilesList = styled.ul`
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.7rem;
-`;
-
-const FileCard = styled.li`
-  padding: 0.9rem 1rem;
+const Highlight = styled.div`
+  padding: 0.95rem 1rem;
   border-radius: var(--radius-md);
   background: rgba(201, 111, 59, 0.08);
   border: 1px solid rgba(201, 111, 59, 0.18);
 `;
 
-const ReportGrid = styled.section`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.2rem;
-
-  @media (max-width: 900px) {
-    grid-template-columns: 1fr;
-  }
-`;
+function InvestigationBriefPanel({
+  investigationBrief,
+  setInvestigationBrief,
+}: {
+  investigationBrief: string;
+  setInvestigationBrief: (value: string) => void;
+}) {
+  return (
+    <Panel>
+      <SectionHeader>
+        <SectionTitle>Analysis goal</SectionTitle>
+        <MetaText>This brief is saved with the conversation so the analyst keeps the objective in view.</MetaText>
+      </SectionHeader>
+      <Textarea
+        value={investigationBrief}
+        onChange={(event) => setInvestigationBrief(event.target.value)}
+        placeholder="Example: Compare regional performance, find the most surprising anomalies, and suggest the best charts."
+      />
+      <Highlight>
+        <MetaText>
+          The analyst will use this as the working objective, then refine the thread title once the focus becomes clear.
+        </MetaText>
+      </Highlight>
+    </Panel>
+  );
+}
 
 export function App() {
-  const [prompt, setPrompt] = useState(
-    "Identify key trends, anomalies, and segments worth investigating. Build a concise executive-ready report.",
-  );
-  const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
-  const [report, setReport] = useState<CreateReportResponse | null>(null);
-  const [status, setStatus] = useState<string>("Drop in CSVs and ask the analyst to investigate.");
-  const [busy, setBusy] = useState(false);
+  const [datasets, setDatasets] = useState<LocalDataset[]>([]);
+  const [status, setStatus] = useState<string>("Add CSV files to begin a local-first investigation.");
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [investigationBrief, setInvestigationBrief] = useState(
+    "Summarize the attached files, identify the strongest trends and anomalies, and explain what deserves follow-up.",
+  );
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("report");
+
+  useEffect(() => {
+    const savedBrief = window.localStorage.getItem(BRIEF_STORAGE_KEY);
+    if (savedBrief) {
+      setInvestigationBrief(savedBrief);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(BRIEF_STORAGE_KEY, investigationBrief);
+  }, [investigationBrief]);
 
   useEffect(() => {
     async function hydrateUser() {
@@ -148,12 +221,18 @@ export function App() {
     void hydrateUser();
   }, []);
 
+  useEffect(() => {
+    if (activeWorkspaceTab === "admin" && user?.role !== "admin") {
+      setActiveWorkspaceTab("report");
+    }
+  }, [activeWorkspaceTab, user]);
+
   async function handleFiles(files: FileList | null) {
     if (!files?.length) {
       return;
     }
 
-    setStatus("Profiling uploaded CSVs client-side before handing safe metadata to the backend.");
+    setStatus("Profiling selected CSV files locally before exposing safe metadata to the agent.");
     const nextDatasets = await Promise.all(
       Array.from(files).map(async (file) => {
         const preview = await parseCsvPreview(file);
@@ -164,115 +243,140 @@ export function App() {
           columns: preview.columns,
           numeric_columns: preview.numericColumns,
           sample_rows: preview.sampleRows,
-        } satisfies DatasetSummary;
+          rows: preview.rows,
+          preview_rows: preview.previewRows,
+        } satisfies LocalDataset;
       }),
     );
 
     setDatasets(nextDatasets);
-    setStatus(`Prepared ${nextDatasets.length} dataset summaries.`);
+    setStatus(`Prepared ${nextDatasets.length} dataset summary${nextDatasets.length === 1 ? "" : "ies"} for analysis.`);
   }
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!user) {
-      setStatus("Sign in before requesting a report.");
-      return;
-    }
+  function handleClearDatasets() {
+    setDatasets([]);
+    setStatus("Cleared dataset inventory. Add CSV files to begin another investigation.");
+  }
 
-    setBusy(true);
-    setStatus("Requesting a report plan from the backend analyst agent.");
+  if (!user) {
+    return (
+      <Page>
+        <Shell>
+          <Hero>
+            <Eyebrow>Agentic CSV Intelligence Demo</Eyebrow>
+            <Title>Report Foundry</Title>
+            <Subhead>
+              Analyze arbitrary CSV files locally, let an agent explore them through safe aggregations and charts, and turn the
+              findings into a clean narrative report.
+            </Subhead>
+          </Hero>
 
-    try {
-      const response = await apiRequest<CreateReportResponse>("/reports", {
-        method: "POST",
-        body: JSON.stringify({ prompt, datasets }),
-      });
-      setReport(response);
-      setStatus("Report bundle created. Next step is wiring chart rendering plus image return for model interpretation.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to create report.");
-    } finally {
-      setBusy(false);
-    }
+          <LoginGrid>
+            <Panel>
+              <SectionHeader>
+                <SectionTitle>What this demo does</SectionTitle>
+                <MetaText>The files stay client-side. The agent works through safe tools, chart rendering, and thread-aware state.</MetaText>
+              </SectionHeader>
+              <FeatureList>
+                <li>Profile multiple CSV files locally and expose only metadata, samples, and aggregate query results.</li>
+                <li>Let the agent explore, compare segments, validate anomalies, and request charts it can inspect visually.</li>
+                <li>Keep the investigation goal and dataset state attached to the thread so the workspace stays coherent.</li>
+              </FeatureList>
+            </Panel>
+
+            <AuthPanel
+              user={user}
+              onAuthenticated={setUser}
+              heading="Sign in to open the analyst workspace"
+              subtitle="Once you are in, you can add local CSV files and start the investigation immediately."
+            />
+          </LoginGrid>
+        </Shell>
+      </Page>
+    );
   }
 
   return (
     <Page>
       <Shell>
-        <Hero>
-          <Eyebrow>Agentic CSV Intelligence Demo</Eyebrow>
-          <Title>Report Foundry</Title>
-          <Subhead>
-            A lightweight demo for turning arbitrary CSV uploads into analyst-style reports with safe queries,
-            rendered charts, and narrative sections assembled through ChatKit-friendly artifacts.
-          </Subhead>
-        </Hero>
+        <WorkspaceHeader>
+          <Hero>
+            <Eyebrow>Agentic CSV Intelligence Demo</Eyebrow>
+            <Title>Report Foundry</Title>
+            <Subhead>
+              Load local datasets, define the investigation goal, and let the analyst explore the files through safe queries,
+              charts, and narrative writeups.
+            </Subhead>
+          </Hero>
 
-        <Grid>
-          <Panel>
-            <form onSubmit={handleSubmit}>
-              <Label>
-                Investigation brief
-                <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-              </Label>
+          <AuthPanel
+            user={user}
+            onAuthenticated={setUser}
+            mode="account"
+            heading="Workspace session"
+            subtitle="You are signed in. Add files, set the goal, and investigate from the workspace."
+          />
+        </WorkspaceHeader>
 
-              <Label>
-                Attach CSV files
-                <Input type="file" accept=".csv" multiple onChange={(event) => void handleFiles(event.target.files)} />
-              </Label>
+        <TabBar>
+          <TabButton $active={activeWorkspaceTab === "report"} onClick={() => setActiveWorkspaceTab("report")} type="button">
+            Report
+          </TabButton>
+          <TabButton $active={activeWorkspaceTab === "datasets"} onClick={() => setActiveWorkspaceTab("datasets")} type="button">
+            Datasets
+          </TabButton>
+          <TabButton $active={activeWorkspaceTab === "goal"} onClick={() => setActiveWorkspaceTab("goal")} type="button">
+            Goal
+          </TabButton>
+          {user.role === "admin" ? (
+            <TabButton $active={activeWorkspaceTab === "admin"} onClick={() => setActiveWorkspaceTab("admin")} type="button">
+              Admin
+            </TabButton>
+          ) : null}
+        </TabBar>
 
-              <Button disabled={busy || !user} type="submit">
-                {busy ? "Building report..." : "Generate report scaffold"}
-              </Button>
-            </form>
-          </Panel>
+        {activeWorkspaceTab === "report" ? (
+          <ReportLayout>
+            <ReportColumn>
+              <Panel>
+                <SectionHeader>
+                  <SectionTitle>Report canvas</SectionTitle>
+                  <MetaText>{status}</MetaText>
+                </SectionHeader>
+                <MetaText>
+                  Good starting moves: summarize every file, compare the most important segments, validate anomalies with a second
+                  query, and leave behind short report sections as the investigation develops.
+                </MetaText>
+                <MetaText>
+                  Uploaded files: {datasets.length ? datasets.map((dataset) => dataset.name).join(", ") : "none yet"}
+                </MetaText>
+                <MetaText>
+                  Current goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the investigation."}
+                </MetaText>
+              </Panel>
+            </ReportColumn>
+            <ChatColumn>
+              <ChatKitPane enabled={Boolean(user)} datasets={datasets} investigationBrief={investigationBrief} />
+            </ChatColumn>
+          </ReportLayout>
+        ) : null}
 
-          <AuthPanel user={user} onAuthenticated={setUser} />
-        </Grid>
+        {activeWorkspaceTab === "datasets" ? (
+          <DatasetInventoryPane
+            datasets={datasets}
+            onSelectFiles={handleFiles}
+            onClearDatasets={handleClearDatasets}
+          />
+        ) : null}
 
-        <Grid>
-          <Panel>
-            <h2>Dataset inventory</h2>
-            {datasets.length ? (
-              <FilesList>
-                {datasets.map((dataset) => (
-                  <FileCard key={dataset.id}>
-                    <strong>{dataset.name}</strong>
-                    <MetaText as="div">
-                      {dataset.row_count} rows · {dataset.columns.length} columns
-                    </MetaText>
-                    <MetaText as="div">{dataset.columns.join(", ")}</MetaText>
-                    <MetaText as="div">
-                      Numeric: {dataset.numeric_columns.length ? dataset.numeric_columns.join(", ") : "none inferred yet"}
-                    </MetaText>
-                  </FileCard>
-                ))}
-              </FilesList>
-            ) : (
-              <MetaText>No files yet. Upload one or more CSVs to create safe dataset summaries.</MetaText>
-            )}
-          </Panel>
+        {activeWorkspaceTab === "goal" ? (
+          <InvestigationBriefPanel
+            investigationBrief={investigationBrief}
+            setInvestigationBrief={setInvestigationBrief}
+          />
+        ) : null}
 
-          <ChatKitPane enabled={Boolean(user)} datasets={datasets} />
-        </Grid>
-
-        <ToolLog events={report?.tool_log ?? []} />
-
-        {report ? (
-          <ReportGrid>
-            {report.sections.map((section) => (
-              <NarrativeCard key={section.id} section={section} />
-            ))}
-            {report.charts.map((chart) => (
-              <ChartCard key={chart.id} chart={chart} />
-            ))}
-          </ReportGrid>
-        ) : (
-          <Panel>
-            <h2>Report canvas</h2>
-            <MetaText>{status}</MetaText>
-          </Panel>
-        )}
+        {activeWorkspaceTab === "admin" && user.role === "admin" ? <AdminPanel currentUser={user} /> : null}
       </Shell>
     </Page>
   );

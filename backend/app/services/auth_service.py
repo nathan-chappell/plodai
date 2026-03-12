@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.config import get_settings
 from backend.app.models.types import UserRole
 from backend.app.models.user import User
-from backend.app.schemas.auth import UserResponse
+from backend.app.schemas.auth import CreateUserRequest, UserResponse
 
 
 def hash_password(password: str) -> str:
@@ -62,6 +62,35 @@ class AuthService:
             select(User).where(User.id == user_id, User.is_active.is_(True))
         )
         return result.scalar_one_or_none()
+
+    async def list_users(self) -> list[User]:
+        result = await self.db.execute(select(User).order_by(User.email.asc()))
+        return list(result.scalars().all())
+
+    async def create_user(self, payload: CreateUserRequest) -> User:
+        existing = await self._get_user_by_email(str(payload.email))
+        if existing is not None:
+            raise ValueError("A user with that email already exists.")
+
+        user = User(
+            email=str(payload.email).strip().lower(),
+            full_name=payload.full_name.strip(),
+            password_hash=hash_password(payload.password),
+            role=payload.role,
+            is_active=payload.is_active,
+        )
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def delete_user(self, user_id: int) -> bool:
+        user = await self.db.get(User, user_id)
+        if user is None:
+            return False
+        await self.db.delete(user)
+        await self.db.commit()
+        return True
 
     async def bootstrap(self) -> None:
         self._ensure_seed_file_exists(self.settings.user_seed_path)

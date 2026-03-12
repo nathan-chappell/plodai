@@ -97,6 +97,7 @@ export type ThreadDatasetMetadata = {
 
 export type AppThreadMetadata = {
   title?: string;
+  investigation_brief?: string;
   dataset_ids?: string[];
   datasets?: ThreadDatasetMetadata[];
   chart_cache?: Record<string, string>;
@@ -123,7 +124,7 @@ export type ListLoadedDatasetsToolArgs = {
 export type ClientToolArgsMap = {
   request_chart_render: RenderChartToolArgs;
   run_aggregate_query: RunLocalQueryToolArgs;
-  list_accessible_datasets: ListLoadedDatasetsToolArgs;
+  list_attached_csv_files: ListLoadedDatasetsToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;
@@ -148,3 +149,5 @@ export type ReportSectionEffect = {
 };
 
 export type ClientEffect = ChartRenderedEffect | ReportSectionEffect;
+
+
