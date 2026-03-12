@@ -294,7 +294,7 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
 def test_chatkit_streaming_models(initialized_db: None, model: str) -> None:
     async def run_stream_check() -> None:
         settings = get_settings()
-        client = AsyncOpenAI(api_key=settings.openai_api_key or None)
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY or None)
 
         text_deltas: list[str] = []
         event_types: list[str] = []

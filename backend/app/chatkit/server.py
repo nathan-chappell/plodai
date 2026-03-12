@@ -134,7 +134,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
     def __init__(self, db: AsyncSession):
         self.settings = get_settings()
         self.db = db
-        self.openai_client = AsyncOpenAI(api_key=self.settings.openai_api_key or None)
+        self.openai_client = AsyncOpenAI(api_key=self.settings.OPENAI_API_KEY or None)
         store = DatabaseMemoryStore(db)
         super().__init__(store=store)
         self.converter = ClientToolResultConverter()

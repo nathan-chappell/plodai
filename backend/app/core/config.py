@@ -1,5 +1,5 @@
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,20 +7,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", case_sensitive=False
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     database_url: str = "sqlite:///./report_foundry.db"
-    auth_secret_key: str = "replace-me"
     auth_salt: str = "report-foundry-auth"
     auth_token_max_age_seconds: int = 60 * 60 * 12
     bootstrap_admin_email: str = "admin@example.com"
-    bootstrap_admin_password: str = ""
     bootstrap_admin_name: str = "Built-in Admin"
     static_dir: str = "./app/static"
 
-    openai_api_key: str = Field(init=False)
-    cors_origins: list[str] = Field(init=False)
+    BOOTSTRAP_ADMIN_PASSWORD: str = Field(init=False)
+    AUTH_SECRET_KEY: str = Field(init=False)
+    OPENAI_API_KEY: str = Field(init=False)
+    CORS_ORIGINS: list[str] = Field(init=False)
 
     @property
     def async_database_url(self) -> str:

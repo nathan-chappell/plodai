@@ -34,19 +34,19 @@ async def lifespan(_: FastAPI):
 configure_logging()
 settings = get_settings()
 logger = get_logger("main")
-if settings.openai_api_key:
-    os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
+if settings.OPENAI_API_KEY:
+    os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
 
 app = FastAPI(
     title="Report Foundry API",
-    version="0.5.1",
+    version="0.5.2",
     description="Agentic CSV analysis demo backend.",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

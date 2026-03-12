@@ -50,7 +50,7 @@ The repo includes VS Code launch configs for both API-only development and produ
 
 - `Dockerfile` expects prebuilt frontend assets in `frontend/dist/` and copies them into the runtime image.
 - The runtime image copies `backend/` plus the prebuilt frontend output and runs the root `main.py` entrypoint.
-- The root `main.py` starts Uvicorn directly on `0.0.0.0:8080`.
+- The root `main.py` starts Uvicorn directly on `0.0.0.0:8000`.
 - `release.py` is the release entrypoint at the repo root.
 - `release.py set-version <version>` keeps the frontend package version and backend FastAPI version aligned.
 - `release.py build <version>` updates versions, builds the frontend, and syncs static assets.
@@ -67,7 +67,7 @@ python release.py publish 0.4.0 --image nathanschappell/report-foundry
 
 - Railway can deploy a prebuilt Docker Hub image directly.
 - Railway provides the public HTTPS endpoint, so the container should serve plain HTTP only.
-- This app is currently hardcoded to listen on `0.0.0.0:8080` to match the current Railway setup.
+- This app is currently hardcoded to listen on `0.0.0.0:8000` to match the current Railway setup.
 - Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
 - Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
 

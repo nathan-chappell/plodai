@@ -28,7 +28,7 @@ class AuthService:
         self.db = db
         self.settings = get_settings()
         self.serializer = URLSafeTimedSerializer(
-            secret_key=self.settings.auth_secret_key,
+            secret_key=self.settings.AUTH_SECRET_KEY,
             salt=self.settings.auth_salt,
         )
 
@@ -106,11 +106,11 @@ class AuthService:
         )
 
     async def _bootstrap_admin(self) -> None:
-        if not self.settings.bootstrap_admin_password:
+        if not self.settings.BOOTSTRAP_ADMIN_PASSWORD:
             return
 
         admin = await self._get_user_by_email(self.settings.bootstrap_admin_email)
-        admin_password_hash = hash_password(self.settings.bootstrap_admin_password)
+        admin_password_hash = hash_password(self.settings.BOOTSTRAP_ADMIN_PASSWORD)
         if admin is None:
             self.db.add(
                 User(
@@ -126,7 +126,7 @@ class AuthService:
         admin.full_name = self.settings.bootstrap_admin_name
         admin.role = "admin"
         admin.is_active = True
-        if not verify_password(self.settings.bootstrap_admin_password, admin.password_hash):
+        if not verify_password(self.settings.BOOTSTRAP_ADMIN_PASSWORD, admin.password_hash):
             admin.password_hash = admin_password_hash
 
     async def _sync_seed_users(self, seed_path: Path) -> None:
