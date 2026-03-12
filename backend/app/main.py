@@ -53,7 +53,7 @@ if settings.OPENAI_API_KEY:
 
 app = FastAPI(
     title="Report Foundry API",
-    version="0.6.6",
+    version="0.7.0",
     description="Agentic CSV analysis demo backend.",
     lifespan=lifespan,
 )
