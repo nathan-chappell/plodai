@@ -2,22 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: pytest current file",
+      "name": "Python: Debug Tests",
       "type": "debugpy",
       "request": "launch",
-      "module": "pytest",
-      "args": [
-        "${file}",
-        "-vv",
-        "-s"
+      "program": "${file}",
+      "purpose": [
+        "debug-test"
       ],
-      "cwd": "${workspaceFolder}/backend",
-      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "console": "integratedTerminal",
-      "justMyCode": false,
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}/backend"
-      }
+      "justMyCode": false
     },
     {
       "name": "Backend: Uvicorn",
@@ -28,7 +21,7 @@
         "app.main:app",
         "--reload",
         "--host",
-        "127.0.0.1",
+        "0.0.0.0",
         "--port",
         "8000",
         "--ssl-certfile",
@@ -64,31 +57,13 @@
       }
     },
     {
-      "name": "Frontend: Chrome (Vite)",
-      "type": "pwa-chrome",
-      "request": "launch",
-      "url": "https://127.0.0.1:5173",
-      "webRoot": "${workspaceFolder}/frontend",
-      "sourceMaps": true,
-      "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
-    },
-    {
       "name": "Frontend: Chrome with Vite task",
-      "type": "pwa-chrome",
+      "type": "chrome",
       "request": "launch",
       "url": "https://127.0.0.1:5173",
       "webRoot": "${workspaceFolder}/frontend",
       "sourceMaps": true,
       "preLaunchTask": "frontend: dev",
-      "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
-    },
-    {
-      "name": "Frontend: Chrome (served by backend)",
-      "type": "pwa-chrome",
-      "request": "launch",
-      "url": "https://127.0.0.1:8000",
-      "webRoot": "${workspaceFolder}/frontend",
-      "sourceMaps": true,
       "userDataDir": "${workspaceFolder}/.vscode/chrome-profile"
     }
   ],
@@ -98,13 +73,6 @@
       "configurations": [
         "Backend: Uvicorn",
         "Frontend: Chrome with Vite task"
-      ]
-    },
-    {
-      "name": "App: Gunicorn + served frontend",
-      "configurations": [
-        "Backend: Gunicorn",
-        "Frontend: Chrome (served by backend)"
       ]
     }
   ]

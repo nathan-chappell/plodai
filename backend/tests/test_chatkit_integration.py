@@ -1,14 +1,12 @@
 import asyncio
 import json
-import os
 from uuid import uuid4
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
-from backend.app.main import app
 from backend.app.db.session import AsyncSessionLocal
+from backend.app.main import app
 from backend.app.models.chatkit import ChatItem, ChatThread
 from backend.app.models.user import User
 from backend.app.services.auth_service import hash_password
@@ -166,13 +164,14 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
             event["item"]
             for event in events
             if event.get("type") == "thread.item.done"
-            and isinstance(event.get("item"), dict)
-            and event["item"].get("type") == "assistant_message"
+            and isinstance(item := event.get("item"), dict)
+            and item.get("type") == "assistant_message"
         ]
         assert assistant_messages
         assistant_text = "\n".join(
             str(content.get("text", ""))
             for message in assistant_messages
+            if isinstance(message, dict)
             for content in message.get("content", [])
             if isinstance(content, dict)
         )
