@@ -82,10 +82,15 @@ def release_commit_message(*, version: str, image: str, latest: bool) -> str:
     lines = [
         f"chore(release): {version}",
         "",
-        "WSL publish commands:",
-        docker_build_command(image=image, version=version),
+        "WSL run command:",
+        "",
         docker_run_command(image=image, tag=version),
+        "",
+        "WSL publish commands:",
+        "",
+        docker_build_command(image=image, version=version),
         docker_push_command(image=image, tag=version),
+        git_tag_command(version=version),
     ]
     if latest:
         lines.extend(
@@ -111,6 +116,10 @@ def docker_run_command(*, image: str, tag: str) -> str:
 
 def docker_push_command(*, image: str, tag: str) -> str:
     return f"docker push {image}:{tag}"
+
+
+def git_tag_command(*, version: str) -> str:
+    return f"git tag v{version}"
 
 
 def copy_frontend_dist() -> None:

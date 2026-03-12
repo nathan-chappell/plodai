@@ -11,7 +11,7 @@ from backend.app.api.routes import router
 from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
 from backend.app.core.auth import AuthenticatedUser, require_current_user
 from backend.app.core.config import get_settings
-from backend.app.core.logging import configure_logging
+from backend.app.core.logging import configure_logging, get_logger
 from backend.app.db.session import AsyncSessionLocal, Base, engine
 from backend.app.services.auth_service import AuthService
 
@@ -25,17 +25,25 @@ async def lifespan(_: FastAPI):
         await AuthService(db).bootstrap()
         await db.commit()
 
+    logger.info(
+        "startup.complete env=%s port=%s static_path=%s database_url=%s",
+        settings.app_env,
+        settings.port,
+        settings.static_path,
+        settings.database_url,
+    )
     yield
 
 
 configure_logging()
 settings = get_settings()
+logger = get_logger("main")
 if settings.openai_api_key:
     os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
 
 app = FastAPI(
     title="Report Foundry API",
-    version="0.4.3",
+    version="0.4.4",
     description="Agentic CSV analysis demo backend.",
     lifespan=lifespan,
 )
@@ -88,4 +96,3 @@ async def spa_entrypoint(full_path: str):
     if full_path and candidate.exists() and candidate.is_file():
         return FileResponse(candidate)
     return FileResponse(index_path)
-
