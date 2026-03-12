@@ -82,4 +82,11 @@ def build_report_analyst(
         instructions=instructions,
         tools=list(build_report_tools(context)),
         model_settings=ModelSettings(parallel_tool_calls=False),
+        tool_use_behavior={
+            "stop_at_tool_names": [
+                "list_attached_csv_files",
+                "run_aggregate_query",
+                "request_chart_render",
+            ]
+        },
     )
