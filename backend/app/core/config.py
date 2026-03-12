@@ -1,6 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[3]
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,7 +19,7 @@ class Settings(BaseSettings):
     auth_token_max_age_seconds: int = 60 * 60 * 12
     bootstrap_admin_email: str = "admin@example.com"
     bootstrap_admin_name: str = "Built-in Admin"
-    static_dir: str = "./app/static"
+    static_dir: str = "./backend/app/static"
 
     BOOTSTRAP_ADMIN_PASSWORD: str = Field(init=False)
     AUTH_SECRET_KEY: str = Field(init=False)
@@ -32,7 +34,10 @@ class Settings(BaseSettings):
 
     @property
     def static_path(self) -> Path:
-        return Path(self.static_dir)
+        configured = Path(self.static_dir)
+        if configured.is_absolute():
+            return configured
+        return (ROOT_DIR / configured).resolve()
 
 
 @lru_cache

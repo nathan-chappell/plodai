@@ -20,18 +20,11 @@
       "args": [
         "backend.app.main:app",
         "--host",
-        "0.0.0.0",
+        "127.0.0.1",
         "--port",
-        "8000"
+        "8001"
       ],
-      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "console": "integratedTerminal",
-      "justMyCode": false,
       "preLaunchTask": "backend: sync static",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}",
-        "PORT": "8000"
-      }
     },
     {
       "name": "Backend: Uvicorn (reload, API only)",
@@ -42,7 +35,7 @@
         "backend.app.main:app",
         "--reload",
         "--host",
-        "0.0.0.0",
+        "127.0.0.1",
         "--port",
         "8000"
       ],
@@ -51,7 +44,8 @@
       "justMyCode": false,
       "env": {
         "PYTHONPATH": "${workspaceFolder}"
-      }
+      },
+      "cwd": "${workspaceFolder}"
     },
     {
       "name": "Frontend: Chrome with Vite task",

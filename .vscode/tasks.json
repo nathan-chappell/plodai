@@ -5,9 +5,6 @@
       "label": "frontend: dev",
       "type": "shell",
       "command": "npm run dev",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
       "isBackground": true,
       "problemMatcher": []
     },
@@ -15,9 +12,6 @@
       "label": "frontend: build",
       "type": "shell",
       "command": "npm run build",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
       "problemMatcher": []
     },
     {
@@ -25,7 +19,6 @@
       "type": "shell",
       "command": "Copy-Item -Path frontend/dist/* -Destination backend/app/static -Recurse -Force",
       "options": {
-        "cwd": "${workspaceFolder}",
         "shell": {
           "executable": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
           "args": [
