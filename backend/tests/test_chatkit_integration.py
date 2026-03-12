@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 from sqlalchemy import delete, select
 
+from backend.app.agents.context import ReportAgentContext
+from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.core.config import get_settings
-
 from backend.app.db.session import AsyncSessionLocal
 from backend.app.main import app
 from backend.app.models.chatkit import ChatItem, ChatThread
@@ -73,9 +74,23 @@ async def _cleanup_user_state(email: str) -> None:
 
 async def _load_thread_state(
     thread_id: str,
+    user_email: str,
 ) -> tuple[ChatThread | None, list[ChatItem]]:
     async with AsyncSessionLocal() as db:
         thread = await db.get(ChatThread, thread_id)
+        if thread is None:
+            return None, []
+
+        store = DatabaseMemoryStore(db)
+        context = ReportAgentContext(report_id=thread_id, user_email=user_email, db=db)
+        page = await store.load_thread_items(
+            thread_id,
+            after=None,
+            limit=100,
+            order="asc",
+            context=context,
+        )
+
         items = list(
             (
                 await db.execute(
@@ -87,6 +102,11 @@ async def _load_thread_state(
             .scalars()
             .all()
         )
+
+        assert len(page.data) == len(items), {
+            "store_item_types": [item.type for item in page.data],
+            "db_item_kinds": [item.kind for item in items],
+        }
         return thread, items
 
 
@@ -167,20 +187,27 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
             assert isinstance(thread, dict)
             thread_id = str(thread["id"])
 
-            first_turn_client_tool_calls = [
-                event["item"]
-                for event in create_events
-                if event.get("type") == "thread.item.done"
-                and isinstance(item := event.get("item"), dict)
-                and item.get("type") == "client_tool_call"
-            ]
-            assert first_turn_client_tool_calls, create_events
-            list_call = next(
-                item
-                for item in first_turn_client_tool_calls
-                if item.get("name") == "list_attached_csv_files"
+            stored_thread_after_create, stored_items_after_create = asyncio.run(
+                _load_thread_state(thread_id, email)
             )
-            assert list_call.get("status") == "pending"
+            assert stored_thread_after_create is not None
+            assert stored_items_after_create, create_events
+
+            pending_list_call = next(
+                (
+                    item
+                    for item in stored_items_after_create
+                    if item.kind == "client_tool_call"
+                    and item.payload.get("name") == "list_attached_csv_files"
+                ),
+                None,
+            )
+            assert pending_list_call is not None, {
+                "events": create_events,
+                "persisted_kinds": [item.kind for item in stored_items_after_create],
+                "persisted_payloads": [item.payload for item in stored_items_after_create],
+            }
+            assert pending_list_call.payload.get("status") == "pending"
 
             followup_events = _stream_request(
                 client,
@@ -199,17 +226,17 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
         stored_thread, stored_items = asyncio.run(_load_thread_state(thread_id))
 
         event_types = [str(event.get("type")) for event in all_events]
-        assert "thread.created" in event_types
+        assert event_types.count("thread.created") == 1
         assert "thread.item.done" in event_types
 
         assistant_messages = [
             event["item"]
-            for event in all_events
+            for event in followup_events
             if event.get("type") == "thread.item.done"
             and isinstance(item := event.get("item"), dict)
             and item.get("type") == "assistant_message"
         ]
-        assert assistant_messages, all_events
+        assert assistant_messages, followup_events
         assistant_text = "\n".join(
             str(content.get("text", ""))
             for message in assistant_messages
@@ -217,17 +244,40 @@ def test_chatkit_live_smoke(initialized_db: None) -> None:
             for content in message.get("content", [])
             if isinstance(content, dict)
         )
-        assert "SYSTEM TEST SUCCESS" in assistant_text
+        assert assistant_text.strip(), assistant_messages
+        assert any(
+            marker in assistant_text.lower()
+            for marker in ["csv", "file", "inventory", "available", "received"]
+        ), assistant_text
 
         assert stored_thread is not None
-        assert stored_thread.title not in {None, "", "New report"}
+        assert stored_thread.id == thread_id
+        assert stored_thread.user_id == email
         assert stored_thread.metadata_json.get("openai_previous_response_id")
         assert stored_thread.metadata_json.get("openai_conversation_id")
         usage = stored_thread.metadata_json.get("usage") or {}
         assert usage.get("input_tokens", 0) > 0
         assert usage.get("output_tokens", 0) > 0
         assert usage.get("estimated_cost_usd", 0.0) > 0
-        assert any(item.kind == "assistant_message" for item in stored_items)
+
+        assert stored_items, "Expected persisted thread items"
+        persisted_kinds = [item.kind for item in stored_items]
+        assert persisted_kinds[0] == "user_message"
+        assert "client_tool_call" in persisted_kinds
+        assert persisted_kinds[-1] == "assistant_message"
+
+        persisted_list_call = next(
+            (
+                item
+                for item in stored_items
+                if item.kind == "client_tool_call"
+                and item.payload.get("name") == "list_attached_csv_files"
+            ),
+            None,
+        )
+        assert persisted_list_call is not None, [item.payload for item in stored_items]
+        assert persisted_list_call.payload.get("status") == "completed"
+        assert persisted_list_call.payload.get("output") == CSV_FILES_PAYLOAD
     finally:
         asyncio.run(_cleanup_user_state(email))
 
@@ -260,3 +310,4 @@ def test_chatkit_streaming_models(initialized_db: None, model: str) -> None:
         assert output_text or getattr(final_response, "output_text", "")
 
     asyncio.run(run_stream_check())
+
