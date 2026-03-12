@@ -1,10 +1,7 @@
 import logging
 from typing import Any
 
-try:
-    from colorlog import ColoredFormatter
-except ImportError:  # pragma: no cover - graceful fallback until deps are installed
-    ColoredFormatter = None
+from colorlog import ColoredFormatter
 
 APP_LOGGER_NAME = "report_foundry"
 
@@ -16,8 +13,8 @@ def configure_logging(level: int = logging.INFO) -> None:
         return
 
     handler = logging.StreamHandler()
-    if ColoredFormatter is not None:
-        formatter: logging.Formatter = ColoredFormatter(
+    handler.setFormatter(
+        ColoredFormatter(
             "%(log_color)s%(asctime)s %(levelname)-8s%(reset)s %(name)s %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
             log_colors={
@@ -28,12 +25,7 @@ def configure_logging(level: int = logging.INFO) -> None:
                 "CRITICAL": "bold_red",
             },
         )
-    else:
-        formatter = logging.Formatter(
-            fmt="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    handler.setFormatter(formatter)
+    )
     logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False
