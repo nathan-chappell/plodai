@@ -3,10 +3,22 @@ import platform
 from pathlib import Path
 
 import uvicorn
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parent
 PACKAGE_JSON = ROOT_DIR / "package.json"
 DIST_DIR = ROOT_DIR / "dist"
+
+
+class EntrypointSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    HOST: str = "localhost"
+    PORT: int = 8000
 
 
 def _read_version() -> str:
@@ -19,12 +31,14 @@ def _read_version() -> str:
 
 
 if __name__ == "__main__":
+    settings = EntrypointSettings()
     version = _read_version()
     print(f"report-foundry version={version}")
     print(f"python={platform.python_version()} cwd={Path.cwd()}")
     print(f"frontend_dist={DIST_DIR} exists={DIST_DIR.exists()}")
+    print(f"bind_host={settings.HOST} bind_port={settings.PORT}")
     uvicorn.run(
         "backend.app.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=settings.HOST,
+        port=settings.PORT,
     )
