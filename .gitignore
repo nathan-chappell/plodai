@@ -12,6 +12,8 @@ __pycache__/
 .venv/
 backend/.venv/
 backend/report_foundry.db
+backend/app/static/*
+!backend/app/static/.gitkeep
 frontend/node_modules/
 frontend/.vite/
 .DS_Store

@@ -16,6 +16,7 @@ Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI bac
 - Python app: `backend/app/`
 - Python runtime config: `requirements.txt`, `requirements-dev.txt`
 - Release automation: `release.py`
+- Runtime entrypoint: `main.py`
 
 ## Build and run
 
@@ -27,7 +28,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r ..\requirements.txt
 pip install -r ..\requirements-dev.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python ..\main.py
 ```
 
 ### Frontend dev
@@ -41,15 +42,15 @@ npm run dev
 
 1. Build the frontend at the repo root.
 2. Copy `frontend/dist/` into `backend/app/static`.
-3. Run Uvicorn without `--reload`.
+3. Run `python main.py` or use the default `Backend: Uvicorn` VS Code launch, which first builds and syncs the frontend assets.
 
-The repo includes VS Code launch configs for backend debugging and tasks for the frontend build/dev loop.
+The repo includes VS Code launch configs for both API-only development and production-style Uvicorn serving with freshly built frontend assets. Generated frontend assets are treated as disposable build output and are ignored by git.
 
 ## Docker and release
 
 - `Dockerfile` expects prebuilt frontend assets in `frontend/dist/` and copies them into the runtime image.
-- The runtime image copies `backend/` plus the prebuilt frontend output and runs Uvicorn.
-- Railway injects `PORT`, and the container entrypoint uses that value with a local fallback to `8000`.
+- The runtime image copies `backend/` plus the prebuilt frontend output and runs the root `main.py` entrypoint.
+- The root `main.py` starts Uvicorn directly on `0.0.0.0:8080`.
 - `release.py` is the release entrypoint at the repo root.
 - `release.py set-version <version>` keeps the frontend package version and backend FastAPI version aligned.
 - `release.py build <version>` updates versions, builds the frontend, and syncs static assets.
@@ -66,7 +67,7 @@ python release.py publish 0.4.0 --image nathanschappell/report-foundry
 
 - Railway can deploy a prebuilt Docker Hub image directly.
 - Railway provides the public HTTPS endpoint, so the container should serve plain HTTP only.
-- Railway injects the `PORT` environment variable; the app should listen on that port.
+- This app is currently hardcoded to listen on `0.0.0.0:8080` to match the current Railway setup.
 - Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
 - The current user bootstrap design is intentionally simple and operationally friendly.
 - Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
@@ -83,3 +84,4 @@ This scaffold provides:
 - Docker, VS Code tasks, and a release script scaffold
 
 The biggest missing pieces are fuller CSV tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
+
