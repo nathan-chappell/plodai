@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from typing import Any, AsyncIterator, Literal, cast
 
 from agents import Runner
@@ -24,6 +26,10 @@ from chatkit.types import (
 )
 from fastapi import Depends
 from openai import AsyncOpenAI
+from openai.types.conversations.conversation_item import ConversationItem
+from openai.types.responses.response_function_tool_call_item import (
+    ResponseFunctionToolCallItem,
+)
 from openai.types.responses.response_input_item_param import (
     FunctionCallOutput,
     ResponseInputItemParam,
@@ -65,6 +71,10 @@ MODEL_ALIASES = {
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
 MAX_AGENT_TURNS = 30
+RATE_LIMIT_RETRY_PATTERN = re.compile(
+    r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
+    re.IGNORECASE,
+)
 
 
 class ClientToolResultConverter(ThreadItemConverter):
@@ -227,21 +237,72 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         agent_context = ChatKitAgentContext[ReportAgentContext](
             thread=thread, store=self.store, request_context=context
         )
-        try:
-            result = Runner.run_streamed(
-                agent,
-                agent_input,
-                context=agent_context,
-                max_turns=MAX_AGENT_TURNS,
-                conversation_id=conversation_id,
-            )
-            async for event in stream_agent_response(agent_context, result):
-                yield event
-        except Exception:
-            self.logger.exception(
-                f"respond.error thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} previous_response_id={previous_response_id}"
-            )
-            raise
+        max_retries = max(0, self.settings.openai_max_retries)
+        result = None
+        next_agent_input = agent_input
+
+        for attempt in range(max_retries + 1):
+            run_started = False
+            try:
+                result = Runner.run_streamed(
+                    agent,
+                    next_agent_input,
+                    context=agent_context,
+                    max_turns=MAX_AGENT_TURNS,
+                    conversation_id=conversation_id,
+                )
+                run_started = True
+                async for event in stream_agent_response(agent_context, result):
+                    yield event
+                break
+            except Exception as exc:
+                if not self._is_retryable_stream_error(exc) or attempt >= max_retries:
+                    self.logger.exception(
+                        f"respond.error thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} previous_response_id={previous_response_id}"
+                    )
+                    raise
+
+                retry_delay_seconds = self._extract_retry_delay_seconds(exc) or min(
+                    60.0,
+                    float(2**attempt),
+                )
+                attempt_number = attempt + 1
+                total_attempts = max_retries + 1
+                self.logger.warning(
+                    f"respond.retry thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} "
+                    f"attempt={attempt_number}/{total_attempts} delay_seconds={retry_delay_seconds:.3f} "
+                    f"error={summarize_for_log(str(exc))}"
+                )
+                yield ProgressUpdateEvent(
+                    text=(
+                        f"OpenAI rate limit reached. Waiting about {retry_delay_seconds:.1f}s before retry "
+                        f"({attempt_number}/{total_attempts})."
+                    )
+                )
+
+                if conversation_id:
+                    dangling_tool_calls = await self._close_dangling_tool_calls(
+                        conversation_id,
+                        exc,
+                    )
+                    if dangling_tool_calls:
+                        yield ProgressUpdateEvent(
+                            text=f"Recovered {dangling_tool_calls} unfinished tool call(s) before retrying."
+                        )
+
+                if retry_delay_seconds >= 5:
+                    yield ProgressUpdateEvent(
+                        text="Still working. The model hit a temporary limit and will continue automatically."
+                    )
+
+                await asyncio.sleep(retry_delay_seconds)
+                yield ProgressUpdateEvent(text="Retrying the OpenAI run now.")
+
+                if run_started:
+                    next_agent_input = []
+
+        if result is None:
+            raise RuntimeError("ChatKit agent run completed without a run result.")
 
         result_conversation_id = (
             getattr(result, "conversation_id", None)
@@ -321,6 +382,97 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             f"respond.conversation_created thread_id={thread.id} user_email={context.user_email} conversation_id={conversation.id} conversation_logs={platform_logs_url(conversation.id)}"
         )
         return conversation.id
+
+    def _extract_retry_delay_seconds(self, exc: Exception) -> float | None:
+        match = RATE_LIMIT_RETRY_PATTERN.search(str(exc))
+        if match is None:
+            return None
+        try:
+            return max(0.0, float(match.group("seconds")))
+        except ValueError:
+            return None
+
+    def _is_retryable_stream_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "rate limit" in message or "try again in" in message
+
+    async def _list_conversation_items(
+        self, conversation_id: str, *, limit: int = 100
+    ) -> list[ConversationItem]:
+        items: list[ConversationItem] = []
+        async for item in self.openai_client.conversations.items.list(
+            conversation_id,
+            order="asc",
+            limit=limit,
+        ):
+            items.append(item)
+        return items
+
+    async def _find_dangling_tool_calls(
+        self, conversation_id: str
+    ) -> list[ResponseFunctionToolCallItem]:
+        items = await self._list_conversation_items(conversation_id)
+        trailing_items: list[ConversationItem] = []
+        for item in reversed(items):
+            if item.type in {"function_call", "function_call_output"}:
+                trailing_items.append(item)
+                continue
+            break
+
+        resolved_call_ids = {
+            item.call_id
+            for item in trailing_items
+            if item.type == "function_call_output"
+        }
+        dangling_tool_calls = [
+            cast(ResponseFunctionToolCallItem, item)
+            for item in reversed(trailing_items)
+            if item.type == "function_call" and item.call_id not in resolved_call_ids
+        ]
+
+        self.logger.info(
+            f"conversation.validate conversation_id={conversation_id} conversation_logs={platform_logs_url(conversation_id)} "
+            f"trailing_items={len(trailing_items)} dangling_tool_calls={len(dangling_tool_calls)}"
+        )
+        return dangling_tool_calls
+
+    async def _close_dangling_tool_calls(
+        self,
+        conversation_id: str,
+        exc: Exception,
+    ) -> int:
+        dangling_tool_calls = await self._find_dangling_tool_calls(conversation_id)
+        if not dangling_tool_calls:
+            return 0
+
+        detailed_error = (
+            "The previous model run ended unexpectedly before all client tool calls received outputs. "
+            "This tool call is being closed automatically so the conversation can continue. "
+            f"Underlying error: {str(exc)}"
+        )
+        brief_error = (
+            "The previous model run ended unexpectedly before this tool call received an output. "
+            "It is being closed automatically so the conversation can continue."
+        )
+        outputs: list[FunctionCallOutput] = []
+        for index, item in enumerate(dangling_tool_calls):
+            outputs.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": detailed_error if index == 0 else brief_error,
+                }
+            )
+
+        await self.openai_client.conversations.items.create(
+            conversation_id,
+            items=outputs,
+        )
+        self.logger.warning(
+            f"conversation.recovered_dangling_tool_calls conversation_id={conversation_id} conversation_logs={platform_logs_url(conversation_id)} "
+            f"count={len(dangling_tool_calls)}"
+        )
+        return len(dangling_tool_calls)
 
     async def _load_recent_items(
         self, thread_id: str | None, user_email: str
@@ -499,3 +651,4 @@ async def build_chatkit_server(
     db: AsyncSession = Depends(get_db),
 ) -> ReportFoundryChatKitServer:
     return ReportFoundryChatKitServer(db)
+
