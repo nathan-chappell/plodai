@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 from typing import Any, AsyncIterator, Literal, cast
 
@@ -256,18 +257,10 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                     yield event
                 break
             except Exception as exc:
-                if not self._is_retryable_stream_error(exc) or attempt >= max_retries:
-                    self.logger.exception(
-                        f"respond.error thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} previous_response_id={previous_response_id}"
-                    )
-                    raise
-
-                retry_delay_seconds = self._extract_retry_delay_seconds(exc) or min(
-                    60.0,
-                    float(2**attempt),
-                )
                 attempt_number = attempt + 1
                 total_attempts = max_retries + 1
+                retry_delay_seconds = self._compute_retry_delay_seconds(exc)
+
                 self.logger.warning(
                     f"respond.retry thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} "
                     f"attempt={attempt_number}/{total_attempts} delay_seconds={retry_delay_seconds:.3f} "
@@ -275,12 +268,12 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 )
                 yield ProgressUpdateEvent(
                     text=(
-                        f"OpenAI rate limit reached. Waiting about {retry_delay_seconds:.1f}s before retry "
+                        f"The model run hit an error. Waiting about {retry_delay_seconds:.1f}s before retry "
                         f"({attempt_number}/{total_attempts})."
                     )
                 )
 
-                if conversation_id:
+                if conversation_id and run_started:
                     dangling_tool_calls = await self._close_dangling_tool_calls(
                         conversation_id,
                         exc,
@@ -290,9 +283,15 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                             text=f"Recovered {dangling_tool_calls} unfinished tool call(s) before retrying."
                         )
 
+                if attempt >= max_retries:
+                    self.logger.exception(
+                        f"respond.error thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} previous_response_id={previous_response_id}"
+                    )
+                    raise
+
                 if retry_delay_seconds >= 5:
                     yield ProgressUpdateEvent(
-                        text="Still working. The model hit a temporary limit and will continue automatically."
+                        text="Still working. The server will keep retrying automatically."
                     )
 
                 await asyncio.sleep(retry_delay_seconds)
@@ -392,9 +391,11 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         except ValueError:
             return None
 
-    def _is_retryable_stream_error(self, exc: Exception) -> bool:
-        message = str(exc).lower()
-        return "rate limit" in message or "try again in" in message
+    def _compute_retry_delay_seconds(self, exc: Exception) -> float:
+        hinted_delay = self._extract_retry_delay_seconds(exc)
+        if hinted_delay is not None:
+            return hinted_delay
+        return max(0.0, 2.0 + random.uniform(-0.5, 0.5))
 
     async def _list_conversation_items(
         self, conversation_id: str, *, limit: int = 100

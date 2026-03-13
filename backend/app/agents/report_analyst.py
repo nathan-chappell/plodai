@@ -2,6 +2,8 @@ from agents import Agent
 from chatkit.agents import AgentContext as ChatKitAgentContext
 from agents.model_settings import ModelSettings
 
+COMPACTION_THRESHOLD_TOKENS = 200_000
+
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.tools import build_report_tools
 
@@ -85,7 +87,17 @@ def build_report_analyst(
         model=model,
         instructions=instructions,
         tools=list(build_report_tools(context)),
-        model_settings=ModelSettings(parallel_tool_calls=False),
+        model_settings=ModelSettings(
+            parallel_tool_calls=False,
+            extra_args={
+                "context_management": [
+                    {
+                        "type": "compaction",
+                        "compact_threshold": COMPACTION_THRESHOLD_TOKENS,
+                    }
+                ]
+            },
+        ),
         tool_use_behavior={
             "stop_at_tool_names": [
                 "list_attached_csv_files",
