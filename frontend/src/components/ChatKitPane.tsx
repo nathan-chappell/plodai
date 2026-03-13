@@ -4,9 +4,7 @@ import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-rea
 
 import { authenticatedFetch, getChatKitConfig } from "../lib/api";
 import { executeClientTool } from "../lib/chatkit-tools";
-import { buildInitialThreadMetadata, buildThreadMetadataUpdateAction } from "../lib/thread-metadata";
 import type {
-  AppThreadMetadata,
   ClientEffect,
   ClientToolCall,
   ClientToolName,
@@ -186,7 +184,6 @@ export function ChatKitHarness({
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
 }) {
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
@@ -204,19 +201,6 @@ export function ChatKitHarness({
   useEffect(() => {
     onEffectsRef.current = onEffects;
   }, [onEffects]);
-
-  const metadata = useMemo<AppThreadMetadata>(
-    () =>
-      buildInitialThreadMetadata({
-        title: investigationBrief.trim()
-          ? investigationBrief.trim().slice(0, 80)
-          : datasets.length
-            ? `Analysis of ${datasets.length} CSV files`
-            : "New report",
-        investigation_brief: investigationBrief.trim() || undefined,
-      }),
-    [datasets.length, investigationBrief],
-  );
 
   const starterPrompts = useMemo(
     () => prompts ?? buildStarterPrompts(investigationBrief),
@@ -311,27 +295,11 @@ export function ChatKitHarness({
         }
         onEffectsRef.current([event.data as ClientEffect]);
       },
-      onThreadChange: ({ threadId }) => {
-        setActiveThreadId(threadId);
-      },
     }),
     [colorScheme, composerPlaceholder, datasets.length, greeting, headerTitle, investigationBrief, showDictation, starterPrompts],
   );
 
   const chatKit = useChatKit(options);
-
-  useEffect(() => {
-    if (!activeThreadId) {
-      return;
-    }
-
-    void chatKit.sendCustomAction(
-      buildThreadMetadataUpdateAction({
-        title: metadata.title,
-        investigation_brief: metadata.investigation_brief,
-      }),
-    );
-  }, [activeThreadId, chatKit, metadata]);
 
   async function handleQuickAction(action: ChatKitQuickAction) {
     setStatus(`Starting ${action.label.toLowerCase()}.`);
