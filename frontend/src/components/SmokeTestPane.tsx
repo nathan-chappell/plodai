@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import styled from "styled-components";
 
+import { createReportFoundryClientTools, reportFoundryCapability } from "../capabilities/reportFoundry";
 import { ChatKitHarness } from "./ChatKitPane";
 import { DatasetChart } from "./DatasetChart";
 import { createSmokeDatasets, runFrontendSmokeTest, type FrontendSmokeResult } from "../lib/smoke";
@@ -191,8 +192,10 @@ export function SmokeTestPane({
       </Expectations>
 
       <ChatKitHarness
+        capabilityId={reportFoundryCapability.id}
         datasets={smokeDatasets}
         investigationBrief="Run the systems smoke scenario against the bundled CSV files and show the real browser rendering path."
+        clientTools={createReportFoundryClientTools(smokeDatasets)}
         headerTitle="Smoke harness"
         greeting="Run the forcing prompt against bundled CSV fixtures."
         composerPlaceholder="Use the forcing prompt or explore the smoke fixtures manually"

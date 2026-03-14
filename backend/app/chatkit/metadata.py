@@ -1,4 +1,4 @@
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from backend.app.chatkit.usage import ThreadUsageTotals, empty_usage_totals
 
@@ -10,6 +10,14 @@ class AnalysisPlan(TypedDict):
     success_criteria: NotRequired[list[str]]
 
 
+class ClientToolDefinition(TypedDict, total=False):
+    type: Literal["function"]
+    name: str
+    description: str
+    parameters: dict[str, object] | None
+    strict: bool
+
+
 class ThreadMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
@@ -18,6 +26,8 @@ class ThreadMetadataPatch(TypedDict, total=False):
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
+    capability_id: str
+    client_tools: list[ClientToolDefinition]
 
 
 class AppThreadMetadata(TypedDict, total=False):
@@ -28,6 +38,8 @@ class AppThreadMetadata(TypedDict, total=False):
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
+    capability_id: str
+    client_tools: list[ClientToolDefinition]
 
 
 def _normalize_usage(raw_usage: object) -> ThreadUsageTotals | None:
@@ -91,6 +103,32 @@ def _normalize_analysis_plan(raw_plan: object) -> AnalysisPlan | None:
     return plan
 
 
+def _normalize_client_tools(raw_tools: object) -> list[ClientToolDefinition] | None:
+    if not isinstance(raw_tools, list):
+        return None
+
+    tools: list[ClientToolDefinition] = []
+    for raw_tool in raw_tools:
+        if not isinstance(raw_tool, dict):
+            continue
+        name = raw_tool.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        parameters = raw_tool.get("parameters")
+        if parameters is not None and not isinstance(parameters, dict):
+            parameters = None
+        tool: ClientToolDefinition = {
+            "type": "function",
+            "name": name.strip(),
+            "description": str(raw_tool.get("description", "")).strip(),
+            "parameters": parameters,
+            "strict": bool(raw_tool.get("strict", True)),
+        }
+        tools.append(tool)
+
+    return tools
+
+
 def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if not isinstance(raw_metadata, dict):
         return {}
@@ -124,6 +162,14 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     previous_response_id = raw_metadata.get("openai_previous_response_id")
     if isinstance(previous_response_id, str) and previous_response_id:
         metadata["openai_previous_response_id"] = previous_response_id
+
+    capability_id = raw_metadata.get("capability_id")
+    if isinstance(capability_id, str) and capability_id.strip():
+        metadata["capability_id"] = capability_id.strip()
+
+    client_tools = _normalize_client_tools(raw_metadata.get("client_tools"))
+    if client_tools:
+        metadata["client_tools"] = client_tools
 
     usage = _normalize_usage(raw_metadata.get("usage"))
     if usage is not None:

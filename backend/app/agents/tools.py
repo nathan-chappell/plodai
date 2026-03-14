@@ -1,4 +1,5 @@
-from typing import Literal
+import json
+from typing import Any, Literal
 
 from agents import FunctionTool, function_tool
 from agents.tool_context import ToolContext
@@ -38,6 +39,64 @@ def _log_tool_end(
     )
     logger.info(
         f"tool.end name={tool_name} report_id={context.report_id} user_email={context.user_email} {detail_text}"
+    )
+
+
+def get_client_tool_names(context: ReportAgentContext) -> list[str]:
+    registered_tool_names = [
+        tool["name"] for tool in context.client_tools if tool.get("name")
+    ]
+    if registered_tool_names:
+        return registered_tool_names
+    return [
+        "list_attached_csv_files",
+        "run_aggregate_query",
+        "request_chart_render",
+    ]
+
+
+def _build_client_tool_proxy(tool_definition: dict[str, Any]) -> FunctionTool:
+    tool_name = str(tool_definition.get("name", "")).strip()
+    if not tool_name:
+        raise ValueError("Client tool definition must include a name.")
+
+    description = str(tool_definition.get("description", "")).strip() or (
+        f"Ask the client to execute the '{tool_name}' tool locally."
+    )
+    params_json_schema = tool_definition.get("parameters")
+    if not isinstance(params_json_schema, dict):
+        params_json_schema = {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": True,
+        }
+    strict_json_schema = bool(tool_definition.get("strict", True))
+
+    async def on_invoke_tool(ctx: ChatKitToolContext, input_json: str) -> Any:
+        request_context = ctx.context.request_context
+        try:
+            arguments = json.loads(input_json) if input_json else {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid client tool arguments for {tool_name}.") from exc
+        if not isinstance(arguments, dict):
+            raise ValueError(
+                f"Client tool {tool_name} expects object arguments, got {type(arguments).__name__}."
+            )
+        _log_tool_start(request_context, tool_name, mode="client_proxy")
+        await ctx.context.stream(
+            ProgressUpdateEvent(text=f"Requesting client tool {tool_name}.")
+        )
+        client_tool_call = ClientToolCall(name=tool_name, arguments=arguments)
+        ctx.context.client_tool_call = client_tool_call
+        _log_tool_end(request_context, tool_name, mode="client_tool_call")
+        return client_tool_call.model_dump(mode="json")
+
+    return FunctionTool(
+        name=tool_name,
+        description=description,
+        params_json_schema=params_json_schema,
+        on_invoke_tool=on_invoke_tool,
+        strict_json_schema=strict_json_schema,
     )
 
 
@@ -119,34 +178,6 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
         )
         return result
 
-    @function_tool(name_override="list_attached_csv_files")
-    async def list_attached_csv_files_tool(
-        ctx: ChatKitToolContext,
-    ) -> dict:
-        """List the CSV files currently available to analyze by asking the client for its local file inventory."""
-        request_context = ctx.context.request_context
-        _log_tool_start(
-            request_context,
-            "list_attached_csv_files",
-            known_csv_file_count=len(request_context.available_datasets),
-        )
-        await ctx.context.stream(
-            ProgressUpdateEvent(
-                text="Requesting the current CSV file inventory from the client."
-            )
-        )
-        client_tool_call = ClientToolCall(
-            name="list_attached_csv_files",
-            arguments={"includeSamples": True},
-        )
-        ctx.context.client_tool_call = client_tool_call
-        _log_tool_end(
-            request_context,
-            "list_attached_csv_files",
-            mode="client_tool_call",
-        )
-        return client_tool_call.model_dump(mode="json")
-
     @function_tool(name_override="append_report_section")
     async def append_report_section_tool(
         ctx: ChatKitToolContext,
@@ -191,7 +222,6 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
         [
             name_current_thread_tool,
             plan_analysis_tool,
-            list_attached_csv_files_tool,
             append_report_section_tool,
         ]
     )
@@ -235,6 +265,38 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
             numeric_count=len(result["numeric_columns"]),
         )
         return result
+
+    if context.client_tools:
+        tools.extend(_build_client_tool_proxy(tool_definition) for tool_definition in context.client_tools)
+        return tools
+
+    @function_tool(name_override="list_attached_csv_files")
+    async def list_attached_csv_files_tool(
+        ctx: ChatKitToolContext,
+    ) -> dict:
+        """List the CSV files currently available to analyze by asking the client for its local file inventory."""
+        request_context = ctx.context.request_context
+        _log_tool_start(
+            request_context,
+            "list_attached_csv_files",
+            known_csv_file_count=len(request_context.available_datasets),
+        )
+        await ctx.context.stream(
+            ProgressUpdateEvent(
+                text="Requesting the current CSV file inventory from the client."
+            )
+        )
+        client_tool_call = ClientToolCall(
+            name="list_attached_csv_files",
+            arguments={"includeSamples": True},
+        )
+        ctx.context.client_tool_call = client_tool_call
+        _log_tool_end(
+            request_context,
+            "list_attached_csv_files",
+            mode="client_tool_call",
+        )
+        return client_tool_call.model_dump(mode="json")
 
     @function_tool(name_override="run_aggregate_query")
     async def run_aggregate_query_tool(
@@ -312,6 +374,7 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
     tools.extend(
         [
+            list_attached_csv_files_tool,
             inspect_csv_file_schema_tool,
             run_aggregate_query_tool,
             request_chart_render_tool,

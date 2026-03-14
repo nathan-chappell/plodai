@@ -1,5 +1,6 @@
 ﻿import json
 import re
+import subprocess
 from pathlib import Path
 
 import typer
@@ -58,8 +59,23 @@ def release(
     resolved_version = resolve_release_version(version)
     update_all_versions(resolved_version)
     typer.echo(f"Prepared release version {resolved_version}")
-    typer.echo("")
-    typer.echo(release_instructions(version=resolved_version, remote=remote, image=image))
+
+    message = release_commit_message(version=resolved_version)
+    image_version = f"{image}:{resolved_version}"
+    image_latest = f"{image}:latest"
+
+    run_command(["npm", "run", "build"])
+    run_command(["docker", "build", "-t", image_version, "."])
+    run_command(["docker", "push", image_version])
+    run_command(["git", "add", "-A"])
+    run_command(["git", "commit", "-m", message])
+    run_command(["git", "tag", f"v{resolved_version}"])
+    run_command(["git", "push", remote])
+    run_command(["git", "push", remote, f"v{resolved_version}"])
+    run_command(["docker", "tag", image_version, image_latest])
+    run_command(["docker", "push", image_latest])
+
+    typer.echo(f"Release {resolved_version} completed.")
 
 
 def update_all_versions(version: str) -> None:
@@ -105,26 +121,25 @@ def release_commit_message(*, version: str) -> str:
     return f"chore(release): {version}"
 
 
-def release_instructions(*, version: str, remote: str, image: str) -> str:
-    message = release_commit_message(version=version)
-    return "\n".join(
-        [
-            message,
-            "",
-            "Run these commands manually:",
-            "",
-            "npm run build",
-            f"docker build -t {image}:{version} .",
-            f"docker push {image}:{version}",
-            "git add -A",
-            f'git commit -m "{message}"',
-            f"git tag v{version}",
-            f"git push {remote}",
-            f"git push {remote} v{version}",
-            f"docker tag {image}:{version} {image}:latest",
-            f"docker push {image}:latest",
-        ]
-    )
+def run_command(command: list[str]) -> None:
+    typer.echo(format_command(command))
+    try:
+        subprocess.run(command, check=True)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(f"Command not found: {command[0]}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise typer.Exit(exc.returncode) from exc
+
+
+def format_command(command: list[str]) -> str:
+    return " ".join(_quote_part(part) for part in command)
+
+
+def _quote_part(part: str) -> str:
+    if re.fullmatch(r"[\w./:@=-]+", part):
+        return part
+    escaped = part.replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def read_package_version(path: Path) -> str:

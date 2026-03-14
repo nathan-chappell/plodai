@@ -5,7 +5,7 @@ from agents.model_settings import ModelSettings
 COMPACTION_THRESHOLD_TOKENS = 200_000
 
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.tools import build_report_tools
+from backend.app.agents.tools import build_report_tools, get_client_tool_names
 
 
 REPORT_ANALYST_INSTRUCTIONS = """
@@ -81,6 +81,7 @@ def build_report_analyst(
         )
 
     instructions = f"{REPORT_ANALYST_INSTRUCTIONS}{brief_section}"
+    client_tool_names = get_client_tool_names(context)
 
     return Agent[ChatKitAgentContext[ReportAgentContext]](
         name="Report Foundry Analyst",
@@ -99,10 +100,6 @@ def build_report_analyst(
             },
         ),
         tool_use_behavior={
-            "stop_at_tool_names": [
-                "list_attached_csv_files",
-                "run_aggregate_query",
-                "request_chart_render",
-            ]
+            "stop_at_tool_names": client_tool_names
         },
     )

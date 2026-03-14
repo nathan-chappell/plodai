@@ -50,6 +50,7 @@ from backend.app.chatkit.client_tools import (
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
     ThreadMetadataPatch,
+    ClientToolDefinition,
     merge_thread_metadata,
     normalize_thread_metadata,
 )
@@ -183,6 +184,8 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             thread_metadata=metadata,
             available_datasets=datasets,
             query_plan_model=query_plan_model,
+            capability_id=metadata.get("capability_id"),
+            client_tools=list(metadata.get("client_tools") or []),
         )
 
     async def respond(
@@ -207,6 +210,8 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         context.available_datasets = self._datasets_from_recent_items(recent_item_data)
         context.dataset_ids = [dataset.id for dataset in context.available_datasets]
         context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
+        context.capability_id = typed_metadata.get("capability_id")
+        context.client_tools = list(typed_metadata.get("client_tools") or [])
 
         pending_items = self._collect_pending_items(
             recent_item_data,
@@ -594,6 +599,28 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
 
+        if action.type == "register_client_tools" and isinstance(action.payload, dict):
+            raw_tools = action.payload.get("client_tools")
+            client_tools = normalize_thread_metadata({"client_tools": raw_tools}).get(
+                "client_tools", []
+            )
+            current_metadata = normalize_thread_metadata(thread.metadata)
+            patch: ThreadMetadataPatch = {
+                "client_tools": client_tools,
+            }
+            capability_id = action.payload.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                patch["capability_id"] = capability_id.strip()
+            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
+            await self.store.save_thread(thread, context=context)
+            self.logger.info(
+                f"client_tools.registered thread_id={thread.id} user_email={context.user_email} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
+            )
+            yield ProgressUpdateEvent(
+                text=f"Registered {len(client_tools)} client tools for this capability."
+            )
+            return
+
         yield ProgressUpdateEvent(text=f"Unhandled action: {action.type}")
 
     async def sync_action(
@@ -612,6 +639,23 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             await self.store.save_thread(thread, context=context)
             self.logger.info(
                 f"thread_metadata.sync_updated thread_id={thread.id} user_email={context.user_email} title={summarize_for_log(thread.title or '')}"
+            )
+        elif action.type == "register_client_tools" and isinstance(action.payload, dict):
+            raw_tools = action.payload.get("client_tools")
+            client_tools = normalize_thread_metadata({"client_tools": raw_tools}).get(
+                "client_tools", []
+            )
+            current_metadata = normalize_thread_metadata(thread.metadata)
+            patch: ThreadMetadataPatch = {
+                "client_tools": client_tools,
+            }
+            capability_id = action.payload.get("capability_id")
+            if isinstance(capability_id, str) and capability_id.strip():
+                patch["capability_id"] = capability_id.strip()
+            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
+            await self.store.save_thread(thread, context=context)
+            self.logger.info(
+                f"client_tools.sync_registered thread_id={thread.id} user_email={context.user_email} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
             )
         return SyncCustomActionResponse(updated_item=sender)
 

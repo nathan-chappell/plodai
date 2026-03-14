@@ -3,13 +3,8 @@ import styled from "styled-components";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig } from "../lib/api";
-import { executeClientTool } from "../lib/chatkit-tools";
-import type {
-  ClientEffect,
-  ClientToolCall,
-  ClientToolName,
-  DataRow,
-} from "../types/analysis";
+import type { CapabilityClientTool } from "../capabilities/types";
+import type { ClientEffect, ClientToolCall, ClientToolName, DataRow } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
 import { emptyStateCss } from "../ui/primitives";
 
@@ -33,7 +28,8 @@ const CHATKIT_MODEL_CHOICES = [
 ] as const;
 const CHATKIT_DEFAULT_MODEL_LABEL =
   CHATKIT_MODEL_CHOICES.find((choice) => choice.id === CHATKIT_DEFAULT_MODEL_ID)?.label ?? "Lightweight";
-const CHATKIT_TOOLS: ClientToolName[] = ["list_attached_csv_files", "run_aggregate_query", "request_chart_render"];
+const FALLBACK_CHATKIT_TOOLS: ClientToolName[] = ["list_attached_csv_files", "run_aggregate_query", "request_chart_render"];
+const REGISTER_CLIENT_TOOLS_ACTION = "register_client_tools";
 
 const Card = styled.section`
   position: sticky;
@@ -162,9 +158,11 @@ export type ChatKitQuickAction = {
 };
 
 export function ChatKitHarness({
+  capabilityId,
   datasets,
   investigationBrief,
   onEffects,
+  clientTools,
   headerTitle = "Report Foundry",
   greeting,
   prompts,
@@ -173,9 +171,11 @@ export function ChatKitHarness({
   colorScheme = "dark",
   showDictation = true,
 }: {
+  capabilityId: string;
   datasets: LocalDataset[];
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
+  clientTools: CapabilityClientTool[];
   headerTitle?: string;
   greeting?: string;
   prompts?: ReadonlyArray<{ label: string; prompt: string; icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle" }>;
@@ -186,6 +186,7 @@ export function ChatKitHarness({
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
 
   const loadedDatasets = useMemo(
     () => datasets.map((dataset) => ({ ...dataset, rows: (dataset.rows as DataRow[]) ?? dataset.sample_rows })),
@@ -193,6 +194,8 @@ export function ChatKitHarness({
   );
   const loadedDatasetsRef = useRef(loadedDatasets);
   const onEffectsRef = useRef(onEffects);
+  const clientToolsRef = useRef(clientTools);
+  const registeredCatalogRef = useRef<string | null>(null);
 
   useEffect(() => {
     loadedDatasetsRef.current = loadedDatasets;
@@ -202,9 +205,29 @@ export function ChatKitHarness({
     onEffectsRef.current = onEffects;
   }, [onEffects]);
 
+  useEffect(() => {
+    clientToolsRef.current = clientTools;
+  }, [clientTools]);
+
   const starterPrompts = useMemo(
     () => prompts ?? buildStarterPrompts(investigationBrief),
     [investigationBrief, prompts],
+  );
+  const chatKitTools = useMemo(
+    () => (clientTools.length ? clientTools.map((tool) => tool.name as ClientToolName) : FALLBACK_CHATKIT_TOOLS),
+    [clientTools],
+  );
+  const clientToolCatalog = useMemo(
+    () =>
+      clientTools.map(({ handler: _handler, ...tool }) => ({
+        ...tool,
+        strict: tool.strict ?? true,
+      })),
+    [clientTools],
+  );
+  const clientToolCatalogKey = useMemo(
+    () => JSON.stringify({ capabilityId, tools: clientToolCatalog }),
+    [capabilityId, clientToolCatalog],
   );
 
   const options = useMemo<UseChatKitOptions>(
@@ -256,7 +279,7 @@ export function ChatKitHarness({
           ...choice,
           default: choice.id === CHATKIT_DEFAULT_MODEL_ID,
         })),
-        tools: CHATKIT_TOOLS.map((tool) => ({
+        tools: chatKitTools.map((tool) => ({
           id: tool,
           label: formatToolLabel(tool),
           icon: toolIcon(tool),
@@ -273,18 +296,22 @@ export function ChatKitHarness({
         setRunning(false);
         setStatus("Agent run finished.");
       },
+      onThreadChange: ({ threadId: nextThreadId }) => {
+        setThreadId(nextThreadId);
+      },
       onClientTool: async ({ name, params }) => {
-        const result = await executeClientTool(
-          {
-            name: name as ClientToolName,
-            arguments: params as ClientToolCall<ClientToolName>["arguments"],
-          },
-          loadedDatasetsRef.current,
-        );
-        if (result.effects.length) {
-          onEffectsRef.current(result.effects);
+        const tool = clientToolsRef.current.find((candidate) => candidate.name === name);
+        if (!tool) {
+          throw new Error(`Unknown client tool: ${name}`);
         }
-        return result.payload;
+        return tool.handler(params as ClientToolCall<ClientToolName>["arguments"], {
+          emitEffect: (effect) => onEffectsRef.current([effect]),
+          emitEffects: (effects) => {
+            if (effects.length) {
+              onEffectsRef.current(effects);
+            }
+          },
+        });
       },
       onEffect: (event) => {
         if (!event.data) {
@@ -296,10 +323,44 @@ export function ChatKitHarness({
         onEffectsRef.current([event.data as ClientEffect]);
       },
     }),
-    [colorScheme, composerPlaceholder, datasets.length, greeting, headerTitle, investigationBrief, showDictation, starterPrompts],
+    [
+      chatKitTools,
+      colorScheme,
+      composerPlaceholder,
+      datasets.length,
+      greeting,
+      headerTitle,
+      investigationBrief,
+      showDictation,
+      starterPrompts,
+    ],
   );
 
   const chatKit = useChatKit(options);
+
+  useEffect(() => {
+    if (!threadId || !clientToolCatalog.length) {
+      return;
+    }
+    const registrationKey = `${threadId}:${clientToolCatalogKey}`;
+    if (registeredCatalogRef.current === registrationKey) {
+      return;
+    }
+    registeredCatalogRef.current = registrationKey;
+    void chatKit
+      .sendCustomAction({
+        type: REGISTER_CLIENT_TOOLS_ACTION,
+        payload: {
+          capability_id: capabilityId,
+          client_tools: clientToolCatalog,
+        },
+      })
+      .then(() => setStatus("Client tools registered for this capability."))
+      .catch((error) => {
+        registeredCatalogRef.current = null;
+        setStatus(error instanceof Error ? error.message : "Unable to register client tools.");
+      });
+  }, [capabilityId, chatKit, clientToolCatalog, clientToolCatalogKey, threadId]);
 
   async function handleQuickAction(action: ChatKitQuickAction) {
     setStatus(`Starting ${action.label.toLowerCase()}.`);
@@ -335,14 +396,18 @@ export function ChatKitHarness({
 }
 
 export function ChatKitPane({
+  capabilityId,
   enabled,
   datasets,
   investigationBrief,
+  clientTools,
   onEffects,
 }: {
+  capabilityId: string;
   enabled: boolean;
   datasets: LocalDataset[];
   investigationBrief: string;
+  clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
 }) {
   const canInvestigate = enabled && datasets.length > 0;
@@ -361,8 +426,10 @@ export function ChatKitPane({
       <Meta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</Meta>
       {canInvestigate ? (
         <ChatKitHarness
+          capabilityId={capabilityId}
           datasets={datasets}
           investigationBrief={investigationBrief}
+          clientTools={clientTools}
           onEffects={onEffects}
         />
       ) : (
