@@ -6,11 +6,11 @@ from pathlib import Path
 import typer
 
 
-app = typer.Typer(help="Version bump and release checklist helper for Report Foundry.")
+app = typer.Typer(help="Version bump and release checklist helper for AI Portfolio.")
 PACKAGE_JSON = Path() / "package.json"
 PACKAGE_LOCK_JSON = Path() / "package-lock.json"
 BACKEND_MAIN = Path() / "backend" / "app" / "main.py"
-DEFAULT_IMAGE = "nathanschappell/report-foundry"
+DEFAULT_IMAGE = "nathanschappell/ai-portfolio"
 
 
 @app.command()
@@ -65,13 +65,13 @@ def release(
     image_latest = f"{image}:latest"
 
     run_command(["npm", "run", "build"])
-    run_command(["docker", "build", "-t", image_version, "."])
-    run_command(["docker", "push", image_version])
     run_command(["git", "add", "-A"])
     run_command(["git", "commit", "-m", message])
     run_command(["git", "tag", f"v{resolved_version}"])
     run_command(["git", "push", remote])
     run_command(["git", "push", remote, f"v{resolved_version}"])
+    run_command(["docker", "build", "-t", image_version, "."])
+    run_command(["docker", "push", image_version])
     run_command(["docker", "tag", image_version, image_latest])
     run_command(["docker", "push", image_latest])
 

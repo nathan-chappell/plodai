@@ -23,7 +23,7 @@ import type { LocalDataset } from "../types/report";
 import { MetaText, displayHeadingCss, panelSurfaceCss } from "../ui/primitives";
 import type { CapabilityClientTool, CapabilityDefinition } from "./types";
 
-const BRIEF_STORAGE_KEY = "report-foundry-investigation-brief";
+const BRIEF_STORAGE_KEY = "ai-portfolio-report-foundry-brief";
 
 type WorkspaceTab = "report" | "datasets" | "goal" | "smoke" | "admin";
 
@@ -304,10 +304,10 @@ export function createReportFoundryClientTools(datasets: LocalDataset[]): Capabi
 export const reportFoundryCapability: CapabilityDefinition = {
   id: "report-foundry",
   path: "/capabilities/report-foundry",
-  navLabel: "Report Foundry",
-  title: "Investigative CSV analytics",
+  navLabel: "Report Foundry Legacy",
+  title: "Report Foundry legacy workspace",
   eyebrow: "Capability",
-  description: "Profile local CSVs, explore them safely, and assemble report sections and charts in a guided workspace.",
+  description: "The original CSV investigation workspace, kept as a legacy capability inside AI Portfolio.",
   tabs: [
     { id: "report", label: "Report" },
     { id: "datasets", label: "Datasets" },

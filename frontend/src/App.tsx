@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
 
 import { PlatformShell } from "./components/PlatformShell";
+import { SignInPage } from "./components/SignInPage";
 import { ReportFoundryPage, reportFoundryCapability } from "./capabilities/reportFoundry";
+import { DEFAULT_AUTHENTICATED_PATH, SIGN_IN_PATH, isClerkEnabled } from "./lib/auth";
 import { navigate, usePathname } from "./lib/router";
 import { apiRequest, getStoredToken, storeToken } from "./lib/api";
 import type { AuthUser } from "./types/auth";
@@ -25,10 +27,12 @@ function resolveCapability(pathname: string) {
 export function App() {
   const pathname = usePathname();
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [hydrating, setHydrating] = useState(true);
 
   useEffect(() => {
     async function hydrateUser() {
-      if (!getStoredToken()) {
+      if (!getStoredToken() && !isClerkEnabled()) {
+        setHydrating(false);
         return;
       }
       try {
@@ -36,6 +40,8 @@ export function App() {
         setUser(me);
       } catch {
         storeToken(null);
+      } finally {
+        setHydrating(false);
       }
     }
 
@@ -44,11 +50,37 @@ export function App() {
 
   useEffect(() => {
     if (pathname === "/") {
-      navigate(reportFoundryCapability.path);
+      navigate(user ? DEFAULT_AUTHENTICATED_PATH : SIGN_IN_PATH);
     }
-  }, [pathname]);
+  }, [pathname, user]);
+
+  useEffect(() => {
+    if (hydrating) {
+      return;
+    }
+    if (!user && pathname !== SIGN_IN_PATH) {
+      navigate(SIGN_IN_PATH);
+      return;
+    }
+    if (user && pathname === SIGN_IN_PATH) {
+      navigate(DEFAULT_AUTHENTICATED_PATH);
+    }
+  }, [hydrating, pathname, user]);
 
   const activeCapability = useMemo(() => resolveCapability(pathname), [pathname]);
+
+  if (hydrating) {
+    return (
+      <EmptyState>
+        <strong>Loading session</strong>
+        <MetaText>Checking whether you already have an authenticated workspace session.</MetaText>
+      </EmptyState>
+    );
+  }
+
+  if (!user) {
+    return <SignInPage onAuthenticated={setUser} />;
+  }
 
   return (
     <PlatformShell
@@ -65,17 +97,7 @@ export function App() {
         </EmptyState>
       ) : null}
 
-      {activeCapability?.id === reportFoundryCapability.id && user ? <ReportFoundryPage user={user} /> : null}
-
-      {activeCapability?.id === reportFoundryCapability.id && !user ? (
-        <EmptyState>
-          <strong>{reportFoundryCapability.title}</strong>
-          <MetaText>
-            Sign in to open this capability. The page shell is now route-based, so additional capabilities can slot in
-            beside this one without reworking the app root.
-          </MetaText>
-        </EmptyState>
-      ) : null}
+      {activeCapability?.id === reportFoundryCapability.id ? <ReportFoundryPage user={user} /> : null}
     </PlatformShell>
   );
 }

@@ -372,7 +372,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         context: ReportAgentContext,
     ) -> str:
         metadata: dict[str, str] = {
-            "app": "report-foundry",
+            "app": "ai-portfolio",
             "thread_id": thread.id,
             "user_email": context.user_email,
         }

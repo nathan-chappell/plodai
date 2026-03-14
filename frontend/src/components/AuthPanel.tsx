@@ -1,6 +1,8 @@
 import { FormEvent, useState } from "react";
 import styled from "styled-components";
 
+import { isClerkEnabled } from "../lib/auth";
+import { signOutClerk } from "../lib/clerk";
 import { apiRequest, storeToken } from "../lib/api";
 import type { AuthUser, LoginResponse } from "../types/auth";
 import { MetaText, inputSurfaceCss, panelSurfaceCss, primaryButtonCss } from "../ui/primitives";
@@ -78,8 +80,11 @@ export function AuthPanel({
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     storeToken(null);
+    if (isClerkEnabled()) {
+      await signOutClerk();
+    }
     onAuthenticated(null);
     setMessage("Signed out.");
   }
@@ -91,10 +96,10 @@ export function AuthPanel({
         {subtitle ? <MetaText>{subtitle}</MetaText> : null}
         <strong>{user.full_name || user.email}</strong>
         <MetaText as="div">
-          {user.email} · {user.role}
+          {user.email} | {user.role}
         </MetaText>
         <Actions>
-          <Button onClick={handleLogout} type="button">
+          <Button onClick={() => void handleLogout()} type="button">
             Sign out
           </Button>
         </Actions>

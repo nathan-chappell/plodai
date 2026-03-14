@@ -26,6 +26,11 @@ router = APIRouter(prefix="/api")
 @router.post("/auth/login", response_model=AuthTokenResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
+    if service.settings.CLERK_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Password login is disabled while Clerk auth is enabled.",
+        )
     result = await service.login(payload.email, payload.password)
     if result is None:
         raise HTTPException(

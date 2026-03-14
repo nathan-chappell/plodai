@@ -84,7 +84,7 @@ def build_report_analyst(
     client_tool_names = get_client_tool_names(context)
 
     return Agent[ChatKitAgentContext[ReportAgentContext]](
-        name="Report Foundry Analyst",
+        name="AI Portfolio Analyst",
         model=model,
         instructions=instructions,
         tools=list(build_report_tools(context)),

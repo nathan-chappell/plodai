@@ -1,6 +1,6 @@
-# Report Foundry
+# AI Portfolio
 
-Report Foundry is a demo app for showing agentic CSV analysis with a FastAPI backend and a Vite TypeScript React frontend. The Python app code lives under `backend/`, while the frontend source lives under `frontend/`.
+AI Portfolio is a demo app for showcasing agentic capabilities with a FastAPI backend and a Vite TypeScript React frontend. The original Report Foundry CSV workflow now lives inside the app as a legacy capability. The Python app code lives under `backend/`, while the frontend source lives under `frontend/`.
 
 ## Why this shape
 

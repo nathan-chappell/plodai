@@ -69,7 +69,7 @@ const Expectations = styled.ul`
 `;
 
 const FORCING_PROMPT = [
-  "This is a system smoke test for Report Foundry.",
+  "This is a system smoke test for AI Portfolio.",
   "Use the attached CSV file tools that are already available in this thread.",
   "Start by listing the attached CSV files.",
   "Create exactly three charts from the sales fixture: a bar chart of revenue by region, a line chart of revenue by month, and a pie chart of revenue by category.",

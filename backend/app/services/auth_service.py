@@ -40,6 +40,13 @@ class AuthService:
             return None
         return self.issue_token(user), user
 
+    async def get_active_user_by_email(self, email: str) -> User | None:
+        normalized = email.strip().lower()
+        result = await self.db.execute(
+            select(User).where(User.email == normalized, User.is_active.is_(True))
+        )
+        return result.scalar_one_or_none()
+
     def issue_token(self, user: User) -> str:
         return self.serializer.dumps(
             {"sub": user.id, "email": user.email, "role": user.role}

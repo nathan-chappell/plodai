@@ -18,11 +18,15 @@ class Settings(BaseSettings):
     bootstrap_admin_name: str = "Built-in Admin"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
+    clerk_authorized_parties: list[str] = []
+    clerk_clock_skew_ms: int = 5000
 
     BOOTSTRAP_ADMIN_PASSWORD: str = Field(init=False)
     AUTH_SECRET_KEY: str = Field(init=False)
     OPENAI_API_KEY: str = Field(init=False)
     CORS_ORIGINS: list[str] = Field(init=False)
+    CLERK_SECRET_KEY: str | None = None
+    CLERK_JWT_KEY: str | None = None
 
     @property
     def async_database_url(self) -> str:

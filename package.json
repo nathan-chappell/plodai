@@ -1,5 +1,5 @@
 {
-  "name": "report-foundry-frontend",
+  "name": "ai-portfolio-frontend",
   "version": "0.8.3",
   "private": true,
   "type": "module",
@@ -11,6 +11,7 @@
     "build:watch": "vite build --watch --config frontend/vite.config.ts"
   },
   "dependencies": {
+    "@clerk/clerk-js": "^6.3.0",
     "@openai/chatkit": "^1.0.0",
     "@openai/chatkit-react": "^1.0.0",
     "chart.js": "^4.4.9",

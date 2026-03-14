@@ -48,8 +48,8 @@ async def lifespan(_: FastAPI):
 
 
 configure_logging()
-print(f"report-foundry api version={_read_version()}")
-print(f"report-foundry api root={ROOT_DIR}")
+print(f"ai-portfolio api version={_read_version()}")
+print(f"ai-portfolio api root={ROOT_DIR}")
 settings = get_settings()
 logger = get_logger("main")
 if settings.OPENAI_API_KEY:
@@ -64,9 +64,9 @@ if settings.OPENAI_API_KEY:
     )
 
 app = FastAPI(
-    title="Report Foundry API",
+    title="AI Portfolio API",
     version="0.8.3",
-    description="Agentic CSV analysis demo backend.",
+    description="Agentic capability platform backend.",
     lifespan=lifespan,
 )
 

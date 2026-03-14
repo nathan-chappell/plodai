@@ -163,7 +163,7 @@ export function ChatKitHarness({
   investigationBrief,
   onEffects,
   clientTools,
-  headerTitle = "Report Foundry",
+  headerTitle = "AI Portfolio",
   greeting,
   prompts,
   composerPlaceholder,
