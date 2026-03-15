@@ -279,6 +279,105 @@ export const AdminPanelMessage = styled(MetaText)`
   color: var(--sidebar-ink);
 `;
 
+export const AdminPanelToolbar = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.45rem;
+  align-items: center;
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+export const AdminPanelTableWrap = styled.div`
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.58);
+`;
+
+export const AdminPanelTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+`;
+
+export const AdminPanelHeaderCell = styled.th`
+  ${tableHeaderCellCss};
+  padding: 0.7rem 0.8rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.45);
+`;
+
+export const AdminPanelCell = styled.td`
+  ${tableBodyCellCss};
+  padding: 0.75rem 0.8rem;
+  vertical-align: top;
+`;
+
+export const AdminPanelActionCell = styled(AdminPanelCell)`
+  white-space: nowrap;
+  width: 1%;
+`;
+
+export const AdminPanelUserButton = styled.button<{ $active: boolean }>`
+  width: 100%;
+  border: 1px solid ${({ $active }) => ($active ? "var(--accent)" : "transparent")};
+  background: ${({ $active }) => ($active ? "color-mix(in srgb, var(--accent) 10%, white 90%)" : "transparent")};
+  border-radius: 12px;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.6);
+  }
+`;
+
+export const AdminPanelInlineMeta = styled(MetaText)`
+  font-size: 0.76rem;
+  line-height: 1.3;
+`;
+
+export const AdminPanelBadgeRow = styled.div`
+  ${flexWrapRowCss("0.35rem")};
+  align-items: center;
+`;
+
+export const AdminPanelBadge = styled.span<{ $tone?: "default" | "accent" | "muted" }>`
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid
+    ${({ $tone }) =>
+      $tone === "accent"
+        ? "color-mix(in srgb, var(--accent) 42%, rgba(31, 41, 55, 0.1))"
+        : "var(--line)"};
+  background: ${({ $tone }) =>
+    $tone === "accent"
+      ? "color-mix(in srgb, var(--accent) 12%, white 88%)"
+      : $tone === "muted"
+        ? "rgba(31, 41, 55, 0.06)"
+        : "rgba(255, 255, 255, 0.66)"};
+  color: ${({ $tone }) => ($tone === "accent" ? "var(--accent-deep)" : "var(--muted)")};
+`;
+
+export const AdminPanelPager = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+`;
+
 export const AdminPanelModalBackdrop = styled.div`
   position: fixed;
   inset: 0;

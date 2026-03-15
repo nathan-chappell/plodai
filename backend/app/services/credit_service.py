@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db.session import AsyncSessionLocal
@@ -20,6 +21,16 @@ class CreditService:
             await self.db.commit()
             await self.db.refresh(balance)
         return balance
+
+    async def list_balance_amounts(self, user_ids: list[str]) -> dict[str, float]:
+        if not user_ids:
+            return {}
+
+        result = await self.db.execute(
+            select(UserCreditBalance).where(UserCreditBalance.user_id.in_(user_ids))
+        )
+        balances = result.scalars().all()
+        return {balance.user_id: float(balance.current_credit_usd) for balance in balances}
 
     async def grant_credit(
         self,

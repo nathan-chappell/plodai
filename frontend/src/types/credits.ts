@@ -20,3 +20,23 @@ export type SetUserActiveResponse = {
   is_active: boolean;
   current_credit_usd: number;
 };
+
+export type AdminUserSummary = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  image_url?: string | null;
+  role: "admin" | "user";
+  is_active: boolean;
+  current_credit_usd: number;
+  created_at_ms: number;
+  last_sign_in_at_ms: number | null;
+};
+
+export type AdminUserListResponse = {
+  items: AdminUserSummary[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  query: string | null;
+};

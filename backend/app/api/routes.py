@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import (
@@ -13,8 +13,10 @@ from backend.app.schemas.credits import (
     AdminGrantCreditResponse,
     AdminSetUserActiveRequest,
     AdminSetUserActiveResponse,
+    AdminUserListResponse,
+    AdminUserSummary,
 )
-from backend.app.services.clerk_admin_service import set_user_active_state
+from backend.app.services.clerk_admin_service import list_users, map_user_summary, set_user_active_state
 from backend.app.services.credit_service import CreditService
 
 
@@ -52,6 +54,32 @@ async def grant_credit(
     return AdminGrantCreditResponse(
         user_id=balance.user_id,
         current_credit_usd=balance.current_credit_usd,
+    )
+
+
+@router.get("/admin/users", response_model=AdminUserListResponse)
+async def get_admin_users(
+    limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    query: str | None = Query(default=None, max_length=200),
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    clerk_users = await list_users(limit=limit, offset=offset, query=query)
+    credit_amounts = await CreditService(db).list_balance_amounts([user.id for user in clerk_users])
+    items = [
+        AdminUserSummary(
+            **map_user_summary(clerk_user),
+            current_credit_usd=round(float(credit_amounts.get(clerk_user.id, 0.0)), 8),
+        )
+        for clerk_user in clerk_users
+    ]
+    return AdminUserListResponse(
+        items=items,
+        limit=limit,
+        offset=offset,
+        has_more=len(clerk_users) == limit,
+        query=query.strip() if query else None,
     )
 
 
