@@ -1,7 +1,18 @@
 import { Show, UserButton, useClerk } from "@clerk/react";
 
 import { useAppState } from "../app/context";
-import { AccountActions, AccountButton, AccountCard, AccountHeading } from "./styles";
+import {
+  AccountActions,
+  AccountBadge,
+  AccountButton,
+  AccountCard,
+  AccountHeading,
+  AccountIdentityBlock,
+  AccountMetaGroup,
+  AccountName,
+  AccountSubline,
+  AccountTopRow,
+} from "./styles";
 import { MetaText } from "../app/styles";
 
 export function AuthPanel({
@@ -23,15 +34,23 @@ export function AuthPanel({
 
   if (mode === "account" && user) {
     const displayName = user.full_name || user.email || user.id;
+    const identityLine = user.email ?? user.id;
+    const accountCapabilitiesLabel = user.role === "admin" ? "Admin capabilities" : null;
 
     return (
       <AccountCard>
-        <AccountHeading>{heading ?? "Signed in"}</AccountHeading>
-        {subtitle ? <MetaText>{subtitle}</MetaText> : null}
-        <strong>{displayName}</strong>
-        <MetaText as="div">
-          {(user.email ?? user.id)} | {user.role}
-        </MetaText>
+        <AccountTopRow>
+          <AccountIdentityBlock>
+            <AccountHeading>{heading ?? "Signed in"}</AccountHeading>
+            <AccountName>{displayName}</AccountName>
+            <AccountSubline>{identityLine}</AccountSubline>
+          </AccountIdentityBlock>
+        </AccountTopRow>
+        <AccountMetaGroup>
+          {accountCapabilitiesLabel ? <AccountBadge>{accountCapabilitiesLabel}</AccountBadge> : null}
+          <AccountBadge $tone="accent">Credits ${user.current_credit_usd.toFixed(2)}</AccountBadge>
+          {subtitle ? <AccountBadge>{subtitle}</AccountBadge> : null}
+        </AccountMetaGroup>
         <AccountActions>
           <Show when="signed-in">
             <UserButton />

@@ -1,7 +1,7 @@
 type StorageKey =
   | "ai-portfolio-sidebar-collapsed"
   | "ai-portfolio-theme"
-  | "ai-portfolio-report-foundry-brief";
+  | "ai-portfolio-theme-mode";
 
 function getStorage(): Storage | null {
   if (typeof window === "undefined") {

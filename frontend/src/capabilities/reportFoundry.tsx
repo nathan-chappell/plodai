@@ -21,6 +21,7 @@ import type { LocalDataset } from "../types/report";
 import { MetaText } from "../app/styles";
 import type { CapabilityClientTool, CapabilityDefinition } from "./types";
 import {
+  CapabilityHeroRow,
   CapabilityEyebrow,
   CapabilityHeader,
   CapabilityHighlight,
@@ -39,6 +40,7 @@ import {
   ReportWorkspaceColumn,
   ReportWorkspaceLayout,
 } from "./styles";
+import { AuthPanel } from "../components/AuthPanel";
 
 function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "chart_rendered" }> {
   return effect.type === "chart_rendered";
@@ -237,11 +239,16 @@ export function ReportFoundryPage() {
 
   return (
     <>
-      <CapabilityHeader>
-        <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
-        <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
-        <CapabilitySubhead>Load local CSVs, set the goal, and investigate through safe queries and charts.</CapabilitySubhead>
-      </CapabilityHeader>
+      <CapabilityHeroRow>
+        <CapabilityHeader>
+          <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
+          <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
+          <CapabilitySubhead>
+            Load local CSVs, set the goal, and investigate through safe queries and charts.
+          </CapabilitySubhead>
+        </CapabilityHeader>
+        <AuthPanel mode="account" heading="Account" />
+      </CapabilityHeroRow>
 
       <CapabilityTabBar>
         {reportFoundryCapability.tabs.map((tab) => (

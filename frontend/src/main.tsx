@@ -32,6 +32,7 @@ const GlobalStyle = createGlobalStyle`
     --radius-md: 14px;
     --font-body: "Manrope", "Segoe UI", sans-serif;
     --font-display: "Fraunces", "Iowan Old Style", serif;
+    color-scheme: light;
   }
 
   * {

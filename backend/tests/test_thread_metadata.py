@@ -15,7 +15,7 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
             "usage": {
                 "input_tokens": 120,
                 "output_tokens": 30,
-                "estimated_cost_usd": 0.001234567,
+                "cost_usd": 0.001234567,
                 "ignored": True,
             },
             "ignored": True,
@@ -31,7 +31,7 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
         "usage": {
             "input_tokens": 120,
             "output_tokens": 30,
-            "estimated_cost_usd": 0.00123457,
+            "cost_usd": 0.00123457,
         },
     }
 

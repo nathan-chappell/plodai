@@ -56,11 +56,14 @@ from backend.app.chatkit.metadata import (
 from backend.app.chatkit.usage import (
     accumulate_transcription_usage,
     accumulate_usage,
+    calculate_transcription_cost_usd,
+    calculate_usage_cost_usd,
     platform_logs_url,
 )
 from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger, summarize_for_log
 from backend.app.db.session import get_db
+from backend.app.services.credit_service import CreditService
 
 logger = get_logger("chatkit.server")
 
@@ -313,10 +316,22 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             or conversation_id
         )
         result_response_id = result.last_response_id
+        response_cost_usd = 0.0
+        if result.context_wrapper.usage is not None:
+            response_cost_usd = calculate_usage_cost_usd(
+                requested_model,
+                result.context_wrapper.usage,
+            )
         updated_usage = accumulate_usage(
             typed_metadata.get("usage"),
             result.context_wrapper.usage,
             model=requested_model,
+        )
+        await CreditService.record_cost_event(
+            user_id=context.user_id,
+            thread_id=thread.id,
+            response_id=result_response_id,
+            cost_usd=response_cost_usd,
         )
         updated_metadata = merge_thread_metadata(
             typed_metadata,
@@ -338,7 +353,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             f"conversation_id={result_conversation_id} conversation_logs={platform_logs_url(result_conversation_id)} "
             f"response_id={result_response_id} response_logs={platform_logs_url(result_response_id)} "
             f"input_tokens={updated_usage.get('input_tokens', 0)} output_tokens={updated_usage.get('output_tokens', 0)} "
-            f"est_cost_usd={updated_usage.get('estimated_cost_usd', 0.0)} title={summarize_for_log(thread.title or '')}"
+            f"cost_usd={updated_usage.get('cost_usd', 0.0)} title={summarize_for_log(thread.title or '')}"
         )
 
     def _resolve_requested_model(
@@ -660,14 +675,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             )
         return SyncCustomActionResponse(updated_item=sender)
 
-    async def list_threads_for_user(self, user_id: str):
-        context = ReportAgentContext(
-            report_id="list", user_id=user_id, db=self.db
-        )
-        return await self.store.load_threads(
-            limit=100, after=None, order="desc", context=context
-        )
-
     async def transcribe(
         self, audio_input: AudioInput, context: ReportAgentContext
     ) -> TranscriptionResult:
@@ -681,14 +688,20 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             response_format="verbose_json",
         )
         seconds = float(getattr(result, "duration", 0.0) or 0.0)
+        transcription_cost_usd = calculate_transcription_cost_usd(model, seconds)
         context.thread_metadata["usage"] = accumulate_transcription_usage(
             context.thread_metadata.get("usage"),
             model=model,
             seconds=seconds,
         )
+        await CreditService.record_cost_event(
+            user_id=context.user_id,
+            thread_id=context.report_id,
+            cost_usd=transcription_cost_usd,
+        )
         self.logger.info(
             f"transcribe.end report_id={context.report_id} user_id={context.user_id} model={model} seconds={seconds} "
-            f"est_cost_usd={context.thread_metadata.get('usage', {}).get('estimated_cost_usd', 0.0)} text_chars={len(result.text)}"
+            f"cost_usd={context.thread_metadata.get('usage', {}).get('cost_usd', 0.0)} text_chars={len(result.text)}"
         )
         return TranscriptionResult(text=result.text)
 

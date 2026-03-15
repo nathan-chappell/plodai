@@ -33,20 +33,3 @@ export type ToolEvent = {
   tool: string;
   detail: string;
 };
-
-export type ReportResponse = {
-  id: string;
-  prompt: string;
-  status: string;
-  uploaded_files: DatasetSummary[];
-  sections: ReportSection[];
-  charts: ReportChart[];
-  tool_log: ToolEvent[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type CreateReportResponse = Pick<
-  ReportResponse,
-  "id" | "status" | "sections" | "charts" | "tool_log"
->;

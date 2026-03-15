@@ -13,10 +13,13 @@ from openai import AsyncOpenAI
 
 from backend.app.api.routes import router
 from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
-from backend.app.core.auth import AuthenticatedUser, require_current_user
+from backend.app.core.auth import AuthenticatedUser, require_paid_user
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging, get_logger
 from backend.app.db.session import Base, engine
+from backend.app.models.cost import CostEvent  # noqa: F401
+from backend.app.models.credit import UserCreditBalance  # noqa: F401
+from backend.app.models.credit_grant import CreditGrant  # noqa: F401
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT_DIR / "package.json"
@@ -93,7 +96,7 @@ async def healthcheck() -> dict[str, str]:
 @app.post("/chatkit")
 async def chatkit_entrypoint(
     request: Request,
-    user: AuthenticatedUser = Depends(require_current_user),
+    user: AuthenticatedUser = Depends(require_paid_user),
     chatkit_server: ReportFoundryChatKitServer = Depends(build_chatkit_server),
 ):
     raw_request = await request.body()

@@ -1,33 +1,89 @@
 import { useEffect, useState } from "react";
 
+import { useAppState } from "../app/context";
 import { parseCsvPreview } from "../lib/csv";
-import { readStoredString, writeStoredString } from "../lib/storage";
+import {
+  clearReportFoundryWorkspace,
+  loadReportFoundryWorkspace,
+  saveReportFoundryWorkspace,
+  type ReportFoundryWorkspaceSnapshot,
+} from "../lib/workspace-store";
 import type { ClientEffect } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
 
-const BRIEF_STORAGE_KEY = "ai-portfolio-report-foundry-brief";
-
 type WorkspaceTab = "report" | "datasets" | "goal" | "smoke";
+const DEFAULT_STATUS = "Add CSV files to begin a local-first investigation.";
+const DEFAULT_BRIEF =
+  "Summarize the attached files, identify the strongest trends and anomalies, and explain what deserves follow-up.";
 
 export function useReportFoundryWorkspace() {
+  const { user } = useAppState();
   const [datasets, setDatasets] = useState<LocalDataset[]>([]);
-  const [status, setStatus] = useState<string>("Add CSV files to begin a local-first investigation.");
-  const [investigationBrief, setInvestigationBrief] = useState(
-    "Summarize the attached files, identify the strongest trends and anomalies, and explain what deserves follow-up.",
-  );
+  const [status, setStatus] = useState<string>(DEFAULT_STATUS);
+  const [investigationBrief, setInvestigationBrief] = useState(DEFAULT_BRIEF);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("report");
   const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const savedBrief = readStoredString(BRIEF_STORAGE_KEY);
-    if (savedBrief) {
-      setInvestigationBrief(savedBrief);
+    if (!user) {
+      setDatasets([]);
+      setStatus(DEFAULT_STATUS);
+      setInvestigationBrief(DEFAULT_BRIEF);
+      setActiveWorkspaceTab("report");
+      setReportEffects([]);
+      setHydrated(false);
+      return;
     }
-  }, []);
+
+    let cancelled = false;
+
+    void (async () => {
+      const snapshot = await loadReportFoundryWorkspace(user.id);
+      if (cancelled) {
+        return;
+      }
+
+      if (snapshot) {
+        setDatasets(snapshot.datasets);
+        setStatus(snapshot.status);
+        setInvestigationBrief(snapshot.investigationBrief);
+        setActiveWorkspaceTab(snapshot.activeWorkspaceTab);
+        setReportEffects(snapshot.reportEffects);
+      } else {
+        setDatasets([]);
+        setStatus(DEFAULT_STATUS);
+        setInvestigationBrief(DEFAULT_BRIEF);
+        setActiveWorkspaceTab("report");
+        setReportEffects([]);
+      }
+      setHydrated(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
-    writeStoredString(BRIEF_STORAGE_KEY, investigationBrief);
-  }, [investigationBrief]);
+    if (!user || !hydrated) {
+      return;
+    }
+
+    const snapshot: ReportFoundryWorkspaceSnapshot = {
+      datasets,
+      status,
+      investigationBrief,
+      activeWorkspaceTab,
+      reportEffects,
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      void saveReportFoundryWorkspace(user.id, snapshot);
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeWorkspaceTab, datasets, hydrated, investigationBrief, reportEffects, status, user]);
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) {
@@ -60,6 +116,9 @@ export function useReportFoundryWorkspace() {
     setDatasets([]);
     setReportEffects([]);
     setStatus("Cleared dataset inventory. Add CSV files to begin another investigation.");
+    if (user) {
+      void clearReportFoundryWorkspace(user.id);
+    }
   }
 
   function handleLoadSmokeDatasets(nextDatasets: LocalDataset[]) {

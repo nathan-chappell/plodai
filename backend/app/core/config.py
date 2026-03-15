@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     openai_max_retries: int = 5
     clerk_authorized_parties: list[str] = []
     clerk_clock_skew_ms: int = 5000
+    USE_COLORLOG: bool = False
 
     OPENAI_API_KEY: str = Field(init=False)
     CORS_ORIGINS: list[str] = Field(init=False)

@@ -1,12 +1,26 @@
 import logging
 from typing import Any
 
-from colorlog import ColoredFormatter
+from backend.app.core.config import get_settings
+
+try:
+    from colorlog import ColoredFormatter
+except ImportError:  # pragma: no cover - optional dependency behavior
+    ColoredFormatter = None
 
 APP_LOGGER_NAME = "report_foundry"
 
 
-def _build_formatter() -> ColoredFormatter:
+def _build_plain_formatter() -> logging.Formatter:
+    return logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
+def _build_color_formatter() -> logging.Formatter:
+    if ColoredFormatter is None:
+        return _build_plain_formatter()
     return ColoredFormatter(
         "%(log_color)s%(asctime)s %(levelname)-8s%(reset)s %(name)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
@@ -21,7 +35,8 @@ def _build_formatter() -> ColoredFormatter:
 
 
 def configure_logging(level: int = logging.INFO) -> None:
-    formatter = _build_formatter()
+    settings = get_settings()
+    formatter = _build_color_formatter() if settings.USE_COLORLOG else _build_plain_formatter()
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)

@@ -9,3 +9,4 @@ class UserResponse(BaseModel):
     full_name: str | None
     role: UserRole
     is_active: bool
+    current_credit_usd: float

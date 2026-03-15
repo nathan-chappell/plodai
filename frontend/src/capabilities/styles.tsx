@@ -14,46 +14,75 @@ const CapabilitySurface = styled.section`
   border-radius: var(--radius-xl);
 `;
 
+export const CapabilityHeroRow = styled.section`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: start;
+
+  @media (max-width: 980px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
 export const CapabilityHeader = styled.section`
-  ${sectionPanelCss("0.8rem", "0.35rem")};
+  ${sectionPanelCss("0.62rem 0.82rem", "0.12rem")};
   border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 244, 0.88)),
+    var(--panel);
 `;
 
 export const CapabilityEyebrow = styled.div`
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent-deep);
-  font-size: 0.7rem;
+  font-size: 0.58rem;
 `;
 
 export const CapabilityTitle = styled.h2`
   ${displayHeadingCss};
   margin: 0;
-  font-size: clamp(1.5rem, 3vw, 2.35rem);
-  line-height: 1.02;
+  font-size: clamp(1.05rem, 1.9vw, 1.56rem);
+  line-height: 0.98;
 `;
 
 export const CapabilitySubhead = styled.p`
   margin: 0;
   color: var(--muted);
   max-width: 64ch;
-  font-size: 0.84rem;
-  line-height: 1.25;
+  font-size: 0.72rem;
+  line-height: 1.18;
 `;
 
 export const CapabilityTabBar = styled.div`
-  ${flexWrapRowCss("0.32rem")};
+  display: inline-flex;
+  align-items: center;
+  gap: 0.08rem;
+  justify-content: flex-start;
+  width: fit-content;
+  padding: 0.12rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 20px rgba(32, 26, 20, 0.05);
 `;
 
 export const CapabilityTabButton = styled.button<{ $active: boolean }>`
-  border: 1px solid ${({ $active }) => ($active ? "rgba(201, 111, 59, 0.38)" : "var(--line)")};
-  background: ${({ $active }) => ($active ? "rgba(201, 111, 59, 0.14)" : "rgba(255, 255, 255, 0.55)")};
-  color: var(--ink);
+  border: 0;
+  background: ${({ $active }) => ($active ? "var(--panel)" : "transparent")};
+  color: ${({ $active }) => ($active ? "var(--ink)" : "var(--muted)")};
   border-radius: 999px;
-  padding: 0.42rem 0.72rem;
+  padding: 0.3rem 0.62rem;
   font-weight: 700;
-  font-size: 0.83rem;
+  font-size: 0.73rem;
   cursor: pointer;
+  box-shadow: ${({ $active }) => ($active ? "0 4px 14px rgba(32, 26, 20, 0.07)" : "none")};
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+  }
 `;
 
 export const ReportWorkspaceLayout = styled.section`

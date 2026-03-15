@@ -109,3 +109,49 @@ export const AppEmptyState = styled.section`
 `;
 
 export const AppEmptyMetaText = styled(MetaText)``;
+
+export const ToastViewport = styled.div`
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 60;
+  width: min(360px, calc(100vw - 2rem));
+  ${gridStackCss("0.6rem")};
+  pointer-events: none;
+`;
+
+export const ToastCard = styled.div<{ $tone?: "info" | "warning" | "error" }>`
+  ${panelSurfaceCss};
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-lg);
+  border-color: ${({ $tone }) =>
+    $tone === "warning"
+      ? "color-mix(in srgb, var(--accent) 42%, rgba(31, 41, 55, 0.12))"
+      : $tone === "error"
+        ? "rgba(185, 28, 28, 0.24)"
+        : "var(--line)"};
+  box-shadow: 0 22px 50px rgba(32, 26, 20, 0.16);
+  pointer-events: auto;
+  ${gridStackCss("0.35rem")};
+`;
+
+export const ToastTitle = styled.strong`
+  font-size: 0.94rem;
+`;
+
+export const ToastDismissButton = styled.button`
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+`;
+
+export const ToastHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+`;

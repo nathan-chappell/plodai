@@ -49,8 +49,8 @@ def _normalize_usage(raw_usage: object) -> ThreadUsageTotals | None:
     usage = empty_usage_totals()
     usage["input_tokens"] = int(raw_usage.get("input_tokens", 0))
     usage["output_tokens"] = int(raw_usage.get("output_tokens", 0))
-    usage["estimated_cost_usd"] = round(
-        float(raw_usage.get("estimated_cost_usd", 0.0)),
+    usage["cost_usd"] = round(
+        float(raw_usage.get("cost_usd", 0.0)),
         8,
     )
     return usage

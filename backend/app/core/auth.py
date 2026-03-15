@@ -8,7 +8,10 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.app.core.config import get_settings
+from backend.app.db.session import get_db
+from backend.app.models.credit import UserCreditBalance
 from backend.app.models.types import UserRole
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -124,5 +127,22 @@ async def require_admin_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required.",
+        )
+    return user
+
+
+async def require_paid_user(
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AuthenticatedUser:
+    if user.role == "admin":
+        return user
+
+    balance = await db.get(UserCreditBalance, user.id)
+    current_credit_usd = float(balance.current_credit_usd) if balance is not None else 0.0
+    if current_credit_usd <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="No remaining credit. Add credit to continue using the workspace.",
         )
     return user

@@ -5,6 +5,7 @@ import { DEFAULT_AUTHENTICATED_PATH, SIGN_IN_PATH } from "../lib/auth";
 import { ApiError, apiRequest, setClerkTokenGetter } from "../lib/api";
 import { navigate } from "../lib/router";
 import type { AuthUser } from "../types/auth";
+import { subscribeToToasts, type AppToast } from "./toasts";
 
 export function useAppSessionState() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -100,4 +101,24 @@ export function useAppRouteGuards({
       navigate(DEFAULT_AUTHENTICATED_PATH);
     }
   }, [authError, hydrating, pathname, user]);
+}
+
+export function useToastState() {
+  const [toasts, setToasts] = useState<AppToast[]>([]);
+
+  useEffect(() => {
+    return subscribeToToasts((toast) => {
+      setToasts((current) => [...current, toast]);
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((item) => item.id !== toast.id));
+      }, 4200);
+    });
+  }, []);
+
+  return {
+    dismissToast: (toastId: string) => {
+      setToasts((current) => current.filter((toast) => toast.id !== toastId));
+    },
+    toasts,
+  };
 }

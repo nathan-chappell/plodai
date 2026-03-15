@@ -1,3 +1,5 @@
+import { publishPaymentRequiredToast } from "../app/toasts";
+
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
 const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce2224e586b";
@@ -31,10 +33,14 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  return fetch(input, {
+  const response = await fetch(input, {
     ...init,
     headers,
   });
+  if (response.status === 402) {
+    void notifyPaymentRequired(response.clone());
+  }
+  return response;
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -87,4 +93,18 @@ function normalizeBase(baseUrl: string): string {
     return baseUrl;
   }
   return baseUrl.replace(/\/$/, "");
+}
+
+async function notifyPaymentRequired(response: Response): Promise<void> {
+  try {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const payload = (await response.json()) as { detail?: unknown };
+      publishPaymentRequiredToast(typeof payload.detail === "string" ? payload.detail : undefined);
+      return;
+    }
+    publishPaymentRequiredToast();
+  } catch {
+    publishPaymentRequiredToast();
+  }
 }

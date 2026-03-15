@@ -12,7 +12,10 @@ class ModelPricing(TypedDict):
 class ThreadUsageTotals(TypedDict):
     input_tokens: int
     output_tokens: int
-    estimated_cost_usd: float
+    cost_usd: float
+
+
+PLATFORM_COST_MULTIPLIER = 2.0
 
 
 MODEL_PRICING: dict[str, ModelPricing] = {
@@ -42,11 +45,11 @@ def empty_usage_totals() -> ThreadUsageTotals:
     return {
         "input_tokens": 0,
         "output_tokens": 0,
-        "estimated_cost_usd": 0.0,
+        "cost_usd": 0.0,
     }
 
 
-def estimate_usage_cost_usd(model: str | None, usage: Usage) -> float:
+def calculate_usage_cost_usd(model: str | None, usage: Usage) -> float:
     if not model:
         return 0.0
     pricing = MODEL_PRICING.get(model)
@@ -55,18 +58,20 @@ def estimate_usage_cost_usd(model: str | None, usage: Usage) -> float:
 
     cached_input_tokens = usage.input_tokens_details.cached_tokens or 0
     non_cached_input_tokens = max((usage.input_tokens or 0) - cached_input_tokens, 0)
-    return (
+    openai_cost = (
         (non_cached_input_tokens * pricing["input_per_million"]) / 1_000_000
         + (cached_input_tokens * pricing["cached_input_per_million"]) / 1_000_000
         + ((usage.output_tokens or 0) * pricing["output_per_million"]) / 1_000_000
     )
+    return openai_cost * PLATFORM_COST_MULTIPLIER
 
 
-def estimate_transcription_cost_usd(model: str, seconds: float) -> float:
+def calculate_transcription_cost_usd(model: str, seconds: float) -> float:
     per_minute = TRANSCRIPTION_PRICING_PER_MINUTE.get(model)
     if per_minute is None:
         return 0.0
-    return (seconds / 60.0) * per_minute
+    openai_cost = (seconds / 60.0) * per_minute
+    return openai_cost * PLATFORM_COST_MULTIPLIER
 
 
 def accumulate_usage(
@@ -79,12 +84,12 @@ def accumulate_usage(
     if current is not None:
         merged["input_tokens"] = int(current.get("input_tokens", 0))
         merged["output_tokens"] = int(current.get("output_tokens", 0))
-        merged["estimated_cost_usd"] = float(current.get("estimated_cost_usd", 0.0))
+        merged["cost_usd"] = float(current.get("cost_usd", 0.0))
 
     merged["input_tokens"] += int(usage.input_tokens or 0)
     merged["output_tokens"] += int(usage.output_tokens or 0)
-    merged["estimated_cost_usd"] = round(
-        merged["estimated_cost_usd"] + estimate_usage_cost_usd(model, usage),
+    merged["cost_usd"] = round(
+        merged["cost_usd"] + calculate_usage_cost_usd(model, usage),
         8,
     )
     return merged
@@ -100,10 +105,10 @@ def accumulate_transcription_usage(
     if current is not None:
         merged["input_tokens"] = int(current.get("input_tokens", 0))
         merged["output_tokens"] = int(current.get("output_tokens", 0))
-        merged["estimated_cost_usd"] = float(current.get("estimated_cost_usd", 0.0))
+        merged["cost_usd"] = float(current.get("cost_usd", 0.0))
 
-    merged["estimated_cost_usd"] = round(
-        merged["estimated_cost_usd"] + estimate_transcription_cost_usd(model, seconds),
+    merged["cost_usd"] = round(
+        merged["cost_usd"] + calculate_transcription_cost_usd(model, seconds),
         8,
     )
     return merged
