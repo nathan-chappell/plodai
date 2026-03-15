@@ -37,11 +37,12 @@ const OverlayMetaText = styled.p`
 `;
 
 const SidebarSurfaceSection = styled.section<{ $collapsed?: boolean }>`
-  padding: 0.85rem;
-  border-radius: var(--radius-lg);
+  padding: ${({ $collapsed }) => ($collapsed ? "0.42rem" : "0.58rem")};
+  border-radius: 18px;
   border: 1px solid var(--sidebar-line);
   background: var(--sidebar-card);
-  ${gridStackCss("0.7rem")};
+  ${gridStackCss("0.4rem")};
+  justify-items: ${({ $collapsed }) => ($collapsed ? "center" : "stretch")};
   overflow: hidden;
   transition: background 220ms ease, border-color 220ms ease, padding 220ms ease;
 `;
@@ -138,7 +139,7 @@ export const SignInActionButton = styled.button`
 `;
 
 export const AccountCard = styled(CardSection)`
-  gap: 0.8rem;
+  gap: 0.4rem;
 `;
 
 export const AccountHeading = styled.h2`
@@ -157,23 +158,30 @@ export const AccountButton = styled.button`
 
 export const PlatformPage = styled.main`
   width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   padding: 0;
 
   @media (max-width: 1100px) {
+    height: auto;
+    max-height: none;
+    overflow: visible;
     padding: 0.75rem;
   }
 `;
 
 export const PlatformLayout = styled.div<{ $collapsed: boolean }>`
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
-  grid-template-columns: ${({ $collapsed }) => ($collapsed ? "92px" : "300px")} minmax(0, 1fr);
+  grid-template-columns: ${({ $collapsed }) => ($collapsed ? "94px" : "338px")} minmax(0, 1fr);
   gap: 0;
   align-items: start;
   transition: grid-template-columns 240ms ease;
 
   @media (max-width: 1100px) {
+    height: auto;
     grid-template-columns: 1fr;
     gap: 0.75rem;
   }
@@ -181,64 +189,94 @@ export const PlatformLayout = styled.div<{ $collapsed: boolean }>`
 
 export const PlatformSidebar = styled.aside`
   position: sticky;
-  top: 1rem;
-  min-height: calc(100vh - 2rem);
-  padding: 1rem 0.85rem;
+  top: 0;
+  height: 100vh;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 0.62rem 0.64rem;
   border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%),
     var(--sidebar-bg);
   color: var(--sidebar-ink);
-  ${gridStackCss("0.8rem")};
+  ${gridStackCss("0.42rem")};
   box-shadow: 0 22px 60px rgba(10, 10, 10, 0.16);
   border: 1px solid var(--sidebar-line);
   transition: background 240ms ease, padding 220ms ease, box-shadow 240ms ease;
 
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
   @media (max-width: 1100px) {
     position: static;
-    min-height: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
     border-radius: var(--radius-xl);
   }
 `;
 
 export const PlatformMain = styled.div`
   min-width: 0;
-  ${gridStackCss("1.25rem")};
-  padding: 1rem;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: auto;
+  ${gridStackCss("1rem")};
+  padding: 0.58rem 0.72rem;
   animation: fadeSlideIn 260ms ease;
 
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(31, 41, 55, 0.14);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
   @media (max-width: 1100px) {
+    height: auto;
+    max-height: none;
+    overflow: visible;
     padding: 0;
   }
 `;
 
 export const PlatformSidebarHeader = styled.div<{ $collapsed: boolean }>`
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
+  grid-template-columns: ${({ $collapsed }) => ($collapsed ? "1fr" : "minmax(0, 1fr) auto")};
+  gap: 0.4rem;
   align-items: start;
+  justify-items: ${({ $collapsed }) => ($collapsed ? "center" : "stretch")};
 `;
 
 export const PlatformBrandBlock = styled.div<{ $collapsed: boolean }>`
   min-width: 0;
-  ${gridStackCss("0.4rem")};
-  opacity: ${({ $collapsed }) => ($collapsed ? 0 : 1)};
-  transform: ${({ $collapsed }) => ($collapsed ? "translateX(-6px)" : "translateX(0)")};
-  transition: opacity 180ms ease, transform 180ms ease;
-  pointer-events: ${({ $collapsed }) => ($collapsed ? "none" : "auto")};
+  ${gridStackCss("0.12rem")};
+  display: ${({ $collapsed }) => ($collapsed ? "none" : "grid")};
 `;
 
 export const PlatformEyebrow = styled.div`
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--sidebar-muted);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
 `;
 
 export const PlatformTitle = styled.h1`
   ${displayHeadingCss};
   margin: 0;
-  font-size: 1.45rem;
+  font-size: 1.7rem;
   line-height: 1;
   color: var(--sidebar-ink);
 `;
@@ -246,8 +284,8 @@ export const PlatformTitle = styled.h1`
 export const PlatformSubhead = styled.p`
   margin: 0;
   color: var(--sidebar-muted);
-  font-size: 0.9rem;
-  line-height: 1.55;
+  font-size: 0.78rem;
+  line-height: 1.22;
 `;
 
 export const PlatformCollapseButton = styled.button`
@@ -255,8 +293,8 @@ export const PlatformCollapseButton = styled.button`
   background: var(--sidebar-card);
   color: var(--sidebar-ink);
   border-radius: 999px;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2rem;
+  height: 2rem;
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -270,20 +308,38 @@ export const PlatformCollapseButton = styled.button`
 
 export const PlatformSidebarSection = styled(SidebarSurfaceSection)``;
 
-export const PlatformSectionTitle = styled.div<{ $collapsed?: boolean }>`
-  font-size: 0.82rem;
+export const PlatformSidebarSectionIcon = styled.div<{ $collapsed?: boolean }>`
+  width: ${({ $collapsed }) => ($collapsed ? "1.6rem" : "0")};
+  height: ${({ $collapsed }) => ($collapsed ? "1.6rem" : "0")};
+  border-radius: 999px;
+  border: 1px solid var(--sidebar-line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--sidebar-ink);
+  display: grid;
+  place-items: center;
+  font-size: 0.76rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  opacity: ${({ $collapsed }) => ($collapsed ? 1 : 0)};
+  margin-inline: auto;
+  overflow: hidden;
+  transition:
+    opacity 180ms ease,
+    width 180ms ease,
+    height 180ms ease;
+`;
+
+export const PlatformSectionTitle = styled.div<{ $collapsed?: boolean }>`
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--sidebar-ink);
-  opacity: ${({ $collapsed }) => ($collapsed ? 0 : 0.86)};
-  max-height: ${({ $collapsed }) => ($collapsed ? "0" : "28px")};
-  transform: ${({ $collapsed }) => ($collapsed ? "translateY(-4px)" : "translateY(0)")};
-  transition: opacity 180ms ease, max-height 180ms ease, transform 180ms ease;
+  display: ${({ $collapsed }) => ($collapsed ? "none" : "block")};
+  opacity: 0.86;
 `;
 
 export const PlatformNavGrid = styled.div`
-  ${gridStackCss("0.45rem")};
+  ${gridStackCss("0.24rem")};
 `;
 
 export const PlatformNavButton = styled.button<{ $active: boolean; $collapsed: boolean }>`
@@ -292,10 +348,11 @@ export const PlatformNavButton = styled.button<{ $active: boolean; $collapsed: b
   background: ${({ $active }) => ($active ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent")};
   color: ${({ $active }) => ($active ? "var(--sidebar-ink)" : "var(--sidebar-muted)")};
   border-radius: 16px;
-  padding: ${({ $collapsed }) => ($collapsed ? "0.7rem 0.55rem" : "0.8rem 0.85rem")};
+  padding: ${({ $collapsed }) => ($collapsed ? "0.54rem 0.46rem" : "0.56rem 0.66rem")};
   text-align: left;
   display: grid;
-  gap: 0.2rem;
+  justify-items: ${({ $collapsed }) => ($collapsed ? "center" : "start")};
+  gap: ${({ $collapsed }) => ($collapsed ? "0" : "0.08rem")};
   cursor: pointer;
   transition:
     background 180ms ease,
@@ -305,33 +362,33 @@ export const PlatformNavButton = styled.button<{ $active: boolean; $collapsed: b
     padding 180ms ease;
 
   &:hover {
-    transform: translateX(2px);
+    transform: ${({ $collapsed }) => ($collapsed ? "translateY(-1px)" : "translateX(2px)")};
   }
 `;
 
 export const PlatformNavLabel = styled.strong<{ $collapsed: boolean }>`
-  font-size: 0.98rem;
-  opacity: ${({ $collapsed }) => ($collapsed ? 0 : 1)};
-  max-height: ${({ $collapsed }) => ($collapsed ? "0" : "32px")};
-  transition: opacity 180ms ease, max-height 180ms ease;
+  font-size: 0.94rem;
+  display: ${({ $collapsed }) => ($collapsed ? "none" : "block")};
 `;
 
 export const PlatformNavMeta = styled(MetaText)<{ $collapsed: boolean }>`
   color: var(--sidebar-muted);
-  opacity: ${({ $collapsed }) => ($collapsed ? 0 : 1)};
-  max-height: ${({ $collapsed }) => ($collapsed ? "0" : "60px")};
-  transition: opacity 180ms ease, max-height 180ms ease;
+  font-size: 0.76rem;
+  line-height: 1.2;
+  display: ${({ $collapsed }) => ($collapsed ? "none" : "block")};
 `;
 
 export const PlatformNavGlyph = styled.span<{ $active: boolean }>`
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.7rem;
+  height: 0.7rem;
   border-radius: 999px;
   background: ${({ $active }) => ($active ? "var(--accent)" : "rgba(255,255,255,0.18)")};
   transition: background 180ms ease, transform 180ms ease;
 `;
 
-export const PlatformSessionWrap = styled.div`
+export const PlatformSessionWrap = styled.div<{ $collapsed?: boolean }>`
+  display: ${({ $collapsed }) => ($collapsed ? "none" : "block")};
+
   > section {
     background: transparent;
     border: 0;
@@ -353,7 +410,7 @@ export const PlatformSessionWrap = styled.div`
 `;
 
 export const PlatformThemeList = styled.div`
-  ${gridStackCss("0.45rem")};
+  ${gridStackCss("0.22rem")};
 `;
 
 export const PlatformThemeButton = styled.button<{ $active: boolean; $collapsed: boolean }>`
@@ -361,21 +418,23 @@ export const PlatformThemeButton = styled.button<{ $active: boolean; $collapsed:
   background: ${({ $active }) => ($active ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent")};
   color: var(--sidebar-ink);
   border-radius: 14px;
-  padding: ${({ $collapsed }) => ($collapsed ? "0.55rem" : "0.65rem 0.75rem")};
+  padding: ${({ $collapsed }) => ($collapsed ? "0.38rem" : "0.42rem 0.6rem")};
   display: grid;
   grid-template-columns: ${({ $collapsed }) => ($collapsed ? "1fr" : "auto minmax(0, 1fr)")};
-  gap: 0.6rem;
+  justify-items: ${({ $collapsed }) => ($collapsed ? "center" : "stretch")};
+  gap: ${({ $collapsed }) => ($collapsed ? "0" : "0.6rem")};
   align-items: center;
   cursor: pointer;
   transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
 
   &:hover {
-    transform: translateX(2px);
+    transform: ${({ $collapsed }) => ($collapsed ? "translateY(-1px)" : "translateX(2px)")};
   }
 `;
 
-export const PlatformSwatchRow = styled.div`
+export const PlatformSwatchRow = styled.div<{ $collapsed?: boolean }>`
   ${flexWrapRowCss("0.35rem")};
+  justify-content: ${({ $collapsed }) => ($collapsed ? "center" : "flex-start")};
 `;
 
 export const PlatformSwatch = styled.span<{ $color: string }>`
@@ -387,12 +446,12 @@ export const PlatformSwatch = styled.span<{ $color: string }>`
 `;
 
 export const PlatformThemeLabel = styled.span<{ $collapsed: boolean }>`
-  opacity: ${({ $collapsed }) => ($collapsed ? 0 : 1)};
-  max-height: ${({ $collapsed }) => ($collapsed ? "0" : "24px")};
-  transition: opacity 180ms ease, max-height 180ms ease;
+  display: ${({ $collapsed }) => ($collapsed ? "none" : "block")};
 `;
 
 export const PlatformSidebarMeta = styled(MetaText)<{ $collapsed?: boolean }>`
+  font-size: 0.74rem;
+  line-height: 1.18;
   ${sidebarFadingMetaCss("120px")};
 `;
 
@@ -439,14 +498,14 @@ export const ChartCardCode = styled.pre`
 
 export const ChatKitPaneCard = styled.section`
   position: sticky;
-  top: 1.5rem;
+  top: 0.8rem;
   min-width: 0;
   background: linear-gradient(135deg, rgba(44, 62, 80, 0.96), rgba(26, 36, 47, 0.98));
   color: #f8f6f2;
   border-radius: var(--radius-xl);
-  padding: 1.15rem;
+  padding: 0.82rem;
   box-shadow: var(--shadow);
-  ${gridStackCss("0.9rem")};
+  ${gridStackCss("0.45rem")};
 `;
 
 export const ChatKitPaneMeta = styled(OverlayMetaText)``;
@@ -466,7 +525,7 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean }>`
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  min-height: 560px;
+  min-height: 430px;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.08)")};
@@ -482,9 +541,9 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean }>`
 
 export const ChatKitPaneEmpty = styled.div`
   ${emptyStateCss};
-  min-height: 560px;
+  min-height: 430px;
   color: rgba(248, 246, 242, 0.74);
-  padding: 1.5rem;
+  padding: 1rem;
 `;
 
 export const ChatKitPaneToolbar = styled(WrapRow)``;

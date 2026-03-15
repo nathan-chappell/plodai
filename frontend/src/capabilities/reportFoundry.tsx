@@ -203,10 +203,10 @@ export function createReportFoundryClientTools(datasets: LocalDataset[]): Capabi
 export const reportFoundryCapability: CapabilityDefinition = {
   id: "report-foundry",
   path: "/capabilities/report-foundry",
-  navLabel: "Report Foundry Legacy",
-  title: "Report Foundry legacy workspace",
+  navLabel: "Report Foundry",
+  title: "Report Foundry",
   eyebrow: "Capability",
-  description: "The original CSV investigation workspace, kept as a legacy capability inside AI Portfolio.",
+  description: "Legacy CSV analysis workspace.",
   tabs: [
     { id: "report", label: "Report" },
     { id: "datasets", label: "Datasets" },
@@ -240,10 +240,7 @@ export function ReportFoundryPage() {
       <CapabilityHeader>
         <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
         <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
-        <CapabilitySubhead>
-          Load local datasets, define the investigation goal, and let the analyst explore the files through safe queries,
-          charts, and narrative writeups.
-        </CapabilitySubhead>
+        <CapabilitySubhead>Load local CSVs, set the goal, and investigate through safe queries and charts.</CapabilitySubhead>
       </CapabilityHeader>
 
       <CapabilityTabBar>
@@ -267,10 +264,6 @@ export function ReportFoundryPage() {
                 <CapabilitySectionTitle>Report canvas</CapabilitySectionTitle>
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
-              <CapabilityMetaText>
-                Good starting moves: summarize every file, compare the most important segments, validate anomalies with a
-                second query, and leave behind short report sections as the investigation develops.
-              </CapabilityMetaText>
               <CapabilityMetaText>
                 Uploaded files: {datasets.length ? datasets.map((dataset) => dataset.name).join(", ") : "none yet"}
               </CapabilityMetaText>

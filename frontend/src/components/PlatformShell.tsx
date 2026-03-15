@@ -20,6 +20,7 @@ import {
   PlatformSessionWrap,
   PlatformSidebar,
   PlatformSidebarHeader,
+  PlatformSidebarSectionIcon,
   PlatformSidebarMeta,
   PlatformSidebarSection,
   PlatformSubhead,
@@ -114,12 +115,9 @@ export function PlatformShell({
         <PlatformSidebar>
           <PlatformSidebarHeader $collapsed={collapsed}>
             <PlatformBrandBlock $collapsed={collapsed}>
-              <PlatformEyebrow>Agentic Analytics Platform</PlatformEyebrow>
+              <PlatformEyebrow>Capability Platform</PlatformEyebrow>
               <PlatformTitle>AI Portfolio</PlatformTitle>
-              <PlatformSubhead>
-                Capability-led workspace shell with reusable client tools, thread memory, and room for auth, credits,
-                and billing.
-              </PlatformSubhead>
+              <PlatformSubhead>Capability-led analysis workspace.</PlatformSubhead>
             </PlatformBrandBlock>
             <PlatformCollapseButton
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -131,10 +129,8 @@ export function PlatformShell({
           </PlatformSidebarHeader>
 
           <PlatformSidebarSection $collapsed={collapsed}>
+            <PlatformSidebarSectionIcon $collapsed={collapsed}>C</PlatformSidebarSectionIcon>
             <PlatformSectionTitle $collapsed={collapsed}>Capabilities</PlatformSectionTitle>
-            <PlatformSidebarMeta $collapsed={collapsed}>
-              Start route-based now, then add billing, approvals, and richer capability-local navigation.
-            </PlatformSidebarMeta>
             <PlatformNavGrid>
               {capabilities.map((capability) => (
                 <PlatformNavButton
@@ -154,13 +150,15 @@ export function PlatformShell({
           </PlatformSidebarSection>
 
           <PlatformSidebarSection $collapsed={collapsed}>
+            <PlatformSidebarSectionIcon $collapsed={collapsed}>U</PlatformSidebarSectionIcon>
             <PlatformSectionTitle $collapsed={collapsed}>Session</PlatformSectionTitle>
-            <PlatformSessionWrap>
-              <AuthPanel mode="account" heading="Session" subtitle="Clerk, credits, and billing will plug into this rail." />
+            <PlatformSessionWrap $collapsed={collapsed}>
+              <AuthPanel mode="account" heading="Account" subtitle="Signed-in workspace session." />
             </PlatformSessionWrap>
           </PlatformSidebarSection>
 
           <PlatformSidebarSection $collapsed={collapsed}>
+            <PlatformSidebarSectionIcon $collapsed={collapsed}>T</PlatformSidebarSectionIcon>
             <PlatformSectionTitle $collapsed={collapsed}>Theme</PlatformSectionTitle>
             <PlatformThemeList>
               {THEME_PRESETS.map((theme) => (
@@ -172,7 +170,7 @@ export function PlatformShell({
                   type="button"
                   title={theme.label}
                 >
-                  <PlatformSwatchRow>
+                  <PlatformSwatchRow $collapsed={collapsed}>
                     <PlatformSwatch $color={theme.values["--accent"]} />
                     <PlatformSwatch $color={theme.values["--sidebar-bg"]} />
                     <PlatformSwatch $color={theme.values["--bg-bottom"]} />
@@ -181,9 +179,6 @@ export function PlatformShell({
                 </PlatformThemeButton>
               ))}
             </PlatformThemeList>
-            <PlatformSidebarMeta $collapsed={collapsed}>
-              These presets drive shared CSS variables so shell colors update without restyling individual pages.
-            </PlatformSidebarMeta>
           </PlatformSidebarSection>
         </PlatformSidebar>
 

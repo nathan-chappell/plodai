@@ -30,8 +30,8 @@ const GlobalStyle = createGlobalStyle`
     --radius-xl: 28px;
     --radius-lg: 20px;
     --radius-md: 14px;
-    --font-body: "Segoe UI", "Helvetica Neue", sans-serif;
-    --font-display: "Georgia", "Times New Roman", serif;
+    --font-body: "Manrope", "Segoe UI", sans-serif;
+    --font-display: "Fraunces", "Iowan Old Style", serif;
   }
 
   * {
@@ -43,6 +43,7 @@ const GlobalStyle = createGlobalStyle`
     min-width: 320px;
     min-height: 100vh;
     font-family: var(--font-body);
+    font-size: 15px;
     color: var(--ink);
     background:
       radial-gradient(circle at top left, var(--bg-glow-left), transparent 28%),
