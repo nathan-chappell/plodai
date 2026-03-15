@@ -1,5 +1,5 @@
 import json
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from agents import FunctionTool, function_tool
 from agents.tool_context import ToolContext
@@ -25,7 +25,7 @@ def _log_tool_start(
         f"{key}={summarize_for_log(value)}" for key, value in details.items()
     )
     logger.info(
-        f"tool.start name={tool_name} report_id={context.report_id} user_email={context.user_email} {detail_text}"
+        f"tool.start name={tool_name} report_id={context.report_id} user_id={context.user_id} {detail_text}"
     )
 
 
@@ -38,13 +38,13 @@ def _log_tool_end(
         f"{key}={summarize_for_log(value)}" for key, value in details.items()
     )
     logger.info(
-        f"tool.end name={tool_name} report_id={context.report_id} user_email={context.user_email} {detail_text}"
+        f"tool.end name={tool_name} report_id={context.report_id} user_id={context.user_id} {detail_text}"
     )
 
 
 def get_client_tool_names(context: ReportAgentContext) -> list[str]:
     registered_tool_names = [
-        tool["name"] for tool in context.client_tools if tool.get("name")
+        name for tool in context.client_tools if (name := tool.get("name"))
     ]
     if registered_tool_names:
         return registered_tool_names
@@ -55,7 +55,7 @@ def get_client_tool_names(context: ReportAgentContext) -> list[str]:
     ]
 
 
-def _build_client_tool_proxy(tool_definition: dict[str, Any]) -> FunctionTool:
+def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool:
     tool_name = str(tool_definition.get("name", "")).strip()
     if not tool_name:
         raise ValueError("Client tool definition must include a name.")
@@ -267,7 +267,10 @@ def build_report_tools(context: ReportAgentContext) -> list[FunctionTool]:
         return result
 
     if context.client_tools:
-        tools.extend(_build_client_tool_proxy(tool_definition) for tool_definition in context.client_tools)
+        tools.extend(
+            _build_client_tool_proxy(tool_definition)
+            for tool_definition in context.client_tools
+        )
         return tools
 
     @function_tool(name_override="list_attached_csv_files")

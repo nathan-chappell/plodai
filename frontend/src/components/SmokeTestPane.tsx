@@ -1,72 +1,24 @@
 import { useMemo, useState } from "react";
-import styled from "styled-components";
 
 import { createReportFoundryClientTools, reportFoundryCapability } from "../capabilities/reportFoundry";
 import { ChatKitHarness } from "./ChatKitPane";
 import { DatasetChart } from "./DatasetChart";
 import { createSmokeDatasets, runFrontendSmokeTest, type FrontendSmokeResult } from "../lib/smoke";
+import {
+  SmokeTestAggregateTable,
+  SmokeTestButton,
+  SmokeTestChartGrid,
+  SmokeTestExpectations,
+  SmokeTestPanel,
+  SmokeTestResultCard,
+  SmokeTestResultList,
+  SmokeTestTd,
+  SmokeTestTh,
+  SmokeTestToolbar,
+} from "./styles";
 import type { ClientEffect } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
-import { MetaText, panelSurfaceCss, primaryButtonCss } from "../ui/primitives";
-
-const Panel = styled.section`
-  ${panelSurfaceCss};
-  padding: 1.2rem;
-  display: grid;
-  gap: 1rem;
-`;
-
-const Toolbar = styled.div`
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-`;
-
-const Button = styled.button`
-  ${primaryButtonCss};
-  background: linear-gradient(135deg, var(--accent-deep), #9f4d21);
-  color: #fffaf4;
-`;
-
-const ResultList = styled.div`
-  display: grid;
-  gap: 0.75rem;
-`;
-
-const ResultCard = styled.div<{ $ok: boolean }>`
-  border-radius: var(--radius-md);
-  padding: 0.85rem 0.95rem;
-  border: 1px solid ${({ $ok }) => ($ok ? "rgba(34, 197, 94, 0.28)" : "rgba(220, 38, 38, 0.28)")};
-  background: ${({ $ok }) => ($ok ? "rgba(34, 197, 94, 0.08)" : "rgba(220, 38, 38, 0.08)")};
-`;
-
-const AggregateTable = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-`;
-
-const Th = styled.th`
-  text-align: left;
-  padding: 0.6rem 0.7rem;
-  border-bottom: 1px solid rgba(31, 41, 55, 0.14);
-`;
-
-const Td = styled.td`
-  padding: 0.6rem 0.7rem;
-  border-bottom: 1px solid rgba(31, 41, 55, 0.08);
-`;
-
-const ChartGrid = styled.div`
-  display: grid;
-  gap: 1rem;
-`;
-
-const Expectations = styled.ul`
-  margin: 0;
-  padding-left: 1.2rem;
-  display: grid;
-  gap: 0.45rem;
-`;
+import { MetaText } from "../app/styles";
 
 const FORCING_PROMPT = [
   "This is a system smoke test for AI Portfolio.",
@@ -106,7 +58,7 @@ export function SmokeTestPane({
   }
 
   return (
-    <Panel>
+    <SmokeTestPanel>
       <div>
         <h2>Frontend smoke test</h2>
         <MetaText>
@@ -116,38 +68,38 @@ export function SmokeTestPane({
         </MetaText>
       </div>
 
-      <Toolbar>
-        <Button type="button" onClick={handleRun} disabled={running}>
+      <SmokeTestToolbar>
+        <SmokeTestButton type="button" onClick={handleRun} disabled={running}>
           {running ? "Running smoke test..." : "Run smoke test"}
-        </Button>
-        <Button type="button" onClick={() => onLoadFixtures(smokeDatasets)}>
+        </SmokeTestButton>
+        <SmokeTestButton type="button" onClick={() => onLoadFixtures(smokeDatasets)}>
           Load smoke datasets into workspace
-        </Button>
-      </Toolbar>
+        </SmokeTestButton>
+      </SmokeTestToolbar>
 
       {result ? (
         <>
           <MetaText>
             Overall result: {result.ok ? "PASS" : "FAIL"}. Listed {result.listedCsvFileCount} files and produced {result.chartEffects.length} charts.
           </MetaText>
-          <ResultList>
+          <SmokeTestResultList>
             {result.assertions.map((assertion) => (
-              <ResultCard key={assertion.label} $ok={assertion.ok}>
+              <SmokeTestResultCard key={assertion.label} $ok={assertion.ok}>
                 <strong>{assertion.ok ? "PASS" : "FAIL"}: {assertion.label}</strong>
                 <MetaText>{assertion.detail}</MetaText>
-              </ResultCard>
+              </SmokeTestResultCard>
             ))}
-          </ResultList>
+          </SmokeTestResultList>
 
           {Object.entries(result.aggregateRowsByChart).map(([chartType, rows]) =>
             rows.length ? (
               <div key={chartType}>
                 <h3>{chartType.toUpperCase()} aggregate output</h3>
-                <AggregateTable>
+                <SmokeTestAggregateTable>
                   <thead>
                     <tr>
                       {Object.keys(rows[0]).map((key) => (
-                        <Th key={key}>{key}</Th>
+                        <SmokeTestTh key={key}>{key}</SmokeTestTh>
                       ))}
                     </tr>
                   </thead>
@@ -155,25 +107,25 @@ export function SmokeTestPane({
                     {rows.map((row, index) => (
                       <tr key={`${chartType}-${index}`}>
                         {Object.keys(rows[0]).map((key) => (
-                          <Td key={`${chartType}-${index}-${key}`}>{String(row[key] ?? "")}</Td>
+                          <SmokeTestTd key={`${chartType}-${index}-${key}`}>{String(row[key] ?? "")}</SmokeTestTd>
                         ))}
                       </tr>
                     ))}
                   </tbody>
-                </AggregateTable>
+                </SmokeTestAggregateTable>
               </div>
             ) : null,
           )}
 
           {result.chartEffects.length ? (
-            <ChartGrid>
+            <SmokeTestChartGrid>
               {result.chartEffects.map((effect) => (
                 <div key={effect.queryId}>
                   <h3>{effect.chart.title}</h3>
                   <DatasetChart spec={effect.chart} rows={effect.rows} />
                 </div>
               ))}
-            </ChartGrid>
+            </SmokeTestChartGrid>
           ) : null}
         </>
       ) : null}
@@ -185,11 +137,11 @@ export function SmokeTestPane({
           the stream, charts, and report updates happen in the browser.
         </MetaText>
       </div>
-      <Expectations>
+      <SmokeTestExpectations>
         <li>The agent should list the attached CSV files first.</li>
         <li>The ideal run creates a bar, line, and pie chart from the sales fixture.</li>
         <li>The ideal run appends a Systems Test Summary section before stopping.</li>
-      </Expectations>
+      </SmokeTestExpectations>
 
       <ChatKitHarness
         capabilityId={reportFoundryCapability.id}
@@ -219,23 +171,23 @@ export function SmokeTestPane({
       />
 
       {liveEffects.length ? (
-        <ResultList>
+        <SmokeTestResultList>
           {liveEffects.map((effect, index) =>
             isChartEffect(effect) ? (
-              <ResultCard key={`${effect.type}-${effect.queryId}-${index}`} $ok>
+              <SmokeTestResultCard key={`${effect.type}-${effect.queryId}-${index}`} $ok>
                 <strong>Rendered chart: {effect.chart.title}</strong>
                 <MetaText>{effect.chart.type.toUpperCase()} chart requested by the agent.</MetaText>
                 <DatasetChart spec={effect.chart} rows={effect.rows} />
-              </ResultCard>
+              </SmokeTestResultCard>
             ) : isReportEffect(effect) ? (
-              <ResultCard key={`${effect.type}-${index}`} $ok>
+              <SmokeTestResultCard key={`${effect.type}-${index}`} $ok>
                 <strong>{effect.title}</strong>
                 <MetaText>{effect.markdown}</MetaText>
-              </ResultCard>
+              </SmokeTestResultCard>
             ) : null,
           )}
-        </ResultList>
+        </SmokeTestResultList>
       ) : null}
-    </Panel>
+    </SmokeTestPanel>
   );
 }

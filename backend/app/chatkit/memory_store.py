@@ -37,7 +37,7 @@ class DatabaseMemoryStore(Store[ReportAgentContext]):
             self.db.add(
                 ChatThread(
                     id=thread.id,
-                    user_id=context.user_email,
+                    user_id=context.user_id,
                     title=thread.title,
                     metadata_json=thread.metadata,
                     status_json=thread.status.model_dump(),
@@ -122,7 +122,7 @@ class DatabaseMemoryStore(Store[ReportAgentContext]):
         order: str,
         context: ReportAgentContext,
     ) -> Page[ThreadMetadata]:
-        query = select(ChatThread).where(ChatThread.user_id == context.user_email)
+        query = select(ChatThread).where(ChatThread.user_id == context.user_id)
         query = await self._apply_thread_cursor(query, after, order)
         query = query.order_by(
             ChatThread.updated_sequence.desc()

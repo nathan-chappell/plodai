@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import styled from "styled-components";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig } from "../lib/api";
 import type { CapabilityClientTool } from "../capabilities/types";
+import {
+  ChatKitPaneCard,
+  ChatKitPaneEmpty,
+  ChatKitPaneHarnessMeta,
+  ChatKitPaneMeta,
+  ChatKitPanePill,
+  ChatKitPaneSurface,
+  ChatKitPaneToolbar,
+  ChatKitPaneToolbarButton,
+} from "./styles";
 import type { ClientEffect, ClientToolCall, ClientToolName, DataRow } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
-import { emptyStateCss } from "../ui/primitives";
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
 const CHATKIT_MODEL_CHOICES = [
@@ -30,84 +38,6 @@ const CHATKIT_DEFAULT_MODEL_LABEL =
   CHATKIT_MODEL_CHOICES.find((choice) => choice.id === CHATKIT_DEFAULT_MODEL_ID)?.label ?? "Lightweight";
 const FALLBACK_CHATKIT_TOOLS: ClientToolName[] = ["list_attached_csv_files", "run_aggregate_query", "request_chart_render"];
 const REGISTER_CLIENT_TOOLS_ACTION = "register_client_tools";
-
-const Card = styled.section`
-  position: sticky;
-  top: 1.5rem;
-  min-width: 0;
-  background: linear-gradient(135deg, rgba(44, 62, 80, 0.96), rgba(26, 36, 47, 0.98));
-  color: #f8f6f2;
-  border-radius: var(--radius-xl);
-  padding: 1.15rem;
-  box-shadow: var(--shadow);
-  display: grid;
-  gap: 0.9rem;
-`;
-
-const Meta = styled.p`
-  margin: 0;
-  color: rgba(248, 246, 242, 0.74);
-  line-height: 1.6;
-`;
-
-const Pill = styled.div`
-  display: inline-flex;
-  width: fit-content;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 0.82rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-`;
-
-const Surface = styled.div<{ $light?: boolean }>`
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
-  min-height: 560px;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.08)")};
-  border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.1)" : "rgba(255, 255, 255, 0.12)")};
-
-  openai-chatkit {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-  }
-`;
-
-const Empty = styled.div`
-  ${emptyStateCss};
-  min-height: 560px;
-  color: rgba(248, 246, 242, 0.74);
-  padding: 1.5rem;
-`;
-
-const InlineToolbar = styled.div`
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-`;
-
-const InlineButton = styled.button`
-  border: 1px solid rgba(31, 41, 55, 0.14);
-  background: rgba(255, 255, 255, 0.92);
-  color: #1f2937;
-  border-radius: 999px;
-  padding: 0.65rem 0.95rem;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-`;
-
-const HarnessMeta = styled.p<{ $light?: boolean }>`
-  margin: 0;
-  color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.74)")};
-  line-height: 1.6;
-`;
 
 function formatToolLabel(tool: string): string {
   return tool
@@ -374,23 +304,23 @@ export function ChatKitHarness({
   return (
     <>
       {quickActions?.length ? (
-        <InlineToolbar>
+        <ChatKitPaneToolbar>
           {quickActions.map((action) => (
-            <InlineButton
+            <ChatKitPaneToolbarButton
               key={action.label}
               type="button"
               onClick={() => void handleQuickAction(action)}
               disabled={running}
             >
               {action.label}
-            </InlineButton>
+            </ChatKitPaneToolbarButton>
           ))}
-        </InlineToolbar>
+        </ChatKitPaneToolbar>
       ) : null}
-      {status ? <HarnessMeta $light={colorScheme === "light"}>{status}</HarnessMeta> : null}
-      <Surface $light={colorScheme === "light"}>
+      {status ? <ChatKitPaneHarnessMeta $light={colorScheme === "light"}>{status}</ChatKitPaneHarnessMeta> : null}
+      <ChatKitPaneSurface $light={colorScheme === "light"}>
         <ChatKit control={chatKit.control} />
-      </Surface>
+      </ChatKitPaneSurface>
     </>
   );
 }
@@ -413,17 +343,17 @@ export function ChatKitPane({
   const canInvestigate = enabled && datasets.length > 0;
 
   return (
-    <Card>
-      <Pill>Analyst workspace</Pill>
+    <ChatKitPaneCard>
+      <ChatKitPanePill>Analyst workspace</ChatKitPanePill>
       <h2>Investigate your CSV files</h2>
-      <Meta>
+      <ChatKitPaneMeta>
         {canInvestigate
           ? `${datasets.length} CSV file${datasets.length === 1 ? " is" : "s are"} ready. ${investigationBrief.trim() ? `Current goal: ${investigationBrief.trim()}` : "Start with a summary, comparison, or anomaly hunt."}`
           : enabled
             ? "Add one or more CSV files to start the investigation."
             : "Sign in to start analyzing local CSV files."}
-      </Meta>
-      <Meta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</Meta>
+      </ChatKitPaneMeta>
+      <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
       {canInvestigate ? (
         <ChatKitHarness
           capabilityId={capabilityId}
@@ -433,14 +363,14 @@ export function ChatKitPane({
           onEffects={onEffects}
         />
       ) : (
-        <Surface>
-          <Empty>
+        <ChatKitPaneSurface>
+          <ChatKitPaneEmpty>
             {enabled
               ? "The agent is ready once you add local CSV files."
               : "Sign in to open the analyst workspace."}
-          </Empty>
-        </Surface>
+          </ChatKitPaneEmpty>
+        </ChatKitPaneSurface>
       )}
-    </Card>
+    </ChatKitPaneCard>
   );
 }

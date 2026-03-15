@@ -1,8 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { ClerkProvider } from "@clerk/react";
 import { createGlobalStyle } from "styled-components";
 
 import { App } from "./App";
+import { CLERK_PUBLISHABLE_KEY, SIGN_IN_PATH } from "./lib/auth";
 
 const GlobalStyle = createGlobalStyle`
   :root {
@@ -62,7 +64,9 @@ const GlobalStyle = createGlobalStyle`
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <GlobalStyle />
-    <App />
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl={SIGN_IN_PATH}>
+      <GlobalStyle />
+      <App />
+    </ClerkProvider>
   </React.StrictMode>,
 );

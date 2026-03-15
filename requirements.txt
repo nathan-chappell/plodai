@@ -1,10 +1,8 @@
 aiosqlite
-bcrypt
 clerk-backend-api
 colorlog
 email-validator
 fastapi
-itsdangerous
 openai
 openai-agents
 openai-chatkit

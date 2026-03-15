@@ -1,22 +1,20 @@
-import { isClerkEnabled } from "./auth";
-import { getClerkToken } from "./clerk";
-
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
-const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce2224e586b"
-const TOKEN_KEY = "ai-portfolio-token";
+const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce2224e586b";
+let clerkTokenGetter: (() => Promise<string | null>) | null = null;
 
-export function getStoredToken(): string | null {
-  return window.localStorage.getItem(TOKEN_KEY);
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
 }
 
-export function storeToken(token: string | null): void {
-  if (token) {
-    window.localStorage.setItem(TOKEN_KEY, token);
-    return;
-  }
-
-  window.localStorage.removeItem(TOKEN_KEY);
+export function setClerkTokenGetter(getter: (() => Promise<string | null>) | null): void {
+  clerkTokenGetter = getter;
 }
 
 export function getChatKitConfig() {
@@ -28,7 +26,7 @@ export function getChatKitConfig() {
 
 export async function authenticatedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers ?? {});
-  const token = isClerkEnabled() ? await getClerkToken() : getStoredToken();
+  const token = (await clerkTokenGetter?.()) ?? null;
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
@@ -52,11 +50,29 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
+    throw await buildApiError(response);
   }
 
   return (await response.json()) as T;
+}
+
+async function buildApiError(response: Response): Promise<ApiError> {
+  const fallbackMessage = `Request failed with ${response.status}`;
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const payload = (await response.json()) as { detail?: unknown; message?: unknown };
+    const detail =
+      typeof payload.detail === "string"
+        ? payload.detail
+        : typeof payload.message === "string"
+          ? payload.message
+          : fallbackMessage;
+    return new ApiError(detail, response.status);
+  }
+
+  const text = (await response.text()).trim();
+  return new ApiError(text || fallbackMessage, response.status);
 }
 
 function deriveChatKitUrl(apiBaseUrl: string): string {

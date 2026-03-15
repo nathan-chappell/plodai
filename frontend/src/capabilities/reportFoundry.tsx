@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import styled from "styled-components";
+import { useMemo } from "react";
 
-import { AdminPanel } from "../components/AdminPanel";
+import { useAppState } from "../app/context";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
 import { DatasetInventoryPane } from "../components/DatasetInventoryPane";
 import { NarrativeCard } from "../components/NarrativeCard";
 import { SmokeTestPane } from "../components/SmokeTestPane";
-import { executeQueryPlan } from "../lib/analysis";
+import { useReportFoundryWorkspace, type ReportFoundryWorkspaceTab } from "./hooks";
+import { executeQueryPlanInWorker } from "../lib/analysis-worker-client";
 import { renderChartToDataUrl } from "../lib/chart";
-import { parseCsvPreview } from "../lib/csv";
 import type {
   ClientEffect,
   ClientToolArgsMap,
@@ -18,128 +17,28 @@ import type {
   RenderChartToolArgs,
   RunLocalQueryToolArgs,
 } from "../types/analysis";
-import type { AuthUser } from "../types/auth";
 import type { LocalDataset } from "../types/report";
-import { MetaText, displayHeadingCss, panelSurfaceCss } from "../ui/primitives";
+import { MetaText } from "../app/styles";
 import type { CapabilityClientTool, CapabilityDefinition } from "./types";
-
-const BRIEF_STORAGE_KEY = "ai-portfolio-report-foundry-brief";
-
-type WorkspaceTab = "report" | "datasets" | "goal" | "smoke" | "admin";
-
-const Header = styled.section`
-  ${panelSurfaceCss};
-  border-radius: var(--radius-xl);
-  padding: 1.5rem;
-  display: grid;
-  gap: 0.9rem;
-`;
-
-const Eyebrow = styled.div`
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent-deep);
-  font-size: 0.78rem;
-`;
-
-const Title = styled.h2`
-  ${displayHeadingCss};
-  margin: 0;
-  font-size: clamp(1.8rem, 4vw, 3rem);
-`;
-
-const Subhead = styled.p`
-  margin: 0;
-  color: var(--muted);
-  max-width: 72ch;
-  line-height: 1.75;
-`;
-
-const TabBar = styled.div`
-  display: flex;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-`;
-
-const TabButton = styled.button<{ $active: boolean }>`
-  border: 1px solid ${({ $active }) => ($active ? "rgba(201, 111, 59, 0.38)" : "var(--line)")};
-  background: ${({ $active }) => ($active ? "rgba(201, 111, 59, 0.14)" : "rgba(255, 255, 255, 0.55)")};
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 0.65rem 0.95rem;
-  font-weight: 700;
-  cursor: pointer;
-`;
-
-const ReportLayout = styled.section`
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 430px;
-  gap: 1.5rem;
-  align-items: start;
-
-  @media (max-width: 1180px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const ReportColumn = styled.div`
-  min-width: 0;
-  display: grid;
-  gap: 1rem;
-`;
-
-const ChatColumn = styled.div`
-  min-width: 0;
-`;
-
-const Panel = styled.section`
-  ${panelSurfaceCss};
-  border-radius: var(--radius-xl);
-  padding: 1.4rem;
-  display: grid;
-  gap: 0.95rem;
-`;
-
-const SectionHeader = styled.div`
-  display: grid;
-  gap: 0.4rem;
-`;
-
-const SectionTitle = styled.h3`
-  margin: 0;
-  font-size: 1.2rem;
-`;
-
-const Textarea = styled.textarea`
-  min-height: 260px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  padding: 0.95rem 1rem;
-  background: rgba(255, 255, 255, 0.75);
-  resize: vertical;
-  font: inherit;
-`;
-
-const Highlight = styled.div`
-  padding: 0.95rem 1rem;
-  border-radius: var(--radius-md);
-  background: rgba(201, 111, 59, 0.08);
-  border: 1px solid rgba(201, 111, 59, 0.18);
-`;
-
-const EffectPanel = styled.div`
-  display: grid;
-  gap: 1rem;
-`;
-
-const EffectCard = styled.section`
-  ${panelSurfaceCss};
-  border-radius: var(--radius-xl);
-  padding: 1rem;
-  display: grid;
-  gap: 0.8rem;
-  min-width: 0;
-`;
+import {
+  CapabilityEyebrow,
+  CapabilityHeader,
+  CapabilityHighlight,
+  CapabilityMetaText,
+  CapabilityPanel,
+  CapabilitySectionHeader,
+  CapabilitySectionTitle,
+  CapabilitySubhead,
+  CapabilityTabBar,
+  CapabilityTabButton,
+  CapabilityTextarea,
+  CapabilityTitle,
+  ReportChatColumn,
+  ReportEffectCard,
+  ReportEffectsPanel,
+  ReportWorkspaceColumn,
+  ReportWorkspaceLayout,
+} from "./styles";
 
 function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "chart_rendered" }> {
   return effect.type === "chart_rendered";
@@ -157,22 +56,22 @@ function InvestigationBriefPanel({
   setInvestigationBrief: (value: string) => void;
 }) {
   return (
-    <Panel>
-      <SectionHeader>
-        <SectionTitle>Analysis goal</SectionTitle>
-        <MetaText>This brief is saved with the conversation so the analyst keeps the objective in view.</MetaText>
-      </SectionHeader>
-      <Textarea
+    <CapabilityPanel>
+      <CapabilitySectionHeader>
+        <CapabilitySectionTitle>Analysis goal</CapabilitySectionTitle>
+        <CapabilityMetaText>This brief is saved with the conversation so the analyst keeps the objective in view.</CapabilityMetaText>
+      </CapabilitySectionHeader>
+      <CapabilityTextarea
         value={investigationBrief}
         onChange={(event) => setInvestigationBrief(event.target.value)}
         placeholder="Example: Compare regional performance, find the most surprising anomalies, and suggest the best charts."
       />
-      <Highlight>
-        <MetaText>
+      <CapabilityHighlight>
+        <CapabilityMetaText>
           The analyst will use this as the working objective, then refine the thread title once the focus becomes clear.
-        </MetaText>
-      </Highlight>
-    </Panel>
+        </CapabilityMetaText>
+      </CapabilityHighlight>
+    </CapabilityPanel>
   );
 }
 
@@ -198,10 +97,10 @@ async function runAggregateQueryTool(
 ): Promise<Record<string, unknown>> {
   const dataset = findDataset(datasets, args.query_plan.dataset_id);
   const rows = (dataset.rows as DataRow[]) ?? dataset.sample_rows;
-  const result = executeQueryPlan(rows, args.query_plan);
+  const resultRows = await executeQueryPlanInWorker(rows, args.query_plan);
   return {
-    rows: result.rows,
-    row_count: result.rows.length,
+    rows: resultRows,
+    row_count: resultRows.length,
   };
 }
 
@@ -211,12 +110,12 @@ async function requestChartRenderTool(
 ): Promise<{ payload: Record<string, unknown>; effect: ClientEffect }> {
   const dataset = findDataset(datasets, args.query_plan.dataset_id);
   const rows = (dataset.rows as DataRow[]) ?? dataset.sample_rows;
-  const result = executeQueryPlan(rows, args.query_plan);
-  const imageDataUrl = await renderChartToDataUrl(args.chart_plan, result.rows);
+  const resultRows = await executeQueryPlanInWorker(rows, args.query_plan);
+  const imageDataUrl = await renderChartToDataUrl(args.chart_plan, resultRows);
   return {
     payload: {
-      rows: result.rows,
-      row_count: result.rows.length,
+      rows: resultRows,
+      row_count: resultRows.length,
       chart: args.chart_plan,
       query_id: args.query_id,
       imageDataUrl,
@@ -226,7 +125,7 @@ async function requestChartRenderTool(
       queryId: args.query_id,
       chart: args.chart_plan,
       imageDataUrl: imageDataUrl ?? undefined,
-      rows: result.rows,
+      rows: resultRows,
     },
   };
 }
@@ -313,132 +212,77 @@ export const reportFoundryCapability: CapabilityDefinition = {
     { id: "datasets", label: "Datasets" },
     { id: "goal", label: "Goal" },
     { id: "smoke", label: "Smoke" },
-    { id: "admin", label: "Admin", visible: ({ role }) => role === "admin" },
   ],
 };
 
-export function ReportFoundryPage({
-  user,
-}: {
-  user: AuthUser;
-}) {
-  const [datasets, setDatasets] = useState<LocalDataset[]>([]);
-  const [status, setStatus] = useState<string>("Add CSV files to begin a local-first investigation.");
-  const [investigationBrief, setInvestigationBrief] = useState(
-    "Summarize the attached files, identify the strongest trends and anomalies, and explain what deserves follow-up.",
-  );
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("report");
-  const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
-
-  useEffect(() => {
-    const savedBrief = window.localStorage.getItem(BRIEF_STORAGE_KEY);
-    if (savedBrief) {
-      setInvestigationBrief(savedBrief);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(BRIEF_STORAGE_KEY, investigationBrief);
-  }, [investigationBrief]);
-
-  useEffect(() => {
-    if (activeWorkspaceTab === "admin" && user.role !== "admin") {
-      setActiveWorkspaceTab("report");
-    }
-  }, [activeWorkspaceTab, user]);
-
-  async function handleFiles(files: FileList | null) {
-    if (!files?.length) {
-      return;
-    }
-
-    setStatus("Profiling selected CSV files locally before exposing safe metadata to the agent.");
-    const nextDatasets = await Promise.all(
-      Array.from(files).map(async (file) => {
-        const preview = await parseCsvPreview(file);
-        return {
-          id: crypto.randomUUID(),
-          name: file.name,
-          row_count: preview.rowCount,
-          columns: preview.columns,
-          numeric_columns: preview.numericColumns,
-          sample_rows: preview.sampleRows,
-          rows: preview.rows,
-          preview_rows: preview.previewRows,
-        } satisfies LocalDataset;
-      }),
-    );
-
-    setDatasets(nextDatasets);
-    setReportEffects([]);
-    setStatus(`Prepared ${nextDatasets.length} dataset summary${nextDatasets.length === 1 ? "" : "ies"} for analysis.`);
+export function ReportFoundryPage() {
+  const { user } = useAppState();
+  if (!user) {
+    return null;
   }
-
-  function handleClearDatasets() {
-    setDatasets([]);
-    setReportEffects([]);
-    setStatus("Cleared dataset inventory. Add CSV files to begin another investigation.");
-  }
-
-  function handleLoadSmokeDatasets(nextDatasets: LocalDataset[]) {
-    setDatasets(nextDatasets);
-    setReportEffects([]);
-    setStatus(`Loaded ${nextDatasets.length} smoke dataset${nextDatasets.length === 1 ? "" : "s"} into the workspace.`);
-    setActiveWorkspaceTab("report");
-  }
-
+  const {
+    datasets,
+    status,
+    investigationBrief,
+    setInvestigationBrief,
+    activeWorkspaceTab,
+    setActiveWorkspaceTab,
+    reportEffects,
+    setReportEffects,
+    handleFiles,
+    handleClearDatasets,
+    handleLoadSmokeDatasets,
+  } = useReportFoundryWorkspace();
   const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(datasets), [datasets]);
 
   return (
     <>
-      <Header>
-        <Eyebrow>{reportFoundryCapability.eyebrow}</Eyebrow>
-        <Title>{reportFoundryCapability.title}</Title>
-        <Subhead>
+      <CapabilityHeader>
+        <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
+        <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
+        <CapabilitySubhead>
           Load local datasets, define the investigation goal, and let the analyst explore the files through safe queries,
           charts, and narrative writeups.
-        </Subhead>
-      </Header>
+        </CapabilitySubhead>
+      </CapabilityHeader>
 
-      <TabBar>
-        {reportFoundryCapability.tabs
-          .filter((tab) => !tab.visible || tab.visible({ role: user.role }))
-          .map((tab) => (
-            <TabButton
+      <CapabilityTabBar>
+        {reportFoundryCapability.tabs.map((tab) => (
+            <CapabilityTabButton
               key={tab.id}
               $active={activeWorkspaceTab === tab.id}
-              onClick={() => setActiveWorkspaceTab(tab.id as WorkspaceTab)}
+              onClick={() => setActiveWorkspaceTab(tab.id as ReportFoundryWorkspaceTab)}
               type="button"
             >
               {tab.label}
-            </TabButton>
+            </CapabilityTabButton>
           ))}
-      </TabBar>
+      </CapabilityTabBar>
 
       {activeWorkspaceTab === "report" ? (
-        <ReportLayout>
-          <ReportColumn>
-            <Panel>
-              <SectionHeader>
-                <SectionTitle>Report canvas</SectionTitle>
-                <MetaText>{status}</MetaText>
-              </SectionHeader>
-              <MetaText>
+        <ReportWorkspaceLayout>
+          <ReportWorkspaceColumn>
+            <CapabilityPanel>
+              <CapabilitySectionHeader>
+                <CapabilitySectionTitle>Report canvas</CapabilitySectionTitle>
+                <CapabilityMetaText>{status}</CapabilityMetaText>
+              </CapabilitySectionHeader>
+              <CapabilityMetaText>
                 Good starting moves: summarize every file, compare the most important segments, validate anomalies with a
                 second query, and leave behind short report sections as the investigation develops.
-              </MetaText>
-              <MetaText>
+              </CapabilityMetaText>
+              <CapabilityMetaText>
                 Uploaded files: {datasets.length ? datasets.map((dataset) => dataset.name).join(", ") : "none yet"}
-              </MetaText>
-              <MetaText>
+              </CapabilityMetaText>
+              <CapabilityMetaText>
                 Current goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the investigation."}
-              </MetaText>
-            </Panel>
+              </CapabilityMetaText>
+            </CapabilityPanel>
 
             {reportEffects.length ? (
-              <EffectPanel>
+              <ReportEffectsPanel>
                 {reportEffects.map((effect, index) => (
-                  <EffectCard key={`${effect.type}-${index}`}>
+                  <ReportEffectCard key={`${effect.type}-${index}`}>
                     {isChartEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : null}
                     {isReportEffect(effect) ? (
                       <NarrativeCard
@@ -449,12 +293,12 @@ export function ReportFoundryPage({
                         }}
                       />
                     ) : null}
-                  </EffectCard>
+                  </ReportEffectCard>
                 ))}
-              </EffectPanel>
+              </ReportEffectsPanel>
             ) : null}
-          </ReportColumn>
-          <ChatColumn>
+          </ReportWorkspaceColumn>
+          <ReportChatColumn>
             <ChatKitPane
               capabilityId={reportFoundryCapability.id}
               enabled
@@ -463,8 +307,8 @@ export function ReportFoundryPage({
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
             />
-          </ChatColumn>
-        </ReportLayout>
+          </ReportChatColumn>
+        </ReportWorkspaceLayout>
       ) : null}
 
       {activeWorkspaceTab === "datasets" ? (
@@ -483,8 +327,6 @@ export function ReportFoundryPage({
       ) : null}
 
       {activeWorkspaceTab === "smoke" ? <SmokeTestPane onLoadFixtures={handleLoadSmokeDatasets} /> : null}
-
-      {activeWorkspaceTab === "admin" && user.role === "admin" ? <AdminPanel currentUser={user} /> : null}
     </>
   );
 }

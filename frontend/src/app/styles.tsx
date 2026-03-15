@@ -61,9 +61,51 @@ export const displayHeadingCss = css`
   font-family: var(--font-display);
 `;
 
+export const gridStackCss = (gap = "1rem") => css`
+  display: grid;
+  gap: ${gap};
+`;
+
+export const flexWrapRowCss = (gap = "0.75rem") => css`
+  display: flex;
+  gap: ${gap};
+  flex-wrap: wrap;
+`;
+
+export const secondaryButtonCss = css`
+  ${primaryButtonCss};
+  background: rgba(31, 41, 55, 0.12);
+  color: var(--ink);
+`;
+
+export const sectionPanelCss = (padding = "1.2rem", gap = "1rem") => css`
+  ${panelSurfaceCss};
+  padding: ${padding};
+  ${gridStackCss(gap)};
+`;
+
+export const tableHeaderCellCss = css`
+  text-align: left;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.14);
+`;
+
+export const tableBodyCellCss = css`
+  border-bottom: 1px solid rgba(31, 41, 55, 0.08);
+`;
+
 export const MetaText = styled.p`
   margin: 0;
   color: var(--muted);
   font-size: 0.92rem;
   line-height: 1.65;
 `;
+
+export const AppEmptyState = styled.section`
+  ${panelSurfaceCss};
+  border-radius: var(--radius-xl);
+  padding: 1.6rem;
+  display: grid;
+  gap: 0.8rem;
+`;
+
+export const AppEmptyMetaText = styled(MetaText)``;

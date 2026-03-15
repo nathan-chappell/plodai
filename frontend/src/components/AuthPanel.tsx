@@ -1,144 +1,53 @@
-import { FormEvent, useState } from "react";
-import styled from "styled-components";
+import { Show, UserButton, useClerk } from "@clerk/react";
 
-import { isClerkEnabled } from "../lib/auth";
-import { signOutClerk } from "../lib/clerk";
-import { apiRequest, storeToken } from "../lib/api";
-import type { AuthUser, LoginResponse } from "../types/auth";
-import { MetaText, inputSurfaceCss, panelSurfaceCss, primaryButtonCss } from "../ui/primitives";
-
-const Card = styled.section`
-  ${panelSurfaceCss};
-  padding: 1.2rem;
-  display: grid;
-  gap: 0.8rem;
-`;
-
-const Heading = styled.h2`
-  margin: 0;
-`;
-
-const Row = styled.div`
-  display: grid;
-  gap: 0.45rem;
-`;
-
-const Input = styled.input`
-  ${inputSurfaceCss};
-`;
-
-const Actions = styled.div`
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  align-items: center;
-`;
-
-const Button = styled.button`
-  ${primaryButtonCss};
-  padding: 0.8rem 1rem;
-  background: var(--ink);
-`;
-
-const SecondaryButton = styled.button`
-  ${primaryButtonCss};
-  padding: 0.8rem 1rem;
-  background: rgba(31, 41, 55, 0.12);
-  color: var(--ink);
-`;
+import { useAppState } from "../app/context";
+import { AccountActions, AccountButton, AccountCard, AccountHeading } from "./styles";
+import { MetaText } from "../app/styles";
 
 export function AuthPanel({
-  user,
-  onAuthenticated,
-  mode = "login",
+  mode = "account",
   heading,
   subtitle,
 }: {
-  user: AuthUser | null;
-  onAuthenticated: (user: AuthUser | null) => void;
   mode?: "login" | "account";
   heading?: string;
   subtitle?: string;
 }) {
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("Use the seeded file users or the env-bootstrapped admin.");
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-
-    try {
-      const response = await apiRequest<LoginResponse>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      storeToken(response.access_token);
-      onAuthenticated(response.user);
-      setMessage(`Signed in as ${response.user.email}.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to sign in.");
-    }
-  }
+  const { user, setUser } = useAppState();
+  const { signOut } = useClerk();
 
   async function handleLogout() {
-    storeToken(null);
-    if (isClerkEnabled()) {
-      await signOutClerk();
-    }
-    onAuthenticated(null);
-    setMessage("Signed out.");
+    await signOut();
+    setUser(null);
   }
 
   if (mode === "account" && user) {
+    const displayName = user.full_name || user.email || user.id;
+
     return (
-      <Card>
-        <Heading>{heading ?? "Signed in"}</Heading>
+      <AccountCard>
+        <AccountHeading>{heading ?? "Signed in"}</AccountHeading>
         {subtitle ? <MetaText>{subtitle}</MetaText> : null}
-        <strong>{user.full_name || user.email}</strong>
+        <strong>{displayName}</strong>
         <MetaText as="div">
-          {user.email} | {user.role}
+          {(user.email ?? user.id)} | {user.role}
         </MetaText>
-        <Actions>
-          <Button onClick={() => void handleLogout()} type="button">
+        <AccountActions>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+          <AccountButton onClick={() => void handleLogout()} type="button">
             Sign out
-          </Button>
-        </Actions>
-      </Card>
+          </AccountButton>
+        </AccountActions>
+      </AccountCard>
     );
   }
 
   return (
-    <Card>
-      <Heading>{heading ?? "Sign in"}</Heading>
-      {subtitle ? <MetaText>{subtitle}</MetaText> : null}
-      <form onSubmit={(event) => void handleSubmit(event)}>
-        <Row>
-          <label htmlFor="email">Email</label>
-          <Input id="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-        </Row>
-        <Row>
-          <label htmlFor="password">Password</label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </Row>
-        <Actions>
-          <Button type="submit">Sign in</Button>
-          <SecondaryButton
-            onClick={() => {
-              setEmail("admin@example.com");
-              setPassword("");
-            }}
-            type="button"
-          >
-            Reset
-          </SecondaryButton>
-        </Actions>
-      </form>
-      <MetaText as="div">{message}</MetaText>
-    </Card>
+    <AccountCard>
+      <AccountHeading>{heading ?? "Clerk session"}</AccountHeading>
+      <MetaText>{subtitle ?? "Sign in happens on the dedicated Clerk route before the app shell opens."}</MetaText>
+    </AccountCard>
   );
 }

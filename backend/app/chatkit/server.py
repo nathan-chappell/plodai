@@ -50,7 +50,6 @@ from backend.app.chatkit.client_tools import (
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
     ThreadMetadataPatch,
-    ClientToolDefinition,
     merge_thread_metadata,
     normalize_thread_metadata,
 )
@@ -162,22 +161,22 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         self.logger = logger
 
     async def build_request_context(
-        self, raw_request: bytes | str, user_email: str
+        self, raw_request: bytes | str, user_id: str
     ) -> ReportAgentContext:
         parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
         metadata = normalize_thread_metadata(parsed_request.metadata)
         thread_id = getattr(parsed_request.params, "thread_id", None)
-        recent_items = await self._load_recent_items(thread_id, user_email)
+        recent_items = await self._load_recent_items(thread_id, user_id)
         datasets = self._datasets_from_recent_items(recent_items)
         query_plan_model, _ = build_query_plan_model(datasets)
 
         self.logger.info(
-            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_email={user_email} dataset_count={len(datasets)}"
+            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_id={user_id} dataset_count={len(datasets)}"
         )
 
         return ReportAgentContext(
             report_id=thread_id or "pending_thread",
-            user_email=user_email,
+            user_id=user_id,
             db=self.db,
             dataset_ids=[dataset.id for dataset in datasets],
             chart_cache=dict(metadata.get("chart_cache") or {}),
@@ -232,7 +231,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             conversation_id = await self._ensure_openai_conversation(thread, context)
 
         self.logger.info(
-            f"respond.start thread_id={thread.id} user_email={context.user_email} model={requested_model} "
+            f"respond.start thread_id={thread.id} user_id={context.user_id} model={requested_model} "
             f"pending_items={len(pending_items)} agent_input_items={len(agent_input)} "
             f"datasets={summarize_for_log(context.dataset_ids)} conversation_id={conversation_id} "
             f"conversation_logs={platform_logs_url(conversation_id)} previous_response_id={previous_response_id} "
@@ -267,7 +266,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 retry_delay_seconds = self._compute_retry_delay_seconds(exc)
 
                 self.logger.warning(
-                    f"respond.retry thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} "
+                    f"respond.retry thread_id={thread.id} user_id={context.user_id} conversation_id={conversation_id} "
                     f"attempt={attempt_number}/{total_attempts} delay_seconds={retry_delay_seconds:.3f} "
                     f"error={summarize_for_log(str(exc))}"
                 )
@@ -290,7 +289,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
 
                 if attempt >= max_retries:
                     self.logger.exception(
-                        f"respond.error thread_id={thread.id} user_email={context.user_email} conversation_id={conversation_id} previous_response_id={previous_response_id}"
+                        f"respond.error thread_id={thread.id} user_id={context.user_id} conversation_id={conversation_id} previous_response_id={previous_response_id}"
                     )
                     raise
 
@@ -335,7 +334,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         thread.metadata = dict(updated_metadata)
 
         self.logger.info(
-            f"respond.end thread_id={thread.id} user_email={context.user_email} "
+            f"respond.end thread_id={thread.id} user_id={context.user_id} "
             f"conversation_id={result_conversation_id} conversation_logs={platform_logs_url(result_conversation_id)} "
             f"response_id={result_response_id} response_logs={platform_logs_url(result_response_id)} "
             f"input_tokens={updated_usage.get('input_tokens', 0)} output_tokens={updated_usage.get('output_tokens', 0)} "
@@ -374,7 +373,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         metadata: dict[str, str] = {
             "app": "ai-portfolio",
             "thread_id": thread.id,
-            "user_email": context.user_email,
+            "user_id": context.user_id,
         }
         if context.dataset_ids:
             metadata["dataset_ids"] = ",".join(context.dataset_ids)[:512]
@@ -383,7 +382,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
 
         conversation = await self.openai_client.conversations.create(metadata=metadata)
         self.logger.info(
-            f"respond.conversation_created thread_id={thread.id} user_email={context.user_email} conversation_id={conversation.id} conversation_logs={platform_logs_url(conversation.id)}"
+            f"respond.conversation_created thread_id={thread.id} user_id={context.user_id} conversation_id={conversation.id} conversation_logs={platform_logs_url(conversation.id)}"
         )
         return conversation.id
 
@@ -481,12 +480,12 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         return len(dangling_tool_calls)
 
     async def _load_recent_items(
-        self, thread_id: str | None, user_email: str
+        self, thread_id: str | None, user_id: str
     ) -> list[ThreadItem]:
         if not thread_id:
             return []
         context = ReportAgentContext(
-            report_id=thread_id, user_email=user_email, db=self.db
+            report_id=thread_id, user_id=user_id, db=self.db
         )
         try:
             page = await self.store.load_thread_items(
@@ -594,7 +593,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 thread.title = title
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                f"thread_metadata.updated thread_id={thread.id} user_email={context.user_email} title={summarize_for_log(thread.title or '')}"
+                f"thread_metadata.updated thread_id={thread.id} user_id={context.user_id} title={summarize_for_log(thread.title or '')}"
             )
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
@@ -614,7 +613,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                f"client_tools.registered thread_id={thread.id} user_email={context.user_email} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
+                f"client_tools.registered thread_id={thread.id} user_id={context.user_id} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
             )
             yield ProgressUpdateEvent(
                 text=f"Registered {len(client_tools)} client tools for this capability."
@@ -638,9 +637,11 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 thread.title = title
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                f"thread_metadata.sync_updated thread_id={thread.id} user_email={context.user_email} title={summarize_for_log(thread.title or '')}"
+                f"thread_metadata.sync_updated thread_id={thread.id} user_id={context.user_id} title={summarize_for_log(thread.title or '')}"
             )
-        elif action.type == "register_client_tools" and isinstance(action.payload, dict):
+        elif action.type == "register_client_tools" and isinstance(
+            action.payload, dict
+        ):
             raw_tools = action.payload.get("client_tools")
             client_tools = normalize_thread_metadata({"client_tools": raw_tools}).get(
                 "client_tools", []
@@ -655,13 +656,13 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                f"client_tools.sync_registered thread_id={thread.id} user_email={context.user_email} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
+                f"client_tools.sync_registered thread_id={thread.id} user_id={context.user_id} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
             )
         return SyncCustomActionResponse(updated_item=sender)
 
-    async def list_threads_for_user(self, user_email: str):
+    async def list_threads_for_user(self, user_id: str):
         context = ReportAgentContext(
-            report_id="list", user_email=user_email, db=self.db
+            report_id="list", user_id=user_id, db=self.db
         )
         return await self.store.load_threads(
             limit=100, after=None, order="desc", context=context
@@ -672,7 +673,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
     ) -> TranscriptionResult:
         model = "gpt-4o-mini-transcribe"
         self.logger.info(
-            f"transcribe.start report_id={context.report_id} user_email={context.user_email} mime_type={audio_input.mime_type} bytes={len(audio_input.data)} model={model}"
+            f"transcribe.start report_id={context.report_id} user_id={context.user_id} mime_type={audio_input.mime_type} bytes={len(audio_input.data)} model={model}"
         )
         result = await self.openai_client.audio.transcriptions.create(
             file=("dictation.webm", audio_input.data, audio_input.media_type),
@@ -686,7 +687,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             seconds=seconds,
         )
         self.logger.info(
-            f"transcribe.end report_id={context.report_id} user_email={context.user_email} model={model} seconds={seconds} "
+            f"transcribe.end report_id={context.report_id} user_id={context.user_id} model={model} seconds={seconds} "
             f"est_cost_usd={context.thread_metadata.get('usage', {}).get('estimated_cost_usd', 0.0)} text_chars={len(result.text)}"
         )
         return TranscriptionResult(text=result.text)
@@ -696,4 +697,3 @@ async def build_chatkit_server(
     db: AsyncSession = Depends(get_db),
 ) -> ReportFoundryChatKitServer:
     return ReportFoundryChatKitServer(db)
-

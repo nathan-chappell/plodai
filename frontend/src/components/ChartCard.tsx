@@ -1,50 +1,13 @@
-import styled from "styled-components";
-
 import { DatasetChart } from "./DatasetChart";
+import {
+  ChartCardCode,
+  ChartCardHeading,
+  ChartCardPreview,
+  ChartCardPreviewImage,
+  ChartCardShell,
+} from "./styles";
 import type { ClientChartSpec } from "../types/analysis";
 import type { ReportChart } from "../types/report";
-import { displayHeadingCss, strongSurfaceCss } from "../ui/primitives";
-
-const Card = styled.article`
-  ${strongSurfaceCss};
-  background: linear-gradient(180deg, rgba(255, 253, 249, 0.98), rgba(248, 241, 234, 0.96));
-  padding: 1.2rem;
-  min-height: 280px;
-`;
-
-const Heading = styled.h3`
-  ${displayHeadingCss};
-  margin: 0 0 0.75rem;
-  font-size: 1.25rem;
-`;
-
-const Preview = styled.div`
-  min-height: 200px;
-  border-radius: var(--radius-md);
-  border: 1px dashed rgba(31, 41, 55, 0.18);
-  background: rgba(201, 111, 59, 0.08);
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  padding: 1rem;
-  text-align: center;
-`;
-
-const PreviewImage = styled.img`
-  display: block;
-  max-width: 100%;
-  border-radius: calc(var(--radius-md) - 4px);
-`;
-
-const Code = styled.pre`
-  margin: 1rem 0 0;
-  padding: 0.9rem;
-  border-radius: var(--radius-md);
-  background: #221f1b;
-  color: #f8f6f2;
-  overflow: auto;
-  font-size: 0.85rem;
-`;
 
 function isClientChartSpec(spec: ReportChart["spec"]): spec is ClientChartSpec {
   return typeof spec === "object" && spec !== null && "type" in spec && "label_key" in spec && "series" in spec;
@@ -52,11 +15,11 @@ function isClientChartSpec(spec: ReportChart["spec"]): spec is ClientChartSpec {
 
 export function ChartCard({ chart }: { chart: ReportChart }) {
   return (
-    <Card>
-      <Heading>{chart.title}</Heading>
-      <Preview>
+    <ChartCardShell>
+      <ChartCardHeading>{chart.title}</ChartCardHeading>
+      <ChartCardPreview>
         {chart.image_data_url ? (
-          <PreviewImage alt={chart.title} src={chart.image_data_url} />
+          <ChartCardPreviewImage alt={chart.title} src={chart.image_data_url} />
         ) : isClientChartSpec(chart.spec) ? (
           <DatasetChart spec={chart.spec} rows={[]} />
         ) : (
@@ -65,8 +28,8 @@ export function ChartCard({ chart }: { chart: ReportChart }) {
             <div>Render this client-side, cache by query id, then return the image to the backend.</div>
           </div>
         )}
-      </Preview>
-      <Code>{JSON.stringify(chart.spec, null, 2)}</Code>
-    </Card>
+      </ChartCardPreview>
+      <ChartCardCode>{JSON.stringify(chart.spec, null, 2)}</ChartCardCode>
+    </ChartCardShell>
   );
 }

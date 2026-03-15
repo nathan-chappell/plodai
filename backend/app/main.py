@@ -16,8 +16,7 @@ from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit
 from backend.app.core.auth import AuthenticatedUser, require_current_user
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging, get_logger
-from backend.app.db.session import AsyncSessionLocal, Base, engine
-from backend.app.services.auth_service import AuthService
+from backend.app.db.session import Base, engine
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT_DIR / "package.json"
@@ -31,15 +30,10 @@ def _read_version() -> str:
     version = data.get("version")
     return version if isinstance(version, str) and version else "unknown"
 
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-    async with AsyncSessionLocal() as db:
-        await AuthService(db).bootstrap()
-        await db.commit()
 
     logger.info(
         f"startup.complete database_url={settings.database_url} openai_max_retries={settings.openai_max_retries}"
@@ -52,6 +46,8 @@ print(f"ai-portfolio api version={_read_version()}")
 print(f"ai-portfolio api root={ROOT_DIR}")
 settings = get_settings()
 logger = get_logger("main")
+if not settings.CLERK_SECRET_KEY:
+    logger.warning("clerk.secret_key_missing auth routes will return 503 until CLERK_SECRET_KEY is configured")
 if settings.OPENAI_API_KEY:
     os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
     default_openai_client = AsyncOpenAI(
@@ -102,7 +98,7 @@ async def chatkit_entrypoint(
 ):
     raw_request = await request.body()
     context = await chatkit_server.build_request_context(
-        raw_request, user_email=user.email
+        raw_request, user_id=user.id
     )
     result = await chatkit_server.process(raw_request, context)
     if isinstance(result, StreamingResult):

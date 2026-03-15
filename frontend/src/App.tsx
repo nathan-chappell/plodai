@@ -1,22 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import styled from "styled-components";
+import { useMemo } from "react";
 
+import { AppStateProvider } from "./app/context";
+import { useAppRouteGuards, useAppSessionState } from "./app/hooks";
+import { AppEmptyMetaText, AppEmptyState } from "./app/styles";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
 import { ReportFoundryPage, reportFoundryCapability } from "./capabilities/reportFoundry";
-import { DEFAULT_AUTHENTICATED_PATH, SIGN_IN_PATH, isClerkEnabled } from "./lib/auth";
 import { navigate, usePathname } from "./lib/router";
-import { apiRequest, getStoredToken, storeToken } from "./lib/api";
-import type { AuthUser } from "./types/auth";
-import { MetaText, panelSurfaceCss } from "./ui/primitives";
-
-const EmptyState = styled.section`
-  ${panelSurfaceCss};
-  border-radius: var(--radius-xl);
-  padding: 1.6rem;
-  display: grid;
-  gap: 0.8rem;
-`;
 
 const capabilities = [reportFoundryCapability];
 
@@ -26,78 +16,46 @@ function resolveCapability(pathname: string) {
 
 export function App() {
   const pathname = usePathname();
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [hydrating, setHydrating] = useState(true);
+  const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
 
-  useEffect(() => {
-    async function hydrateUser() {
-      if (!getStoredToken() && !isClerkEnabled()) {
-        setHydrating(false);
-        return;
-      }
-      try {
-        const me = await apiRequest<AuthUser>("/auth/me");
-        setUser(me);
-      } catch {
-        storeToken(null);
-      } finally {
-        setHydrating(false);
-      }
-    }
-
-    void hydrateUser();
-  }, []);
-
-  useEffect(() => {
-    if (pathname === "/") {
-      navigate(user ? DEFAULT_AUTHENTICATED_PATH : SIGN_IN_PATH);
-    }
-  }, [pathname, user]);
-
-  useEffect(() => {
-    if (hydrating) {
-      return;
-    }
-    if (!user && pathname !== SIGN_IN_PATH) {
-      navigate(SIGN_IN_PATH);
-      return;
-    }
-    if (user && pathname === SIGN_IN_PATH) {
-      navigate(DEFAULT_AUTHENTICATED_PATH);
-    }
-  }, [hydrating, pathname, user]);
+  useAppRouteGuards({
+    authError,
+    pathname,
+    user,
+    hydrating,
+  });
 
   const activeCapability = useMemo(() => resolveCapability(pathname), [pathname]);
 
   if (hydrating) {
     return (
-      <EmptyState>
+      <AppEmptyState>
         <strong>Loading session</strong>
-        <MetaText>Checking whether you already have an authenticated workspace session.</MetaText>
-      </EmptyState>
+        <AppEmptyMetaText>Checking whether you already have an authenticated workspace session.</AppEmptyMetaText>
+      </AppEmptyState>
     );
   }
 
   if (!user) {
-    return <SignInPage onAuthenticated={setUser} />;
+    return <SignInPage authError={authError} hasClerkSession={isSignedIn} onRetryAuth={reloadSession} />;
   }
 
   return (
-    <PlatformShell
-      user={user}
-      capabilities={capabilities}
-      activeCapabilityId={activeCapability?.id ?? null}
-      onSelectCapability={navigate}
-      onAuthenticated={setUser}
-    >
-      {!activeCapability ? (
-        <EmptyState>
-          <strong>Unknown route</strong>
-          <MetaText>Pick one of the registered capabilities from the shell navigation.</MetaText>
-        </EmptyState>
-      ) : null}
+    <AppStateProvider value={{ authError, setAuthError, user, setUser }}>
+      <PlatformShell
+        capabilities={capabilities}
+        activeCapabilityId={activeCapability?.id ?? null}
+        onSelectCapability={navigate}
+      >
+        {!activeCapability ? (
+          <AppEmptyState>
+            <strong>Unknown route</strong>
+            <AppEmptyMetaText>Pick one of the registered capabilities from the shell navigation.</AppEmptyMetaText>
+          </AppEmptyState>
+        ) : null}
 
-      {activeCapability?.id === reportFoundryCapability.id ? <ReportFoundryPage user={user} /> : null}
-    </PlatformShell>
+        {activeCapability?.id === reportFoundryCapability.id ? <ReportFoundryPage /> : null}
+      </PlatformShell>
+    </AppStateProvider>
   );
 }

@@ -82,6 +82,7 @@ def build_report_analyst(
 
     instructions = f"{REPORT_ANALYST_INSTRUCTIONS}{brief_section}"
     client_tool_names = get_client_tool_names(context)
+    safety_identifier = context.user_id[:64]
 
     return Agent[ChatKitAgentContext[ReportAgentContext]](
         name="AI Portfolio Analyst",
@@ -91,6 +92,7 @@ def build_report_analyst(
         model_settings=ModelSettings(
             parallel_tool_calls=False,
             extra_args={
+                "safety_identifier": safety_identifier,
                 "context_management": [
                     {
                         "type": "compaction",

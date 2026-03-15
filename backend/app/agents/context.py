@@ -10,7 +10,7 @@ from backend.app.chatkit.metadata import AppThreadMetadata, ClientToolDefinition
 @dataclass
 class ReportAgentContext:
     report_id: str
-    user_email: str
+    user_id: str
     db: AsyncSession
     dataset_ids: list[str] = field(default_factory=list)
     chart_cache: dict[str, str] = field(default_factory=dict)
