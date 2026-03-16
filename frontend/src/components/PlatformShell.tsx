@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAppState } from "../app/context";
 import type { CapabilityDefinition } from "../capabilities/types";
+import { BLOG_INDEX_PATH, isBlogPath } from "../lib/blog";
+import { navigate } from "../lib/router";
 import { AuthPanel } from "./AuthPanel";
 import { usePlatformShellState } from "./hooks";
 import {
@@ -183,11 +185,13 @@ const THEME_PRESETS: ThemePreset[] = [
 export function PlatformShell({
   capabilities,
   activeCapabilityId,
+  currentPathname,
   onSelectCapability,
   children,
 }: {
   capabilities: CapabilityDefinition[];
   activeCapabilityId: string | null;
+  currentPathname: string;
   onSelectCapability: (path: string) => void;
   children: ReactNode;
 }) {
@@ -247,6 +251,24 @@ export function PlatformShell({
                     <PlatformNavMeta $collapsed={collapsed}>{capability.description}</PlatformNavMeta>
                   </PlatformNavButton>
                 ))}
+              </PlatformNavGrid>
+            </PlatformSidebarSection>
+
+            <PlatformSidebarSection $collapsed={collapsed}>
+              <PlatformSidebarSectionIcon $collapsed={collapsed}>B</PlatformSidebarSectionIcon>
+              <PlatformSectionTitle $collapsed={collapsed}>Browse</PlatformSectionTitle>
+              <PlatformNavGrid>
+                <PlatformNavButton
+                  $active={isBlogPath(currentPathname)}
+                  $collapsed={collapsed}
+                  onClick={() => navigate(BLOG_INDEX_PATH)}
+                  type="button"
+                  title="Blog"
+                >
+                  <PlatformNavGlyph $active={isBlogPath(currentPathname)} />
+                  <PlatformNavLabel $collapsed={collapsed}>Blog</PlatformNavLabel>
+                  <PlatformNavMeta $collapsed={collapsed}>Read published notes and essays.</PlatformNavMeta>
+                </PlatformNavButton>
               </PlatformNavGrid>
             </PlatformSidebarSection>
           </PlatformSidebarPrimary>

@@ -20,3 +20,4 @@ frontend/node_modules/
 node_modules/
 report_foundry.db
 Thumbs.db
+tmp/

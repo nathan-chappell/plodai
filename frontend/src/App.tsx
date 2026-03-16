@@ -9,10 +9,12 @@ import {
   ToastTitle,
   ToastViewport,
 } from "./app/styles";
+import { BlogPage } from "./components/BlogPage";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
 import { AdminUsersPage, adminUsersCapability } from "./capabilities/adminUsers";
 import { ReportFoundryPage, reportFoundryCapability } from "./capabilities/reportFoundry";
+import { isBlogPath } from "./lib/blog";
 import { navigate, usePathname } from "./lib/router";
 
 const allCapabilities = [reportFoundryCapability, adminUsersCapability];
@@ -32,6 +34,7 @@ export function App() {
   const pathname = usePathname();
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const { dismissToast, toasts } = useToastState();
+  const viewingBlog = isBlogPath(pathname);
 
   useAppRouteGuards({
     authError,
@@ -39,6 +42,27 @@ export function App() {
     user,
     hydrating,
   });
+
+  if (viewingBlog) {
+    return (
+      <>
+        <BlogPage pathname={pathname} viewerRole={user?.role ?? null} />
+        <ToastViewport>
+          {toasts.map((toast) => (
+            <ToastCard key={toast.id} $tone={toast.tone}>
+              <ToastHeader>
+                <ToastTitle>{toast.title}</ToastTitle>
+                <ToastDismissButton onClick={() => dismissToast(toast.id)} type="button">
+                  Dismiss
+                </ToastDismissButton>
+              </ToastHeader>
+              <AppEmptyMetaText>{toast.message}</AppEmptyMetaText>
+            </ToastCard>
+          ))}
+        </ToastViewport>
+      </>
+    );
+  }
 
   if (hydrating) {
     return (
@@ -61,6 +85,7 @@ export function App() {
       <PlatformShell
         capabilities={capabilities}
         activeCapabilityId={activeCapability?.id ?? null}
+        currentPathname={pathname}
         onSelectCapability={navigate}
       >
         {!activeCapability ? (

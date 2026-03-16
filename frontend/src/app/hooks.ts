@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/react";
 
 import { DEFAULT_AUTHENTICATED_PATH, SIGN_IN_PATH } from "../lib/auth";
 import { ApiError, apiRequest, setClerkTokenGetter } from "../lib/api";
+import { BLOG_INDEX_PATH, isBlogPath } from "../lib/blog";
 import { navigate } from "../lib/router";
 import type { AuthUser } from "../types/auth";
 import { subscribeToToasts, type AppToast } from "./toasts";
@@ -80,20 +81,22 @@ export function useAppRouteGuards({
   authError: string | null;
 }) {
   useEffect(() => {
-    if (pathname === "/") {
-      navigate(user ? DEFAULT_AUTHENTICATED_PATH : SIGN_IN_PATH);
+    if (pathname === "/" && !hydrating) {
+      navigate(user ? DEFAULT_AUTHENTICATED_PATH : BLOG_INDEX_PATH);
     }
-  }, [pathname, user]);
+  }, [hydrating, pathname, user]);
 
   useEffect(() => {
+    const isPublicRoute = isBlogPath(pathname) || pathname === SIGN_IN_PATH;
+
     if (hydrating) {
       return;
     }
-    if (authError && pathname !== SIGN_IN_PATH) {
+    if (authError && !isPublicRoute) {
       navigate(SIGN_IN_PATH);
       return;
     }
-    if (!user && pathname !== SIGN_IN_PATH) {
+    if (!user && !isPublicRoute) {
       navigate(SIGN_IN_PATH);
       return;
     }
