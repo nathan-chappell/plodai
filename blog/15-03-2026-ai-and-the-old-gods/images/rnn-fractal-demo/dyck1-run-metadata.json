@@ -1,0 +1,34 @@
+{
+  "device": "cpu",
+  "language": "dyck1",
+  "train_samples": 1800,
+  "short_test_samples": 500,
+  "long_test_samples": 500,
+  "min_complexity": 1,
+  "max_complexity": 20,
+  "short_test_min_complexity": 1,
+  "note": "Training uses only strings up to max_complexity; long-test evaluates longer strings only.",
+  "short_test_complexity": 20,
+  "long_test_min_complexity": 21,
+  "long_test_complexity": 60,
+  "epochs": 80,
+  "batch_size": 64,
+  "learning_rate": 0.003,
+  "seed": 7,
+  "final_metrics": {
+    "epoch": 80.0,
+    "train_loss": 0.22573888199082737,
+    "train_acc": 0.9202586206896551,
+    "short_test_loss": 0.17314420640468597,
+    "short_test_acc": 0.9419999718666077,
+    "long_test_loss": 0.22477832436561584,
+    "long_test_acc": 0.9240000247955322
+  },
+  "output_files": [
+    "dyck1-training-curves.png",
+    "dyck1-dataset-distribution.png"
+  ],
+  "trace_cloud_files": [
+    "dyck1-trace-cloud-01.png"
+  ]
+}

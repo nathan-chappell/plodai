@@ -3,6 +3,7 @@
 ### 1. Theoretical Justification Is Not Optional
 
 "This is computer science, so the proofs aren't unimportant."
+- My Analysis Professor
 
 When I started studying neural networks mathematically, one of my first questions was: why am I studying these things at all? Eventually I learned about universal approximation, for example [Cybenko's theorem](https://web.njit.edu/~usman/courses/cs675_fall18/10.1.1.441.7873.pdf), though there are simpler and more illustrative proofs for narrower classes of activations. Then the plot thickens in [Siegelmann and Sontag](https://binds.cs.umass.edu/papers/1992_Siegelmann_COLT.pdf), where recurrent neural nets are shown to be Turing complete. It is this argument, and the lead-up to it, that first made a certain parallel feel hard to ignore.
 

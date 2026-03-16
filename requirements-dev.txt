@@ -1,4 +1,6 @@
 -r requirements.txt
 httpx
+matplotlib
 pytest
 ruff
+torch
