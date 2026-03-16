@@ -15,9 +15,19 @@ One of the most memorable papers I ever read was [Pollack](https://www.researchg
 
 That connection between recurrent nets and discrete dynamical systems exhibiting chaotic behavior is magnificent. You can say that AI gets some of its power from chaos, and that is not just poetry. In the arguments and constructions, the data structures really do get embedded as fractals.[^precision]
 
+<figure>
+  <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-layered-basepts64.png" alt="Layered Cantor-style symbolic dust showing nested clusters across scales." width="560" />
+  <figcaption><em>A simple symbolic dust gives a concrete picture of how discrete structure can be packed into a fractal subset of the plane.</em></figcaption>
+</figure>
+
 That is also where the "chaos" starts to become more than a metaphor: it is the system's ability to move through that intricate structure in a meaningful way.
 
 What is so striking is that Pollack really does say the strong version. In the abstract, he writes that "a small weight adjustment causes a 'bifurcation' in the limit behavior of the network" and that this phase transition corresponds to the onset of generalization to "arbitrary-length strings." He also says the architecture appears capable of generating nonregular languages by exploiting "fractal and chaotic dynamics." Later he makes the wonderfully blunt remark that "a discrete dynamical system is just an iterative computation." And the paper does not leave the idea at the level of metaphor: when discussing parenthesis balancing, he says it is mathematically possible to embed an "infinite state machine" in a dynamical recognizer, with a state space built from fractal self-similarity. That is exactly the kind of claim that made this line of thought hard for me to forget.
+
+<figure>
+  <img src="./images/rnn-fractal-demo/dyck1-trace-cloud-01.png" alt="Projected hidden-state trace cloud from a small recurrent network trained on Dyck-1 parenthesis strings." width="680" />
+  <figcaption><em>A tiny recurrent net trained on balanced parentheses already carves out a structured state space rather than a featureless blur.</em></figcaption>
+</figure>
 
 ### 3. Complexity and Chaos: The New Gods and the Old
 
@@ -45,6 +55,11 @@ That is why I think the theological comparison is more interesting than it first
 Somehow I found myself reading [Evans and Larsen-Freeman](https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2020.574603/full), a paper on second-language acquisition through the lens of complex systems. On paper that sounds like an odd detour. In practice it ended up fitting the theme almost perfectly.
 
 What the paper makes unusually clear is that learning a second language does not look like smooth linear accumulation. Their learner begins in a fluent but contextually wrong attractor state: forms like "before to talk" and "before to tell" come out smoothly because they are stabilized by the learner's first language. The paper explicitly calls this kind of state a "pocket of stability." Then the old attractor destabilizes. Dysfluency appears. Hesitations and self-repairs show up. A new form, "before starting the class," eventually emerges, but not as a neat replacement. For a while several forms coexist in competition before a new attractor wins out. The paper summarizes the transition cleanly: bifurcations involve "loss of stability, an increase in variability, and a period of disfluency."
+
+<figure>
+  <img src="./images/bifurcation-language-learning.png" alt="Bifurcation diagram from Evans and Larsen-Freeman showing a learner moving from one stable syntactic attractor through instability into another." width="760" />
+  <figcaption><em>The Evans and Larsen-Freeman diagram is useful here because it makes the attractor-language explicit: fluency can break before a new stable pattern appears.</em></figcaption>
+</figure>
 
 That matters because learning a language is not merely adding a rule to a notebook. It is the physical reorganization of a system. If that is what language interaction does to a brain, then it is hard for me to believe that long, repeated interaction with AI will not do the same. We are not just consulting a tool. We are allowing a reality-detached symbolic system to participate in shaping our habits of speech, thought, and attention.
 

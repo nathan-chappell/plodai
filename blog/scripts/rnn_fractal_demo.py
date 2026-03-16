@@ -191,7 +191,7 @@ class StackedElmanRNN(nn.Module):
         self,
         vocab_size: int,
         embedding_dim: int = 8,
-        hidden_sizes: tuple[int, int, int] = (8, 4, 4),
+        hidden_sizes: tuple[int, ...] = (8, 4),
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
@@ -382,30 +382,20 @@ def sample_layered_symbolic_dust(
     base_points: int = 64,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     rng = random.Random(seed)
-    all_points: list[tuple[float, float]] = []
+    all_points: list[torch.Tensor] = []
     all_levels: list[int] = []
 
     for level in range(1, depth + 1):
-        n_points = base_points * (2 ** (level - 1))
-        shared_prefix_x = [rng.choice(digits) for _ in range(max(0, level - 1))]
-        shared_prefix_y = [rng.choice(digits) for _ in range(max(0, level - 1))]
-
-        def sample_coord(shared_prefix: list[int]) -> float:
-            tail_len = rng.randint(1, max(1, depth - len(shared_prefix)))
-            coeffs = shared_prefix + [rng.choice(digits) for _ in range(tail_len)]
-            return sum(digit * (base ** -(idx + 1)) for idx, digit in enumerate(coeffs))
-
-        for _ in range(n_points):
-            all_points.append(
-                (
-                    sample_coord(shared_prefix_x),
-                    sample_coord(shared_prefix_y),
-                )
-            )
-            all_levels.append(level)
+        level_points = symbolic_dust(depth=level, digits=digits, base=base)
+        n_points = min(base_points * (2 ** (level - 1)), level_points.shape[0])
+        if n_points < level_points.shape[0]:
+            indices = rng.sample(range(level_points.shape[0]), k=n_points)
+            level_points = level_points[indices]
+        all_points.append(level_points)
+        all_levels.extend([level] * level_points.shape[0])
 
     return (
-        torch.tensor(all_points, dtype=torch.float32),
+        torch.cat(all_points, dim=0),
         torch.tensor(all_levels, dtype=torch.long),
     )
 
@@ -611,9 +601,9 @@ def save_dust_plot(
         ax.scatter(
             points[:, 0],
             points[:, 1],
-            s=5.2,
+            s=4.6,
             color="#245f73",
-            alpha=0.68,
+            alpha=0.72,
             linewidths=0,
         )
     else:
@@ -624,8 +614,8 @@ def save_dust_plot(
         for level in range(1, max_level + 1):
             mask = levels == level
             color = cmap((level - 1) / max(1, max_level - 1))
-            size = max(0.9, 6.5 / (level ** 0.72))
-            alpha = min(0.92, 0.28 + 0.065 * level)
+            size = max(1.2, 12.0 / (level ** 0.55))
+            alpha = min(0.82, 0.22 + 0.05 * level)
             ax.scatter(
                 points[mask, 0],
                 points[mask, 1],
@@ -635,10 +625,14 @@ def save_dust_plot(
                 linewidths=0,
             )
     ax.set_title(title, fontfamily=DISPLAY_FONT)
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
     ax.set_aspect("equal")
     ax.grid(False)
+    ax.set_xlim(-0.03, 1.03)
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_xticks([0.0, 0.5, 1.0])
+    ax.set_yticks([0.0, 0.5, 1.0])
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     fig.savefig(path)
     plt.close(fig)
 

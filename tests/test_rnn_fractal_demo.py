@@ -29,6 +29,39 @@ def test_encode_batch_shapes() -> None:
     assert lengths.tolist() == [3, 5]
 
 
+def test_stacked_rnn_supports_arbitrary_hidden_layers() -> None:
+    vocab = demo.build_vocab("ab")
+    tokens, lengths = demo.encode_batch(["ab", "aabb"], vocab)
+
+    one_layer = demo.StackedElmanRNN(
+        vocab_size=len(vocab), embedding_dim=6, hidden_sizes=(5,)
+    )
+    one_layer_out = one_layer(tokens, lengths, capture_states=True)
+    assert one_layer_out["logits"].shape == (2,)
+    assert one_layer_out["final_hidden"].shape == (2, 5)
+    assert len(one_layer_out["layer_traces"]) == 1
+
+    three_layer = demo.StackedElmanRNN(
+        vocab_size=len(vocab), embedding_dim=6, hidden_sizes=(7, 5, 3)
+    )
+    three_layer_out = three_layer(tokens, lengths, capture_states=True)
+    assert three_layer_out["logits"].shape == (2,)
+    assert three_layer_out["final_hidden"].shape == (2, 3)
+    assert len(three_layer_out["layer_traces"]) == 3
+
+
+def test_layered_symbolic_dust_stays_on_fractal_grid() -> None:
+    points, levels = demo.sample_layered_symbolic_dust(
+        depth=6, digits=(0, 2), base=3, seed=7, base_points=8
+    )
+    assert points.shape[0] == levels.shape[0]
+    assert points.ndim == 2
+    assert levels.min().item() == 1
+    assert levels.max().item() == 6
+    assert float(points.min().item()) >= 0.0
+    assert float(points.max().item()) <= 1.0
+
+
 def test_dust_cli_writes_file(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
@@ -143,13 +176,13 @@ def test_generate_blog_artifacts_for_one_language() -> None:
             "--short-test-complexity",
             "20",
             "--long-test-min-complexity",
-            "21",
-            "--long-test-complexity",
             "60",
+            "--long-test-complexity",
+            "80",
             "--epochs",
             "80",
             "--batch-size",
-            "64",
+            "8",
             "--lr",
             "0.003",
             "--seed",
