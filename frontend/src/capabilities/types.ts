@@ -1,16 +1,26 @@
 import type { ClientEffect } from "../types/analysis";
+import type { JsonSchema } from "../types/json-schema";
+import type { LocalWorkspaceFile } from "../types/report";
 
 export type FunctionToolDefinition = {
   type: "function";
   name: string;
   description: string;
-  parameters: Record<string, unknown> | null;
+  parameters: JsonSchema;
   strict?: boolean;
+};
+
+export type CapabilityManifest = {
+  capability_id: string;
+  agent_name: string;
+  instructions: string;
+  client_tools: FunctionToolDefinition[];
 };
 
 export type ClientToolHandlerContext = {
   emitEffect: (effect: ClientEffect) => void;
   emitEffects: (effects: ClientEffect[]) => void;
+  appendFiles: (files: LocalWorkspaceFile[]) => void;
 };
 
 export type ClientToolHandler<Args = Record<string, unknown>, Result = Record<string, unknown>> = (

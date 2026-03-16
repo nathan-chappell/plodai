@@ -26,6 +26,32 @@ export async function executeClientTool<Name extends ClientToolName>(
   datasets: LoadedDataset[],
 ): Promise<ClientToolExecutionResult> {
   switch (toolCall.name) {
+    case "list_workspace_files": {
+      const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
+      return {
+        payload: {
+          files: datasets.map((dataset) => ({
+            id: dataset.id,
+            name: dataset.name,
+            kind: "csv",
+            extension: "csv",
+            row_count: dataset.row_count,
+            columns: dataset.columns,
+            numeric_columns: dataset.numeric_columns,
+            sample_rows: args.includeSamples ? dataset.sample_rows : [],
+          })),
+          csv_files: datasets.map((dataset) => ({
+            id: dataset.id,
+            name: dataset.name,
+            row_count: dataset.row_count,
+            columns: dataset.columns,
+            numeric_columns: dataset.numeric_columns,
+            sample_rows: args.includeSamples ? dataset.sample_rows : [],
+          })),
+        },
+        effects: [],
+      };
+    }
     case "list_attached_csv_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       return {
@@ -35,6 +61,7 @@ export async function executeClientTool<Name extends ClientToolName>(
             name: dataset.name,
             row_count: dataset.row_count,
             columns: dataset.columns,
+            numeric_columns: dataset.numeric_columns,
             sample_rows: args.includeSamples ? dataset.sample_rows : [],
           })),
         },
@@ -79,6 +106,9 @@ export async function executeClientTool<Name extends ClientToolName>(
         ],
       };
     }
+    case "create_csv_file":
+    case "get_pdf_page_range":
+      throw new Error(`Tool ${toolCall.name} is not implemented in the smoke-test client executor.`);
   }
 }
 

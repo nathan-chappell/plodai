@@ -114,14 +114,32 @@ export type RunLocalQueryToolArgs = {
   query_plan: QueryPlan;
 };
 
+export type CreateCsvFileToolArgs = {
+  filename: string;
+  query_plan: QueryPlan;
+};
+
+export type GetPdfPageRangeToolArgs = {
+  file_id: string;
+  start_page: number;
+  end_page: number;
+};
+
+export type ListWorkspaceFilesToolArgs = {
+  includeSamples?: boolean;
+};
+
 export type ListLoadedDatasetsToolArgs = {
   includeSamples?: boolean;
 };
 
 export type ClientToolArgsMap = {
+  list_workspace_files: ListWorkspaceFilesToolArgs;
   request_chart_render: RenderChartToolArgs;
   run_aggregate_query: RunLocalQueryToolArgs;
   list_attached_csv_files: ListLoadedDatasetsToolArgs;
+  create_csv_file: CreateCsvFileToolArgs;
+  get_pdf_page_range: GetPdfPageRangeToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;

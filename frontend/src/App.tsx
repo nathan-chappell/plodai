@@ -13,11 +13,13 @@ import { BlogPage } from "./components/BlogPage";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
 import { AdminUsersPage, adminUsersCapability } from "./capabilities/adminUsers";
+import { FileAgentPage, fileAgentCapability } from "./capabilities/fileAgent";
+import { PdfAgentPage, pdfAgentCapability } from "./capabilities/pdfAgent";
 import { ReportFoundryPage, reportFoundryCapability } from "./capabilities/reportFoundry";
 import { isBlogPath } from "./lib/blog";
 import { navigate, usePathname } from "./lib/router";
 
-const allCapabilities = [reportFoundryCapability, adminUsersCapability];
+const allCapabilities = [reportFoundryCapability, fileAgentCapability, pdfAgentCapability, adminUsersCapability];
 
 function filterCapabilities(role: "admin" | "user") {
   return allCapabilities.filter((capability) =>
@@ -96,6 +98,8 @@ export function App() {
         ) : null}
 
         {activeCapability?.id === reportFoundryCapability.id ? <ReportFoundryPage /> : null}
+        {activeCapability?.id === fileAgentCapability.id ? <FileAgentPage /> : null}
+        {activeCapability?.id === pdfAgentCapability.id ? <PdfAgentPage /> : null}
         {activeCapability?.id === adminUsersCapability.id ? <AdminUsersPage /> : null}
       </PlatformShell>
       <ToastViewport>

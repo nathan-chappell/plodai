@@ -97,6 +97,10 @@ export function useReportFoundryWorkspace() {
         return {
           id: crypto.randomUUID(),
           name: file.name,
+          kind: "csv",
+          extension: "csv",
+          byte_size: file.size,
+          mime_type: file.type || "text/csv",
           row_count: preview.rowCount,
           columns: preview.columns,
           numeric_columns: preview.numericColumns,

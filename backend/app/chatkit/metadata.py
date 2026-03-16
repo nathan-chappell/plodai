@@ -1,6 +1,23 @@
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from backend.app.chatkit.usage import ThreadUsageTotals, empty_usage_totals
+
+
+JsonSchemaPrimitive: TypeAlias = str | int | float | bool | None
+
+
+class JsonSchema(TypedDict, total=False):
+    type: str
+    description: str
+    title: str
+    enum: list[JsonSchemaPrimitive]
+    anyOf: list["JsonSchema"]
+    items: "JsonSchema"
+    properties: dict[str, "JsonSchema"]
+    required: list[str]
+    additionalProperties: bool
+    minimum: int | float
+    maximum: int | float
 
 
 class AnalysisPlan(TypedDict):
@@ -14,8 +31,15 @@ class ClientToolDefinition(TypedDict, total=False):
     type: Literal["function"]
     name: str
     description: str
-    parameters: dict[str, object] | None
+    parameters: JsonSchema
     strict: bool
+
+
+class CapabilityManifest(TypedDict):
+    capability_id: str
+    agent_name: str
+    instructions: str
+    client_tools: list[ClientToolDefinition]
 
 
 class ThreadMetadataPatch(TypedDict, total=False):
@@ -26,8 +50,7 @@ class ThreadMetadataPatch(TypedDict, total=False):
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
-    capability_id: str
-    client_tools: list[ClientToolDefinition]
+    capability_manifest: CapabilityManifest
 
 
 class AppThreadMetadata(TypedDict, total=False):
@@ -38,8 +61,7 @@ class AppThreadMetadata(TypedDict, total=False):
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
-    capability_id: str
-    client_tools: list[ClientToolDefinition]
+    capability_manifest: CapabilityManifest
 
 
 def _normalize_usage(raw_usage: object) -> ThreadUsageTotals | None:
@@ -103,6 +125,38 @@ def _normalize_analysis_plan(raw_plan: object) -> AnalysisPlan | None:
     return plan
 
 
+def _is_strict_json_schema(raw_schema: object) -> bool:
+    if not isinstance(raw_schema, dict):
+        return False
+    schema_type = raw_schema.get("type")
+    if isinstance(schema_type, str):
+        if schema_type == "object":
+            properties = raw_schema.get("properties")
+            if not isinstance(properties, dict):
+                return False
+            if raw_schema.get("additionalProperties") is not False:
+                return False
+            return all(_is_strict_json_schema(value) for value in properties.values())
+        if schema_type == "array":
+            return _is_strict_json_schema(raw_schema.get("items"))
+        if schema_type in {"string", "number", "integer", "boolean", "null"}:
+            return True
+        return False
+    if "properties" in raw_schema:
+        return False
+    if "items" in raw_schema:
+        return False
+    if "anyOf" in raw_schema:
+        any_of = raw_schema.get("anyOf")
+        if not isinstance(any_of, list) or not any_of:
+            return False
+        return all(_is_strict_json_schema(value) for value in any_of)
+    if "enum" in raw_schema:
+        enum_values = raw_schema.get("enum")
+        return isinstance(enum_values, list) and bool(enum_values)
+    return False
+
+
 def _normalize_client_tools(raw_tools: object) -> list[ClientToolDefinition] | None:
     if not isinstance(raw_tools, list):
         return None
@@ -115,8 +169,8 @@ def _normalize_client_tools(raw_tools: object) -> list[ClientToolDefinition] | N
         if not isinstance(name, str) or not name.strip():
             continue
         parameters = raw_tool.get("parameters")
-        if parameters is not None and not isinstance(parameters, dict):
-            parameters = None
+        if not _is_strict_json_schema(parameters):
+            continue
         tool: ClientToolDefinition = {
             "type": "function",
             "name": name.strip(),
@@ -127,6 +181,32 @@ def _normalize_client_tools(raw_tools: object) -> list[ClientToolDefinition] | N
         tools.append(tool)
 
     return tools
+
+
+def _normalize_capability_manifest(raw_manifest: object) -> CapabilityManifest | None:
+    if not isinstance(raw_manifest, dict):
+        return None
+
+    capability_id = raw_manifest.get("capability_id")
+    agent_name = raw_manifest.get("agent_name")
+    instructions = raw_manifest.get("instructions")
+    client_tools = _normalize_client_tools(raw_manifest.get("client_tools"))
+
+    if not isinstance(capability_id, str) or not capability_id.strip():
+        return None
+    if not isinstance(agent_name, str) or not agent_name.strip():
+        return None
+    if not isinstance(instructions, str) or not instructions.strip():
+        return None
+    if client_tools is None:
+        return None
+
+    return {
+        "capability_id": capability_id.strip(),
+        "agent_name": agent_name.strip(),
+        "instructions": instructions.strip(),
+        "client_tools": client_tools,
+    }
 
 
 def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
@@ -163,13 +243,11 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if isinstance(previous_response_id, str) and previous_response_id:
         metadata["openai_previous_response_id"] = previous_response_id
 
-    capability_id = raw_metadata.get("capability_id")
-    if isinstance(capability_id, str) and capability_id.strip():
-        metadata["capability_id"] = capability_id.strip()
-
-    client_tools = _normalize_client_tools(raw_metadata.get("client_tools"))
-    if client_tools:
-        metadata["client_tools"] = client_tools
+    capability_manifest = _normalize_capability_manifest(
+        raw_metadata.get("capability_manifest")
+    )
+    if capability_manifest is not None:
+        metadata["capability_manifest"] = capability_manifest
 
     usage = _normalize_usage(raw_metadata.get("usage"))
     if usage is not None:

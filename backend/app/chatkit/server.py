@@ -38,13 +38,19 @@ from openai.types.responses.response_input_item_param import (
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agents.agent_builder import build_registered_agent
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.query_models import build_query_plan_model
-from backend.app.agents.report_analyst import build_report_analyst
+from backend.app.agents.workspace_file import (
+    CsvWorkspaceMetadata,
+    PdfWorkspaceMetadata,
+    WorkspaceFileMetadata,
+)
 from backend.app.chatkit.client_tools import (
     ClientToolCsvFile,
     ClientToolResultPayload,
+    ClientToolWorkspaceFile,
     coerce_client_tool_result,
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
@@ -107,12 +113,18 @@ class ClientToolResultConverter(ThreadItemConverter):
             return None
 
         image_url = result.get("imageDataUrl") or result.get("image_data_url")
+        file_input = result.get("file_input")
         query_id = result.get("query_id") or result.get("queryId")
         row_count = result.get("row_count")
         csv_files = result.get("csv_files")
         sanitized_result = dict(result)
         sanitized_result.pop("imageDataUrl", None)
         sanitized_result.pop("image_data_url", None)
+        if isinstance(file_input, dict):
+            sanitized_file_input = dict(file_input)
+            if "file_data" in sanitized_file_input:
+                sanitized_file_input["file_data"] = "[omitted_base64_file_data]"
+            sanitized_result["file_input"] = sanitized_file_input
 
         function_call_output: FunctionCallOutput = {
             "type": "function_call_output",
@@ -120,26 +132,52 @@ class ClientToolResultConverter(ThreadItemConverter):
             "output": json.dumps(sanitized_result, ensure_ascii=True),
         }
 
-        if isinstance(image_url, str) and image_url:
-            description = (
-                "A rendered client-side chart is attached for visual inspection."
-            )
+        rich_output: list[dict[str, object]] = []
+        if isinstance(image_url, str) and image_url or isinstance(file_input, dict):
+            description = "The client tool completed successfully."
             if tool_name:
-                description = f"The client tool '{tool_name}' completed successfully. A rendered chart image is attached for visual inspection."
+                description = (
+                    f"The client tool '{tool_name}' completed successfully."
+                )
+            if isinstance(image_url, str) and image_url:
+                description += " A rendered chart image is attached for visual inspection."
+            if isinstance(file_input, dict):
+                description += " A derived file is attached for downstream inspection."
             if isinstance(query_id, str) and query_id:
                 description += f" Query id: {query_id}."
             if isinstance(row_count, int):
                 description += f" Result row count: {row_count}."
             if isinstance(csv_files, list):
                 description += f" CSV files available: {len(csv_files)}."
-
-            function_call_output["output"] = [
+            rich_output.append(
                 {
                     "type": "input_text",
-                    "text": f"{description}\n\n{json.dumps(sanitized_result, ensure_ascii=True)}",
-                },
-                {"type": "input_image", "image_url": image_url, "detail": "high"},
-            ]
+                    "text": (
+                        f"{description}\n\n"
+                        f"{json.dumps(sanitized_result, ensure_ascii=True)}"
+                    ),
+                }
+            )
+
+        if isinstance(image_url, str) and image_url:
+            rich_output.append(
+                {"type": "input_image", "image_url": image_url, "detail": "high"}
+            )
+
+        if isinstance(file_input, dict):
+            filename = file_input.get("filename")
+            file_data = file_input.get("file_data")
+            if isinstance(filename, str) and filename and isinstance(file_data, str) and file_data:
+                rich_output.append(
+                    {
+                        "type": "input_file",
+                        "filename": filename,
+                        "file_data": file_data,
+                    }
+                )
+
+        if rich_output:
+            function_call_output["output"] = rich_output
 
         return cast(list[ResponseInputItemParam], [function_call_output])
 
@@ -170,11 +208,12 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         metadata = normalize_thread_metadata(parsed_request.metadata)
         thread_id = getattr(parsed_request.params, "thread_id", None)
         recent_items = await self._load_recent_items(thread_id, user_id)
-        datasets = self._datasets_from_recent_items(recent_items)
+        files = self._files_from_recent_items(recent_items)
+        datasets = self._datasets_from_workspace_files(files)
         query_plan_model, _ = build_query_plan_model(datasets)
 
         self.logger.info(
-            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_id={user_id} dataset_count={len(datasets)}"
+            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_id={user_id} file_count={len(files)} dataset_count={len(datasets)}"
         )
 
         return ReportAgentContext(
@@ -184,10 +223,10 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             dataset_ids=[dataset.id for dataset in datasets],
             chart_cache=dict(metadata.get("chart_cache") or {}),
             thread_metadata=metadata,
+            available_files=files,
             available_datasets=datasets,
             query_plan_model=query_plan_model,
-            capability_id=metadata.get("capability_id"),
-            client_tools=list(metadata.get("client_tools") or []),
+            capability_manifest=metadata.get("capability_manifest"),
         )
 
     async def respond(
@@ -209,11 +248,13 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             context=context,
         )
         recent_item_data = recent_items.data
-        context.available_datasets = self._datasets_from_recent_items(recent_item_data)
+        context.available_files = self._files_from_recent_items(recent_item_data)
+        context.available_datasets = self._datasets_from_workspace_files(
+            context.available_files
+        )
         context.dataset_ids = [dataset.id for dataset in context.available_datasets]
         context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
-        context.capability_id = typed_metadata.get("capability_id")
-        context.client_tools = list(typed_metadata.get("client_tools") or [])
+        context.capability_manifest = typed_metadata.get("capability_manifest")
 
         pending_items = self._collect_pending_items(
             recent_item_data,
@@ -241,7 +282,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             f"response_logs={platform_logs_url(previous_response_id)}"
         )
 
-        agent = build_report_analyst(context, model=requested_model)
+        agent = build_registered_agent(context, model=requested_model)
         agent_context = ChatKitAgentContext[ReportAgentContext](
             thread=thread, store=self.store, request_context=context
         )
@@ -514,51 +555,146 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             return []
         return page.data
 
-    def _datasets_from_recent_items(
+    def _files_from_recent_items(
         self, recent_items: list[ThreadItem]
-    ) -> list[DatasetMetadata]:
+    ) -> list[WorkspaceFileMetadata]:
         for item in recent_items:
             if item.type != "client_tool_call":
                 continue
-            if item.name != "list_attached_csv_files" or item.status != "completed":
+            if item.status != "completed":
                 continue
             result = coerce_client_tool_result(item.output)
-            datasets = self._datasets_from_client_tool_result(result)
-            if datasets:
-                return datasets
+            if item.name == "list_workspace_files":
+                files = self._workspace_files_from_client_tool_result(result)
+                if files:
+                    return files
+            if item.name == "list_attached_csv_files":
+                files = self._workspace_files_from_client_tool_result(result)
+                if files:
+                    return files
         return []
 
-    def _datasets_from_client_tool_result(
+    def _workspace_files_from_client_tool_result(
         self, result: ClientToolResultPayload | None
-    ) -> list[DatasetMetadata]:
+    ) -> list[WorkspaceFileMetadata]:
         if result is None:
             return []
+        raw_files = result.get("files")
+        if isinstance(raw_files, list):
+            files: list[WorkspaceFileMetadata] = []
+            for raw_file in raw_files:
+                if not isinstance(raw_file, dict):
+                    continue
+                workspace_file = cast(ClientToolWorkspaceFile, raw_file)
+                file_id = str(workspace_file.get("id", "")).strip()
+                if not file_id:
+                    continue
+                files.append(
+                    WorkspaceFileMetadata(
+                        id=file_id,
+                        name=str(workspace_file.get("name", "Workspace file")),
+                        kind=cast(
+                            Literal["csv", "pdf", "other"],
+                            str(workspace_file.get("kind", "other")),
+                        ),
+                        extension=str(workspace_file.get("extension", "")),
+                        mime_type=(
+                            str(workspace_file.get("mime_type"))
+                            if workspace_file.get("mime_type")
+                            else None
+                        ),
+                        byte_size=(
+                            int(workspace_file.get("byte_size"))
+                            if workspace_file.get("byte_size") is not None
+                            else None
+                        ),
+                        csv=(
+                            CsvWorkspaceMetadata(
+                                row_count=int(workspace_file.get("row_count", 0)),
+                                columns=[
+                                    str(column)
+                                    for column in workspace_file.get("columns", [])
+                                ],
+                                numeric_columns=[
+                                    str(column)
+                                    for column in workspace_file.get(
+                                        "numeric_columns", []
+                                    )
+                                ],
+                                sample_rows=[
+                                    {str(key): value for key, value in row.items()}
+                                    for row in workspace_file.get("sample_rows", [])
+                                    if isinstance(row, dict)
+                                ],
+                            )
+                            if str(workspace_file.get("kind", "other")) == "csv"
+                            else None
+                        ),
+                        pdf=(
+                            PdfWorkspaceMetadata(
+                                page_count=(
+                                    int(workspace_file.get("page_count"))
+                                    if workspace_file.get("page_count") is not None
+                                    else None
+                                )
+                            )
+                            if str(workspace_file.get("kind", "other")) == "pdf"
+                            else None
+                        ),
+                    )
+                )
+            if files:
+                return files
+
         raw_csv_files = result.get("csv_files")
         if not isinstance(raw_csv_files, list):
             return []
 
-        datasets: list[DatasetMetadata] = []
+        files: list[WorkspaceFileMetadata] = []
         for raw_file in raw_csv_files:
             if not isinstance(raw_file, dict):
                 continue
             csv_file = cast(ClientToolCsvFile, raw_file)
-            dataset_id = str(csv_file.get("id", "")).strip()
-            if not dataset_id:
+            file_id = str(csv_file.get("id", "")).strip()
+            if not file_id:
+                continue
+            files.append(
+                WorkspaceFileMetadata(
+                    id=file_id,
+                    name=str(csv_file.get("name", "CSV file")),
+                    kind="csv",
+                    extension="csv",
+                    csv=CsvWorkspaceMetadata(
+                        row_count=int(csv_file.get("row_count", 0)),
+                        columns=[str(column) for column in csv_file.get("columns", [])],
+                        numeric_columns=[
+                            str(column) for column in csv_file.get("numeric_columns", [])
+                        ],
+                        sample_rows=[
+                            {str(key): value for key, value in row.items()}
+                            for row in csv_file.get("sample_rows", [])
+                            if isinstance(row, dict)
+                        ],
+                    ),
+                )
+            )
+        return files
+
+    def _datasets_from_workspace_files(
+        self, files: list[WorkspaceFileMetadata]
+    ) -> list[DatasetMetadata]:
+        datasets: list[DatasetMetadata] = []
+        for file in files:
+            if file.kind != "csv" or file.csv is None:
                 continue
             datasets.append(
                 DatasetMetadata(
-                    id=dataset_id,
-                    name=str(csv_file.get("name", "CSV file")),
-                    columns=[str(column) for column in csv_file.get("columns", [])],
-                    sample_rows=[
-                        {str(key): value for key, value in row.items()}
-                        for row in csv_file.get("sample_rows", [])
-                        if isinstance(row, dict)
-                    ],
-                    row_count=int(csv_file.get("row_count", 0)),
-                    numeric_columns=[
-                        str(column) for column in csv_file.get("numeric_columns", [])
-                    ],
+                    id=file.id,
+                    name=file.name,
+                    columns=list(file.csv.columns),
+                    sample_rows=list(file.csv.sample_rows),
+                    row_count=file.csv.row_count,
+                    numeric_columns=list(file.csv.numeric_columns),
                 )
             )
         return datasets
@@ -613,25 +749,33 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
 
-        if action.type == "register_client_tools" and isinstance(action.payload, dict):
-            raw_tools = action.payload.get("client_tools")
-            client_tools = normalize_thread_metadata({"client_tools": raw_tools}).get(
-                "client_tools", []
-            )
+        if action.type == "register_capability_manifest" and isinstance(
+            action.payload, dict
+        ):
+            capability_manifest = normalize_thread_metadata(
+                {"capability_manifest": action.payload.get("capability_manifest")}
+            ).get("capability_manifest")
+            if capability_manifest is None:
+                yield ProgressUpdateEvent(
+                    text="Capability manifest registration was rejected because it was incomplete or invalid."
+                )
+                return
             current_metadata = normalize_thread_metadata(thread.metadata)
             patch: ThreadMetadataPatch = {
-                "client_tools": client_tools,
+                "capability_manifest": capability_manifest,
             }
-            capability_id = action.payload.get("capability_id")
-            if isinstance(capability_id, str) and capability_id.strip():
-                patch["capability_id"] = capability_id.strip()
             thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                f"client_tools.registered thread_id={thread.id} user_id={context.user_id} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
+                f"capability_manifest.registered thread_id={thread.id} user_id={context.user_id} "
+                f"capability_id={summarize_for_log(capability_manifest.get('capability_id'))} "
+                f"tool_count={len(capability_manifest.get('client_tools') or [])}"
             )
             yield ProgressUpdateEvent(
-                text=f"Registered {len(client_tools)} client tools for this capability."
+                text=(
+                    f"Registered capability manifest for "
+                    f"{capability_manifest.get('agent_name')}."
+                )
             )
             return
 
@@ -654,24 +798,24 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger.info(
                 f"thread_metadata.sync_updated thread_id={thread.id} user_id={context.user_id} title={summarize_for_log(thread.title or '')}"
             )
-        elif action.type == "register_client_tools" and isinstance(
+        elif action.type == "register_capability_manifest" and isinstance(
             action.payload, dict
         ):
-            raw_tools = action.payload.get("client_tools")
-            client_tools = normalize_thread_metadata({"client_tools": raw_tools}).get(
-                "client_tools", []
-            )
+            capability_manifest = normalize_thread_metadata(
+                {"capability_manifest": action.payload.get("capability_manifest")}
+            ).get("capability_manifest")
+            if capability_manifest is None:
+                return SyncCustomActionResponse(updated_item=sender)
             current_metadata = normalize_thread_metadata(thread.metadata)
             patch: ThreadMetadataPatch = {
-                "client_tools": client_tools,
+                "capability_manifest": capability_manifest,
             }
-            capability_id = action.payload.get("capability_id")
-            if isinstance(capability_id, str) and capability_id.strip():
-                patch["capability_id"] = capability_id.strip()
             thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
             await self.store.save_thread(thread, context=context)
             self.logger.info(
-                f"client_tools.sync_registered thread_id={thread.id} user_id={context.user_id} capability_id={summarize_for_log(thread.metadata.get('capability_id'))} tool_count={len(client_tools)}"
+                f"capability_manifest.sync_registered thread_id={thread.id} user_id={context.user_id} "
+                f"capability_id={summarize_for_log(capability_manifest.get('capability_id'))} "
+                f"tool_count={len(capability_manifest.get('client_tools') or [])}"
             )
         return SyncCustomActionResponse(updated_item=sender)
 

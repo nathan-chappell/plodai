@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { createReportFoundryClientTools, reportFoundryCapability } from "../capabilities/reportFoundry";
+import { buildReportAgentManifest } from "../capabilities/manifests";
 import { ChatKitHarness } from "./ChatKitPane";
 import { DatasetChart } from "./DatasetChart";
 import { createSmokeDatasets, runFrontendSmokeTest, type FrontendSmokeResult } from "../lib/smoke";
@@ -46,6 +47,7 @@ export function SmokeTestPane({
   const [running, setRunning] = useState(false);
   const [liveEffects, setLiveEffects] = useState<ClientEffect[]>([]);
   const smokeDatasets = useMemo(() => createSmokeDatasets(), []);
+  const capabilityManifest = useMemo(() => buildReportAgentManifest(), []);
 
   async function handleRun() {
     setRunning(true);
@@ -144,8 +146,8 @@ export function SmokeTestPane({
       </SmokeTestExpectations>
 
       <ChatKitHarness
-        capabilityId={reportFoundryCapability.id}
-        datasets={smokeDatasets}
+        capabilityManifest={capabilityManifest}
+        files={smokeDatasets}
         investigationBrief="Run the systems smoke scenario against the bundled CSV files and show the real browser rendering path."
         clientTools={createReportFoundryClientTools(smokeDatasets)}
         headerTitle="Smoke harness"

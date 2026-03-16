@@ -7,19 +7,12 @@ import { DatasetInventoryPane } from "../components/DatasetInventoryPane";
 import { NarrativeCard } from "../components/NarrativeCard";
 import { SmokeTestPane } from "../components/SmokeTestPane";
 import { useReportFoundryWorkspace, type ReportFoundryWorkspaceTab } from "./hooks";
-import { executeQueryPlanInWorker } from "../lib/analysis-worker-client";
-import { renderChartToDataUrl } from "../lib/chart";
-import type {
-  ClientEffect,
-  ClientToolArgsMap,
-  DataRow,
-  ListLoadedDatasetsToolArgs,
-  RenderChartToolArgs,
-  RunLocalQueryToolArgs,
-} from "../types/analysis";
+import type { ClientEffect } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
 import { MetaText } from "../app/styles";
 import type { CapabilityClientTool, CapabilityDefinition } from "./types";
+import { buildReportAgentManifest } from "./manifests";
+import { createWorkspaceClientTools } from "../lib/file-agent-tools";
 import {
   CapabilityHeroRow,
   CapabilityEyebrow,
@@ -77,138 +70,17 @@ function InvestigationBriefPanel({
   );
 }
 
-async function listAttachedCsvFilesTool(
-  args: ListLoadedDatasetsToolArgs,
-  datasets: LocalDataset[],
-): Promise<Record<string, unknown>> {
-  return {
-    csv_files: datasets.map((dataset) => ({
-      id: dataset.id,
-      name: dataset.name,
-      row_count: dataset.row_count,
-      columns: dataset.columns,
-      numeric_columns: dataset.numeric_columns,
-      sample_rows: args.includeSamples ? dataset.sample_rows : [],
-    })),
-  };
-}
-
-async function runAggregateQueryTool(
-  args: RunLocalQueryToolArgs,
-  datasets: LocalDataset[],
-): Promise<Record<string, unknown>> {
-  const dataset = findDataset(datasets, args.query_plan.dataset_id);
-  const rows = (dataset.rows as DataRow[]) ?? dataset.sample_rows;
-  const resultRows = await executeQueryPlanInWorker(rows, args.query_plan);
-  return {
-    rows: resultRows,
-    row_count: resultRows.length,
-  };
-}
-
-async function requestChartRenderTool(
-  args: RenderChartToolArgs,
-  datasets: LocalDataset[],
-): Promise<{ payload: Record<string, unknown>; effect: ClientEffect }> {
-  const dataset = findDataset(datasets, args.query_plan.dataset_id);
-  const rows = (dataset.rows as DataRow[]) ?? dataset.sample_rows;
-  const resultRows = await executeQueryPlanInWorker(rows, args.query_plan);
-  const imageDataUrl = await renderChartToDataUrl(args.chart_plan, resultRows);
-  return {
-    payload: {
-      rows: resultRows,
-      row_count: resultRows.length,
-      chart: args.chart_plan,
-      query_id: args.query_id,
-      imageDataUrl,
-    },
-    effect: {
-      type: "chart_rendered",
-      queryId: args.query_id,
-      chart: args.chart_plan,
-      imageDataUrl: imageDataUrl ?? undefined,
-      rows: resultRows,
-    },
-  };
-}
-
-function findDataset(datasets: LocalDataset[], datasetId: string): LocalDataset {
-  const dataset = datasets.find((candidate) => candidate.id === datasetId);
-  if (!dataset) {
-    throw new Error(`Unknown dataset: ${datasetId}`);
-  }
-  return dataset;
-}
-
 export function createReportFoundryClientTools(datasets: LocalDataset[]): CapabilityClientTool[] {
-  return [
-    {
-      type: "function",
-      name: "list_attached_csv_files",
-      description:
-        "List the CSV files currently available on the client, including safe schema details, row counts, numeric columns, and tiny familiarization samples.",
-      strict: true,
-      parameters: {
-        type: "object",
-        properties: {
-          includeSamples: { type: "boolean", description: "Whether to include tiny familiarization samples." },
-        },
-        additionalProperties: false,
-      },
-      handler: async (args) => listAttachedCsvFilesTool(args as ClientToolArgsMap["list_attached_csv_files"], datasets),
-    },
-    {
-      type: "function",
-      name: "run_aggregate_query",
-      description:
-        "Execute a validated aggregate query plan against the client-side CSV rows and return grouped or summary results.",
-      strict: true,
-      parameters: {
-        type: "object",
-        properties: {
-          query_plan: {
-            type: "object",
-            description: "A validated row/filter/group/aggregate plan for exactly one dataset.",
-            additionalProperties: true,
-          },
-        },
-        required: ["query_plan"],
-        additionalProperties: false,
-      },
-      handler: async (args) => runAggregateQueryTool(args as ClientToolArgsMap["run_aggregate_query"], datasets),
-    },
-    {
-      type: "function",
-      name: "request_chart_render",
-      description:
-        "Run a validated query plan locally, render a chart on the client, and return the result rows plus chart metadata.",
-      strict: true,
-      parameters: {
-        type: "object",
-        properties: {
-          query_id: { type: "string" },
-          query_plan: { type: "object", additionalProperties: true },
-          chart_plan: { type: "object", additionalProperties: true },
-        },
-        required: ["query_id", "query_plan", "chart_plan"],
-        additionalProperties: false,
-      },
-      handler: async (args, context) => {
-        const result = await requestChartRenderTool(args as ClientToolArgsMap["request_chart_render"], datasets);
-        context.emitEffect(result.effect);
-        return result.payload;
-      },
-    },
-  ];
+  return createWorkspaceClientTools(datasets, { includeCharts: true });
 }
 
 export const reportFoundryCapability: CapabilityDefinition = {
-  id: "report-foundry",
-  path: "/capabilities/report-foundry",
-  navLabel: "Report Foundry",
-  title: "Report Foundry",
+  id: "report-agent",
+  path: "/capabilities/report-agent",
+  navLabel: "Report Agent",
+  title: "Report Agent",
   eyebrow: "Capability",
-  description: "Legacy CSV analysis workspace.",
+  description: "Investigative report generation over local files.",
   tabs: [
     { id: "report", label: "Report" },
     { id: "datasets", label: "Datasets" },
@@ -235,6 +107,7 @@ export function ReportFoundryPage() {
     handleClearDatasets,
     handleLoadSmokeDatasets,
   } = useReportFoundryWorkspace();
+  const capabilityManifest = useMemo(() => buildReportAgentManifest(), []);
   const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(datasets), [datasets]);
 
   return (
@@ -300,9 +173,9 @@ export function ReportFoundryPage() {
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
-              capabilityId={reportFoundryCapability.id}
+              capabilityManifest={capabilityManifest}
               enabled
-              datasets={datasets}
+              files={datasets}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}

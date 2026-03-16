@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig } from "../lib/api";
-import type { CapabilityClientTool } from "../capabilities/types";
+import type { CapabilityClientTool, CapabilityManifest } from "../capabilities/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
@@ -14,7 +14,7 @@ import {
   ChatKitPaneToolbarButton,
 } from "./styles";
 import type { ClientEffect, ClientToolCall, ClientToolName, DataRow } from "../types/analysis";
-import type { LocalDataset } from "../types/report";
+import type { LocalWorkspaceFile } from "../types/report";
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
 const CHATKIT_MODEL_CHOICES = [
@@ -36,8 +36,7 @@ const CHATKIT_MODEL_CHOICES = [
 ] as const;
 const CHATKIT_DEFAULT_MODEL_LABEL =
   CHATKIT_MODEL_CHOICES.find((choice) => choice.id === CHATKIT_DEFAULT_MODEL_ID)?.label ?? "Lightweight";
-const FALLBACK_CHATKIT_TOOLS: ClientToolName[] = ["list_attached_csv_files", "run_aggregate_query", "request_chart_render"];
-const REGISTER_CLIENT_TOOLS_ACTION = "register_client_tools";
+const REGISTER_CAPABILITY_MANIFEST_ACTION = "register_capability_manifest";
 
 function formatToolLabel(tool: string): string {
   return tool
@@ -46,14 +45,18 @@ function formatToolLabel(tool: string): string {
     .join(" ");
 }
 
-function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" {
+function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
   switch (tool) {
+    case "list_workspace_files":
     case "list_attached_csv_files":
       return "cube";
     case "run_aggregate_query":
+    case "create_csv_file":
       return "analytics";
     case "request_chart_render":
       return "chart";
+    case "get_pdf_page_range":
+      return "document";
   }
 }
 
@@ -88,10 +91,11 @@ export type ChatKitQuickAction = {
 };
 
 export function ChatKitHarness({
-  capabilityId,
-  datasets,
+  capabilityManifest,
+  files,
   investigationBrief,
   onEffects,
+  onFilesAdded,
   clientTools,
   headerTitle = "AI Portfolio",
   greeting,
@@ -101,10 +105,11 @@ export function ChatKitHarness({
   colorScheme = "dark",
   showDictation = true,
 }: {
-  capabilityId: string;
-  datasets: LocalDataset[];
+  capabilityManifest: CapabilityManifest;
+  files: LocalWorkspaceFile[];
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
+  onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
   clientTools: CapabilityClientTool[];
   headerTitle?: string;
   greeting?: string;
@@ -117,23 +122,18 @@ export function ChatKitHarness({
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
-
-  const loadedDatasets = useMemo(
-    () => datasets.map((dataset) => ({ ...dataset, rows: (dataset.rows as DataRow[]) ?? dataset.sample_rows })),
-    [datasets],
-  );
-  const loadedDatasetsRef = useRef(loadedDatasets);
   const onEffectsRef = useRef(onEffects);
+  const onFilesAddedRef = useRef(onFilesAdded);
   const clientToolsRef = useRef(clientTools);
   const registeredCatalogRef = useRef<string | null>(null);
 
   useEffect(() => {
-    loadedDatasetsRef.current = loadedDatasets;
-  }, [loadedDatasets]);
-
-  useEffect(() => {
     onEffectsRef.current = onEffects;
   }, [onEffects]);
+
+  useEffect(() => {
+    onFilesAddedRef.current = onFilesAdded;
+  }, [onFilesAdded]);
 
   useEffect(() => {
     clientToolsRef.current = clientTools;
@@ -144,20 +144,12 @@ export function ChatKitHarness({
     [investigationBrief, prompts],
   );
   const chatKitTools = useMemo(
-    () => (clientTools.length ? clientTools.map((tool) => tool.name as ClientToolName) : FALLBACK_CHATKIT_TOOLS),
-    [clientTools],
-  );
-  const clientToolCatalog = useMemo(
-    () =>
-      clientTools.map(({ handler: _handler, ...tool }) => ({
-        ...tool,
-        strict: tool.strict ?? true,
-      })),
-    [clientTools],
+    () => capabilityManifest.client_tools.map((tool) => tool.name as ClientToolName),
+    [capabilityManifest.client_tools],
   );
   const clientToolCatalogKey = useMemo(
-    () => JSON.stringify({ capabilityId, tools: clientToolCatalog }),
-    [capabilityId, clientToolCatalog],
+    () => JSON.stringify(capabilityManifest),
+    [capabilityManifest],
   );
 
   const options = useMemo<UseChatKitOptions>(
@@ -186,9 +178,9 @@ export function ChatKitHarness({
       startScreen: {
         greeting:
           greeting ??
-          (datasets.length
-            ? `Investigate ${datasets.length} attached file${datasets.length === 1 ? "" : "s"}.`
-            : "Add CSV files to start the investigation."),
+          (files.length
+            ? `Investigate ${files.length} attached file${files.length === 1 ? "" : "s"}.`
+            : "Add local files to start the investigation."),
         prompts: starterPrompts.map((prompt) => ({
           label: prompt.label,
           prompt: prompt.prompt,
@@ -200,7 +192,7 @@ export function ChatKitHarness({
           composerPlaceholder ??
           (investigationBrief.trim()
             ? `Work toward this goal: ${investigationBrief.trim().slice(0, 80)}`
-            : "Ask the analyst to summarize, compare, or investigate your CSV files"),
+            : "Ask the agent to inspect, transform, or investigate your local files"),
         attachments: {
           enabled: false,
         },
@@ -241,6 +233,11 @@ export function ChatKitHarness({
               onEffectsRef.current(effects);
             }
           },
+          appendFiles: (nextFiles) => {
+            if (nextFiles.length) {
+              onFilesAddedRef.current?.(nextFiles);
+            }
+          },
         });
       },
       onEffect: (event) => {
@@ -257,7 +254,7 @@ export function ChatKitHarness({
       chatKitTools,
       colorScheme,
       composerPlaceholder,
-      datasets.length,
+      files.length,
       greeting,
       headerTitle,
       investigationBrief,
@@ -269,7 +266,7 @@ export function ChatKitHarness({
   const chatKit = useChatKit(options);
 
   useEffect(() => {
-    if (!threadId || !clientToolCatalog.length) {
+    if (!threadId) {
       return;
     }
     const registrationKey = `${threadId}:${clientToolCatalogKey}`;
@@ -279,18 +276,17 @@ export function ChatKitHarness({
     registeredCatalogRef.current = registrationKey;
     void chatKit
       .sendCustomAction({
-        type: REGISTER_CLIENT_TOOLS_ACTION,
+        type: REGISTER_CAPABILITY_MANIFEST_ACTION,
         payload: {
-          capability_id: capabilityId,
-          client_tools: clientToolCatalog,
+          capability_manifest: capabilityManifest,
         },
       })
-      .then(() => setStatus("Client tools registered for this capability."))
+      .then(() => setStatus("Capability manifest registered for this thread."))
       .catch((error) => {
         registeredCatalogRef.current = null;
-        setStatus(error instanceof Error ? error.message : "Unable to register client tools.");
+        setStatus(error instanceof Error ? error.message : "Unable to register capability manifest.");
       });
-  }, [capabilityId, chatKit, clientToolCatalog, clientToolCatalogKey, threadId]);
+  }, [capabilityManifest, chatKit, clientToolCatalogKey, threadId]);
 
   async function handleQuickAction(action: ChatKitQuickAction) {
     setStatus(`Starting ${action.label.toLowerCase()}.`);
@@ -326,41 +322,44 @@ export function ChatKitHarness({
 }
 
 export function ChatKitPane({
-  capabilityId,
+  capabilityManifest,
   enabled,
-  datasets,
+  files,
   investigationBrief,
   clientTools,
   onEffects,
+  onFilesAdded,
 }: {
-  capabilityId: string;
+  capabilityManifest: CapabilityManifest;
   enabled: boolean;
-  datasets: LocalDataset[];
+  files: LocalWorkspaceFile[];
   investigationBrief: string;
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
+  onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
 }) {
-  const canInvestigate = enabled && datasets.length > 0;
+  const canInvestigate = enabled && files.length > 0;
 
   return (
     <ChatKitPaneCard>
       <ChatKitPanePill>Analyst workspace</ChatKitPanePill>
-      <h2>Investigate your CSV files</h2>
+      <h2>Investigate your files</h2>
       <ChatKitPaneMeta>
         {canInvestigate
-          ? `${datasets.length} CSV file${datasets.length === 1 ? " is" : "s are"} ready. ${investigationBrief.trim() ? `Current goal: ${investigationBrief.trim()}` : "Start with a summary, comparison, or anomaly hunt."}`
+          ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. ${investigationBrief.trim() ? `Current goal: ${investigationBrief.trim()}` : "Start with a summary, extraction, or investigation pass."}`
           : enabled
-            ? "Add one or more CSV files to start the investigation."
-            : "Sign in to start analyzing local CSV files."}
+            ? "Add one or more local files to start the investigation."
+            : "Sign in to start analyzing local files."}
       </ChatKitPaneMeta>
       <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
       {canInvestigate ? (
         <ChatKitHarness
-          capabilityId={capabilityId}
-          datasets={datasets}
+          capabilityManifest={capabilityManifest}
+          files={files}
           investigationBrief={investigationBrief}
           clientTools={clientTools}
           onEffects={onEffects}
+          onFilesAdded={onFilesAdded}
         />
       ) : (
         <ChatKitPaneSurface>

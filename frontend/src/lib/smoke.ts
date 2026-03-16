@@ -205,6 +205,8 @@ function buildDataset(id: string, name: string, csvText: string): LocalDataset {
   return {
     id,
     name,
+    kind: "csv",
+    extension: "csv",
     row_count: preview.rowCount,
     columns: preview.columns,
     numeric_columns: preview.numericColumns,
