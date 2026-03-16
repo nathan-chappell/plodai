@@ -4,7 +4,9 @@ from typer.testing import CliRunner
 
 import blog.scripts.rnn_fractal_demo as demo
 
-BLOG_IMAGE_DIR = Path("blog/15-03-2026-ai-and-the-old-gods/images/rnn-fractal-demo")
+BLOG_IMAGE_DIR = Path(
+    "blog/15-03-2026-the-theoretical-justification-of-neural-networks/images/rnn-fractal-demo"
+)
 
 
 def test_language_validators() -> None:
@@ -27,6 +29,19 @@ def test_encode_batch_shapes() -> None:
     tokens, lengths = demo.encode_batch(["ab", "aabb"], vocab)
     assert tokens.shape[0] == 2
     assert lengths.tolist() == [3, 5]
+
+
+def test_sample_dataset_respects_complexity_bounds() -> None:
+    sequences, _ = demo.sample_dataset(
+        demo.LANGUAGES["dyck1"],
+        n_samples=128,
+        min_complexity=3,
+        max_complexity=5,
+        seed=7,
+    )
+    complexities = [demo.sequence_complexity(demo.LANGUAGES["dyck1"], seq) for seq in sequences]
+    assert min(complexities) >= 3
+    assert max(complexities) <= 5
 
 
 def test_stacked_rnn_supports_arbitrary_hidden_layers() -> None:
@@ -116,6 +131,10 @@ def test_train_cli_smoke(tmp_path: Path) -> None:
             "1",
             "--batch-size",
             "16",
+            "--embedding-dim",
+            "4",
+            "--hidden-sizes",
+            "4,2",
             "--trace-variants",
             "2",
             "--trace-output-dir",
@@ -127,6 +146,32 @@ def test_train_cli_smoke(tmp_path: Path) -> None:
     assert (tmp_path / "run-metadata.json").exists()
     assert (tmp_path / "trace-clouds" / "odd_parity-trace-cloud-01.png").exists()
     assert (tmp_path / "trace-clouds" / "odd_parity-trace-cloud-02.png").exists()
+
+
+def test_train_cli_rejects_long_range_overlap(tmp_path: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        demo.app,
+        [
+            "train",
+            "--language",
+            "odd_parity",
+            "--output-dir",
+            str(tmp_path),
+            "--max-complexity",
+            "6",
+            "--long-test-min-complexity",
+            "6",
+            "--epochs",
+            "1",
+            "--trace-variants",
+            "0",
+            "--trace-output-dir",
+            str(tmp_path / "trace-clouds"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "greater than max-complexity" in result.output
 
 
 def test_generate_blog_artifacts_for_one_language() -> None:
@@ -180,11 +225,15 @@ def test_generate_blog_artifacts_for_one_language() -> None:
             "--long-test-complexity",
             "80",
             "--epochs",
-            "80",
+            "40",
             "--batch-size",
             "8",
             "--lr",
             "0.003",
+            "--embedding-dim",
+            "3",
+            "--hidden-sizes",
+            "3,2",
             "--seed",
             "7",
             "--trace-variants",

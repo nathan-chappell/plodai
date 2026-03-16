@@ -1,0 +1,1 @@
+"""Blog assets and scripts."""

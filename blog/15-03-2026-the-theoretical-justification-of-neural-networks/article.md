@@ -1,4 +1,4 @@
-# Why Neural Networks Deserve Theoretical Attention
+# The Theoretical Justification of Neural Networks
 
 ### 1. On Theoretical Justification
 
@@ -36,25 +36,43 @@ This is a very different kind of claim from universal approximation.  Universal 
 
 One thing that started bothering me, in a good way, is that Turing-complete systems always seem to hide an infinity somewhere.  A Turing machine has an infinite tape.  A register machine gets to use arbitrarily large integers.  The lambda calculus allows arbitrarily long reductions.  So where does the infinity go in an RNN?
 
-In the end, it turns out that they are Turing complete - see [Siegelmann and Sontag](https://binds.cs.umass.edu/papers/1992_Siegelmann_COLT.pdf) for a good technical proof.  And the answer to the "where did the infinity go?" question is: into precision.  The symbolic structure is packed into a bounded region of state space, but doing that requires arbitrarily fine distinctions between nearby points.  The infinity has not vanished.  It has been hidden in the precision needed to represent and manipulate the state.
+In the end, it turns out that they are Turing complete - see [Siegelmann and Sontag](https://binds.cs.umass.edu/papers/1992_Siegelmann_COLT.pdf) for a good technical proof.  And the answer to the "where did the infinity go?" question is: into precision.  The symbolic structure is packed into a bounded region of state space, but doing that requires arbitrarily fine distinctions between nearby points.  The infinity has not vanished.  It has been hidden in the precision needed to represent and manipulate the state.[^precision]
 
 That observation helped a lot of later material click into place for me.  If the power of the system is partly hiding in fine geometric structure, then looking at state space is not a cute visualization trick.  It is a way of peeking at where the computation actually lives.
 
 ### 4. Pollack, Bifurcations, and Fractal Hidden States
 
-But before that proof was nailed down, there was already fascinating work pointing in the same direction.  In [The Induction of Dynamical Recognizers](https://www.researchgate.net/publication/226171158_The_Induction_of_Dynamical_Recognizers), Pollack traced out the trajectories of hidden states in recurrent nets and analyzed them through the lens of discrete dynamical systems.  He noticed a few things.  First, the models would have "aha moments" as they jumped from understanding only shorter strings to much longer ones, including strings longer than they were trained on.  Second, he observed - quite literally - that the trajectories themselves were beginning to form fractal shapes.  That is where, for me at least, the story starts to become much more interesting.
+But before that proof was nailed down, there was already fascinating work pointing in the same direction.  Pollack's [The Induction of Dynamical Recognizers](https://www.researchgate.net/publication/226171158_The_Induction_of_Dynamical_Recognizers) is the paper that really makes the story feel alive.  He traced out the trajectories of hidden states in recurrent nets as they learned formal languages, and found abrupt qualitative changes in behavior: networks that had only managed short strings would suddenly begin handling much longer ones, including strings beyond the training range.  He treated these as "aha moments," which is exactly the right phrase.
 
 This is also the point where the technical discussion becomes genuinely fun.  We are no longer just proving an abstract capability theorem.  We are watching a learning system pass through qualitative changes, and the geometry of those changes starts to matter.
 
-One of the most memorable papers I ever read was [Pollack](https://www.researchgate.net/publication/226171158_The_Induction_of_Dynamical_Recognizers). In it, he describes experiments with recurrent nets by mapping the hidden state spaces they traverse while learning formal languages. The loss on long strings would suddenly change when the networks went from recognizing only short strings to recognizing arbitrarily long ones. He treated this as an "aha moment," which is already a wonderful phrase for it. And it was Pollack who noticed that after these moments, the state-space traversals began to look fractal.
-
-That connection between recurrent nets and discrete dynamical systems exhibiting chaotic behavior is magnificent. You can say that AI gets some of its power from chaos, and that is not just poetry. In the arguments and constructions, the data structures really do get embedded as fractals.[^precision]
+That connection between recurrent nets and discrete dynamical systems exhibiting chaotic behavior is magnificent. You can say that AI gets some of its power from chaos, and that is not just poetry.  Pollack was not just reporting better accuracy; he was noticing that the state-space trajectories themselves were beginning to take on fractal structure.
 
 That is also where the "chaos" starts to become more than a metaphor: it is the system's ability to move through that intricate structure in a meaningful way.  The appeal of Pollack's paper is that he does not merely borrow language from dynamics.  He treats the network as a dynamical system and then finds evidence that the dynamics really are doing computational work.
 
 What is so striking is that Pollack really does say the strong version. In the abstract, he writes that "a small weight adjustment causes a 'bifurcation' in the limit behavior of the network" and that this phase transition corresponds to the onset of generalization to "arbitrary-length strings." He also says the architecture appears capable of generating nonregular languages by exploiting "fractal and chaotic dynamics." Later he makes the wonderfully blunt remark that "a discrete dynamical system is just an iterative computation." And the paper does not leave the idea at the level of metaphor: when discussing parenthesis balancing, he says it is mathematically possible to embed an "infinite state machine" in a dynamical recognizer, with a state space built from fractal self-similarity. That is exactly the kind of claim that made this line of thought hard for me to forget.
 
-`TODO:` implement a picture of trajectories and maybe a placeholder diagram of the RNN architecture.  We generate most of what we need in the test suite.
+<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start;">
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/dyck1-training-curves.png" alt="Training curves for the Dyck-1 recognizer, with train, short-test, and long-test accuracy and loss over time." width="560" />
+    <figcaption><em>The thing I wanted to capture from Pollack is already visible here: performance on much longer strings can lag and then change qualitatively once the state dynamics settle into a different regime.</em></figcaption>
+  </figure>
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/dyck1-dataset-distribution.png" alt="Distribution of train, short-test, and long-test Dyck-1 examples by complexity." width="560" />
+    <figcaption><em>This makes the split explicit.  Training stays on short strings, while the long-test set lives well outside the training range.</em></figcaption>
+  </figure>
+</div>
+
+<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/dyck1-trace-cloud-01.png" alt="PCA projection of recurrent hidden-state trajectories for balanced-parentheses examples." width="560" />
+    <figcaption><em>A simple projection of hidden-state trajectories is enough to make the computation feel geometric rather than merely symbolic.</em></figcaption>
+  </figure>
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-layered-basepts64.png" alt="A layered symbolic dust figure illustrating how discrete structure can be embedded in a bounded state-space region." width="560" />
+    <figcaption><em>The dust image is not meant as a literal hidden-state reconstruction.  It is there to make the fractal encoding idea concrete enough to visualize.</em></figcaption>
+  </figure>
+</div>
 
 ### 5. Wrap-Up
 
@@ -69,4 +87,4 @@ References:
 - Turing-completeness result for recurrent nets: [Siegelmann Sontag 1992 - On The Computational Power Of Neural Nets](https://binds.cs.umass.edu/papers/1992_Siegelmann_COLT.pdf)
 - Pollack on dynamical recognizers, phase transitions, and fractal state spaces: [Pollack 1991 - The Induction of Dynamical Recognizers](https://www.researchgate.net/publication/226171158_The_Induction_of_Dynamical_Recognizers)
 
-[^precision]: One convenient model is to map a binary stack `a = (a_1, a_2, ...)`, with `a_i in {0,1}`, to the real number `x(a) = sum_{i=1}^{infty} a_i 2^{-i}`. Using two stacks gives a point `(x(a), x(b)) in [0,1]^2`. In this way one obtains two Cantor-like coordinate sets, and hence a fractal subset of the square on which symbolic structure can be encoded geometrically. The "infinity" has not disappeared; it has been transferred into the arbitrarily fine precision required to specify the point.
+[^precision]: One convenient model is to map a binary stack `a = (a_1, a_2, ...)`, with `a_i in {0,1}`, to the real number `x(a) = sum_{i=1}^{infty} a_i 2^{-i}`. Using two stacks gives a point `(x(a), x(b)) in [0,1]^2`. In this way one obtains two Cantor-like coordinate sets, and hence a fractal subset of the square on which symbolic structure can be encoded geometrically.

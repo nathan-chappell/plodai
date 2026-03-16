@@ -16,7 +16,8 @@ app = typer.Typer(
 )
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ROOT = Path(__file__).resolve().parent
-ARTICLE_DIR = ROOT.parent / "15-03-2026-ai-and-the-old-gods"
+ARTICLE_SLUG = "15-03-2026-the-theoretical-justification-of-neural-networks"
+ARTICLE_DIR = ROOT.parent / ARTICLE_SLUG
 DEFAULT_OUTPUT_DIR = ARTICLE_DIR / "images" / "rnn-fractal-demo"
 DEFAULT_VARIANT_DIR = ROOT.parents[1] / "tmp" / "rnn-fractal-demo"
 BODY_FONT = "Manrope"
@@ -77,9 +78,17 @@ def sample_anbn(rng: random.Random, max_pairs: int) -> str:
 
 def sample_not_anbn(rng: random.Random, max_pairs: int) -> str:
     while True:
-        text = "".join(
-            rng.choice("ab") for _ in range(rng.randint(1, 2 * max_pairs + 2))
-        )
+        if rng.random() < 0.6:
+            a_count = rng.randint(1, max_pairs + 1)
+            b_count = rng.randint(1, max_pairs + 1)
+            if a_count == b_count:
+                b_count += 1
+            text = "a" * a_count + "b" * b_count
+        else:
+            left = rng.randint(1, max_pairs)
+            middle = rng.randint(1, max_pairs)
+            right = rng.randint(1, max_pairs)
+            text = "a" * left + "b" * middle + "a" * right
         if not is_anbn(text):
             return text
 
@@ -118,9 +127,19 @@ def sample_dyck1(rng: random.Random, max_pairs: int) -> str:
 
 def sample_not_dyck1(rng: random.Random, max_pairs: int) -> str:
     while True:
-        text = "".join(
-            rng.choice("()") for _ in range(rng.randint(1, 2 * max_pairs + 2))
-        )
+        valid = sample_dyck1(rng, max_pairs)
+        strategy = rng.randrange(4)
+        if strategy == 0:
+            text = ")" + valid
+        elif strategy == 1:
+            text = valid + "("
+        elif strategy == 2:
+            cut = rng.randrange(len(valid))
+            text = valid[:cut] + valid[cut + 1 :]
+        else:
+            flip = rng.randrange(len(valid))
+            replacement = ")" if valid[flip] == "(" else "("
+            text = valid[:flip] + replacement + valid[flip + 1 :]
         if not is_dyck1(text):
             return text
 
@@ -434,7 +453,7 @@ def ensure_dir(path: Path) -> Path:
 
 def save_history_plot(history: list[dict[str, float]], path: Path) -> None:
     epochs = [int(row["epoch"]) for row in history]
-    fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.8))
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.3))
     axes[0].plot(
         epochs,
         [row["train_loss"] for row in history],
@@ -496,7 +515,9 @@ def save_dataset_distribution_plot(
     datasets: list[tuple[str, list[str], torch.Tensor]],
     path: Path,
 ) -> None:
-    fig, axes = plt.subplots(1, len(datasets), figsize=(5.0 * len(datasets), 4.1), sharey=True)
+    fig, axes = plt.subplots(
+        1, len(datasets), figsize=(4.4 * len(datasets), 3.7), sharey=True
+    )
     if len(datasets) == 1:
         axes = [axes]
 
@@ -564,7 +585,7 @@ def save_trace_cloud_variants(
             splits.append(projected[start:stop])
             start = stop
 
-        fig, ax = plt.subplots(figsize=(7.6, 6.2))
+        fig, ax = plt.subplots(figsize=(6.2, 5.1))
         for idx, path_points in enumerate(splits):
             color = cmap(idx / max(1, len(splits) - 1))
             ax.scatter(
@@ -596,7 +617,7 @@ def save_dust_plot(
     title: str,
     levels: torch.Tensor | None = None,
 ) -> None:
-    fig, ax = plt.subplots(figsize=(7.2, 7.2))
+    fig, ax = plt.subplots(figsize=(5.9, 5.9))
     if levels is None:
         ax.scatter(
             points[:, 0],
@@ -644,6 +665,13 @@ def parse_digits(text: str) -> tuple[int, int]:
     return parts[0], parts[1]
 
 
+def parse_hidden_sizes(text: str) -> tuple[int, ...]:
+    sizes = tuple(int(part.strip()) for part in text.split(",") if part.strip())
+    if not sizes or any(size <= 0 for size in sizes):
+        raise typer.BadParameter("hidden-sizes must look like '6,4' with positive integers")
+    return sizes
+
+
 def metadata_path(output_dir: Path) -> Path:
     return output_dir / "run-metadata.json"
 
@@ -656,6 +684,31 @@ def parse_languages(text: str) -> list[str]:
         if language not in LANGUAGES:
             raise typer.BadParameter(f"unknown language '{language}'")
     return languages
+
+
+def validate_complexity_ranges(
+    *,
+    min_complexity: int,
+    max_complexity: int,
+    short_test_min_complexity: int,
+    short_test_complexity: int,
+    long_test_min_complexity: int,
+    long_test_complexity: int,
+) -> None:
+    if min_complexity > max_complexity:
+        raise typer.BadParameter("min-complexity must be <= max-complexity")
+    if short_test_min_complexity > short_test_complexity:
+        raise typer.BadParameter(
+            "short-test-min-complexity must be <= short-test-complexity"
+        )
+    if long_test_min_complexity > long_test_complexity:
+        raise typer.BadParameter(
+            "long-test-min-complexity must be <= long-test-complexity"
+        )
+    if long_test_min_complexity <= max_complexity:
+        raise typer.BadParameter(
+            "long-test-min-complexity must be greater than max-complexity so long-test strings stay out of training"
+        )
 
 
 @app.command()
@@ -672,18 +725,29 @@ def train(
     min_complexity: int = typer.Option(1, help="Minimum training complexity."),
     max_complexity: int = typer.Option(12, help="Maximum training complexity."),
     short_test_min_complexity: int = typer.Option(1, help="Minimum short-string test complexity."),
-    short_test_complexity: int = typer.Option(20, help="Maximum short-string test complexity."),
-    long_test_min_complexity: int = typer.Option(21, help="Minimum long-string test complexity."),
+    short_test_complexity: int = typer.Option(12, help="Maximum short-string test complexity."),
+    long_test_min_complexity: int = typer.Option(13, help="Minimum long-string test complexity."),
     long_test_complexity: int = typer.Option(60, help="Maximum long-string test complexity."),
     epochs: int = typer.Option(100, help="Training epochs."),
     batch_size: int = typer.Option(64, help="Batch size."),
     lr: float = typer.Option(3e-3, help="Learning rate."),
+    embedding_dim: int = typer.Option(3, help="Embedding width for each symbol."),
+    hidden_sizes: str = typer.Option("3,2", help="Comma-separated hidden sizes, e.g. '6,4'."),
     seed: int = typer.Option(7, help="Random seed."),
     trace_variants: int = typer.Option(10, help="How many trace-cloud variants to render."),
     trace_output_dir: Path = typer.Option(DEFAULT_VARIANT_DIR, help="Directory for trace-cloud variants."),
 ) -> None:
     seed_everything(seed)
     use_pretty_style()
+    validate_complexity_ranges(
+        min_complexity=min_complexity,
+        max_complexity=max_complexity,
+        short_test_min_complexity=short_test_min_complexity,
+        short_test_complexity=short_test_complexity,
+        long_test_min_complexity=long_test_min_complexity,
+        long_test_complexity=long_test_complexity,
+    )
+    parsed_hidden_sizes = parse_hidden_sizes(hidden_sizes)
     output_dir = ensure_dir(output_dir)
     trace_output_dir = ensure_dir(trace_output_dir)
     languages = parse_languages(language)
@@ -713,7 +777,11 @@ def train(
             seed=seed + idx * 101 + 23,
         )
 
-        model = StackedElmanRNN(vocab_size=len(vocab), embedding_dim=8, hidden_sizes=(8, 4, 4)).to(DEVICE)
+        model = StackedElmanRNN(
+            vocab_size=len(vocab),
+            embedding_dim=embedding_dim,
+            hidden_sizes=parsed_hidden_sizes,
+        ).to(DEVICE)
         history = train_model(
             model,
             train_sequences,
@@ -766,6 +834,8 @@ def train(
             "epochs": epochs,
             "batch_size": batch_size,
             "learning_rate": lr,
+            "embedding_dim": embedding_dim,
+            "hidden_sizes": list(parsed_hidden_sizes),
             "seed": seed + idx * 101,
             "final_metrics": history[-1],
             "output_files": [

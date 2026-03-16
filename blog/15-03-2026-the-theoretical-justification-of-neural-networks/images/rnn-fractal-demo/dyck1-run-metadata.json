@@ -11,18 +11,23 @@
   "short_test_complexity": 20,
   "long_test_min_complexity": 60,
   "long_test_complexity": 80,
-  "epochs": 80,
+  "epochs": 40,
   "batch_size": 8,
   "learning_rate": 0.003,
+  "embedding_dim": 3,
+  "hidden_sizes": [
+    3,
+    2
+  ],
   "seed": 7,
   "final_metrics": {
-    "epoch": 80.0,
-    "train_loss": 0.12113159545593792,
-    "train_acc": 0.97,
-    "short_test_loss": 0.09823281317949295,
-    "short_test_acc": 0.9739999771118164,
-    "long_test_loss": 0.1126207560300827,
-    "long_test_acc": 0.9700000286102295
+    "epoch": 40.0,
+    "train_loss": 0.28475193490584694,
+    "train_acc": 0.8972222222222223,
+    "short_test_loss": 0.3020038902759552,
+    "short_test_acc": 0.8840000033378601,
+    "long_test_loss": 0.29218342900276184,
+    "long_test_acc": 0.8920000195503235
   },
   "output_files": [
     "dyck1-training-curves.png",
