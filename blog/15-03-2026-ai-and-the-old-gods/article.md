@@ -2,218 +2,49 @@
 
 ## Working thesis
 
-During my study of neural networks, I kept noticing disturbing parallels between modern AI and much older ways of talking about opaque, consequential forces. The point is not that AI is supernatural. The point is that we are engaged in mass engineering projects whose theoretical justification matters, and that the mathematics of these systems may help explain both their power and the strange way humans respond to them.
+### 1. Theoretical Justification - not necessarily unimportant 
 
-## Outline
+"This is computer science, so the proofs aren't unimportant" - something my great professor Tiwary once allegedly said.
 
-### 1. Before Mass Engineering Projects, Don’t Forget Your Theoretical Justification
+When I started studying NNs mathematically, I quickly asked "why am I studying these things?"  Eventually I learned about universal approximation e.g. cybenko's theorem, although there are easier proofs of less powerful but more illustrative examples using, e.g. some smaller class of simgoids or just the linear sigmoid (the proof becomes painfully easy).  But there are wider instance of the theorem, one I like was the notes here `https://wiki.math.ntnu.no/_media/ma8106/2020v/stoneweierstrass.pdf`.  Anyways, the plot thickens in S&S when they prove that RNNs are turing complete.  It is this argument, and the lead up to it, where I want to point out a parallel I find somewhat disturbing.
 
-- Post-sized takeaway:
-  before we spend billions scaling a class of systems, we should be able to say what theoretical properties make them worth scaling.
-- Core move:
-  start with the practical question of industrial AI investment, then answer it with theory rather than vibes.
-- Key claim:
-  two deep results justify taking neural networks seriously as a general machine architecture:
-  universal approximation and Turing completeness.
-- What this section needs to establish:
-  this is the rational core beneath the engineering gold rush.
-- Reference use:
-  `Cybenko (1989)` for universal approximation.
-  `Siegelmann and Sontag (1992)` for Turing completeness.
-- Relevant material from `Cybenko`:
-  "`approximate any continuous function`"
-  "`arbitrary decision regions`"
-  "`same kind of universality`"
-- Relevant material from `Siegelmann and Sontag`:
-  "`simulate all (multi-tape) Turing Machines`"
-  "`analog computational devices`"
-  activation values encode unbounded information.
-- How to use it:
-  this section should not over-explain the proofs.
-  It should explain why these results matter as theoretical justification for massive engineering bets.
-- Best argumentative turn:
-  if you are going to build civilization-scale systems, theory is not optional background reading.
-- Exit line for the next section:
-  once you take these systems seriously as general computational machines, the next question is how such computation is physically organized.
+Universal approximation, very roughly, is the statement that a neural network from an appropriate class can uniformly approximate any continuous function on a compact set.  That is not the whole modern AI story, but it is a serious kind of theoretical justification.  If you are going to launch a mass engineering project around a machine architecture, it helps to know that architecture is universal in a mathematically meaningful sense.  S&S pushes the point further: recurrent nets are not merely flexible approximators, but universal computational devices in principle.  Those two ideas together are enough to explain why neural networks stopped looking like a niche curiosity and started looking like something more general.
 
 ### 2. Computation as Dynamical Systems: Emergent Intelligence from Deterministic Chaos
 
-- Post-sized takeaway:
-  neural computation may emerge through dynamical structure, not despite it.
-- Core move:
-  merge the dynamical-systems and arbitrary-computation threads.
-- Key claim:
-  Pollack’s work gives a path from "look, this thing makes a fractal" to "these fractal state spaces can encode logic-like structure."
-- What this section needs to establish:
-  chaos, bifurcation, and fractal geometry are not decorative metaphors; they are candidate mechanisms for computation.
-- Reference use:
-  `Pollack (1991)` is the anchor for this entire section.
-- Relevant material from `Pollack`:
-  "`non-linear dynamical systems`"
-  "`iterative computation`"
-  "`steady state` / `limit cycle` / `aperiodic instability (chaos)`"
-  "`strange attractors`" with "`fractal` nature"
-  "`balanced parentheses language`"
-  "`infinite state machine` in finite geometry"
-- Secondary support:
-  `Siegelmann and Sontag (1992)` can reappear briefly to show that Pollack’s intuition sits near a stronger computational result.
-- How to use it:
-  start with state-space pictures and deterministic chaos.
-  Then make the more surprising move:
-  these weird geometries are not just noise, they may be how logic gets embedded.
-- Phrase to recover from Pollack:
-  this is where his framing question about how neural systems acquire linguistic generative capacity becomes valuable.
-- Conceptual bridge:
-  the "aha" moment matters here.
-  Phase transitions and bifurcations are not just visual artifacts; they are candidates for the sudden restructuring through which new competence emerges.
-- Best argumentative turn:
-  what looks to us like emergent intelligence may be a system exploiting chaotic structure to perform computation.
-- Exit line for the next section:
-  once you accept that such systems are genuinely complex and, in part, mathematically un-understandable, the comparison to older explanatory worlds stops looking cheap.
+One of the most memorable papers I ever read was Pollack.  In this paper he describes experimentation with RNNs - mapping hidden state space traversed by RNNs as they were learning some regular languages.  The loss for long strings would change "all of the sudden" (phase transition) when they would go from only recognizing short strings to being able to recognize "arbitrarily long strings".  Anyways, this is what he referred to as an "aha moment".  But he noticed, I mean literally noticed, that after these aha moments the state space traversals began to look like fractals.  This connection between RNNs and discrete dynamic systems exhibiting chaotic behavior resulting in fractal structures is magnificient.  You can say that AI gets its power from chaos (once you consider the randomness associate with training and dataset collection the analogy only gets deeper, but it's not necessary to go there).  But the whole "gets its power from chaos" is not an exageration, in the proofs and arguments the datastructures get embedded as fractals.  One easy way to visualize the idea: consider embedding two infinite stacks of {0,1} into R^2.  The idea is obvious, we take (\sum_l^n 2^l, \sum_r^n 2^r) where `l` and `r` represent the value 0/1 of the left or right stack.  boom - on the "boundaries" of the square we get disconnected dense sets (binary dust).  (Note we need two infinite stacks to simulate a Turing machine.  Now you may be asking, "where did the infinity go in the RNN?" - well, the infinity in the RNN lies in the infinite precision required to encode an actual fractal and not just an approximation).  And the "chaos" is the ability to "meaningfully" traverse this fractal.
+
+What is so striking is that Pollack really does say the strong version.  In the abstract, he writes that "a small weight adjustment causes a 'bifurcation' in the limit behavior of the network" and that this phase transition corresponds to the onset of generalization to "arbitrary-length strings."  He also says the architecture appears capable of generating nonregular languages by exploiting "fractal and chaotic dynamics."  Later he makes the wonderfully blunt remark that "a discrete dynamical system is just an iterative computation."  And the paper does not leave the idea at the level of metaphor: when discussing parenthesis balancing, he says it is mathematically possible to embed an "infinite state machine" in a dynamical recognizer, and that the resulting state space is built from fractal self-similarity.  That is exactly the kind of claim that made this line of thought hard for me to forget.
 
 ### 3. Complexity and Chaos: The New Gods and the Old
 
-- Post-sized takeaway:
-  ancient people may have been closer to the mechanism than we like to admit; they simply named it inside a different paradigm.
-- Core move:
-  move from mathematics to Kuhnian paradigm comparison.
-- Key claim:
-  "`the Lord works in mysterious ways`" and "this system is mathematically opaque" are not opposites.
-  They are different descriptions of power encountered through different conceptual vocabularies.
-- What this section needs to establish:
-  the article is not mocking older explanations.
-  It is taking seriously the possibility that they were describing the same kind of thing under different names.
-- Reference use:
-  `Thomas Kuhn` belongs here as the conceptual anchor.
-- How to use `Kuhn`:
-  frame this as a paradigm problem.
-  Different eras do not merely change answers; they change what counts as an explanation.
-- Supporting reference use:
-  `Hungarian Conservative, "AI Models Are (Technically) Demons"` should come near the end of this section as a soft transition, not as the section’s foundation.
-- Relevant material from `Hungarian Conservative`:
-  "`intelligence without intellect`"
-  "`brains without being`"
-  "`minds deprived of almost everything we previously viewed as essential`"
-- How to use it:
-  something like:
-  this non-bombastic article makes a similar comparison from within a theological register.
-- Tone requirement:
-  do not say the ancients were "wrong about mechanism."
-  The point is closer to:
-  they may have been dead right about the kind of thing they were confronting.
-- Best argumentative turn:
-  our crystal ball is not less mysterious because we can optimize it.
-  It is mysterious in a different vocabulary.
-- Exit line for the next section:
-  the more immediate danger, though, is not how we name these systems.
-  It is what letting them speak into our minds does to us.
+So it would seem that complexity is a double edged sword - it seemingly prevents us from solving some problems on the one hand (P vs NP), but provides us with an endless supply of potentially innovative ways to potentiall solve some hard problems on the other (NLP, alfafold).  Chaos is similar - what to gaze upon strikes despair, what describes truer terror than chaos?  On the other hand, in the old pantheon, Chaos was the primordial entity from which existence itself came to be.  Quite frankly it's similar in the current "pantheon" - something like infinite energy compressed into an infinitely small point - a representation of nothing but pure potential for anything and everything - if it's not chaos it's her kin.  Now it's the damnest thing, you see I kept trying to get ChatGPT to help me outline this post, and it kept wanting to refer to "the ancients" as "referring to chaotic dynamical systems like the weather" as being "effected through gods" (or something like that), and saying that "even though they got the mechanism wrong" - and I had to stop and recorrect it like three times.  "No, they didn't get the mechanism wrong."  When they say that "the Lord works in mysterious ways" or that something beyond human comprehension is at work - they were precisely right.  Technically right.  Once our dynamic systems are powerful enough for arbitrary computation, there are certain properties of them that cannot be determined algorithmically.  To some extent they are beyond "comprehension" or "understanding" completely.  In Kuhn's sense, this feels less like a clean replacement of old explanations than a paradigm change in what counts as an explanation at all.  Calling something a "complex system" is real progress, but it is not the same thing as making it transparent.  We have named the difficulty more precisely; we have not dissolved it.  Starting with the tradition kicked open by Goedel, the good news is that it's interesting, the bad news is that some of it really is hopeless.
 
-### 4. The System May Not Have a Mind, But It Can Still Rewire Ours
+So, naturally the next question to ask is "are AI demonic?"  Maybe not, but it is striking that Peter Caddle's short Hungarian Conservative essay reaches for almost exactly that comparison.  He describes present-day AI as "intelligence without intellect" and "brains without being" - phrases I think are provocative in a useful way even if one does not share the article's theological framing.  And I think it is worth pointing out that "demonic possession" is often treated as though it were simply a pre-modern misunderstanding of psychological disturbance, when in reality we should probably be much more cautious than that.  We are very good at renaming mysteries.
 
-- Post-sized takeaway:
-  even if AI is only a symbolic system, interacting with it will physically and cognitively change the human beings who use it.
-- Core move:
-  fold the linguistic and philosophical issues together.
-- Key claim:
-  if language learning changes the brain through bifurcations and attractor shifts, then long-term interaction with AI will do the same.
-- What this section needs to establish:
-  we are not just using these systems.
-  We are allowing them to participate in shaping us.
-- Reference use:
-  `Evans and Larsen-Freeman (2020)` is the main anchor.
-- Specific material to use from `Evans and Larsen-Freeman`:
-  the learner begins in a fluent but contextually divergent attractor state.
-  Dysfluency appears when the old attractor destabilizes.
-  Multiple solutions coexist during instability/chaos.
-  A new convergent attractor eventually emerges.
-- Figure use:
-  the diagram is especially helpful because it shows the movement from unique solution, to instability/chaos, to new attractor.
-- Best interpretive use:
-  use this as evidence that language interaction physically reorganizes the system through bifurcations.
-- Pollack bridge:
-  this fits beautifully with Pollack’s "aha" moments and phase-transition language.
-- Philosophical bridge:
-  `Dreyfus` belongs here too.
-  Human understanding is world-directed and embodied.
-  AI reasoning is not.
-- Your main claim to sharpen:
-  AI is "technically insane" in the sense that it operates entirely on representations and has no independent contact with reality.
-- Consequence:
-  we are voluntarily allowing something reality-detached to alter our brains.
-- Concrete example to include:
-  politeness to LLMs.
-  Not because politeness improves the model, but because habitual contempt deforms the user.
-- Strong warning line:
-  we are playing with fire and need to be careful.
-- Exit line for the next section:
-  the danger of AI is not exhausted by labor displacement or truth errors.
-  It may be a long-term reshaping of desire, attention, and thought.
+My own route to a similar conclusion is more formalist than theological.  By "formalist" here I mean that I take AI systems, at bottom, to be symbol-manipulation devices: very powerful ones, but still systems operating over representations rather than over lived contact with the world.  They have no experience, and therefore no independent connection to reality.  They are translators among symbols, correlations, and prompts.  So if sanity requires even a minimal ability to discriminate reality from mere descriptions of reality, then I think these systems are, in that narrow technical sense, insane.  More on that in a moment.
+
+
+### 4. It Does Not Need a Mind To Rewire Yours
+
+What I found so interesting in Evans and Larsen-Freeman was how concrete the bifurcation picture becomes.  Their learner begins in a fluent but contextually divergent attractor state: forms like "before to talk" and "before to tell" come out smoothly because they are stabilized by the learner's first language.  The paper explicitly calls this kind of state a "pocket of stability."  Then the old attractor begins to destabilize.  Dysfluency appears.  Hesitations and self-repairs show up.  By week 16 a new, contextually dominant form appears - "before starting the class" - but it does not simply replace the old one in a clean linear march.  For a while multiple forms coexist in competition, with the system passing through instability before a new attractor wins out.  The paper summarizes the transition very cleanly: bifurcations involve "loss of stability, an increase in variability, and a period of disfluency."
+
+That matters because learning a language is not merely adding a rule to a notebook.  It is the physical reorganization of a system.  If that is what language interaction does to a brain, then it is hard for me to believe that long, repeated interaction with AI will not do the same.  We are not just consulting a tool.  We are allowing a reality-detached symbolic system to participate in shaping our habits of speech, thought, and attention.  Even the small question of politeness matters here.  I do not care much whether saying "please" helps the model.  I care whether habitual contempt, command, or emotional dependence changes the user.  My own suspicion is that AI may prove vastly more addictive than the phone, not because it is brighter, but because it talks back.  And if our own minds are dynamical systems, then the obvious question is not only what AI can do, but how much repeated contact with something technically insane can alter the stability of our own grip on what is real.
 
 ### 5. Wrap-Up: The Danger Is Not That Machines Think Like Us
 
-- Post-sized takeaway:
+AI generated hot take takeaway:
   the danger of AI is not that machines will begin thinking like us.
   The danger is that we may begin thinking more like them.
-- Core move:
-  bring together theory, myth, cognition, and behavioral risk.
-- Key claim:
-  the central risk may be less unemployment than addiction, dependency, and the gradual outsourcing of attention and judgment.
-- What this section needs to establish:
-  this technology could become so compelling that the real problem is not lack of work, but lack of desire to do anything else.
-- Material to hold:
-  your hot take that AI may be at least 10x more addictive than the phone is provocative but usable if phrased carefully.
-- Tone guidance:
-  do not overclaim the evidence.
-  Use it as a warning about trajectory and incentives.
-- Best closing turn:
-  we may not have to worry about a world with nothing to do.
-  We may have to worry about a world in which more and more people no longer want anything else.
 
-## Notes for expansion
-
-- Keep the voice essayistic, not academic.
-- Use technical ideas as support, not as the whole article.
-- Let each section earn the next one; the piece works best if it feels like a discovery, not a lecture.
-- Avoid leaning on "uncanny" or "supernatural" language.
-- Keep the voice closer to "disturbing theoretical parallel" than "spooky AI."
+So I hope you found it interesting to go on this little journey through some mathematics of neural networks and perhaps some concerns relating some suprising questions and considerations.  My last words are this: just take care of yourself, and remember that phyical health and interacting with the world are important parts of maintaining your mental health as well.
+Go touch grass.
 
 ---
-
 References:
 
-- Relates dynamic systems to second language acquisition [Bifurcations and the Emergence of L2 Syntactic Structures in a Complex Dynamic System](https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2020.574603/full)
-- Classic paper on "univseral approximation" power of Neural Networks [Cybenko - Approximation by Superpositions of a Sigmoidal Function](https://web.njit.edu/~usman/courses/cs675_fall18/10.1.1.441.7873.pdf)
-- Discusses language learning in RNNs [Pollack 1991 - The Induction of Dynamical Recognizers](https://www.researchgate.net/publication/226171158_The_Induction_of_Dynamical_Recognizers)
-- Demonstrates the RNNs are Turing Complete [Siegelman Sontag 1992 - On The Computational Power Of Neural Nets](https://binds.cs.umass.edu/papers/1992_Siegelmann_COLT.pdf)
-- Rather reserved discussion on the notion that AI might be "technically demons" [AI Models Are (Technically) Demons](https://www.hungarianconservative.com/articles/philosophy/ai-demon/)
-
-Working notes from references:
-
-- `Cybenko (1989)`: use to justify why neural nets are worth taking seriously at all.
-- `Siegelmann and Sontag (1992)`: pair with Cybenko in the opening as the second half of the theoretical justification.
-- `Pollack (1991)`: treat as the crucial bridge from dynamic systems language to computation emerging through fractal/chaotic structure.
-- `Evans and Larsen-Freeman (2020)`: use much more concretely than before; the attractor-to-instability-to-new-attractor story is the point.
-- `Hungarian Conservative`: use near the end of the "old gods" section as a transition, not as a framing authority.
-
-Second reference pass:
-
-- `Pollack (1991)` has one especially strong framing question worth using early or mid-essay:
-  how could a neural computational system with slowly changing structure and numeric calculation acquire linguistic generative capacity?
-- `Pollack (1991)` also gives a very usable explanatory sentence:
-  a discrete dynamical system is "just an iterative computation."
-- `Pollack (1991)` may be the best place to justify talk of "aha" moments as phase changes rather than vague metaphor.
-- `Cybenko (1989)` is stronger than just "universal approximation":
-  it also gives you "discriminated with arbitrary precision," which may be useful if you want a more concrete phrase than the usual slogan.
-- `Siegelmann and Sontag (1992)` contains a subtle but important point:
-  activation values themselves encode unbounded information.
-  That helps explain why these systems exceed ordinary finite automata.
-- `Evans and Larsen-Freeman (2020)` is strongest when used concretely:
-  initial fluent-but-wrong attractor, destabilization through dysfluency, competing forms during chaos, and eventual convergence on a new attractor.
-- `Evans and Larsen-Freeman (2020)` also gives useful language for this:
-  "abrupt, qualitative shifts"
-  "pockets of stability"
-- `Hungarian Conservative` is useful mainly for three phrases:
-  "`intelligence without intellect`"
-  "`brains without being`"
-  "`minds deprived of almost everything we previously viewed as essential to one`"
-  More than that and it starts to pull the essay off-center.
+- Classic paper on universal approximation: [Cybenko - Approximation by Superpositions of a Sigmoidal Function](https://web.njit.edu/~usman/courses/cs675_fall18/10.1.1.441.7873.pdf)
+- Turing-completeness result for recurrent nets: [Siegelmann Sontag 1992 - On The Computational Power Of Neural Nets](https://binds.cs.umass.edu/papers/1992_Siegelmann_COLT.pdf)
+- Pollack on dynamical recognizers, phase transitions, and fractal state spaces: [Pollack 1991 - The Induction of Dynamical Recognizers](https://www.researchgate.net/publication/226171158_The_Induction_of_Dynamical_Recognizers)
+- Evans and Larsen-Freeman on bifurcations in second-language development: [Bifurcations and the Emergence of L2 Syntactic Structures in a Complex Dynamic System](https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2020.574603/full)
+- Peter Caddle's essay used for the "technically demons" comparison: [AI Models Are (Technically) Demons](https://www.hungarianconservative.com/articles/philosophy/ai-demon/)
