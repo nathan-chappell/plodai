@@ -2,31 +2,11 @@
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
   "seed": 7,
   "output_dir": "frontend/public/blog-assets/theoretical-justification-of-neural-networks",
-  "mlp": {
-    "files": [
-      "mlp-sine-approximation-snapshots.png",
-      "mlp-sine-approximation-snapshots.html",
-      "mlp-sine-loss.png",
-      "mlp-sine-loss.html"
-    ],
-    "snapshot_epochs": [
-      0,
-      1,
-      4,
-      20,
-      89,
-      400
-    ],
-    "final_loss": 0.0016303722513839602
-  },
   "rnn": {
     "files": [
       "rnn-dataset-diversity.png",
-      "rnn-dataset-diversity.html",
       "rnn-training-metrics.png",
-      "rnn-training-metrics.html",
-      "rnn-response-bifurcation.png",
-      "rnn-response-bifurcation.html"
+      "rnn-response-bifurcation.png"
     ],
     "models": [
       {
@@ -39,31 +19,61 @@
             "name": "warmup",
             "label": "warmup",
             "start_epoch": 0,
-            "end_epoch": 20
+            "end_epoch": 20,
+            "batch_size": 16,
+            "train_samples": 2046,
+            "short_ratio": 1.0,
+            "short_length_max": 10,
+            "mean_length": 5.0,
+            "max_length": 10
           },
           {
             "name": "rollout-short",
             "label": "rollout short strings",
             "start_epoch": 21,
-            "end_epoch": 31
+            "end_epoch": 31,
+            "batch_size": 32,
+            "train_samples": 2048,
+            "short_ratio": 1.0,
+            "short_length_max": 18,
+            "mean_length": 14.0,
+            "max_length": 18
           },
           {
             "name": "rollout-medium",
             "label": "rollout medium strings",
             "start_epoch": 32,
-            "end_epoch": 45
+            "end_epoch": 45,
+            "batch_size": 64,
+            "train_samples": 2048,
+            "short_ratio": 0.85,
+            "short_length_max": 36,
+            "mean_length": 28.0,
+            "max_length": 72
           },
           {
             "name": "shock-long",
             "label": "shock longer strings",
             "start_epoch": 46,
-            "end_epoch": 62
+            "end_epoch": 62,
+            "batch_size": 192,
+            "train_samples": 2765,
+            "short_ratio": 0.35,
+            "short_length_max": 80,
+            "mean_length": 64.0,
+            "max_length": 160
           },
           {
             "name": "shock-full",
             "label": "shock full distribution",
             "start_epoch": 63,
-            "end_epoch": 80
+            "end_epoch": 80,
+            "batch_size": 320,
+            "train_samples": 3482,
+            "short_ratio": 0.15,
+            "short_length_max": 80,
+            "mean_length": 88.0,
+            "max_length": 160
           }
         ],
         "peak_aha_epoch": 21,
@@ -72,32 +82,25 @@
           1,
           20,
           21,
-          22,
           31,
           45,
+          58,
           62,
           80
         ],
         "final_metrics": {
           "epoch": 80,
           "phase": "shock-full",
-          "train_loss": 0.5012456774711609,
-          "train_acc": 0.734375,
-          "short_test_loss": 0.5888789892196655,
-          "short_test_acc": 0.625,
-          "long_test_loss": 0.5136810541152954,
-          "long_test_acc": 0.7109375,
-          "probe_change": 0.00112961707636714,
-          "aha_score": 0.00112961707636714
+          "train_loss": 0.5273438692092896,
+          "train_acc": 0.7153934240341187,
+          "short_test_loss": 0.5445167422294617,
+          "short_test_acc": 0.6953125,
+          "long_test_loss": 0.5600227117538452,
+          "long_test_acc": 0.69140625,
+          "probe_change": 0.08310736493440345,
+          "aha_score": 0.08310736493440345
         },
-        "files": [
-          "rnn-1layer-traces-initial.png",
-          "rnn-1layer-traces-initial.html",
-          "rnn-1layer-traces-aha.png",
-          "rnn-1layer-traces-aha.html",
-          "rnn-1layer-traces-final.png",
-          "rnn-1layer-traces-final.html"
-        ]
+        "files": []
       },
       {
         "model_key": "rnn-2layer",
@@ -109,65 +112,88 @@
             "name": "warmup",
             "label": "warmup",
             "start_epoch": 0,
-            "end_epoch": 20
+            "end_epoch": 20,
+            "batch_size": 16,
+            "train_samples": 2046,
+            "short_ratio": 1.0,
+            "short_length_max": 10,
+            "mean_length": 5.0,
+            "max_length": 10
           },
           {
             "name": "rollout-short",
             "label": "rollout short strings",
             "start_epoch": 21,
-            "end_epoch": 31
+            "end_epoch": 31,
+            "batch_size": 32,
+            "train_samples": 2048,
+            "short_ratio": 1.0,
+            "short_length_max": 18,
+            "mean_length": 14.0,
+            "max_length": 18
           },
           {
             "name": "rollout-medium",
             "label": "rollout medium strings",
             "start_epoch": 32,
-            "end_epoch": 45
+            "end_epoch": 45,
+            "batch_size": 64,
+            "train_samples": 2048,
+            "short_ratio": 0.85,
+            "short_length_max": 36,
+            "mean_length": 28.0,
+            "max_length": 72
           },
           {
             "name": "shock-long",
             "label": "shock longer strings",
             "start_epoch": 46,
-            "end_epoch": 62
+            "end_epoch": 62,
+            "batch_size": 192,
+            "train_samples": 2765,
+            "short_ratio": 0.35,
+            "short_length_max": 80,
+            "mean_length": 64.0,
+            "max_length": 160
           },
           {
             "name": "shock-full",
             "label": "shock full distribution",
             "start_epoch": 63,
-            "end_epoch": 80
+            "end_epoch": 80,
+            "batch_size": 320,
+            "train_samples": 3482,
+            "short_ratio": 0.15,
+            "short_length_max": 80,
+            "mean_length": 88.0,
+            "max_length": 160
           }
         ],
         "peak_aha_epoch": 21,
         "selected_epochs": [
           0,
-          1,
           20,
           21,
+          28,
           31,
+          39,
           45,
-          54,
           62,
           80
         ],
         "final_metrics": {
           "epoch": 80,
           "phase": "shock-full",
-          "train_loss": 0.5392457246780396,
-          "train_acc": 0.689453125,
-          "short_test_loss": 0.5554190278053284,
-          "short_test_acc": 0.671875,
-          "long_test_loss": 0.5980426669120789,
-          "long_test_acc": 0.625,
-          "probe_change": 0.00025311876088380815,
-          "aha_score": 0.00025311876088380815
+          "train_loss": 0.3673817813396454,
+          "train_acc": 0.8360137939453125,
+          "short_test_loss": 0.30125609040260315,
+          "short_test_acc": 0.89453125,
+          "long_test_loss": 0.3913472294807434,
+          "long_test_acc": 0.81640625,
+          "probe_change": 0.003154401376377791,
+          "aha_score": 0.003154401376377791
         },
-        "files": [
-          "rnn-2layer-traces-initial.png",
-          "rnn-2layer-traces-initial.html",
-          "rnn-2layer-traces-aha.png",
-          "rnn-2layer-traces-aha.html",
-          "rnn-2layer-traces-final.png",
-          "rnn-2layer-traces-final.html"
-        ]
+        "files": []
       }
     ]
   }

@@ -99,10 +99,26 @@ def test_aha_scoring_and_epoch_selection() -> None:
 
 
 def test_curriculum_phase_epoch_budget_is_conserved() -> None:
-    phases = demo.build_curriculum_phases(total_epochs=11, max_length=demo.DEFAULT_MAX_LENGTH)
+    phases = demo.build_curriculum_phases(
+        total_epochs=11,
+        mean_length=40.0,
+        train_samples=512,
+        max_length=demo.DEFAULT_MAX_LENGTH,
+    )
     assert sum(phase.epochs for phase in phases) == 11
     assert phases[0].label == "rollout short strings"
     assert phases[-1].label == "shock full distribution"
+    assert phases[-1].batch_size_start > phases[-1].batch_size_end
+
+
+def test_response_probes_are_diverse_and_mixed() -> None:
+    probes = demo.RESPONSE_PROBES
+    assert len(probes) == 20
+    assert len(set(probes)) == 20
+    valid_count = sum(1 for probe in probes if demo.is_balanced_parentheses(probe))
+    invalid_count = len(probes) - valid_count
+    assert valid_count >= 6
+    assert invalid_count >= 6
 
 
 def test_generate_mlp_cli_smoke(tmp_path: Path) -> None:

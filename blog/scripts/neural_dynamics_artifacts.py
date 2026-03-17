@@ -50,7 +50,7 @@ TRACE_PROBES: tuple[tuple[str, str], ...] = (
     ("near miss invalid", "(((()))"),
     ("concat invalid", ")(()())()"),
 )
-RESPONSE_PROBES: tuple[str, ...] = (
+RESPONSE_PROBE_POOL: tuple[str, ...] = (
     "()",
     "(())",
     "()()",
@@ -61,6 +61,11 @@ RESPONSE_PROBES: tuple[str, ...] = (
     "(((())))((()))",
     "(()(()()))(())",
     "((()())(()()))",
+    "(((()(()))))",
+    "(()()(()()))",
+    "()((()))()",
+    "((())())(())",
+    "(()(()(())))",
     "(",
     ")",
     "(()",
@@ -71,6 +76,21 @@ RESPONSE_PROBES: tuple[str, ...] = (
     "())(()",
     "(((())))((",
     "(()())())(()",
+    "))((",
+    "())())",
+    "((())",
+    "()(()",
+    "(((()))))(",
+    "())(()())",
+    "((())()))(()",
+    "(()(()))())",
+    ")(()())()",
+    "()()())(()",
+    "(((())))())(",
+    "(()()))(()(",
+    "((()(()))(()))",
+    "((())())())(",
+    "()(()(()))(()",
 )
 FIGURE_STYLE = {
     "paper_bgcolor": "#fcfbf8",
@@ -136,7 +156,10 @@ class CurriculumPhase:
     short_ratio: float
     short_length_max: int
     max_length: int
-    batch_size: int
+    mean_length: float
+    batch_size_start: int
+    batch_size_end: int
+    train_samples: int
     lr_start: float
     lr_end: float
     epochs: int
@@ -154,6 +177,77 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def log_progress(message: str) -> None:
+    typer.echo(f"[artifacts] {message}")
+
+
+def max_prefix_balance(text: str) -> int:
+    balance = 0
+    peak = 0
+    for char in text:
+        balance += 1 if char == "(" else -1
+        peak = max(peak, balance)
+    return peak
+
+
+def terminal_balance(text: str) -> int:
+    return text.count("(") - text.count(")")
+
+
+def edit_distance(left: str, right: str) -> int:
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, start=1):
+            cost = 0 if left_char == right_char else 1
+            current.append(
+                min(
+                    previous[right_index] + 1,
+                    current[right_index - 1] + 1,
+                    previous[right_index - 1] + cost,
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def probe_similarity(left: str, right: str) -> float:
+    similarity = float(edit_distance(left, right))
+    similarity += 0.35 * abs(len(left) - len(right))
+    similarity += 0.25 * abs(max_prefix_balance(left) - max_prefix_balance(right))
+    similarity += 0.15 * abs(terminal_balance(left) - terminal_balance(right))
+    if is_balanced_parentheses(left) != is_balanced_parentheses(right):
+        similarity += 2.5
+    return similarity
+
+
+def select_diverse_response_probes(
+    pool: tuple[str, ...],
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    if limit > len(pool):
+        raise ValueError("limit cannot exceed the probe pool size")
+    anchors = [
+        "()",
+        "(((())))((()))",
+        "(",
+        ")(()())()",
+    ]
+    selected: list[str] = [text for text in anchors if text in pool]
+    remaining = [text for text in pool if text not in selected]
+    while len(selected) < limit and remaining:
+        best_candidate = max(
+            remaining,
+            key=lambda candidate: min(
+                probe_similarity(candidate, chosen) for chosen in selected
+            ),
+        )
+        selected.append(best_candidate)
+        remaining.remove(best_candidate)
+    return tuple(selected)
+
+
 def is_balanced_parentheses(text: str) -> bool:
     balance = 0
     if not text:
@@ -165,6 +259,9 @@ def is_balanced_parentheses(text: str) -> bool:
         if balance < 0:
             return False
     return balance == 0
+
+
+RESPONSE_PROBES = select_diverse_response_probes(RESPONSE_PROBE_POOL, limit=20)
 
 
 def iter_parentheses_strings(max_length: int) -> list[str]:
@@ -540,6 +637,13 @@ def interpolate_lr(epoch_index: int, total_epochs: int, *, start: float, end: fl
     return start + (end - start) * progress
 
 
+def interpolate_int(epoch_index: int, total_epochs: int, *, start: int, end: int) -> int:
+    if total_epochs <= 1:
+        return end
+    progress = epoch_index / (total_epochs - 1)
+    return max(1, int(round(start + (end - start) * progress)))
+
+
 def build_metric_row(
     *,
     epoch: int,
@@ -645,10 +749,15 @@ def allocate_phase_epochs(total_epochs: int, weights: tuple[float, ...]) -> list
 def build_curriculum_phases(
     *,
     total_epochs: int,
+    mean_length: float,
+    train_samples: int,
     max_length: int,
 ) -> list[CurriculumPhase]:
     phase_epochs = allocate_phase_epochs(total_epochs, (0.18, 0.24, 0.28, 0.30))
-    rollout_max = max(SHORT_LENGTH_MAX + 8, min(max_length, 120))
+    medium_max = max(48, min(max_length, 72))
+    shock_long_max = max(SHORT_LENGTH_MAX + 32, min(max_length, 160))
+    shock_mean = max(mean_length * 1.6, 64.0)
+    full_mean = max(mean_length * 2.2, 88.0)
     return [
         CurriculumPhase(
             name="rollout-short",
@@ -656,7 +765,10 @@ def build_curriculum_phases(
             short_ratio=1.0,
             short_length_max=min(18, SHORT_LENGTH_MAX),
             max_length=min(max_length, 18),
-            batch_size=32,
+            mean_length=max(10.0, mean_length * 0.35),
+            batch_size_start=32,
+            batch_size_end=24,
+            train_samples=train_samples,
             lr_start=0.02,
             lr_end=0.008,
             epochs=phase_epochs[0],
@@ -666,32 +778,41 @@ def build_curriculum_phases(
             label="rollout medium strings",
             short_ratio=0.85,
             short_length_max=min(36, SHORT_LENGTH_MAX),
-            max_length=min(max_length, 60),
-            batch_size=48,
-            lr_start=0.024,
+            max_length=medium_max,
+            mean_length=max(18.0, mean_length * 0.7),
+            batch_size_start=64,
+            batch_size_end=48,
+            train_samples=train_samples,
+            lr_start=0.026,
             lr_end=0.008,
             epochs=phase_epochs[1],
         ),
         CurriculumPhase(
             name="shock-long",
             label="shock longer strings",
-            short_ratio=0.65,
+            short_ratio=0.35,
             short_length_max=SHORT_LENGTH_MAX,
-            max_length=rollout_max,
-            batch_size=96,
-            lr_start=0.03,
-            lr_end=0.006,
+            max_length=shock_long_max,
+            mean_length=shock_mean,
+            batch_size_start=224,
+            batch_size_end=128,
+            train_samples=int(round(train_samples * 1.35)),
+            lr_start=0.05,
+            lr_end=0.01,
             epochs=phase_epochs[2],
         ),
         CurriculumPhase(
             name="shock-full",
             label="shock full distribution",
-            short_ratio=0.5,
+            short_ratio=0.15,
             short_length_max=SHORT_LENGTH_MAX,
             max_length=max_length,
-            batch_size=160,
-            lr_start=0.024,
-            lr_end=0.003,
+            mean_length=full_mean,
+            batch_size_start=320,
+            batch_size_end=64,
+            train_samples=int(round(train_samples * 1.7)),
+            lr_start=0.06,
+            lr_end=0.008,
             epochs=phase_epochs[3],
         ),
     ]
@@ -762,10 +883,12 @@ def write_figure(
 ) -> list[str]:
     ensure_dir(output_dir)
     png_path = output_dir / f"{stem}.png"
+    log_progress(f"writing {png_path.name}")
     figure.write_image(png_path, width=1400, height=900, scale=2)
     written = [png_path.name]
     if write_html:
         html_path = output_dir / f"{stem}.html"
+        log_progress(f"writing {html_path.name}")
         figure.write_html(html_path, include_plotlyjs="cdn", full_html=True)
         written.append(html_path.name)
     return written
@@ -939,9 +1062,12 @@ def build_rnn_metrics_figure(results: list[RNNExperimentResult]) -> go.Figure:
                 )
             span_midpoint = start_epoch + max(0.5, (end_epoch - start_epoch) / 2)
             short_ratio = float(span.get("short_ratio", 1.0))
-            batch_size = int(span.get("batch_size", 0))
+            batch_size_start = int(span.get("batch_size_start", 0))
+            batch_size_end = int(span.get("batch_size_end", batch_size_start))
             short_length_max = int(span.get("short_length_max", SHORT_LENGTH_MAX))
+            mean_length = float(span.get("mean_length", short_length_max))
             max_length = int(span.get("max_length", SHORT_LENGTH_MAX))
+            train_samples = int(span.get("train_samples", 0))
             figure.add_annotation(
                 x=span_midpoint,
                 y=0.14,
@@ -949,7 +1075,8 @@ def build_rnn_metrics_figure(results: list[RNNExperimentResult]) -> go.Figure:
                 yref=f"y{row_index}" if row_index > 1 else "y",
                 text=(
                     f"{span['label']} ({start_epoch}-{end_epoch})"
-                    f"<br>batch={batch_size}, short={short_ratio:.0%}, len<= {short_length_max}, max={max_length}"
+                    f"<br>batch={batch_size_start}->{batch_size_end}, samples={train_samples}, short={short_ratio:.0%}"
+                    f"<br>mean≈{mean_length:.0f}, len<= {short_length_max}, max={max_length}"
                 ),
                 showarrow=False,
                 font={"size": 12, "color": border_color},
@@ -1160,7 +1287,10 @@ def build_bifurcation_figure(results: list[RNNExperimentResult]) -> go.Figure:
                 )
             span_midpoint = start_epoch + max(0.5, (end_epoch - start_epoch) / 2)
             short_ratio = float(span.get("short_ratio", 1.0))
-            batch_size = int(span.get("batch_size", 0))
+            batch_size_start = int(span.get("batch_size_start", 0))
+            batch_size_end = int(span.get("batch_size_end", batch_size_start))
+            train_samples = int(span.get("train_samples", 0))
+            mean_length = float(span.get("mean_length", 0.0))
             figure.add_annotation(
                 x=span_midpoint,
                 y=0.12,
@@ -1168,7 +1298,8 @@ def build_bifurcation_figure(results: list[RNNExperimentResult]) -> go.Figure:
                 yref=f"y{row_index}" if row_index > 1 else "y",
                 text=(
                     f"{span['label']} ({start_epoch}-{end_epoch})"
-                    f"<br>batch={batch_size}, short={short_ratio:.0%}"
+                    f"<br>batch={batch_size_start}->{batch_size_end}, samples={train_samples}, short={short_ratio:.0%}"
+                    f"<br>mean≈{mean_length:.0f}"
                 ),
                 showarrow=False,
                 font={"size": 12, "color": border_color},
@@ -1326,6 +1457,7 @@ def run_rnn_experiment(
     seed_everything(seed)
     model_builder = lambda: TinyTraceRNN(num_layers=num_layers)
     model = model_builder().to(DEVICE)
+    model_title = build_model_title(num_layers)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     criterion = nn.BCEWithLogitsLoss()
     warmup_examples = build_warmup_examples()
@@ -1371,6 +1503,7 @@ def run_rnn_experiment(
     perfect_epochs = 0
     global_epoch = 0
 
+    log_progress(f"{model_title}: warmup on exhaustive strings up to length {PHASE_ONE_MAX_LENGTH}")
     for warmup_epoch in range(1, warmup_max_epochs + 1):
         global_epoch += 1
         train_rnn_epoch(
@@ -1409,32 +1542,47 @@ def run_rnn_experiment(
             break
     if warmup_end_epoch == 0:
         warmup_end_epoch = global_epoch
+    log_progress(f"{model_title}: warmup ended at epoch {warmup_end_epoch}")
     phase_spans.append(
         {
             "name": "warmup",
             "label": "warmup",
             "start_epoch": 0,
             "end_epoch": warmup_end_epoch,
-            "batch_size": 16,
+            "batch_size_start": 16,
+            "batch_size_end": 16,
+            "train_samples": len(warmup_examples),
             "short_ratio": 1.0,
             "short_length_max": PHASE_ONE_MAX_LENGTH,
+            "mean_length": PHASE_ONE_MAX_LENGTH / 2,
             "max_length": PHASE_ONE_MAX_LENGTH,
         }
     )
 
     curriculum_phases = build_curriculum_phases(
         total_epochs=phase2_epochs,
+        mean_length=mean_length,
+        train_samples=train_samples,
         max_length=max_length,
     )
     for phase_index, curriculum_phase in enumerate(curriculum_phases):
         if curriculum_phase.epochs <= 0:
             continue
+        log_progress(
+            f"{model_title}: starting {curriculum_phase.label} "
+            f"for {curriculum_phase.epochs} epochs "
+            f"(batch={curriculum_phase.batch_size_start}->{curriculum_phase.batch_size_end}, "
+            f"short={curriculum_phase.short_ratio:.0%}, "
+            f"mean={curriculum_phase.mean_length:.0f}, "
+            f"samples={curriculum_phase.train_samples}, "
+            f"len<= {curriculum_phase.short_length_max}, max={curriculum_phase.max_length})"
+        )
         phase_start_epoch = global_epoch + 1
         for local_epoch in range(1, curriculum_phase.epochs + 1):
             global_epoch += 1
             phase_examples = sample_phase2_examples(
-                total_examples=train_samples,
-                mean_length=mean_length,
+                total_examples=curriculum_phase.train_samples,
+                mean_length=curriculum_phase.mean_length,
                 short_ratio=curriculum_phase.short_ratio,
                 short_length_max=curriculum_phase.short_length_max,
                 max_length=curriculum_phase.max_length,
@@ -1449,12 +1597,18 @@ def run_rnn_experiment(
                     end=curriculum_phase.lr_end,
                 ),
             )
+            batch_size = interpolate_int(
+                local_epoch - 1,
+                curriculum_phase.epochs,
+                start=curriculum_phase.batch_size_start,
+                end=curriculum_phase.batch_size_end,
+            )
             train_rnn_epoch(
                 model,
                 phase_examples,
                 optimizer,
                 criterion,
-                batch_size=curriculum_phase.batch_size,
+                batch_size=batch_size,
                 rng=rng,
             )
             metrics.append(
@@ -1477,11 +1631,17 @@ def run_rnn_experiment(
                 "label": curriculum_phase.label,
                 "start_epoch": phase_start_epoch,
                 "end_epoch": global_epoch,
-                "batch_size": curriculum_phase.batch_size,
+                "batch_size_start": curriculum_phase.batch_size_start,
+                "batch_size_end": curriculum_phase.batch_size_end,
+                "train_samples": curriculum_phase.train_samples,
                 "short_ratio": curriculum_phase.short_ratio,
                 "short_length_max": curriculum_phase.short_length_max,
+                "mean_length": curriculum_phase.mean_length,
                 "max_length": curriculum_phase.max_length,
             }
+        )
+        log_progress(
+            f"{model_title}: finished {curriculum_phase.label} at epoch {global_epoch}"
         )
 
     if not representative_train_examples:
@@ -1511,7 +1671,7 @@ def run_rnn_experiment(
     )
     return RNNExperimentResult(
         model_key="rnn-1layer" if num_layers == 1 else "rnn-2layer",
-        model_title=build_model_title(num_layers),
+        model_title=model_title,
         num_layers=num_layers,
         warmup_end_epoch=warmup_end_epoch,
         phase_spans=phase_spans,
@@ -1535,6 +1695,9 @@ def render_mlp_assets(
     mlp_epochs: int,
     mlp_batch_size: int,
 ) -> dict[str, object]:
+    log_progress(
+        f"training MLP for {mlp_epochs} epochs (batch={mlp_batch_size}, lr=0.08->0.008)"
+    )
     loss_history, snapshots, xs, ys = train_mlp(
         epochs=mlp_epochs,
         batch_size=mlp_batch_size,
@@ -1579,6 +1742,11 @@ def render_rnn_assets(
     mean_length: float,
     max_length: int,
 ) -> dict[str, object]:
+    log_progress(
+        f"training RNN studies with warmup_max_epochs={warmup_max_epochs}, "
+        f"phase2_epochs={phase2_epochs}, train_samples={train_samples}, "
+        f"test_samples={test_samples}"
+    )
     results = [
         run_rnn_experiment(
             num_layers=1,
@@ -1601,6 +1769,14 @@ def render_rnn_assets(
             max_length=max_length,
         ),
     ]
+    for result in results:
+        final_metrics = result.metrics[-1]
+        log_progress(
+            f"{result.model_title}: final train={final_metrics.train_acc:.3f}, "
+            f"short={final_metrics.short_test_acc:.3f}, "
+            f"long={final_metrics.long_test_acc:.3f}, "
+            f"aha_epoch={result.peak_aha_epoch}"
+        )
     shared_files: list[str] = []
     shared_files.extend(
         write_figure(
@@ -1714,6 +1890,7 @@ def generate(
     ),
 ) -> None:
     ensure_dir(output_dir)
+    log_progress(f"starting generation for target={target} in {output_dir}")
     manifest: dict[str, object] = {
         "article": ARTICLE_SLUG,
         "seed": seed,
@@ -1741,6 +1918,7 @@ def generate(
             max_length=max_length,
         )
     manifest_path = output_dir / "manifest.json"
+    log_progress(f"writing {manifest_path.name}")
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     typer.echo(f"Generated assets for {target} at {output_dir}")
     typer.echo(f"Wrote manifest to {manifest_path}")
