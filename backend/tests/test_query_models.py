@@ -118,3 +118,5 @@ def test_tool_models_use_anyof_and_forbid_freeform_dicts() -> None:
     assert "additionalProperties': True" not in schema_text
     assert "anyOf" in schema_text
     assert chart_schema.get("additionalProperties") is False
+    assert "legend_position" in str(chart_schema)
+    assert "midnight" in str(chart_schema)

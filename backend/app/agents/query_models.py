@@ -44,7 +44,12 @@ AggregateOpLiteral: TypeAlias = Literal[
 ]
 ChartTypeLiteral: TypeAlias = Literal["bar", "line", "pie", "doughnut", "scatter"]
 ChartStylePresetLiteral: TypeAlias = Literal[
-    "editorial", "sunrise", "ocean", "forest", "mono"
+    "editorial", "sunrise", "ocean", "forest", "mono", "ledger", "amber", "cobalt", "terracotta", "midnight"
+]
+ChartLegendPositionLiteral: TypeAlias = Literal["top", "bottom", "left", "right"]
+ChartOrientationLiteral: TypeAlias = Literal["vertical", "horizontal"]
+ChartValueFormatLiteral: TypeAlias = Literal[
+    "number", "integer", "currency", "percent", "compact", "string"
 ]
 
 
@@ -166,14 +171,23 @@ class ChartSeries(QueryModelBase):
 class ChartPlan(QueryModelBase):
     type: ChartTypeLiteral
     title: str
+    subtitle: str | None = None
     description: str | None = None
     label_key: str
     series: list[ChartSeries]
     style_preset: ChartStylePresetLiteral | None = None
+    x_axis_label: str | None = None
+    y_axis_label: str | None = None
+    legend_position: ChartLegendPositionLiteral | None = None
+    orientation: ChartOrientationLiteral | None = None
+    value_format: ChartValueFormatLiteral | None = None
     show_legend: bool | None = None
     stacked: bool | None = None
     smooth: bool | None = None
     interactive: bool | None = None
+    show_grid: bool | None = None
+    show_data_labels: bool | None = None
+    fill_area: bool | None = None
 
 
 StaticUnaryExpr.model_rebuild(_types_namespace={"StaticRowExpr": StaticRowExpr})

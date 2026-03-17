@@ -22,45 +22,65 @@ def test_valid_sampler_respects_exact_length() -> None:
     assert demo.is_balanced_parentheses(text)
 
 
-def test_invalid_sampler_supports_all_named_modes() -> None:
+def test_parse_mlp_shape_accepts_single_and_multiple_layers() -> None:
+    assert demo.parse_mlp_shape("32") == (32,)
+    assert demo.parse_mlp_shape("32, 32") == (32, 32)
+
+
+def test_invalid_sampler_supports_named_modes() -> None:
     rng = random.Random(7)
     for kind in demo.INVALID_KIND_ORDER:
-        example = demo.sample_invalid_sequence(rng, 11, kind=kind)
-        assert len(example.text) == 11
+        example = demo.sample_invalid_sequence(rng, 20, kind=kind)
+        assert len(example.text) == 20
         assert example.kind == kind
         assert example.label == 0
         assert not demo.is_balanced_parentheses(example.text)
 
 
-def test_phase2_sampler_respects_short_long_quota_split() -> None:
-    examples = demo.sample_phase2_examples(
-        total_examples=100,
-        mean_length=40.0,
-        short_ratio=0.6,
-        short_length_max=demo.SHORT_LENGTH_MAX,
-        max_length=demo.DEFAULT_MAX_LENGTH,
-        seed=7,
-    )
-    short_count = sum(1 for example in examples if len(example.text) <= demo.SHORT_LENGTH_MAX)
-    long_count = len(examples) - short_count
-    assert short_count == 60
-    assert long_count == 40
+def test_balanced_invalid_sampler_preserves_net_balance() -> None:
+    rng = random.Random(13)
+    text = demo.sample_balanced_invalid_sequence(rng, 12)
+    assert len(text) == 12
+    assert demo.terminal_balance(text) == 0
+    assert demo.is_balanced_invalid(text)
 
 
-def test_phase2_sampler_supports_all_short_rollout() -> None:
-    examples = demo.sample_phase2_examples(
+def test_exact_length_phase_sampler_uses_requested_length_and_modes() -> None:
+    examples = demo.sample_exact_length_examples(
         total_examples=24,
-        mean_length=40.0,
-        short_ratio=1.0,
-        short_length_max=18,
-        max_length=18,
-        seed=11,
+        length=20,
+        invalid_kinds=(demo.INVALID_KIND_RANDOM, demo.INVALID_KIND_CORRUPTION),
+        seed=7,
+        family="cohort-20",
     )
     assert len(examples) == 24
-    assert all(len(example.text) <= 18 for example in examples)
+    assert all(len(example.text) == 20 for example in examples)
+    assert sum(example.label for example in examples) == 12
+    invalid_kinds = {example.kind for example in examples if example.label == 0}
+    assert demo.INVALID_KIND_RANDOM in invalid_kinds
+    assert demo.INVALID_KIND_CORRUPTION in invalid_kinds
 
 
-def test_tiny_trace_rnn_returns_per_layer_traces() -> None:
+def test_training_blocks_are_cumulative_and_budgeted() -> None:
+    blocks = demo.build_training_blocks(block_epochs=5, train_samples=64)
+    assert len(blocks) == 9
+    assert sum(block.epochs for block in blocks) == 45
+    assert blocks[0].active_lengths == (20,)
+    assert blocks[3].active_lengths == (20, 50)
+    assert blocks[-1].active_lengths == (20, 50, 100)
+    assert blocks[-1].phase_kind == demo.PHASE_KIND_BALANCED
+
+
+def test_evaluation_sets_cover_all_families_and_balanced_slice() -> None:
+    evaluation_sets, balanced_examples = demo.build_evaluation_sets(test_samples=24, seed=7)
+    assert set(evaluation_sets) == {family.key for family in demo.EVALUATION_FAMILIES}
+    assert len(evaluation_sets["cohort-20"]) == 24
+    assert len(evaluation_sets["very-long"]) == 24
+    assert len(balanced_examples) == 24
+    assert all(example.kind == demo.INVALID_KIND_BALANCED for example in balanced_examples)
+
+
+def test_trace_rnn_returns_per_layer_traces() -> None:
     tokens, lengths = demo.encode_sequences(["()()", "((()))"])
 
     one_layer = demo.TinyTraceRNN(num_layers=1)
@@ -81,10 +101,10 @@ def test_tiny_trace_rnn_returns_per_layer_traces() -> None:
 
 def test_aha_scoring_and_epoch_selection() -> None:
     metrics = [
-        demo.MetricRow(0, "initial", 0.7, 0.5, 0.7, 0.5, 0.7, 0.5),
-        demo.MetricRow(1, "warmup", 0.6, 0.7, 0.6, 0.7, 0.6, 0.52),
-        demo.MetricRow(2, "shock", 0.5, 0.8, 0.5, 0.82, 0.5, 0.9),
-        demo.MetricRow(3, "shock", 0.4, 0.85, 0.4, 0.86, 0.4, 0.92),
+        demo.MetricRow(0, "initial", 0.7, 0.5, 0.48, 0.5, 0.5, 0.5, 0.4, 0.3),
+        demo.MetricRow(1, "20/random", 0.6, 0.7, 0.58, 0.55, 0.5, 0.5, 0.4, 0.35),
+        demo.MetricRow(2, "50/balanced", 0.5, 0.8, 0.72, 0.7, 0.65, 0.72, 0.55, 0.8),
+        demo.MetricRow(3, "100/balanced", 0.4, 0.85, 0.8, 0.75, 0.7, 0.86, 0.7, 0.9),
     ]
     response_history = [
         [0.1, 0.2],
@@ -93,32 +113,18 @@ def test_aha_scoring_and_epoch_selection() -> None:
         [0.81, 0.91],
     ]
     demo.score_aha_moments(metrics, response_history)
-    selected = demo.select_trace_epochs(metrics, warmup_end_epoch=1, top_k=2)
+    selected = demo.select_trace_epochs(metrics, phase_boundary_epochs=(1, 2), top_k=2)
     assert metrics[2].aha_score > metrics[1].aha_score
     assert selected == [0, 1, 2, 3]
 
 
-def test_curriculum_phase_epoch_budget_is_conserved() -> None:
-    phases = demo.build_curriculum_phases(
-        total_epochs=11,
-        mean_length=40.0,
-        train_samples=512,
-        max_length=demo.DEFAULT_MAX_LENGTH,
-    )
-    assert sum(phase.epochs for phase in phases) == 11
-    assert phases[0].label == "rollout short strings"
-    assert phases[-1].label == "shock full distribution"
-    assert phases[-1].batch_size_start > phases[-1].batch_size_end
-
-
-def test_response_probes_are_diverse_and_mixed() -> None:
-    probes = demo.RESPONSE_PROBES
-    assert len(probes) == 20
-    assert len(set(probes)) == 20
-    valid_count = sum(1 for probe in probes if demo.is_balanced_parentheses(probe))
-    invalid_count = len(probes) - valid_count
-    assert valid_count >= 6
-    assert invalid_count >= 6
+def test_response_and_trace_probes_cover_balanced_invalid_and_very_long() -> None:
+    response_probes = demo.RESPONSE_PROBES
+    trace_probes = demo.TRACE_PROBES
+    assert any(probe.family == "very-long" for probe in response_probes)
+    assert any(probe.probe_kind == demo.PHASE_KIND_BALANCED for probe in response_probes)
+    assert any(probe.probe_kind == "transition" for probe in trace_probes)
+    assert all(len(probe.text) >= 38 for probe in trace_probes)
 
 
 def test_generate_mlp_cli_smoke(tmp_path: Path) -> None:
@@ -154,22 +160,18 @@ def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
             "rnn",
             "--output-dir",
             str(tmp_path),
-            "--rnn-warmup-max-epochs",
-            "2",
-            "--rnn-phase2-epochs",
-            "2",
+            "--rnn-block-epochs",
+            "1",
             "--rnn-train-samples",
-            "64",
-            "--rnn-test-samples",
             "32",
-            "--max-length",
-            "120",
+            "--rnn-test-samples",
+            "24",
             "--no-html",
             "--no-trace-images",
         ],
     )
     assert result.exit_code == 0, result.output
     assert (tmp_path / "rnn-dataset-diversity.png").exists()
-    assert (tmp_path / "rnn-training-metrics.png").exists()
-    assert (tmp_path / "rnn-response-bifurcation.png").exists()
+    assert (tmp_path / "rnn-1layer-training-story.png").exists()
+    assert (tmp_path / "rnn-2layer-training-story.png").exists()
     assert (tmp_path / "manifest.json").exists()

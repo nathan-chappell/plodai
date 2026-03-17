@@ -7,7 +7,8 @@ from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.workspace_file import WorkspaceFileMetadata
 from backend.app.chatkit.metadata import (
     AppThreadMetadata,
-    CapabilityManifest,
+    CapabilityAgentSpec,
+    CapabilityBundle,
     ClientToolDefinition,
 )
 
@@ -21,7 +22,7 @@ class ReportAgentContext:
     thread_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
     available_files: list[WorkspaceFileMetadata] = field(default_factory=list)
     query_plan_model: type[BaseModel] | None = None
-    capability_manifest: CapabilityManifest | None = None
+    capability_bundle: CapabilityBundle | None = None
 
     @property
     def available_datasets(self) -> list[DatasetMetadata]:
@@ -40,6 +41,15 @@ class ReportAgentContext:
                 )
             )
         return datasets
+
+    @property
+    def available_chartable_files(self) -> list[WorkspaceFileMetadata]:
+        return [
+            file
+            for file in self.available_files
+            if (file.kind == "csv" and file.csv is not None)
+            or (file.kind == "json" and file.json is not None)
+        ]
 
     @property
     def dataset_ids(self) -> list[str]:
@@ -63,10 +73,29 @@ class ReportAgentContext:
 
     @property
     def capability_id(self) -> str | None:
-        manifest = self.capability_manifest
-        return manifest.get("capability_id") if manifest is not None else None
+        bundle = self.capability_bundle
+        return bundle.get("root_capability_id") if bundle is not None else None
+
+    @property
+    def capability_spec(self) -> CapabilityAgentSpec | None:
+        bundle = self.capability_bundle
+        capability_id = self.capability_id
+        if bundle is None or capability_id is None:
+            return None
+        return next(
+            (
+                capability
+                for capability in bundle.get("capabilities", [])
+                if capability.get("capability_id") == capability_id
+            ),
+            None,
+        )
 
     @property
     def client_tools(self) -> list[ClientToolDefinition]:
-        manifest = self.capability_manifest
-        return list(manifest.get("client_tools") or []) if manifest is not None else []
+        capability_spec = self.capability_spec
+        return (
+            list(capability_spec.get("client_tools") or [])
+            if capability_spec is not None
+            else []
+        )

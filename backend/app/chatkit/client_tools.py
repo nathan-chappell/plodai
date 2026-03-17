@@ -37,9 +37,12 @@ class ClientToolResultPayload(TypedDict, total=False):
     chart: dict[str, object]
     files: list[ClientToolWorkspaceFile]
     csv_files: list[ClientToolCsvFile]
+    chartable_files: list[ClientToolWorkspaceFile]
     created_file: ClientToolWorkspaceFile
     file_input: dict[str, object]
     page_range: dict[str, object]
+    pdf_inspection: dict[str, object]
+    smart_split: dict[str, object]
 
 
 def coerce_client_tool_result(result: object | None) -> ClientToolResultPayload | None:

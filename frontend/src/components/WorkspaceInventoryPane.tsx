@@ -47,9 +47,11 @@ export function WorkspaceInventoryPane({
 
   const currentPage = expandedFile ? pageByFileId[expandedFile.id] ?? 0 : 0;
   const pageCount =
-    expandedFile?.kind === "csv" ? Math.max(1, Math.ceil(expandedFile.preview_rows.length / PAGE_SIZE)) : 1;
+    expandedFile?.kind === "csv" || expandedFile?.kind === "json"
+      ? Math.max(1, Math.ceil(expandedFile.preview_rows.length / PAGE_SIZE))
+      : 1;
   const pagedRows =
-    expandedFile?.kind === "csv"
+    expandedFile?.kind === "csv" || expandedFile?.kind === "json"
       ? expandedFile.preview_rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
       : [];
 
@@ -93,14 +95,14 @@ export function WorkspaceInventoryPane({
                   <DatasetInventoryMetaRow>
                     <MetaText as="span">{file.kind.toUpperCase()}</MetaText>
                     <MetaText as="span">{file.extension || "no extension"}</MetaText>
-                    {file.kind === "csv" ? <MetaText as="span">{file.row_count} rows</MetaText> : null}
-                    {file.kind === "csv" ? <MetaText as="span">{file.columns.length} columns</MetaText> : null}
+                    {file.kind === "csv" || file.kind === "json" ? <MetaText as="span">{file.row_count} rows</MetaText> : null}
+                    {file.kind === "csv" || file.kind === "json" ? <MetaText as="span">{file.columns.length} columns</MetaText> : null}
                     {file.kind === "pdf" ? <MetaText as="span">{file.page_count} pages</MetaText> : null}
                   </DatasetInventoryMetaRow>
                 </DatasetInventoryToggle>
                 {isExpanded ? (
                   <DatasetInventoryExpanded>
-                    {file.kind === "csv" ? (
+                    {file.kind === "csv" || file.kind === "json" ? (
                       <>
                         <MetaText>Columns: {file.columns.join(", ")}</MetaText>
                         <DatasetInventoryScroller>
@@ -152,7 +154,11 @@ export function WorkspaceInventoryPane({
                       </MetaText>
                     ) : null}
                     {file.kind === "other" ? (
-                      <MetaText>This file is listed for awareness, but there are no specialized tools for it yet.</MetaText>
+                      <MetaText>
+                        {file.text_content
+                          ? "This derived file is available in the workspace."
+                          : "This file is listed for awareness, but there are no specialized tools for it yet."}
+                      </MetaText>
                     ) : null}
                     {onRemoveFile ? (
                       <DatasetInventoryButton onClick={() => onRemoveFile(file.id)} type="button">

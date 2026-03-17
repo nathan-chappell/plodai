@@ -164,17 +164,28 @@ export const clientChartSpecSchema: JsonSchema = {
   properties: {
     type: { enum: ["bar", "line", "pie", "doughnut", "scatter"] },
     title: { type: "string" },
+    subtitle: { type: "string" },
     description: { type: "string" },
     label_key: { type: "string" },
     series: {
       type: "array",
       items: chartSeriesSchema,
     },
-    style_preset: { enum: ["editorial", "sunrise", "ocean", "forest", "mono"] },
+    style_preset: {
+      enum: ["editorial", "sunrise", "ocean", "forest", "mono", "ledger", "amber", "cobalt", "terracotta", "midnight"],
+    },
+    x_axis_label: { type: "string" },
+    y_axis_label: { type: "string" },
+    legend_position: { enum: ["top", "bottom", "left", "right"] },
+    orientation: { enum: ["vertical", "horizontal"] },
+    value_format: { enum: ["number", "integer", "currency", "percent", "compact", "string"] },
     show_legend: { type: "boolean" },
     stacked: { type: "boolean" },
     smooth: { type: "boolean" },
     interactive: { type: "boolean" },
+    show_grid: { type: "boolean" },
+    show_data_labels: { type: "boolean" },
+    fill_area: { type: "boolean" },
   },
   required: ["type", "title", "label_key", "series"],
   additionalProperties: false,
@@ -191,23 +202,21 @@ export const includeSamplesSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+export const inspectChartableFileSchemaToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    file_id: { type: "string" },
+  },
+  required: ["file_id"],
+  additionalProperties: false,
+};
+
 export const runAggregateQueryToolSchema: JsonSchema = {
   type: "object",
   properties: {
     query_plan: queryPlanSchema,
   },
   required: ["query_plan"],
-  additionalProperties: false,
-};
-
-export const requestChartRenderToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    query_id: { type: "string" },
-    query_plan: queryPlanSchema,
-    chart_plan: clientChartSpecSchema,
-  },
-  required: ["query_id", "query_plan", "chart_plan"],
   additionalProperties: false,
 };
 
@@ -221,6 +230,40 @@ export const createCsvFileToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+export const createJsonFileToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    filename: { type: "string" },
+    query_plan: queryPlanSchema,
+  },
+  required: ["filename", "query_plan"],
+  additionalProperties: false,
+};
+
+export const renderChartFromFileToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    file_id: { type: "string" },
+    chart_plan_id: { type: "string" },
+    chart_plan: clientChartSpecSchema,
+    x_key: { type: "string" },
+    y_key: { type: "string" },
+    series_key: { type: "string" },
+  },
+  required: ["file_id", "chart_plan_id", "chart_plan", "x_key"],
+  additionalProperties: false,
+};
+
+export const inspectPdfFileToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    file_id: { type: "string" },
+    max_pages: { type: "integer", minimum: 1, maximum: 30 },
+  },
+  required: ["file_id"],
+  additionalProperties: false,
+};
+
 export const getPdfPageRangeToolSchema: JsonSchema = {
   type: "object",
   properties: {
@@ -229,6 +272,16 @@ export const getPdfPageRangeToolSchema: JsonSchema = {
     end_page: { type: "integer", minimum: 1 },
   },
   required: ["file_id", "start_page", "end_page"],
+  additionalProperties: false,
+};
+
+export const smartSplitPdfToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    file_id: { type: "string" },
+    goal: { type: "string" },
+  },
+  required: ["file_id"],
   additionalProperties: false,
 };
 

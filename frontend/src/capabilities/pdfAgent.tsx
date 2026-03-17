@@ -1,12 +1,16 @@
 import { useEffect, useMemo } from "react";
 
 import { AuthPanel } from "../components/AuthPanel";
+import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
+import { buildPdfAgentDemoScenario } from "./pdf-agent/demo";
+import { createPdfAgentClientTools } from "./pdf-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
-import { buildPdfAgentManifest } from "./manifests";
+import { buildPdfAgentBundle } from "./manifests";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
-import { createWorkspaceClientTools } from "../lib/file-agent-tools";
+import { useDemoScenario } from "./shared/useDemoScenario";
 import { MetaText } from "../app/styles";
+import type { ClientEffect } from "../types/analysis";
 import type { CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
 import {
   CapabilityEyebrow,
@@ -23,15 +27,21 @@ import {
   CapabilityTextarea,
   CapabilityTitle,
   ReportChatColumn,
+  ReportEffectCard,
+  ReportEffectsPanel,
   ReportWorkspaceColumn,
   ReportWorkspaceLayout,
 } from "./styles";
 
-type PdfAgentTab = "agent" | "goal";
+type PdfAgentTab = "agent" | "goal" | "demo";
 
 const DEFAULT_STATUS = "Load PDF files to start carving bounded page ranges.";
 const DEFAULT_BRIEF =
-  "Inspect the available PDFs, keep page selections bounded, and extract the smallest useful sub-documents.";
+  "Inspect the available PDFs, keep page selections bounded, and split them into the most useful sub-documents.";
+
+function isPdfEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "pdf_smart_split_completed" }> {
+  return effect.type === "pdf_smart_split_completed";
+}
 
 function GoalPanel({
   investigationBrief,
@@ -53,7 +63,7 @@ function GoalPanel({
       />
       <CapabilityHighlight>
         <CapabilityMetaText>
-          The current PDF tool is intentionally narrow: inspect inventory first, then extract inclusive page ranges that can be reasoned about safely.
+          Inspect first, then either extract bounded page ranges or ask for a smart split that creates sub-PDFs, an index, and a ZIP.
         </CapabilityMetaText>
       </CapabilityHighlight>
     </CapabilityPanel>
@@ -70,6 +80,7 @@ export const pdfAgentCapability: CapabilityDefinition = {
   tabs: [
     { id: "agent", label: "Agent" },
     { id: "goal", label: "Goal" },
+    { id: "demo", label: "Demo" },
   ],
 };
 
@@ -80,8 +91,10 @@ export function PdfAgentPage({
 }) {
   const {
     files,
+    setFiles,
     appendFiles,
     status,
+    setStatus,
     investigationBrief,
     setInvestigationBrief,
     activeWorkspaceTab,
@@ -96,13 +109,22 @@ export function PdfAgentPage({
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
-    allowedTabs: ["agent", "goal"],
+    allowedTabs: ["agent", "goal", "demo"],
   });
-  const capabilityManifest = useMemo(() => buildPdfAgentManifest(), []);
-  const clientTools = useMemo(
-    () => createWorkspaceClientTools(files, { includeCsvTools: false, includePdfRange: true }),
-    [files],
-  );
+  const capabilityBundle = useMemo(() => buildPdfAgentBundle(), []);
+  const clientTools = useMemo(() => createPdfAgentClientTools({ files }), [files]);
+  const {
+    scenario: demoScenario,
+    loading: demoLoading,
+    error: demoError,
+    reloadScenario,
+  } = useDemoScenario({
+    active: activeWorkspaceTab === "demo",
+    buildDemoScenario: buildPdfAgentDemoScenario,
+    setFiles,
+    setStatus,
+    setReportEffects,
+  });
 
   useEffect(() => {
     onRegisterWorkspace?.({
@@ -160,10 +182,24 @@ export function PdfAgentPage({
               <MetaText>Use the sidebar workspace panel to load PDFs or remove them from the current session.</MetaText>
               {reportEffects.length ? <MetaText>Client effects captured this session: {reportEffects.length}</MetaText> : null}
             </CapabilityPanel>
+            {reportEffects.filter(isPdfEffect).length ? (
+              <ReportEffectsPanel>
+                {reportEffects.filter(isPdfEffect).map((effect, index) => (
+                  <ReportEffectCard key={`${effect.type}-${effect.archiveFileId}-${index}`}>
+                    <h3>Smart split: {effect.sourceFileName}</h3>
+                    <MetaText>{effect.markdown}</MetaText>
+                    <MetaText>Archive ready: {effect.archiveFileName}</MetaText>
+                    <MetaText>
+                      Outputs: {effect.entries.map((entry) => `${entry.title} (${entry.startPage}-${entry.endPage})`).join(", ")}
+                    </MetaText>
+                  </ReportEffectCard>
+                ))}
+              </ReportEffectsPanel>
+            ) : null}
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
-              capabilityManifest={capabilityManifest}
+              capabilityBundle={capabilityBundle}
               enabled
               files={files}
               investigationBrief={investigationBrief}
@@ -177,6 +213,52 @@ export function PdfAgentPage({
 
       {activeWorkspaceTab === "goal" ? (
         <GoalPanel investigationBrief={investigationBrief} setInvestigationBrief={setInvestigationBrief} />
+      ) : null}
+
+      {activeWorkspaceTab === "demo" ? (
+        <ReportWorkspaceLayout>
+          <ReportWorkspaceColumn>
+            <CapabilityPanel>
+              <CapabilitySectionHeader>
+                <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
+                <CapabilityMetaText>
+                  {demoLoading ? "Preparing the PDF demo." : demoError ?? status}
+                </CapabilityMetaText>
+              </CapabilitySectionHeader>
+              <MetaText>
+                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
+              </MetaText>
+              <MetaText>Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
+            </CapabilityPanel>
+            {reportEffects.filter(isPdfEffect).length ? (
+              <ReportEffectsPanel>
+                {reportEffects.filter(isPdfEffect).map((effect, index) => (
+                  <ReportEffectCard key={`${effect.type}-${effect.archiveFileId}-${index}`}>
+                    <h3>Smart split: {effect.sourceFileName}</h3>
+                    <MetaText>{effect.markdown}</MetaText>
+                    <MetaText>Archive ready: {effect.archiveFileName}</MetaText>
+                    <MetaText>
+                      Outputs: {effect.entries.map((entry) => `${entry.title} (${entry.startPage}-${entry.endPage})`).join(", ")}
+                    </MetaText>
+                  </ReportEffectCard>
+                ))}
+              </ReportEffectsPanel>
+            ) : null}
+          </ReportWorkspaceColumn>
+          <ReportChatColumn>
+            <CapabilityDemoPane
+              scenario={demoScenario}
+              loading={demoLoading}
+              error={demoError}
+              capabilityBundle={capabilityBundle}
+              files={files}
+              clientTools={clientTools}
+              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onFilesAdded={appendFiles}
+              onReloadScenario={reloadScenario}
+            />
+          </ReportChatColumn>
+        </ReportWorkspaceLayout>
       ) : null}
     </>
   );

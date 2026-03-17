@@ -1,23 +1,25 @@
 import { useEffect, useMemo } from "react";
 
 import { useAppState } from "../app/context";
+import { MetaText } from "../app/styles";
+import { AuthPanel } from "../components/AuthPanel";
+import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
 import { NarrativeCard } from "../components/NarrativeCard";
-import { SmokeTestPane } from "../components/SmokeTestPane";
-import { useReportFoundryWorkspace, type ReportFoundryWorkspaceTab } from "./hooks";
-import type { ClientEffect } from "../types/analysis";
-import type { LocalDataset } from "../types/report";
-import { MetaText } from "../app/styles";
-import type { CapabilityClientTool, CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
+import { buildReportAgentDemoScenario } from "./report-agent/demo";
+import { createReportAgentClientTools } from "./report-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
-import { buildReportAgentManifest } from "./manifests";
-import { createWorkspaceClientTools } from "../lib/file-agent-tools";
+import { useCapabilityFileWorkspace } from "./fileWorkspace";
+import { buildReportAgentBundle } from "./manifests";
+import { useDemoScenario } from "./shared/useDemoScenario";
+import type { CapabilityClientTool, CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
+import type { ClientEffect } from "../types/analysis";
+import type { LocalWorkspaceFile } from "../types/report";
 import {
-  CapabilityHeroRow,
   CapabilityEyebrow,
   CapabilityHeader,
-  CapabilityHighlight,
+  CapabilityHeroRow,
   CapabilityMetaText,
   CapabilityPanel,
   CapabilitySectionHeader,
@@ -33,7 +35,12 @@ import {
   ReportWorkspaceColumn,
   ReportWorkspaceLayout,
 } from "./styles";
-import { AuthPanel } from "../components/AuthPanel";
+
+type ReportAgentTab = "report" | "goal" | "demo";
+
+const DEFAULT_STATUS = "Load local files to begin a report-led investigation.";
+const DEFAULT_BRIEF =
+  "Investigate the attached files, hand off to the right specialist when needed, and build a useful report progressively.";
 
 function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "chart_rendered" }> {
   return effect.type === "chart_rendered";
@@ -41,6 +48,10 @@ function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { 
 
 function isReportEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "report_section_appended" }> {
   return effect.type === "report_section_appended";
+}
+
+function isPdfEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "pdf_smart_split_completed" }> {
+  return effect.type === "pdf_smart_split_completed";
 }
 
 function InvestigationBriefPanel({
@@ -54,24 +65,19 @@ function InvestigationBriefPanel({
     <CapabilityPanel>
       <CapabilitySectionHeader>
         <CapabilitySectionTitle>Analysis goal</CapabilitySectionTitle>
-        <CapabilityMetaText>This brief is saved with the conversation so the analyst keeps the objective in view.</CapabilityMetaText>
+        <CapabilityMetaText>This brief is saved with the conversation so the report agent keeps the objective in view.</CapabilityMetaText>
       </CapabilitySectionHeader>
       <CapabilityTextarea
         value={investigationBrief}
         onChange={(event) => setInvestigationBrief(event.target.value)}
-        placeholder="Example: Compare regional performance, find the most surprising anomalies, and suggest the best charts."
+        placeholder="Example: Investigate the attached files, produce the strongest charts, and assemble a stakeholder-ready report."
       />
-      <CapabilityHighlight>
-        <CapabilityMetaText>
-          The analyst will use this as the working objective, then refine the thread title once the focus becomes clear.
-        </CapabilityMetaText>
-      </CapabilityHighlight>
     </CapabilityPanel>
   );
 }
 
-export function createReportFoundryClientTools(datasets: LocalDataset[]): CapabilityClientTool[] {
-  return createWorkspaceClientTools(datasets, { includeCharts: true });
+export function createReportFoundryClientTools(files: LocalWorkspaceFile[]): CapabilityClientTool[] {
+  return createReportAgentClientTools({ files });
 }
 
 export const reportFoundryCapability: CapabilityDefinition = {
@@ -80,11 +86,11 @@ export const reportFoundryCapability: CapabilityDefinition = {
   navLabel: "Report Agent",
   title: "Report Agent",
   eyebrow: "Capability",
-  description: "Investigative report generation over local files.",
+  description: "Narrative report assembly with CSV, chart, and PDF handoffs.",
   tabs: [
     { id: "report", label: "Report" },
     { id: "goal", label: "Goal" },
-    { id: "integration", label: "Integration Test" },
+    { id: "demo", label: "Demo" },
   ],
 };
 
@@ -97,9 +103,12 @@ export function ReportFoundryPage({
   if (!user) {
     return null;
   }
+
   const {
-    datasets,
+    files,
+    appendFiles,
     status,
+    setStatus,
     investigationBrief,
     setInvestigationBrief,
     activeWorkspaceTab,
@@ -107,25 +116,43 @@ export function ReportFoundryPage({
     reportEffects,
     setReportEffects,
     handleFiles,
-    handleClearDatasets,
-    handleLoadSmokeDatasets,
-    handleRemoveDataset,
-  } = useReportFoundryWorkspace();
-  const capabilityManifest = useMemo(() => buildReportAgentManifest(), []);
-  const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(datasets), [datasets]);
+    handleClearFiles,
+    handleRemoveFile,
+    setFiles,
+  } = useCapabilityFileWorkspace({
+    capabilityId: reportFoundryCapability.id,
+    defaultStatus: DEFAULT_STATUS,
+    defaultBrief: DEFAULT_BRIEF,
+    defaultTab: "report",
+    allowedTabs: ["report", "goal", "demo"],
+  });
+  const capabilityBundle = useMemo(() => buildReportAgentBundle(), []);
+  const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(files), [files]);
+  const {
+    scenario: demoScenario,
+    loading: demoLoading,
+    error: demoError,
+    reloadScenario,
+  } = useDemoScenario({
+    active: activeWorkspaceTab === "demo",
+    buildDemoScenario: buildReportAgentDemoScenario,
+    setFiles,
+    setStatus,
+    setReportEffects,
+  });
 
   useEffect(() => {
     onRegisterWorkspace?.({
       capabilityId: reportFoundryCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      files: datasets,
-      accept: ".csv",
+      files,
+      accept: ".csv,.json,.pdf",
       onSelectFiles: handleFiles,
-      onClearFiles: handleClearDatasets,
-      onRemoveFile: handleRemoveDataset,
+      onClearFiles: handleClearFiles,
+      onRemoveFile: handleRemoveFile,
     });
-  }, [datasets, handleClearDatasets, handleFiles, handleRemoveDataset, onRegisterWorkspace]);
+  }, [files, handleClearFiles, handleFiles, handleRemoveFile, onRegisterWorkspace]);
 
   return (
     <>
@@ -134,7 +161,7 @@ export function ReportFoundryPage({
           <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
           <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
           <CapabilitySubhead>
-            Load local files, set the goal, and investigate through safe queries and charts.
+            Lead an investigation, hand off to specialists when needed, and assemble a narrative report over local files.
           </CapabilitySubhead>
         </CapabilityHeader>
         <AuthPanel mode="account" heading="Account" />
@@ -142,15 +169,15 @@ export function ReportFoundryPage({
 
       <CapabilityTabBar>
         {reportFoundryCapability.tabs.map((tab) => (
-            <CapabilityTabButton
-              key={tab.id}
-              $active={activeWorkspaceTab === tab.id}
-              onClick={() => setActiveWorkspaceTab(tab.id as ReportFoundryWorkspaceTab)}
-              type="button"
-            >
-              {tab.label}
-            </CapabilityTabButton>
-          ))}
+          <CapabilityTabButton
+            key={tab.id}
+            $active={activeWorkspaceTab === tab.id}
+            onClick={() => setActiveWorkspaceTab(tab.id as ReportAgentTab)}
+            type="button"
+          >
+            {tab.label}
+          </CapabilityTabButton>
+        ))}
       </CapabilityTabBar>
 
       {activeWorkspaceTab === "report" ? (
@@ -159,13 +186,13 @@ export function ReportFoundryPage({
             <CapabilityPanel>
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Report canvas</CapabilitySectionTitle>
-              <CapabilityMetaText>{status}</CapabilityMetaText>
+                <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
-              <CapabilityMetaText>Files: {datasets.length ? datasets.map((dataset) => dataset.name).join(", ") : "none yet"}</CapabilityMetaText>
-              <CapabilityMetaText>
+              <MetaText>Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}</MetaText>
+              <MetaText>
                 Current goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the investigation."}
-              </CapabilityMetaText>
-              <CapabilityMetaText>Use the sidebar workspace panel to add, inspect, or remove the files feeding this report.</CapabilityMetaText>
+              </MetaText>
+              <MetaText>Use the sidebar workspace panel to add, inspect, or remove the files feeding this report.</MetaText>
             </CapabilityPanel>
 
             {reportEffects.length ? (
@@ -182,6 +209,13 @@ export function ReportFoundryPage({
                         }}
                       />
                     ) : null}
+                    {isPdfEffect(effect) ? (
+                      <>
+                        <h3>Smart split: {effect.sourceFileName}</h3>
+                        <MetaText>{effect.markdown}</MetaText>
+                        <MetaText>Archive: {effect.archiveFileName}</MetaText>
+                      </>
+                    ) : null}
                   </ReportEffectCard>
                 ))}
               </ReportEffectsPanel>
@@ -189,12 +223,13 @@ export function ReportFoundryPage({
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
-              capabilityManifest={capabilityManifest}
+              capabilityBundle={capabilityBundle}
               enabled
-              files={datasets}
+              files={files}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onFilesAdded={appendFiles}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
@@ -207,7 +242,61 @@ export function ReportFoundryPage({
         />
       ) : null}
 
-      {activeWorkspaceTab === "integration" ? <SmokeTestPane onLoadFixtures={handleLoadSmokeDatasets} /> : null}
+      {activeWorkspaceTab === "demo" ? (
+        <ReportWorkspaceLayout>
+          <ReportWorkspaceColumn>
+            <CapabilityPanel>
+              <CapabilitySectionHeader>
+                <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
+                <CapabilityMetaText>
+                  {demoLoading ? "Preparing the report demo." : demoError ?? status}
+                </CapabilityMetaText>
+              </CapabilitySectionHeader>
+              <MetaText>Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}</MetaText>
+              <MetaText>Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
+            </CapabilityPanel>
+
+            {reportEffects.length ? (
+              <ReportEffectsPanel>
+                {reportEffects.map((effect, index) => (
+                  <ReportEffectCard key={`${effect.type}-${index}`}>
+                    {isChartEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : null}
+                    {isReportEffect(effect) ? (
+                      <NarrativeCard
+                        section={{
+                          id: `${effect.type}-${index}`,
+                          title: effect.title,
+                          markdown: effect.markdown,
+                        }}
+                      />
+                    ) : null}
+                    {isPdfEffect(effect) ? (
+                      <>
+                        <h3>Smart split: {effect.sourceFileName}</h3>
+                        <MetaText>{effect.markdown}</MetaText>
+                        <MetaText>Archive: {effect.archiveFileName}</MetaText>
+                      </>
+                    ) : null}
+                  </ReportEffectCard>
+                ))}
+              </ReportEffectsPanel>
+            ) : null}
+          </ReportWorkspaceColumn>
+          <ReportChatColumn>
+            <CapabilityDemoPane
+              scenario={demoScenario}
+              loading={demoLoading}
+              error={demoError}
+              capabilityBundle={capabilityBundle}
+              files={files}
+              clientTools={clientTools}
+              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onFilesAdded={appendFiles}
+              onReloadScenario={reloadScenario}
+            />
+          </ReportChatColumn>
+        </ReportWorkspaceLayout>
+      ) : null}
     </>
   );
 }

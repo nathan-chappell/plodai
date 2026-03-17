@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-import itertools
 import json
 import math
 import random
+import shutil
 from statistics import mean
 from typing import Callable, Literal
 
@@ -31,78 +31,48 @@ DEFAULT_OUTPUT_DIR = (
     / "theoretical-justification-of-neural-networks"
 )
 PAD_INDEX = 2
-SHORT_LENGTH_MAX = 80
-DEFAULT_MAX_LENGTH = 240
-PHASE_ONE_MAX_LENGTH = 10
+TRAIN_COHORTS: tuple[int, ...] = (20, 50, 100)
+PHASE_KIND_RANDOM = "random"
+PHASE_KIND_OFF_BY_ONE = "off_by_one"
+PHASE_KIND_BALANCED = "balanced_invalid"
+PHASE_KIND_ORDER: tuple[str, ...] = (
+    PHASE_KIND_RANDOM,
+    PHASE_KIND_OFF_BY_ONE,
+    PHASE_KIND_BALANCED,
+)
 INVALID_KIND_RANDOM = "random_invalid"
 INVALID_KIND_CORRUPTION = "corruption_invalid"
-INVALID_KIND_VALID_THEN_INVALID = "valid_then_invalid"
-INVALID_KIND_INVALID_THEN_VALID = "invalid_then_valid"
+INVALID_KIND_BALANCED = "balanced_invalid"
 INVALID_KIND_ORDER: tuple[str, ...] = (
     INVALID_KIND_RANDOM,
     INVALID_KIND_CORRUPTION,
-    INVALID_KIND_VALID_THEN_INVALID,
-    INVALID_KIND_INVALID_THEN_VALID,
+    INVALID_KIND_BALANCED,
 )
-TRACE_PROBES: tuple[tuple[str, str], ...] = (
-    ("shallow valid", "()()()()"),
-    ("nested valid", "(((())))"),
-    ("near miss invalid", "(((()))"),
-    ("concat invalid", ")(()())()"),
-)
-RESPONSE_PROBE_POOL: tuple[str, ...] = (
-    "()",
-    "(())",
-    "()()",
-    "(()())",
-    "(((())))",
-    "(()(()))",
-    "()()()()",
-    "(((())))((()))",
-    "(()(()()))(())",
-    "((()())(()()))",
-    "(((()(()))))",
-    "(()()(()()))",
-    "()((()))()",
-    "((())())(())",
-    "(()(()(())))",
-    "(",
-    ")",
-    "(()",
-    "())",
-    "())(",
-    "(()))(",
-    "()())()",
-    "())(()",
-    "(((())))((",
-    "(()())())(()",
-    "))((",
-    "())())",
-    "((())",
-    "()(()",
-    "(((()))))(",
-    "())(()())",
-    "((())()))(()",
-    "(()(()))())",
-    ")(()())()",
-    "()()())(()",
-    "(((())))())(",
-    "(()()))(()(",
-    "((()(()))(()))",
-    "((())())())(",
-    "()(()(()))(()",
-)
+DEFAULT_BLOCK_EPOCHS = 10
+DEFAULT_BATCH_SIZE = 16
+VERY_LONG_LENGTHS: tuple[int, ...] = (200, 260)
+VERY_LONG_LENGTH_MIN = VERY_LONG_LENGTHS[0]
+DEFAULT_MAX_LENGTH = VERY_LONG_LENGTHS[-1]
 FIGURE_STYLE = {
-    "paper_bgcolor": "#fcfbf8",
-    "plot_bgcolor": "#f4efe6",
-    "font": {"family": "Georgia, serif", "color": "#24313d", "size": 14},
+    "paper_bgcolor": "#f7f8fb",
+    "plot_bgcolor": "#ffffff",
+    "font": {"family": "Aptos, Segoe UI, Helvetica, Arial, sans-serif", "color": "#1f2937", "size": 14},
 }
-COLOR_VALID = "#c26b2d"
-COLOR_INVALID = "#2f6c8f"
-COLOR_SHORT = "#1f5f7a"
-COLOR_LONG = "#bc6c25"
 COLOR_TRAIN = "#5c4d7d"
-TRACE_COLORS = ("#c26b2d", "#38618c", "#7b4f9d", "#809848")
+COLOR_BALANCED = "#1d3557"
+FAMILY_PALETTES = {
+    "cohort-20": ("#7f1d1d", "#b91c1c", "#ef4444"),
+    "cohort-50": ("#1d4ed8", "#2563eb", "#60a5fa"),
+    "cohort-100": ("#166534", "#16a34a", "#86efac"),
+    "very-long": ("#7c5c2d", "#a16207", "#d6a856"),
+}
+TRACE_COLORS = ("#7f1d1d", "#1d4ed8", "#166534", "#7c5c2d", "#9333ea", "#db2777")
+TRACE_SYMBOLS = {
+    "valid": "circle",
+    PHASE_KIND_OFF_BY_ONE: "diamond",
+    PHASE_KIND_BALANCED: "square",
+    "transition": "x",
+}
 
 
 @app.callback()
@@ -115,6 +85,36 @@ class SequenceExample:
     text: str
     label: int
     kind: str
+    family: str = ""
+
+
+@dataclass(frozen=True)
+class CohortBlock:
+    name: str
+    label: str
+    cohort_length: int
+    phase_kind: str
+    active_lengths: tuple[int, ...]
+    epochs: int
+    train_samples: int
+    learning_rate: float
+
+
+@dataclass(frozen=True)
+class EvaluationFamily:
+    key: str
+    label: str
+    lengths: tuple[int, ...]
+    color: str
+
+
+@dataclass(frozen=True)
+class ProbeSpec:
+    label: str
+    text: str
+    family: str
+    probe_kind: str
+    color: str
 
 
 @dataclass
@@ -123,10 +123,12 @@ class MetricRow:
     phase: str
     train_loss: float
     train_acc: float
-    short_test_loss: float
-    short_test_acc: float
-    long_test_loss: float
-    long_test_acc: float
+    overall_eval_acc: float
+    cohort_20_acc: float
+    cohort_50_acc: float
+    cohort_100_acc: float
+    very_long_acc: float
+    balanced_invalid_acc: float
     probe_change: float = 0.0
     aha_score: float = 0.0
 
@@ -136,33 +138,24 @@ class RNNExperimentResult:
     model_key: str
     model_title: str
     num_layers: int
-    warmup_end_epoch: int
     phase_spans: list[dict[str, object]]
     peak_aha_epoch: int
     selected_epochs: list[int]
     metrics: list[MetricRow]
     response_history: list[list[float]]
     representative_train_examples: list[SequenceExample]
-    short_test_examples: list[SequenceExample]
-    long_test_examples: list[SequenceExample]
+    evaluation_sets: dict[str, list[SequenceExample]]
+    balanced_invalid_examples: list[SequenceExample]
     trace_payloads: dict[int, list[dict[str, object]]]
     files: list[str]
 
 
-@dataclass(frozen=True)
-class CurriculumPhase:
-    name: str
-    label: str
-    short_ratio: float
-    short_length_max: int
-    max_length: int
-    mean_length: float
-    batch_size_start: int
-    batch_size_end: int
-    train_samples: int
-    lr_start: float
-    lr_end: float
-    epochs: int
+EVALUATION_FAMILIES: tuple[EvaluationFamily, ...] = (
+    EvaluationFamily("cohort-20", "20 / 25 / 30", (20, 25, 30), FAMILY_PALETTES["cohort-20"][1]),
+    EvaluationFamily("cohort-50", "50 / 60 / 75", (50, 60, 75), FAMILY_PALETTES["cohort-50"][1]),
+    EvaluationFamily("cohort-100", "100 / 120 / 150", (100, 120, 150), FAMILY_PALETTES["cohort-100"][1]),
+    EvaluationFamily("very-long", "200 / 260", VERY_LONG_LENGTHS, FAMILY_PALETTES["very-long"][1]),
+)
 
 
 def seed_everything(seed: int) -> None:
@@ -177,75 +170,31 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def clean_output_dir(path: Path) -> None:
+    if not path.exists():
+        return
+    for child in path.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def log_progress(message: str) -> None:
     typer.echo(f"[artifacts] {message}")
 
 
-def max_prefix_balance(text: str) -> int:
+def min_prefix_balance(text: str) -> int:
     balance = 0
-    peak = 0
+    trough = 0
     for char in text:
         balance += 1 if char == "(" else -1
-        peak = max(peak, balance)
-    return peak
+        trough = min(trough, balance)
+    return trough
 
 
 def terminal_balance(text: str) -> int:
     return text.count("(") - text.count(")")
-
-
-def edit_distance(left: str, right: str) -> int:
-    previous = list(range(len(right) + 1))
-    for left_index, left_char in enumerate(left, start=1):
-        current = [left_index]
-        for right_index, right_char in enumerate(right, start=1):
-            cost = 0 if left_char == right_char else 1
-            current.append(
-                min(
-                    previous[right_index] + 1,
-                    current[right_index - 1] + 1,
-                    previous[right_index - 1] + cost,
-                )
-            )
-        previous = current
-    return previous[-1]
-
-
-def probe_similarity(left: str, right: str) -> float:
-    similarity = float(edit_distance(left, right))
-    similarity += 0.35 * abs(len(left) - len(right))
-    similarity += 0.25 * abs(max_prefix_balance(left) - max_prefix_balance(right))
-    similarity += 0.15 * abs(terminal_balance(left) - terminal_balance(right))
-    if is_balanced_parentheses(left) != is_balanced_parentheses(right):
-        similarity += 2.5
-    return similarity
-
-
-def select_diverse_response_probes(
-    pool: tuple[str, ...],
-    *,
-    limit: int,
-) -> tuple[str, ...]:
-    if limit > len(pool):
-        raise ValueError("limit cannot exceed the probe pool size")
-    anchors = [
-        "()",
-        "(((())))((()))",
-        "(",
-        ")(()())()",
-    ]
-    selected: list[str] = [text for text in anchors if text in pool]
-    remaining = [text for text in pool if text not in selected]
-    while len(selected) < limit and remaining:
-        best_candidate = max(
-            remaining,
-            key=lambda candidate: min(
-                probe_similarity(candidate, chosen) for chosen in selected
-            ),
-        )
-        selected.append(best_candidate)
-        remaining.remove(best_candidate)
-    return tuple(selected)
 
 
 def is_balanced_parentheses(text: str) -> bool:
@@ -261,29 +210,8 @@ def is_balanced_parentheses(text: str) -> bool:
     return balance == 0
 
 
-RESPONSE_PROBES = select_diverse_response_probes(RESPONSE_PROBE_POOL, limit=20)
-
-
-def iter_parentheses_strings(max_length: int) -> list[str]:
-    sequences: list[str] = []
-    for length in range(1, max_length + 1):
-        for chars in itertools.product("()", repeat=length):
-            sequences.append("".join(chars))
-    return sequences
-
-
-def build_warmup_examples(max_length: int = PHASE_ONE_MAX_LENGTH) -> list[SequenceExample]:
-    examples: list[SequenceExample] = []
-    for text in iter_parentheses_strings(max_length):
-        is_valid = is_balanced_parentheses(text)
-        examples.append(
-            SequenceExample(
-                text=text,
-                label=1 if is_valid else 0,
-                kind="valid" if is_valid else "exhaustive_invalid",
-            )
-        )
-    return examples
+def is_balanced_invalid(text: str) -> bool:
+    return bool(text) and terminal_balance(text) == 0 and min_prefix_balance(text) < 0
 
 
 def sample_valid_sequence_of_length(rng: random.Random, length: int) -> str:
@@ -321,164 +249,255 @@ def sample_corruption_invalid_sequence(rng: random.Random, length: int) -> str:
     if length < 2 or length % 2 != 0:
         return sample_random_invalid_sequence(rng, length)
     while True:
-        base = list(sample_valid_sequence_of_length(rng, length))
-        edits = 1 if length < 4 else rng.choice((1, 2))
-        positions = rng.sample(range(length), k=edits)
-        for position in positions:
-            base[position] = ")" if base[position] == "(" else "("
-        text = "".join(base)
-        if not is_balanced_parentheses(text):
-            return text
+        chars = list(sample_valid_sequence_of_length(rng, length))
+        edits = 1 if length < 12 else 2
+        for position in rng.sample(range(length), k=edits):
+            chars[position] = ")" if chars[position] == "(" else "("
+        candidate = "".join(chars)
+        if not is_balanced_parentheses(candidate):
+            return candidate
 
 
-def valid_concat_lengths(total_length: int) -> list[int]:
-    return [
-        length
-        for length in range(2, total_length)
-        if length % 2 == 0 and total_length - length >= 1
-    ]
-
-
-def sample_concat_invalid_sequence(
-    rng: random.Random,
-    total_length: int,
-    *,
-    valid_first: bool,
-) -> str:
-    possible_valid_lengths = valid_concat_lengths(total_length)
-    if not possible_valid_lengths:
-        return sample_random_invalid_sequence(rng, total_length)
-    valid_length = rng.choice(possible_valid_lengths)
-    invalid_length = total_length - valid_length
-    valid_text = sample_valid_sequence_of_length(rng, valid_length)
-    invalid_text = sample_random_invalid_sequence(rng, invalid_length)
-    return valid_text + invalid_text if valid_first else invalid_text + valid_text
+def sample_balanced_invalid_sequence(rng: random.Random, length: int) -> str:
+    if length < 2 or length % 2 != 0:
+        return sample_random_invalid_sequence(rng, length)
+    base = sample_valid_sequence_of_length(rng, length)
+    for offset in rng.sample(range(1, length), k=length - 1):
+        candidate = base[offset:] + base[:offset]
+        if is_balanced_invalid(candidate):
+            return candidate
+    while True:
+        chars = ["("] * (length // 2) + [")"] * (length // 2)
+        rng.shuffle(chars)
+        candidate = "".join(chars)
+        if is_balanced_invalid(candidate):
+            return candidate
 
 
 def sample_invalid_sequence(
     rng: random.Random,
     length: int,
     *,
-    kind: str | None = None,
+    kind: str,
 ) -> SequenceExample:
-    candidate_kinds = (
-        (kind,)
-        if kind is not None
-        else tuple(rng.sample(list(INVALID_KIND_ORDER), k=len(INVALID_KIND_ORDER)))
-    )
-    for candidate in candidate_kinds:
-        if candidate == INVALID_KIND_RANDOM:
-            text = sample_random_invalid_sequence(rng, length)
-        elif candidate == INVALID_KIND_CORRUPTION:
-            text = sample_corruption_invalid_sequence(rng, length)
-        elif candidate == INVALID_KIND_VALID_THEN_INVALID:
-            text = sample_concat_invalid_sequence(rng, length, valid_first=True)
-        elif candidate == INVALID_KIND_INVALID_THEN_VALID:
-            text = sample_concat_invalid_sequence(rng, length, valid_first=False)
-        else:
-            continue
-        if not is_balanced_parentheses(text):
-            return SequenceExample(text=text, label=0, kind=candidate)
-    return SequenceExample(
-        text=sample_random_invalid_sequence(rng, length),
-        label=0,
-        kind=INVALID_KIND_RANDOM,
-    )
+    if kind == INVALID_KIND_RANDOM:
+        text = sample_random_invalid_sequence(rng, length)
+    elif kind == INVALID_KIND_CORRUPTION:
+        text = sample_corruption_invalid_sequence(rng, length)
+    elif kind == INVALID_KIND_BALANCED:
+        text = sample_balanced_invalid_sequence(rng, length)
+    else:
+        raise ValueError(f"Unknown invalid kind: {kind}")
+    return SequenceExample(text=text, label=0, kind=kind)
 
 
-def sample_truncated_exponential_length(
-    rng: random.Random,
-    *,
-    mean_length: float,
-    min_length: int,
-    max_length: int,
-    even_only: bool = False,
-) -> int:
-    if mean_length <= 0:
-        raise ValueError("mean_length must be positive")
-    while True:
-        length = max(1, int(round(rng.expovariate(1.0 / mean_length))))
-        if min_length <= length <= max_length and (not even_only or length % 2 == 0):
-            return length
+def parse_mlp_shape(shape: str) -> tuple[int, ...]:
+    hidden_layers = tuple(int(part.strip()) for part in shape.split(",") if part.strip())
+    if not hidden_layers or any(size <= 0 for size in hidden_layers):
+        raise ValueError("mlp_shape must contain one or more positive integers.")
+    return hidden_layers
 
 
-def sample_bucket_examples(
+def format_mlp_shape(hidden_layers: tuple[int, ...]) -> str:
+    return "1→" + "→".join(str(size) for size in hidden_layers) + "→1"
+
+
+def allocate_counts(total: int, buckets: int) -> list[int]:
+    base = total // buckets
+    counts = [base] * buckets
+    for index in range(total - sum(counts)):
+        counts[index] += 1
+    return counts
+
+
+def phase_invalid_kinds(phase_kind: str) -> tuple[str, ...]:
+    if phase_kind == PHASE_KIND_RANDOM:
+        return (INVALID_KIND_RANDOM,)
+    if phase_kind == PHASE_KIND_OFF_BY_ONE:
+        return (INVALID_KIND_RANDOM, INVALID_KIND_CORRUPTION)
+    if phase_kind == PHASE_KIND_BALANCED:
+        return (INVALID_KIND_RANDOM, INVALID_KIND_CORRUPTION, INVALID_KIND_BALANCED)
+    raise ValueError(f"Unknown phase kind: {phase_kind}")
+
+
+def sample_exact_length_examples(
     *,
     total_examples: int,
-    mean_length: float,
-    min_length: int,
-    max_length: int,
+    length: int,
+    invalid_kinds: tuple[str, ...],
     seed: int,
+    family: str = "",
 ) -> list[SequenceExample]:
     rng = random.Random(seed)
     examples: list[SequenceExample] = []
-    valid_count = total_examples // 2
+    valid_count = total_examples // 2 if length % 2 == 0 else 0
     invalid_count = total_examples - valid_count
     for _ in range(valid_count):
-        length = sample_truncated_exponential_length(
-            rng,
-            mean_length=mean_length,
-            min_length=min_length,
-            max_length=max_length,
-            even_only=True,
-        )
         examples.append(
             SequenceExample(
                 text=sample_valid_sequence_of_length(rng, length),
                 label=1,
                 kind="valid",
+                family=family,
             )
         )
-    for _ in range(invalid_count):
-        length = sample_truncated_exponential_length(
-            rng,
-            mean_length=mean_length,
-            min_length=min_length,
-            max_length=max_length,
-        )
-        examples.append(sample_invalid_sequence(rng, length))
+    invalid_allocations = allocate_counts(invalid_count, len(invalid_kinds))
+    for kind, kind_count in zip(invalid_kinds, invalid_allocations, strict=True):
+        for _ in range(kind_count):
+            example = sample_invalid_sequence(rng, length, kind=kind)
+            examples.append(
+                SequenceExample(
+                    text=example.text,
+                    label=example.label,
+                    kind=example.kind,
+                    family=family,
+                )
+            )
     rng.shuffle(examples)
     return examples
 
 
-def sample_phase2_examples(
+def sample_block_examples(
     *,
     total_examples: int,
-    mean_length: float,
-    short_ratio: float,
-    short_length_max: int,
-    max_length: int,
+    active_lengths: tuple[int, ...],
+    phase_kind: str,
     seed: int,
 ) -> list[SequenceExample]:
-    if not 0 <= short_ratio <= 1:
-        raise ValueError("short_ratio must be between 0 and 1 inclusive.")
-    short_examples = int(round(total_examples * short_ratio))
-    long_examples = total_examples - short_examples
-    short_bucket = (
-        sample_bucket_examples(
-            total_examples=short_examples,
-            mean_length=mean_length,
-            min_length=1,
-            max_length=short_length_max,
-            seed=seed,
+    length_allocations = allocate_counts(total_examples, len(active_lengths))
+    all_examples: list[SequenceExample] = []
+    invalid_kinds = phase_invalid_kinds(phase_kind)
+    for index, (length, length_count) in enumerate(zip(active_lengths, length_allocations, strict=True)):
+        all_examples.extend(
+            sample_exact_length_examples(
+                total_examples=length_count,
+                length=length,
+                invalid_kinds=invalid_kinds,
+                seed=seed + index * 137,
+                family=f"train-{length}",
+            )
         )
-        if short_examples > 0
-        else []
+    random.Random(seed + 999).shuffle(all_examples)
+    return all_examples
+
+
+def build_training_blocks(
+    *,
+    block_epochs: int,
+    train_samples: int,
+) -> list[CohortBlock]:
+    blocks: list[CohortBlock] = []
+    learning_rates = {
+        PHASE_KIND_RANDOM: 0.03,
+        PHASE_KIND_OFF_BY_ONE: 0.025,
+        PHASE_KIND_BALANCED: 0.02,
+    }
+    for cohort_index, cohort_length in enumerate(TRAIN_COHORTS):
+        active_lengths = TRAIN_COHORTS[: cohort_index + 1]
+        for phase_kind in PHASE_KIND_ORDER:
+            blocks.append(
+                CohortBlock(
+                    name=f"cohort-{cohort_length}-{phase_kind}",
+                    label=f"{cohort_length}/{phase_kind.replace('_', '-')}",
+                    cohort_length=cohort_length,
+                    phase_kind=phase_kind,
+                    active_lengths=active_lengths,
+                    epochs=block_epochs,
+                    train_samples=train_samples,
+                    learning_rate=learning_rates[phase_kind],
+                )
+            )
+    return blocks
+
+
+def build_evaluation_sets(
+    *,
+    test_samples: int,
+    seed: int,
+) -> tuple[dict[str, list[SequenceExample]], list[SequenceExample]]:
+    evaluation_sets: dict[str, list[SequenceExample]] = {}
+    final_invalid_kinds = phase_invalid_kinds(PHASE_KIND_BALANCED)
+    for family_index, family in enumerate(EVALUATION_FAMILIES):
+        examples: list[SequenceExample] = []
+        for length_index, (length, count) in enumerate(
+            zip(family.lengths, allocate_counts(test_samples, len(family.lengths)), strict=True)
+        ):
+            examples.extend(
+                sample_exact_length_examples(
+                    total_examples=count,
+                    length=length,
+                    invalid_kinds=final_invalid_kinds,
+                    seed=seed + family_index * 1_000 + length_index * 97,
+                    family=family.key,
+                )
+            )
+        evaluation_sets[family.key] = examples
+
+    balanced_lengths = tuple(
+        length
+        for family in EVALUATION_FAMILIES
+        for length in family.lengths
+        if length % 2 == 0
     )
-    long_bucket = (
-        sample_bucket_examples(
-            total_examples=long_examples,
-            mean_length=mean_length,
-            min_length=short_length_max + 1,
-            max_length=max_length,
-            seed=seed + 17,
-        )
-        if long_examples > 0 and short_length_max < max_length
-        else []
+    balanced_examples: list[SequenceExample] = []
+    for index, (length, count) in enumerate(
+        zip(balanced_lengths, allocate_counts(test_samples, len(balanced_lengths)), strict=True)
+    ):
+        rng = random.Random(seed + 50_000 + index * 193)
+        for _ in range(count):
+            balanced_examples.append(
+                SequenceExample(
+                    text=sample_invalid_sequence(rng, length, kind=INVALID_KIND_BALANCED).text,
+                    label=0,
+                    kind=INVALID_KIND_BALANCED,
+                    family="balanced-invalid",
+                )
+            )
+    return evaluation_sets, balanced_examples
+
+
+def deterministic_valid(length: int, seed: int) -> str:
+    return sample_valid_sequence_of_length(random.Random(seed), length)
+
+
+def deterministic_invalid(length: int, kind: str, seed: int) -> str:
+    return sample_invalid_sequence(random.Random(seed), length, kind=kind).text
+
+
+def build_response_probes() -> tuple[ProbeSpec, ...]:
+    return (
+        ProbeSpec("20 valid", deterministic_valid(20, 1_020), "cohort-20", "valid", FAMILY_PALETTES["cohort-20"][0]),
+        ProbeSpec("30 off-by-one", deterministic_invalid(30, INVALID_KIND_CORRUPTION, 1_030), "cohort-20", PHASE_KIND_OFF_BY_ONE, FAMILY_PALETTES["cohort-20"][1]),
+        ProbeSpec("20 balanced-invalid", deterministic_invalid(20, INVALID_KIND_BALANCED, 1_040), "cohort-20", PHASE_KIND_BALANCED, FAMILY_PALETTES["cohort-20"][2]),
+        ProbeSpec("40 transition", ")" + deterministic_valid(38, 1_050) + ")", "cohort-20", "transition", FAMILY_PALETTES["cohort-20"][2]),
+        ProbeSpec("50 valid", deterministic_valid(50, 2_050), "cohort-50", "valid", FAMILY_PALETTES["cohort-50"][0]),
+        ProbeSpec("60 off-by-one", deterministic_invalid(60, INVALID_KIND_CORRUPTION, 2_060), "cohort-50", PHASE_KIND_OFF_BY_ONE, FAMILY_PALETTES["cohort-50"][1]),
+        ProbeSpec("50 balanced-invalid", deterministic_invalid(50, INVALID_KIND_BALANCED, 2_070), "cohort-50", PHASE_KIND_BALANCED, FAMILY_PALETTES["cohort-50"][2]),
+        ProbeSpec("100 valid", deterministic_valid(100, 3_100), "cohort-100", "valid", FAMILY_PALETTES["cohort-100"][0]),
+        ProbeSpec("120 off-by-one", deterministic_invalid(120, INVALID_KIND_CORRUPTION, 3_120), "cohort-100", PHASE_KIND_OFF_BY_ONE, FAMILY_PALETTES["cohort-100"][1]),
+        ProbeSpec("100 balanced-invalid", deterministic_invalid(100, INVALID_KIND_BALANCED, 3_140), "cohort-100", PHASE_KIND_BALANCED, FAMILY_PALETTES["cohort-100"][2]),
+        ProbeSpec("200 valid", deterministic_valid(200, 4_200), "very-long", "valid", FAMILY_PALETTES["very-long"][0]),
+        ProbeSpec("200 balanced-invalid", deterministic_invalid(200, INVALID_KIND_BALANCED, 4_240), "very-long", PHASE_KIND_BALANCED, FAMILY_PALETTES["very-long"][2]),
     )
-    combined = short_bucket + long_bucket
-    random.Random(seed + 31).shuffle(combined)
-    return combined
+
+
+def build_trace_probes() -> tuple[ProbeSpec, ...]:
+    valid_40 = deterministic_valid(40, 9_001)
+    valid_18_a = deterministic_valid(18, 9_018)
+    valid_18_b = deterministic_valid(18, 9_028)
+    valid_10 = deterministic_valid(10, 9_010)
+    return (
+        ProbeSpec("A valid tail", valid_40, "cohort-50", "valid", TRACE_COLORS[0]),
+        ProbeSpec("B immediate invalid", ")" + deterministic_valid(38, 9_101) + "(", "cohort-50", "transition", TRACE_COLORS[1]),
+        ProbeSpec("C valid+valid+bad", valid_18_a + valid_18_b + "())(", "cohort-50", "transition", TRACE_COLORS[2]),
+        ProbeSpec("D balanced-invalid", deterministic_invalid(40, INVALID_KIND_BALANCED, 9_301), "cohort-50", PHASE_KIND_BALANCED, TRACE_COLORS[3]),
+        ProbeSpec("E oscillating prefix", valid_10 + ")" + valid_10 + "(" + deterministic_valid(18, 9_401), "cohort-50", "transition", TRACE_COLORS[4]),
+        ProbeSpec("F off-by-one long", deterministic_invalid(40, INVALID_KIND_CORRUPTION, 9_501), "cohort-50", PHASE_KIND_OFF_BY_ONE, TRACE_COLORS[5]),
+    )
+
+
+RESPONSE_PROBES = build_response_probes()
+TRACE_PROBES = build_trace_probes()
 
 
 def examples_to_tensors(
@@ -559,15 +578,16 @@ class TinyTraceRNN(nn.Module):
 
 
 class SineMLP(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, hidden_layers: tuple[int, ...]) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(1, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-        )
+        layers: list[nn.Module] = []
+        input_size = 1
+        for hidden_size in hidden_layers:
+            layers.append(nn.Linear(input_size, hidden_size))
+            layers.append(nn.ReLU())
+            input_size = hidden_size
+        layers.append(nn.Linear(input_size, 1))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, values: torch.Tensor) -> torch.Tensor:
         return self.net(2 * values - 1)
@@ -583,6 +603,8 @@ def evaluate_rnn(
     examples: list[SequenceExample],
     criterion: nn.Module,
 ) -> tuple[float, float]:
+    if not examples:
+        return 0.0, 0.0
     model.eval()
     texts, labels = examples_to_tensors(examples)
     with torch.no_grad():
@@ -614,8 +636,7 @@ def train_rnn_epoch(
     indices = list(range(len(examples)))
     rng.shuffle(indices)
     for start in range(0, len(indices), batch_size):
-        batch_indices = indices[start : start + batch_size]
-        batch = [examples[index] for index in batch_indices]
+        batch = [examples[index] for index in indices[start : start + batch_size]]
         texts, labels = examples_to_tensors(batch)
         tokens, lengths = encode_sequences(texts)
         optimizer.zero_grad()
@@ -630,50 +651,44 @@ def set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
         group["lr"] = lr
 
 
-def interpolate_lr(epoch_index: int, total_epochs: int, *, start: float, end: float) -> float:
-    if total_epochs <= 1:
-        return end
-    progress = epoch_index / (total_epochs - 1)
-    return start + (end - start) * progress
-
-
-def interpolate_int(epoch_index: int, total_epochs: int, *, start: int, end: int) -> int:
-    if total_epochs <= 1:
-        return end
-    progress = epoch_index / (total_epochs - 1)
-    return max(1, int(round(start + (end - start) * progress)))
-
-
 def build_metric_row(
     *,
     epoch: int,
     phase: str,
     train_examples: list[SequenceExample],
-    short_test_examples: list[SequenceExample],
-    long_test_examples: list[SequenceExample],
+    evaluation_sets: dict[str, list[SequenceExample]],
+    balanced_invalid_examples: list[SequenceExample],
     model: TinyTraceRNN,
     criterion: nn.Module,
 ) -> MetricRow:
     train_loss, train_acc = evaluate_rnn(model, train_examples, criterion)
-    short_test_loss, short_test_acc = evaluate_rnn(model, short_test_examples, criterion)
-    long_test_loss, long_test_acc = evaluate_rnn(model, long_test_examples, criterion)
+    overall_examples = [
+        example
+        for family_examples in evaluation_sets.values()
+        for example in family_examples
+    ]
+    overall_eval_acc = evaluate_rnn(model, overall_examples, criterion)[1]
+    cohort_20_acc = evaluate_rnn(model, evaluation_sets["cohort-20"], criterion)[1]
+    cohort_50_acc = evaluate_rnn(model, evaluation_sets["cohort-50"], criterion)[1]
+    cohort_100_acc = evaluate_rnn(model, evaluation_sets["cohort-100"], criterion)[1]
+    very_long_acc = evaluate_rnn(model, evaluation_sets["very-long"], criterion)[1]
+    balanced_invalid_acc = evaluate_rnn(model, balanced_invalid_examples, criterion)[1]
     return MetricRow(
         epoch=epoch,
         phase=phase,
         train_loss=train_loss,
         train_acc=train_acc,
-        short_test_loss=short_test_loss,
-        short_test_acc=short_test_acc,
-        long_test_loss=long_test_loss,
-        long_test_acc=long_test_acc,
+        overall_eval_acc=overall_eval_acc,
+        cohort_20_acc=cohort_20_acc,
+        cohort_50_acc=cohort_50_acc,
+        cohort_100_acc=cohort_100_acc,
+        very_long_acc=very_long_acc,
+        balanced_invalid_acc=balanced_invalid_acc,
     )
 
 
 def clone_model_state(model: nn.Module) -> dict[str, torch.Tensor]:
-    return {
-        key: value.detach().cpu().clone()
-        for key, value in model.state_dict().items()
-    }
+    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
 def load_model_state(model: nn.Module, state: dict[str, torch.Tensor]) -> None:
@@ -692,29 +707,26 @@ def score_aha_moments(
         current_responses = response_history[index]
         metric.probe_change = mean(
             abs(current - previous)
-            for current, previous in zip(current_responses, previous_responses, strict=False)
+            for current, previous in zip(current_responses, previous_responses, strict=True)
         )
-        long_acc_jump = max(0.0, metric.long_test_acc - previous_metric.long_test_acc)
-        metric.aha_score = long_acc_jump + metric.probe_change
+        balanced_jump = max(0.0, metric.balanced_invalid_acc - previous_metric.balanced_invalid_acc)
+        long_jump = max(0.0, metric.very_long_acc - previous_metric.very_long_acc)
+        cohort_jump = max(0.0, metric.cohort_100_acc - previous_metric.cohort_100_acc)
+        metric.aha_score = metric.probe_change + balanced_jump + 0.5 * (long_jump + cohort_jump)
 
 
 def select_trace_epochs(
     metrics: list[MetricRow],
     *,
-    warmup_end_epoch: int,
     phase_boundary_epochs: tuple[int, ...] = (),
     top_k: int = 3,
 ) -> list[int]:
     final_epoch = metrics[-1].epoch
     candidates = [
         metric.epoch
-        for metric in sorted(
-            metrics[1:-1],
-            key=lambda metric: metric.aha_score,
-            reverse=True,
-        )[:top_k]
+        for metric in sorted(metrics[1:-1], key=lambda metric: metric.aha_score, reverse=True)[:top_k]
     ]
-    ordered = [0, warmup_end_epoch, *phase_boundary_epochs, *candidates, final_epoch]
+    ordered = [0, *phase_boundary_epochs, *candidates, final_epoch]
     selected: list[int] = []
     for epoch in ordered:
         if epoch not in selected:
@@ -728,131 +740,39 @@ def peak_aha_epoch(metrics: list[MetricRow]) -> int:
     return max(metrics[1:-1], key=lambda metric: metric.aha_score).epoch
 
 
-def allocate_phase_epochs(total_epochs: int, weights: tuple[float, ...]) -> list[int]:
-    if total_epochs < 0:
-        raise ValueError("total_epochs must be non-negative")
-    if not weights or any(weight <= 0 for weight in weights):
-        raise ValueError("weights must be a non-empty tuple of positive values")
-    scaled = [total_epochs * weight / sum(weights) for weight in weights]
-    epochs = [math.floor(value) for value in scaled]
-    remainder = total_epochs - sum(epochs)
-    order = sorted(
-        range(len(weights)),
-        key=lambda index: scaled[index] - epochs[index],
-        reverse=True,
-    )
-    for index in order[:remainder]:
-        epochs[index] += 1
-    return epochs
-
-
-def build_curriculum_phases(
-    *,
-    total_epochs: int,
-    mean_length: float,
-    train_samples: int,
-    max_length: int,
-) -> list[CurriculumPhase]:
-    phase_epochs = allocate_phase_epochs(total_epochs, (0.18, 0.24, 0.28, 0.30))
-    medium_max = max(48, min(max_length, 72))
-    shock_long_max = max(SHORT_LENGTH_MAX + 32, min(max_length, 160))
-    shock_mean = max(mean_length * 1.6, 64.0)
-    full_mean = max(mean_length * 2.2, 88.0)
-    return [
-        CurriculumPhase(
-            name="rollout-short",
-            label="rollout short strings",
-            short_ratio=1.0,
-            short_length_max=min(18, SHORT_LENGTH_MAX),
-            max_length=min(max_length, 18),
-            mean_length=max(10.0, mean_length * 0.35),
-            batch_size_start=32,
-            batch_size_end=24,
-            train_samples=train_samples,
-            lr_start=0.02,
-            lr_end=0.008,
-            epochs=phase_epochs[0],
-        ),
-        CurriculumPhase(
-            name="rollout-medium",
-            label="rollout medium strings",
-            short_ratio=0.85,
-            short_length_max=min(36, SHORT_LENGTH_MAX),
-            max_length=medium_max,
-            mean_length=max(18.0, mean_length * 0.7),
-            batch_size_start=64,
-            batch_size_end=48,
-            train_samples=train_samples,
-            lr_start=0.026,
-            lr_end=0.008,
-            epochs=phase_epochs[1],
-        ),
-        CurriculumPhase(
-            name="shock-long",
-            label="shock longer strings",
-            short_ratio=0.35,
-            short_length_max=SHORT_LENGTH_MAX,
-            max_length=shock_long_max,
-            mean_length=shock_mean,
-            batch_size_start=224,
-            batch_size_end=128,
-            train_samples=int(round(train_samples * 1.35)),
-            lr_start=0.05,
-            lr_end=0.01,
-            epochs=phase_epochs[2],
-        ),
-        CurriculumPhase(
-            name="shock-full",
-            label="shock full distribution",
-            short_ratio=0.15,
-            short_length_max=SHORT_LENGTH_MAX,
-            max_length=max_length,
-            mean_length=full_mean,
-            batch_size_start=320,
-            batch_size_end=64,
-            train_samples=int(round(train_samples * 1.7)),
-            lr_start=0.06,
-            lr_end=0.008,
-            epochs=phase_epochs[3],
-        ),
-    ]
-
-
 def collect_trace_payloads(
     *,
     model_builder: Callable[[], TinyTraceRNN],
     checkpoints: dict[int, dict[str, torch.Tensor]],
     selected_epochs: list[int],
-    trace_probes: tuple[tuple[str, str], ...],
+    trace_probes: tuple[ProbeSpec, ...],
 ) -> dict[int, list[dict[str, object]]]:
     payloads: dict[int, list[dict[str, object]]] = {}
+    sequences = [probe.text for probe in trace_probes]
     for epoch in selected_epochs:
         model = model_builder().to(DEVICE)
         load_model_state(model, checkpoints[epoch])
-        sequences = [text for _, text in trace_probes]
         tokens, lengths = encode_sequences(sequences)
         logits, traces = model(tokens, lengths, capture_traces=True)
         predictions = (logits.sigmoid() >= 0.5).detach().cpu().tolist()
         assert traces is not None
         epoch_payloads: list[dict[str, object]] = []
-        for probe_index, (label, text) in enumerate(trace_probes):
+        for probe_index, probe in enumerate(trace_probes):
             layer_payloads: list[dict[str, object]] = []
             for layer_index, layer_trace in enumerate(traces):
-                steps = len(text)
-                layer_points = layer_trace[probe_index, :steps, :].tolist()
-                layer_payloads.append(
-                    {
-                        "layer": layer_index + 1,
-                        "points": layer_points,
-                    }
-                )
+                steps = len(probe.text)
+                points = layer_trace[probe_index, :steps, :].tolist()
+                layer_payloads.append({"layer": layer_index + 1, "points": points})
             epoch_payloads.append(
                 {
-                    "label": label,
-                    "text": text,
-                    "is_valid": is_balanced_parentheses(text),
+                    "label": probe.label,
+                    "text": probe.text,
+                    "family": probe.family,
+                    "probe_kind": probe.probe_kind,
+                    "color": probe.color,
+                    "is_valid": is_balanced_parentheses(probe.text),
                     "predicted_valid": bool(predictions[probe_index]),
-                    "correct": bool(predictions[probe_index]) == is_balanced_parentheses(text),
+                    "correct": bool(predictions[probe_index]) == is_balanced_parentheses(probe.text),
                     "layers": layer_payloads,
                 }
             )
@@ -860,18 +780,189 @@ def collect_trace_payloads(
     return payloads
 
 
-def log_spaced_epochs(total_epochs: int, *, count: int) -> list[int]:
-    if total_epochs <= 1:
-        return [0, total_epochs]
-    values = [0]
-    for value in torch.logspace(0, math.log10(total_epochs), steps=max(2, count - 1)):
-        values.append(int(round(float(value.item()))))
-    values.append(total_epochs)
-    unique: list[int] = []
-    for value in values:
-        if value not in unique:
-            unique.append(value)
-    return sorted(unique)
+def build_rnn_result_snapshot(
+    *,
+    model_key: str,
+    model_title: str,
+    num_layers: int,
+    phase_spans: list[dict[str, object]],
+    metrics: list[MetricRow],
+    response_history: list[list[float]],
+    representative_train_examples: list[SequenceExample],
+    evaluation_sets: dict[str, list[SequenceExample]],
+    balanced_invalid_examples: list[SequenceExample],
+    trace_payloads: dict[int, list[dict[str, object]]] | None = None,
+) -> RNNExperimentResult:
+    score_aha_moments(metrics, response_history)
+    peak_epoch = peak_aha_epoch(metrics)
+    selected_epochs = select_trace_epochs(
+        metrics,
+        phase_boundary_epochs=tuple(int(span["end_epoch"]) for span in phase_spans[:-1]),
+    )
+    return RNNExperimentResult(
+        model_key=model_key,
+        model_title=model_title,
+        num_layers=num_layers,
+        phase_spans=phase_spans,
+        peak_aha_epoch=peak_epoch,
+        selected_epochs=selected_epochs,
+        metrics=metrics,
+        response_history=response_history,
+        representative_train_examples=representative_train_examples,
+        evaluation_sets=evaluation_sets,
+        balanced_invalid_examples=balanced_invalid_examples,
+        trace_payloads=trace_payloads or {},
+        files=[],
+    )
+
+
+def build_model_title(num_layers: int) -> str:
+    return "4-unit RNN (1 layer)" if num_layers == 1 else "4-unit RNN (2 layers)"
+
+
+def run_rnn_experiment(
+    *,
+    num_layers: int,
+    seed: int,
+    block_epochs: int,
+    train_samples: int,
+    test_samples: int,
+) -> RNNExperimentResult:
+    seed_everything(seed)
+    model_builder = lambda: TinyTraceRNN(num_layers=num_layers)
+    model = model_builder().to(DEVICE)
+    model_title = build_model_title(num_layers)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.03, momentum=0.9)
+    criterion = nn.BCEWithLogitsLoss()
+    blocks = build_training_blocks(block_epochs=block_epochs, train_samples=train_samples)
+    evaluation_sets, balanced_invalid_examples = build_evaluation_sets(
+        test_samples=test_samples,
+        seed=seed + 7_000,
+    )
+    response_sequences = [probe.text for probe in RESPONSE_PROBES]
+    metrics: list[MetricRow] = []
+    response_history: list[list[float]] = []
+    checkpoints: dict[int, dict[str, torch.Tensor]] = {}
+    representative_train_examples: list[SequenceExample] = []
+    rng = random.Random(seed)
+    initial_examples = sample_block_examples(
+        total_examples=train_samples,
+        active_lengths=(TRAIN_COHORTS[0],),
+        phase_kind=PHASE_KIND_RANDOM,
+        seed=seed + 111,
+    )
+    metrics.append(
+        build_metric_row(
+            epoch=0,
+            phase="initial",
+            train_examples=initial_examples,
+            evaluation_sets=evaluation_sets,
+            balanced_invalid_examples=balanced_invalid_examples,
+            model=model,
+            criterion=criterion,
+        )
+    )
+    response_history.append(evaluate_probabilities(model, response_sequences))
+    checkpoints[0] = clone_model_state(model)
+
+    phase_spans: list[dict[str, object]] = []
+    global_epoch = 0
+    for block_index, block in enumerate(blocks):
+        log_progress(
+            f"{model_title}: starting {block.label} for {block.epochs} epochs "
+            f"(lengths={list(block.active_lengths)}, batch={DEFAULT_BATCH_SIZE}, "
+            f"samples={block.train_samples}, lr={block.learning_rate:.3f})"
+        )
+        set_optimizer_lr(optimizer, block.learning_rate)
+        start_epoch = global_epoch + 1
+        for local_epoch in range(1, block.epochs + 1):
+            global_epoch += 1
+            phase_examples = sample_block_examples(
+                total_examples=block.train_samples,
+                active_lengths=block.active_lengths,
+                phase_kind=block.phase_kind,
+                seed=seed + block_index * 10_000 + local_epoch * 307,
+            )
+            train_rnn_epoch(
+                model,
+                phase_examples,
+                optimizer,
+                criterion,
+                batch_size=DEFAULT_BATCH_SIZE,
+                rng=rng,
+            )
+            representative_train_examples = phase_examples
+            metrics.append(
+                build_metric_row(
+                    epoch=global_epoch,
+                    phase=block.name,
+                    train_examples=phase_examples,
+                    evaluation_sets=evaluation_sets,
+                    balanced_invalid_examples=balanced_invalid_examples,
+                    model=model,
+                    criterion=criterion,
+                )
+            )
+            response_history.append(evaluate_probabilities(model, response_sequences))
+            checkpoints[global_epoch] = clone_model_state(model)
+        phase_spans.append(
+            {
+                "name": block.name,
+                "label": block.label,
+                "start_epoch": start_epoch,
+                "end_epoch": global_epoch,
+                "batch_size": DEFAULT_BATCH_SIZE,
+                "train_samples": block.train_samples,
+                "learning_rate": block.learning_rate,
+                "cohort_length": block.cohort_length,
+                "phase_kind": block.phase_kind,
+                "active_lengths": list(block.active_lengths),
+            }
+        )
+        log_progress(f"{model_title}: finished {block.label} at epoch {global_epoch}")
+    final_snapshot = build_rnn_result_snapshot(
+        model_key="rnn-1layer" if num_layers == 1 else "rnn-2layer",
+        model_title=model_title,
+        num_layers=num_layers,
+        phase_spans=phase_spans,
+        metrics=metrics,
+        response_history=response_history,
+        representative_train_examples=representative_train_examples,
+        evaluation_sets=evaluation_sets,
+        balanced_invalid_examples=balanced_invalid_examples,
+    )
+    trace_payloads = collect_trace_payloads(
+        model_builder=model_builder,
+        checkpoints=checkpoints,
+        selected_epochs=final_snapshot.selected_epochs,
+        trace_probes=TRACE_PROBES,
+    )
+    return build_rnn_result_snapshot(
+        model_key=final_snapshot.model_key,
+        model_title=final_snapshot.model_title,
+        num_layers=final_snapshot.num_layers,
+        phase_spans=final_snapshot.phase_spans,
+        metrics=final_snapshot.metrics,
+        response_history=final_snapshot.response_history,
+        representative_train_examples=final_snapshot.representative_train_examples,
+        evaluation_sets=final_snapshot.evaluation_sets,
+        balanced_invalid_examples=final_snapshot.balanced_invalid_examples,
+        trace_payloads=trace_payloads,
+    )
+
+
+def mlp_snapshot_epochs(total_epochs: int) -> list[int]:
+    if total_epochs <= 0:
+        return [0]
+    fractions = (0.0, 0.03, 0.08, 0.18, 0.4, 1.0)
+    selected: list[int] = []
+    for fraction in fractions:
+        epoch = int(round(total_epochs * fraction))
+        if epoch not in selected:
+            selected.append(epoch)
+    if selected[-1] != total_epochs:
+        selected.append(total_epochs)
+    return selected
 
 
 def write_figure(
@@ -884,7 +975,9 @@ def write_figure(
     ensure_dir(output_dir)
     png_path = output_dir / f"{stem}.png"
     log_progress(f"writing {png_path.name}")
-    figure.write_image(png_path, width=1400, height=900, scale=2)
+    width = figure.layout.width or 1400
+    height = figure.layout.height or 900
+    figure.write_image(png_path, width=width, height=height, scale=2)
     written = [png_path.name]
     if write_html:
         html_path = output_dir / f"{stem}.html"
@@ -907,13 +1000,14 @@ def train_mlp(
     lr_start: float,
     lr_end: float,
     seed: int,
+    hidden_layers: tuple[int, ...],
 ) -> tuple[list[float], dict[int, torch.Tensor], torch.Tensor, torch.Tensor]:
     seed_everything(seed)
-    model = SineMLP().to(DEVICE)
+    model = SineMLP(hidden_layers).to(DEVICE)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr_start, momentum=0.9)
     criterion = nn.MSELoss()
     xs, ys = build_mlp_dataset()
-    snapshot_epochs = log_spaced_epochs(epochs, count=6)
+    snapshot_epochs = mlp_snapshot_epochs(epochs)
     snapshots: dict[int, torch.Tensor] = {}
     history: list[float] = []
 
@@ -953,6 +1047,7 @@ def build_mlp_snapshot_figure(
     xs: torch.Tensor,
     ys: torch.Tensor,
     snapshots: dict[int, torch.Tensor],
+    hidden_layers: tuple[int, ...],
 ) -> go.Figure:
     epochs = sorted(snapshots)
     rows = 2
@@ -974,7 +1069,7 @@ def build_mlp_snapshot_figure(
                 y=target_values,
                 mode="lines",
                 name="target" if index == 0 else None,
-                line={"color": COLOR_VALID, "width": 3},
+                line={"color": "#c26b2d", "width": 3},
                 showlegend=index == 0,
             ),
             row=row,
@@ -986,7 +1081,7 @@ def build_mlp_snapshot_figure(
                 y=prediction_values,
                 mode="lines",
                 name="MLP" if index == 0 else None,
-                line={"color": COLOR_SHORT, "width": 2.5},
+                line={"color": "#1f5f7a", "width": 2.5},
                 showlegend=index == 0,
             ),
             row=row,
@@ -995,11 +1090,15 @@ def build_mlp_snapshot_figure(
         figure.update_xaxes(title_text="x", row=row, col=col)
         figure.update_yaxes(title_text="y", row=row, col=col)
     figure.update_layout(
-        title="Approximating sin(8πx) with a 1→32→32→1 ReLU MLP",
-        legend={"orientation": "h", "y": 1.06, "x": 0.0},
-        margin={"t": 90, "r": 30, "b": 60, "l": 60},
+        title=f"Approximating sin(8πx) with a {format_mlp_shape(hidden_layers)} ReLU MLP",
+        legend={"orientation": "h", "y": 1.04, "x": 0.0},
+        margin={"t": 80, "r": 30, "b": 60, "l": 60},
         **FIGURE_STYLE,
     )
+    for row in range(1, rows + 1):
+        for col in range(1, cols + 1):
+            figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row, col=col)
+            figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row, col=col)
     return figure
 
 
@@ -1022,7 +1121,69 @@ def build_mlp_loss_figure(loss_history: list[float]) -> go.Figure:
         margin={"t": 90, "r": 30, "b": 60, "l": 60},
         **FIGURE_STYLE,
     )
+    figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False)
+    figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False)
     return figure
+
+
+def compact_phase_label(span: dict[str, object]) -> str:
+    return f"{span['label']}<br>epochs {span['start_epoch']}-{span['end_epoch']}"
+
+
+def phase_colors() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    return (
+        ("#ead7b8", "#d8e7ef", "#e8dfef", "#dfe9d7", "#f1dfd8", "#e9d4c7"),
+        ("#7a5c2e", "#486c80", "#6a4c93", "#617a3c", "#99624e", "#735751"),
+    )
+
+
+def add_phase_backgrounds(
+    figure: go.Figure,
+    *,
+    result: RNNExperimentResult,
+    row: int,
+    col: int,
+    annotate: bool,
+    xref: str,
+    yref: str,
+    label_y: float,
+) -> None:
+    fill_colors, border_colors = phase_colors()
+    for span_index, span in enumerate(result.phase_spans):
+        start_epoch = int(span["start_epoch"])
+        end_epoch = int(span["end_epoch"])
+        border_color = border_colors[span_index % len(border_colors)]
+        figure.add_vrect(
+            x0=start_epoch,
+            x1=end_epoch,
+            fillcolor=fill_colors[span_index % len(fill_colors)],
+            opacity=0.24 if span_index % 2 else 0.34,
+            line_width=0,
+            row=row,
+            col=col,
+        )
+        if span_index > 0:
+            figure.add_vline(
+                x=start_epoch,
+                line_width=2,
+                line_dash="dash",
+                line_color=border_color,
+                row=row,
+                col=col,
+            )
+        if annotate:
+            figure.add_annotation(
+                x=start_epoch + max(0.5, (end_epoch - start_epoch) / 2),
+                y=label_y,
+                xref=xref,
+                yref=yref,
+                text=compact_phase_label(span),
+                showarrow=False,
+                font={"size": 10, "color": border_color},
+                bgcolor="rgba(255,255,255,0.92)",
+                bordercolor=border_color,
+                borderwidth=1,
+            )
 
 
 def build_rnn_metrics_figure(results: list[RNNExperimentResult]) -> go.Figure:
@@ -1032,72 +1193,24 @@ def build_rnn_metrics_figure(results: list[RNNExperimentResult]) -> go.Figure:
         shared_xaxes=True,
         subplot_titles=[result.model_title for result in results],
     )
-    phase_fill_colors = ("#ead7b8", "#d8e7ef", "#e8dfef", "#dfe9d7", "#f1dfd8")
-    phase_border_colors = ("#7a5c2e", "#486c80", "#6a4c93", "#617a3c", "#99624e")
     for row_index, result in enumerate(results, start=1):
         epochs = [metric.epoch for metric in result.metrics]
-        final_epoch = epochs[-1]
-        for span_index, span in enumerate(result.phase_spans):
-            start_epoch = int(span["start_epoch"])
-            end_epoch = int(span["end_epoch"])
-            fill_color = phase_fill_colors[span_index % len(phase_fill_colors)]
-            border_color = phase_border_colors[span_index % len(phase_border_colors)]
-            figure.add_vrect(
-                x0=start_epoch,
-                x1=end_epoch,
-                fillcolor=fill_color,
-                opacity=0.28 if span_index % 2 else 0.4,
-                line_width=0,
-                row=row_index,
-                col=1,
-            )
-            if span_index > 0:
-                figure.add_vline(
-                    x=start_epoch,
-                    line_width=3,
-                    line_dash="dash",
-                    line_color=border_color,
-                    row=row_index,
-                    col=1,
-                )
-            span_midpoint = start_epoch + max(0.5, (end_epoch - start_epoch) / 2)
-            short_ratio = float(span.get("short_ratio", 1.0))
-            batch_size_start = int(span.get("batch_size_start", 0))
-            batch_size_end = int(span.get("batch_size_end", batch_size_start))
-            short_length_max = int(span.get("short_length_max", SHORT_LENGTH_MAX))
-            mean_length = float(span.get("mean_length", short_length_max))
-            max_length = int(span.get("max_length", SHORT_LENGTH_MAX))
-            train_samples = int(span.get("train_samples", 0))
-            figure.add_annotation(
-                x=span_midpoint,
-                y=0.14,
-                xref=f"x{row_index}" if row_index > 1 else "x",
-                yref=f"y{row_index}" if row_index > 1 else "y",
-                text=(
-                    f"{span['label']} ({start_epoch}-{end_epoch})"
-                    f"<br>batch={batch_size_start}->{batch_size_end}, samples={train_samples}, short={short_ratio:.0%}"
-                    f"<br>mean≈{mean_length:.0f}, len<= {short_length_max}, max={max_length}"
-                ),
-                showarrow=False,
-                font={"size": 12, "color": border_color},
-                bgcolor=f"rgba(252,251,248,{0.9 if span_index % 2 == 0 else 0.82})",
-                bordercolor=border_color,
-                borderwidth=1,
-            )
-        figure.add_vline(
-            x=result.peak_aha_epoch,
-            line_width=2,
-            line_dash="dot",
-            line_color="#a23e48",
+        add_phase_backgrounds(
+            figure,
+            result=result,
             row=row_index,
             col=1,
+            annotate=True,
+            xref=f"x{row_index}" if row_index > 1 else "x",
+            yref=f"y{row_index}" if row_index > 1 else "y",
+            label_y=0.065,
         )
         figure.add_trace(
             go.Scatter(
                 x=epochs,
                 y=[metric.train_acc for metric in result.metrics],
                 mode="lines",
-                line={"color": COLOR_TRAIN, "width": 2.5},
+                line={"color": COLOR_TRAIN, "width": 2.4},
                 name="train",
                 showlegend=row_index == 1,
             ),
@@ -1107,59 +1220,68 @@ def build_rnn_metrics_figure(results: list[RNNExperimentResult]) -> go.Figure:
         figure.add_trace(
             go.Scatter(
                 x=epochs,
-                y=[metric.short_test_acc for metric in result.metrics],
+                y=[metric.overall_eval_acc for metric in result.metrics],
                 mode="lines",
-                line={"color": COLOR_SHORT, "width": 2.5},
-                name="short test",
+                line={"color": "#111111", "width": 2.8},
+                name="overall eval",
                 showlegend=row_index == 1,
             ),
             row=row_index,
             col=1,
         )
+        for key, field_name in (
+            ("cohort-20", "cohort_20_acc"),
+            ("cohort-50", "cohort_50_acc"),
+            ("cohort-100", "cohort_100_acc"),
+            ("very-long", "very_long_acc"),
+        ):
+            color = next(family.color for family in EVALUATION_FAMILIES if family.key == key)
+            dash = "dot" if key == "very-long" else "solid"
+            label = key.replace("-", " ")
+            figure.add_trace(
+                go.Scatter(
+                    x=epochs,
+                    y=[getattr(metric, field_name) for metric in result.metrics],
+                    mode="lines",
+                    line={"color": color, "width": 2.3, "dash": dash},
+                    name=label,
+                    showlegend=row_index == 1,
+                ),
+                row=row_index,
+                col=1,
+            )
         figure.add_trace(
             go.Scatter(
                 x=epochs,
-                y=[metric.long_test_acc for metric in result.metrics],
+                y=[metric.balanced_invalid_acc for metric in result.metrics],
                 mode="lines",
-                line={"color": COLOR_LONG, "width": 2.5},
-                name="long test",
+                line={"color": COLOR_BALANCED, "width": 2.3, "dash": "dash"},
+                name="balanced-invalid eval",
                 showlegend=row_index == 1,
             ),
             row=row_index,
             col=1,
         )
         figure.update_yaxes(title_text="accuracy", range=[0.0, 1.02], row=row_index, col=1)
-        figure.add_annotation(
-            x=result.peak_aha_epoch,
-            y=0.98,
-            xref=f"x{row_index}" if row_index > 1 else "x",
-            yref=f"y{row_index}" if row_index > 1 else "y",
-            text=f"aha @ {result.peak_aha_epoch}",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=1.5,
-            ay=-24,
-            font={"size": 12, "color": "#a23e48"},
-            bgcolor="rgba(252,251,248,0.9)",
-            bordercolor="#a23e48",
-            borderwidth=1,
-        )
+        figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
+        figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
     figure.update_xaxes(title_text="epoch", row=len(results), col=1)
     figure.update_layout(
-        title={
-            "text": "Balanced-parentheses accuracy through curriculum phase changes",
-            "x": 0.5,
-        },
-        legend={"orientation": "h", "y": 1.12, "x": 0.02},
-        margin={"t": 110, "r": 40, "b": 60, "l": 60},
+        title={"text": "How accuracy changes as we add longer and harder cohorts", "x": 0.5},
+        legend={"orientation": "h", "y": -0.1, "x": 0.0, "font": {"size": 11}},
+        margin={"t": 95, "r": 40, "b": 95, "l": 60},
+        width=1600,
+        height=450 * len(results),
         **FIGURE_STYLE,
     )
     return figure
 
 
-def lengths_for_examples(examples: list[SequenceExample]) -> list[int]:
-    return [len(example.text) for example in examples]
+def length_counts(examples: list[SequenceExample]) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for example in examples:
+        counts[len(example.text)] = counts.get(len(example.text), 0) + 1
+    return counts
 
 
 def invalid_mode_counts(examples: list[SequenceExample]) -> dict[str, int]:
@@ -1173,75 +1295,81 @@ def invalid_mode_counts(examples: list[SequenceExample]) -> dict[str, int]:
 def build_dataset_diversity_figure(
     *,
     train_examples: list[SequenceExample],
-    short_test_examples: list[SequenceExample],
-    long_test_examples: list[SequenceExample],
+    evaluation_sets: dict[str, list[SequenceExample]],
+    balanced_invalid_examples: list[SequenceExample],
 ) -> go.Figure:
     figure = make_subplots(
         rows=1,
         cols=2,
-        subplot_titles=("Length distribution", "Invalid example composition"),
+        subplot_titles=("Cohort length support", "Invalid example composition"),
     )
+    length_labels = sorted(
+        {
+            *length_counts(train_examples).keys(),
+            *[length for family in EVALUATION_FAMILIES for length in family.lengths],
+        }
+    )
+    label_text = [str(length) for length in length_labels]
+    train_counts = length_counts(train_examples)
     figure.add_trace(
-        go.Histogram(
-            x=lengths_for_examples(train_examples),
-            name="train",
-            opacity=0.65,
+        go.Bar(
+            x=label_text,
+            y=[train_counts.get(length, 0) for length in length_labels],
+            name="train block",
             marker_color=COLOR_TRAIN,
-            nbinsx=24,
         ),
         row=1,
         col=1,
     )
-    figure.add_trace(
-        go.Histogram(
-            x=lengths_for_examples(short_test_examples),
-            name="short test",
-            opacity=0.55,
-            marker_color=COLOR_SHORT,
-            nbinsx=24,
-        ),
-        row=1,
-        col=1,
-    )
-    figure.add_trace(
-        go.Histogram(
-            x=lengths_for_examples(long_test_examples),
-            name="long test",
-            opacity=0.55,
-            marker_color=COLOR_LONG,
-            nbinsx=24,
-        ),
-        row=1,
-        col=1,
-    )
-    figure.add_vline(
-        x=SHORT_LENGTH_MAX,
-        line_width=2,
-        line_dash="dash",
-        line_color="#425466",
-        row=1,
-        col=1,
-    )
-    labels = ["train", "short test", "long test"]
-    buckets = [train_examples, short_test_examples, long_test_examples]
+    for family in EVALUATION_FAMILIES:
+        counts = length_counts(evaluation_sets[family.key])
+        figure.add_trace(
+            go.Bar(
+                x=label_text,
+                y=[counts.get(length, 0) for length in length_labels],
+                name=f"{family.key} eval",
+                marker_color=family.color,
+                opacity=0.72,
+            ),
+            row=1,
+            col=1,
+        )
+    buckets = {
+        "train block": train_examples,
+        "balanced eval": balanced_invalid_examples,
+        "very-long eval": evaluation_sets["very-long"],
+    }
     for kind in INVALID_KIND_ORDER:
         figure.add_trace(
             go.Bar(
-                x=labels,
-                y=[invalid_mode_counts(bucket)[kind] for bucket in buckets],
-                name=kind.replace("_", " "),
+                x=list(buckets.keys()),
+                y=[invalid_mode_counts(bucket)[kind] for bucket in buckets.values()],
+                name={
+                    INVALID_KIND_RANDOM: "random",
+                    INVALID_KIND_CORRUPTION: "off-by-one",
+                    INVALID_KIND_BALANCED: "balanced-invalid",
+                }[kind],
             ),
             row=1,
             col=2,
         )
     figure.update_layout(
-        barmode="stack",
-        title="Dataset diversity across the balanced-parentheses curriculum",
+        barmode="group",
+        title="What lengths and negative examples each split actually contains",
+        legend={"orientation": "h", "y": -0.12, "x": 0.0, "font": {"size": 11}},
+        margin={"t": 90, "r": 40, "b": 100, "l": 60},
+        width=1600,
+        height=820,
         **FIGURE_STYLE,
     )
-    figure.update_xaxes(title_text="character length", row=1, col=1)
+    figure.update_xaxes(title_text="exact length", row=1, col=1)
     figure.update_yaxes(title_text="count", row=1, col=1)
     figure.update_yaxes(title_text="count", row=1, col=2)
+    figure.update_xaxes(title_text="split", row=1, col=2)
+    figure.update_xaxes(showgrid=False, row=1, col=1)
+    figure.update_xaxes(showgrid=False, row=1, col=2)
+    figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=1, col=1)
+    figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=1, col=2)
     return figure
 
 
@@ -1250,124 +1378,263 @@ def build_bifurcation_figure(results: list[RNNExperimentResult]) -> go.Figure:
         rows=len(results),
         cols=1,
         shared_xaxes=True,
-        subplot_titles=[result.model_title for result in results],
+        subplot_titles=[f"{result.model_title}: all probes" for result in results],
     )
-    probe_labels = [
-        f"{text} ({'valid' if is_balanced_parentheses(text) else 'invalid'})"
-        for text in RESPONSE_PROBES
-    ]
-    shown_valid = False
-    shown_invalid = False
-    phase_fill_colors = ("#ead7b8", "#d8e7ef", "#e8dfef", "#dfe9d7", "#f1dfd8")
-    phase_border_colors = ("#7a5c2e", "#486c80", "#6a4c93", "#617a3c", "#99624e")
+    shown_legends: set[str] = set()
     for row_index, result in enumerate(results, start=1):
         epochs = [metric.epoch for metric in result.metrics]
-        for span_index, span in enumerate(result.phase_spans):
-            start_epoch = int(span["start_epoch"])
-            end_epoch = int(span["end_epoch"])
-            fill_color = phase_fill_colors[span_index % len(phase_fill_colors)]
-            border_color = phase_border_colors[span_index % len(phase_border_colors)]
-            figure.add_vrect(
-                x0=start_epoch,
-                x1=end_epoch,
-                fillcolor=fill_color,
-                opacity=0.28 if span_index % 2 else 0.4,
-                line_width=0,
-                row=row_index,
-                col=1,
-            )
-            if span_index > 0:
-                figure.add_vline(
-                    x=start_epoch,
-                    line_width=3,
-                    line_dash="dash",
-                    line_color=border_color,
-                    row=row_index,
-                    col=1,
-                )
-            span_midpoint = start_epoch + max(0.5, (end_epoch - start_epoch) / 2)
-            short_ratio = float(span.get("short_ratio", 1.0))
-            batch_size_start = int(span.get("batch_size_start", 0))
-            batch_size_end = int(span.get("batch_size_end", batch_size_start))
-            train_samples = int(span.get("train_samples", 0))
-            mean_length = float(span.get("mean_length", 0.0))
-            figure.add_annotation(
-                x=span_midpoint,
-                y=0.12,
-                xref=f"x{row_index}" if row_index > 1 else "x",
-                yref=f"y{row_index}" if row_index > 1 else "y",
-                text=(
-                    f"{span['label']} ({start_epoch}-{end_epoch})"
-                    f"<br>batch={batch_size_start}->{batch_size_end}, samples={train_samples}, short={short_ratio:.0%}"
-                    f"<br>mean≈{mean_length:.0f}"
-                ),
-                showarrow=False,
-                font={"size": 12, "color": border_color},
-                bgcolor=f"rgba(252,251,248,{0.9 if span_index % 2 == 0 else 0.82})",
-                bordercolor=border_color,
-                borderwidth=1,
-            )
-        figure.add_vline(
-            x=result.peak_aha_epoch,
-            line_width=2,
-            line_dash="dot",
-            line_color="#a23e48",
+        add_phase_backgrounds(
+            figure,
+            result=result,
             row=row_index,
             col=1,
+            annotate=False,
+            xref=f"x{row_index}" if row_index > 1 else "x",
+            yref=f"y{row_index}" if row_index > 1 else "y",
+            label_y=0.0,
         )
-        for probe_index, probe_label in enumerate(probe_labels):
+        final_probabilities = result.response_history[-1]
+        for probe_index, probe in enumerate(RESPONSE_PROBES):
             values = [response[probe_index] for response in result.response_history]
-            is_valid = is_balanced_parentheses(RESPONSE_PROBES[probe_index])
-            showlegend = False
-            if is_valid and not shown_valid:
-                showlegend = True
-                shown_valid = True
-            elif not is_valid and not shown_invalid:
-                showlegend = True
-                shown_invalid = True
+            final_prediction = final_probabilities[probe_index] >= 0.5
+            actual_valid = is_balanced_parentheses(probe.text)
+            final_correct = final_prediction == actual_valid
+            legend_name = (
+                ("valid" if actual_valid else "invalid")
+                + " / "
+                + ("correct" if final_correct else "wrong")
+            )
+            dash = {
+                "valid": "solid",
+                PHASE_KIND_OFF_BY_ONE: "dash",
+                PHASE_KIND_BALANCED: "dot",
+                "transition": "dashdot",
+            }[probe.probe_kind]
+            showlegend = legend_name not in shown_legends
+            shown_legends.add(legend_name)
             figure.add_trace(
                 go.Scatter(
                     x=epochs,
                     y=values,
                     mode="lines",
                     line={
-                        "color": COLOR_VALID if is_valid else COLOR_INVALID,
-                        "width": 1.6,
+                        "color": {
+                            "valid / correct": "#15803d",
+                            "valid / wrong": "#ca8a04",
+                            "invalid / correct": "#2563eb",
+                            "invalid / wrong": "#dc2626",
+                        }[legend_name],
+                        "width": 2.2,
+                        "dash": dash,
                     },
-                    opacity=0.72,
-                    name="valid probes" if is_valid else "invalid probes",
+                    opacity=0.84,
+                    name=legend_name,
                     showlegend=showlegend,
-                    customdata=[[probe_label]] * len(epochs),
-                    hovertemplate="epoch=%{x}<br>p(valid)=%{y:.3f}<br>%{customdata[0]}<extra></extra>",
+                    customdata=[[probe.label, probe.text, probe.probe_kind, legend_name]] * len(epochs),
+                    hovertemplate=(
+                        "epoch=%{x}<br>p(valid)=%{y:.3f}"
+                        "<br>%{customdata[0]} | %{customdata[2]}"
+                        "<br>%{customdata[3]}"
+                        "<br>%{customdata[1]}<extra></extra>"
+                    ),
                 ),
                 row=row_index,
                 col=1,
             )
         figure.update_yaxes(title_text="p(valid)", range=[0.0, 1.0], row=row_index, col=1)
-        figure.add_annotation(
-            x=result.peak_aha_epoch,
-            y=0.99,
-            xref=f"x{row_index}" if row_index > 1 else "x",
-            yref=f"y{row_index}" if row_index > 1 else "y",
-            text=f"aha @ {result.peak_aha_epoch}",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=1.5,
-            ay=-24,
-            font={"size": 12, "color": "#a23e48"},
-            bgcolor="rgba(252,251,248,0.9)",
-            bordercolor="#a23e48",
-            borderwidth=1,
-        )
+        figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
+        figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
     figure.update_xaxes(title_text="epoch", row=len(results), col=1)
     figure.update_layout(
-        title={"text": "Response bifurcation across curriculum phase changes", "x": 0.5},
-        legend={"orientation": "h", "y": 1.12, "x": 0.02},
-        margin={"t": 110, "r": 40, "b": 60, "l": 60},
+        title={"text": "How the model's judgments split apart during cohort rollout", "x": 0.5},
+        legend={"orientation": "h", "y": -0.1, "x": 0.0, "font": {"size": 11}},
+        margin={"t": 95, "r": 40, "b": 95, "l": 60},
+        width=1300,
+        height=440 * len(results),
         **FIGURE_STYLE,
     )
     return figure
+
+
+def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        specs=[
+            [{"type": "xy"}],
+            [{"type": "xy"}],
+        ],
+        subplot_titles=(
+            f"{result.model_title}: training accuracy",
+            f"{result.model_title}: all probes",
+        ),
+        vertical_spacing=0.1,
+    )
+    epochs = [metric.epoch for metric in result.metrics]
+    add_phase_backgrounds(
+        figure,
+        result=result,
+        row=1,
+        col=1,
+        annotate=True,
+        xref="x",
+        yref="y",
+        label_y=0.065,
+    )
+    figure.add_trace(
+        go.Scatter(x=epochs, y=[metric.train_acc for metric in result.metrics], mode="lines", line={"color": COLOR_TRAIN, "width": 2.4}, name="train"),
+        row=1,
+        col=1,
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=epochs,
+            y=[metric.overall_eval_acc for metric in result.metrics],
+            mode="lines",
+            line={"color": "#111111", "width": 2.8},
+            name="overall eval",
+        ),
+        row=1,
+        col=1,
+    )
+    for key, field_name in (
+        ("cohort-20", "cohort_20_acc"),
+        ("cohort-50", "cohort_50_acc"),
+        ("cohort-100", "cohort_100_acc"),
+        ("very-long", "very_long_acc"),
+    ):
+        color = next(family.color for family in EVALUATION_FAMILIES if family.key == key)
+        dash = "dot" if key == "very-long" else "solid"
+        figure.add_trace(
+            go.Scatter(
+                x=epochs,
+                y=[getattr(metric, field_name) for metric in result.metrics],
+                mode="lines",
+                line={"color": color, "width": 2.3, "dash": dash},
+                name=key.replace("-", " "),
+            ),
+            row=1,
+            col=1,
+        )
+    figure.add_trace(
+        go.Scatter(
+            x=epochs,
+            y=[metric.balanced_invalid_acc for metric in result.metrics],
+            mode="lines",
+            line={"color": COLOR_BALANCED, "width": 2.3, "dash": "dash"},
+            name="balanced-invalid eval",
+        ),
+        row=1,
+        col=1,
+    )
+    figure.update_yaxes(title_text="accuracy", range=[0.0, 1.02], row=1, col=1)
+    figure.update_xaxes(title_text="epoch", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=1, col=1)
+    figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=1, col=1)
+
+    shown_legends: set[str] = set()
+    add_phase_backgrounds(
+        figure,
+        result=result,
+        row=2,
+        col=1,
+        annotate=False,
+        xref="x2",
+        yref="y2",
+        label_y=0.0,
+    )
+    final_probabilities = result.response_history[-1]
+    for probe_index, probe in enumerate(RESPONSE_PROBES):
+        values = [response[probe_index] for response in result.response_history]
+        final_prediction = final_probabilities[probe_index] >= 0.5
+        actual_valid = is_balanced_parentheses(probe.text)
+        final_correct = final_prediction == actual_valid
+        status_label = (
+            ("valid" if actual_valid else "invalid")
+            + " / "
+            + ("correct" if final_correct else "wrong")
+        )
+        legend_name = status_label
+        dash = {
+            "valid": "solid",
+            PHASE_KIND_OFF_BY_ONE: "dash",
+            PHASE_KIND_BALANCED: "dot",
+            "transition": "dashdot",
+        }[probe.probe_kind]
+        showlegend = legend_name not in shown_legends
+        shown_legends.add(legend_name)
+        figure.add_trace(
+            go.Scatter(
+                x=epochs,
+                y=values,
+                mode="lines",
+                line={
+                    "color": {
+                        "valid / correct": "#15803d",
+                        "valid / wrong": "#ca8a04",
+                        "invalid / correct": "#2563eb",
+                        "invalid / wrong": "#dc2626",
+                    }[status_label],
+                    "width": 2.2,
+                    "dash": dash,
+                },
+                opacity=0.84,
+                name=legend_name,
+                showlegend=showlegend,
+                customdata=[[probe.label, probe.text, probe.probe_kind, status_label]] * len(epochs),
+                hovertemplate=(
+                    "epoch=%{x}<br>p(valid)=%{y:.3f}"
+                    "<br>%{customdata[0]} | %{customdata[2]}"
+                    "<br>%{customdata[3]}"
+                    "<br>%{customdata[1]}<extra></extra>"
+                ),
+            ),
+            row=2,
+            col=1,
+        )
+    figure.update_xaxes(title_text="epoch", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=2, col=1)
+    figure.update_yaxes(title_text="p(valid)", range=[0.0, 1.0], showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=2, col=1)
+
+    figure.update_layout(
+        title={"text": f"{result.model_title}: training phases and response splitting", "x": 0.5},
+        legend={"orientation": "h", "y": -0.06, "x": 0.0, "font": {"size": 11}},
+        margin={"t": 95, "r": 40, "b": 100, "l": 60},
+        width=1300,
+        height=980,
+        **FIGURE_STYLE,
+    )
+    return figure
+
+
+def rgba(hex_color: str, alpha: float) -> str:
+    hex_color = hex_color.lstrip("#")
+    red = int(hex_color[0:2], 16)
+    green = int(hex_color[2:4], 16)
+    blue = int(hex_color[4:6], 16)
+    return f"rgba({red},{green},{blue},{alpha:.3f})"
+
+
+def tail_slice(points: list[list[float]]) -> tuple[list[list[float]], int]:
+    keep = max(10, int(math.ceil(len(points) * 0.35)))
+    start = max(0, len(points) - keep)
+    return points[start:], start
+
+
+def trace_grid_epochs(result: RNNExperimentResult) -> list[int]:
+    balanced_phase_epochs = [
+        int(span["end_epoch"])
+        for span in result.phase_spans
+        if str(span["phase_kind"]) == PHASE_KIND_BALANCED
+    ]
+    ordered = [0, *balanced_phase_epochs]
+    selected: list[int] = []
+    for epoch in ordered:
+        if epoch not in selected:
+            selected.append(epoch)
+        if len(selected) == 4:
+            break
+    if result.metrics[-1].epoch not in selected:
+        selected[-1] = result.metrics[-1].epoch
+    return selected
 
 
 def build_trace_figure(
@@ -1377,314 +1644,249 @@ def build_trace_figure(
     payloads: list[dict[str, object]],
     num_layers: int,
 ) -> go.Figure:
+    row_count = num_layers * 2
     figure = make_subplots(
-        rows=num_layers,
+        rows=row_count,
         cols=2,
         subplot_titles=[
-            f"Layer {layer_index + 1}: (h1, h2)"
+            f"{validity} | Layer {layer_index + 1}: (h1, h2)"
             if pair_index == 0
-            else f"Layer {layer_index + 1}: (h3, h4)"
+            else f"{validity} | Layer {layer_index + 1}: (h3, h4)"
+            for validity in ("valid tails", "invalid tails")
             for layer_index in range(num_layers)
             for pair_index in range(2)
         ],
     )
-    for probe_index, payload in enumerate(payloads):
-        label = str(payload["label"])
+    for payload in payloads:
         text = str(payload["text"])
+        label = str(payload["label"])
+        probe_kind = str(payload["probe_kind"])
+        color = str(payload["color"])
+        is_valid = bool(payload["is_valid"])
         correctness = "correct" if bool(payload["correct"]) else "wrong"
-        legend_label = f"{label}: {text} ({correctness})"
+        row_offset = 0 if is_valid else num_layers
+        symbol = TRACE_SYMBOLS[probe_kind]
+        legend_label = f"{label} [{probe_kind}, {correctness}]"
         for layer_payload in payload["layers"]:  # type: ignore[index]
             layer_number = int(layer_payload["layer"])
             points = layer_payload["points"]  # type: ignore[index]
-            xs_left = [point[0] for point in points]
-            ys_left = [point[1] for point in points]
-            xs_right = [point[2] for point in points]
-            ys_right = [point[3] for point in points]
-            for col_index, (xs, ys) in enumerate(((xs_left, ys_left), (xs_right, ys_right)), start=1):
+            tail_points, tail_start = tail_slice(points)
+            full_left_x = [point[0] for point in points]
+            full_left_y = [point[1] for point in points]
+            full_right_x = [point[2] for point in points]
+            full_right_y = [point[3] for point in points]
+            tail_left_x = [point[0] for point in tail_points]
+            tail_left_y = [point[1] for point in tail_points]
+            tail_right_x = [point[2] for point in tail_points]
+            tail_right_y = [point[3] for point in tail_points]
+            row_number = row_offset + layer_number
+            for col_index, (full_x, full_y, tail_x, tail_y) in enumerate(
+                (
+                    (full_left_x, full_left_y, tail_left_x, tail_left_y),
+                    (full_right_x, full_right_y, tail_right_x, tail_right_y),
+                ),
+                start=1,
+            ):
+                figure.add_trace(
+                    go.Scatter(
+                        x=full_x,
+                        y=full_y,
+                        mode="lines",
+                        line={"color": rgba(color, 0.22), "width": 1.0},
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row_number,
+                    col=col_index,
+                )
+                milestone_labels = [
+                    f"{tail_start + 1}",
+                    f"{(tail_start + len(tail_points)) // 2}",
+                    f"{len(points)}",
+                ]
+                text_values = [""] * len(tail_x)
+                if tail_x:
+                    text_values[0] = milestone_labels[0]
+                    text_values[len(tail_x) // 2] = milestone_labels[1]
+                    text_values[-1] = milestone_labels[2]
+                figure.add_trace(
+                    go.Scatter(
+                        x=tail_x,
+                        y=tail_y,
+                        mode="markers+text",
+                        marker={
+                            "size": 8,
+                            "color": color,
+                            "symbol": symbol,
+                            "line": {"color": "#fdfcf8", "width": 0.8},
+                        },
+                        text=text_values,
+                        textposition="top center",
+                        textfont={"size": 9},
+                        name=legend_label,
+                        showlegend=(row_number in (1, num_layers + 1) and col_index == 1),
+                        hovertemplate=(
+                            f"{legend_label}<br>{text}<br>tail-step=%{{text}}"
+                            "<br>x=%{x:.3f}<br>y=%{y:.3f}<extra></extra>"
+                        ),
+                    ),
+                    row=row_number,
+                    col=col_index,
+                )
+                if tail_x:
+                    figure.add_trace(
+                        go.Scatter(
+                            x=[tail_x[-1]],
+                            y=[tail_y[-1]],
+                            mode="markers",
+                            marker={
+                                "size": 15,
+                                "symbol": "star",
+                                "color": color,
+                                "line": {"color": "#111827", "width": 1.2},
+                            },
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ),
+                        row=row_number,
+                        col=col_index,
+                    )
+    for row_index in range(1, row_count + 1):
+        figure.update_xaxes(title_text="state x", row=row_index, col=1)
+        figure.update_xaxes(title_text="state x", row=row_index, col=2)
+        figure.update_yaxes(title_text="state y", row=row_index, col=1)
+        figure.update_yaxes(title_text="state y", row=row_index, col=2)
+    figure.update_layout(
+        title=f"{model_title} hidden-state tail scatter at epoch {epoch}",
+        legend={"orientation": "v", "x": 1.01, "y": 1.0, "font": {"size": 11}},
+        margin={"t": 95, "r": 320, "b": 60, "l": 60},
+        width=1650,
+        height=410 * row_count,
+        **FIGURE_STYLE,
+    )
+    for row_index in range(1, row_count + 1):
+        figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
+        figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=2)
+        figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
+        figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=2)
+    return figure
+
+
+def build_trace_epoch_grid_figure(
+    *,
+    model_title: str,
+    num_layers: int,
+    epochs: list[int],
+    payloads_by_epoch: dict[int, list[dict[str, object]]],
+    pair_index: int,
+) -> go.Figure:
+    row_count = num_layers * 2
+    col_count = len(epochs)
+    pair_label = "(h1, h2)" if pair_index == 0 else "(h3, h4)"
+    figure = make_subplots(
+        rows=row_count,
+        cols=col_count,
+        subplot_titles=[
+            f"{'valid' if row_group == 0 else 'invalid'} | Layer {layer_index + 1} | epoch {epoch}"
+            for row_group in range(2)
+            for layer_index in range(num_layers)
+            for epoch in epochs
+        ],
+        horizontal_spacing=0.04,
+        vertical_spacing=0.1,
+    )
+    for col_number, epoch in enumerate(epochs, start=1):
+        payloads = payloads_by_epoch[epoch]
+        for payload in payloads:
+            text = str(payload["text"])
+            label = str(payload["label"])
+            probe_kind = str(payload["probe_kind"])
+            color = str(payload["color"])
+            is_valid = bool(payload["is_valid"])
+            correctness = "correct" if bool(payload["correct"]) else "wrong"
+            row_offset = 0 if is_valid else num_layers
+            symbol = TRACE_SYMBOLS[probe_kind]
+            legend_label = f"{label} [{probe_kind}, {correctness}]"
+            for layer_payload in payload["layers"]:  # type: ignore[index]
+                layer_number = int(layer_payload["layer"])
+                points = layer_payload["points"]  # type: ignore[index]
+                tail_points, tail_start = tail_slice(points)
+                xs = [point[pair_index * 2] for point in tail_points]
+                ys = [point[pair_index * 2 + 1] for point in tail_points]
+                full_xs = [point[pair_index * 2] for point in points]
+                full_ys = [point[pair_index * 2 + 1] for point in points]
+                row_number = row_offset + layer_number
+                figure.add_trace(
+                    go.Scatter(
+                        x=full_xs,
+                        y=full_ys,
+                        mode="lines",
+                        line={"color": rgba(color, 0.18), "width": 1.0},
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row_number,
+                    col=col_number,
+                )
+                text_values = [""] * len(xs)
+                if xs:
+                    text_values[0] = str(tail_start + 1)
+                    text_values[-1] = str(len(points))
                 figure.add_trace(
                     go.Scatter(
                         x=xs,
                         y=ys,
-                        mode="lines+markers",
-                        name=legend_label,
-                        showlegend=(layer_number == 1 and col_index == 1),
-                        line={"color": TRACE_COLORS[probe_index], "width": 2.3},
-                        marker={"size": 6},
-                        hovertemplate=f"{legend_label}<br>step=%{{pointNumber}}<br>x=%{{x:.3f}}<br>y=%{{y:.3f}}<extra></extra>",
-                    ),
-                    row=layer_number,
-                    col=col_index,
-                )
-                figure.add_trace(
-                    go.Scatter(
-                        x=[xs[0], xs[-1]],
-                        y=[ys[0], ys[-1]],
-                        mode="markers",
-                        showlegend=False,
+                        mode="markers+text",
                         marker={
-                            "size": 11,
-                            "symbol": ["circle", "x"],
-                            "color": [TRACE_COLORS[probe_index], TRACE_COLORS[probe_index]],
+                            "size": 7,
+                            "color": color,
+                            "symbol": symbol,
+                            "line": {"color": "#fdfcf8", "width": 0.8},
                         },
-                        hoverinfo="skip",
+                        text=text_values,
+                        textposition="top center",
+                        textfont={"size": 8},
+                        name=legend_label,
+                        showlegend=col_number == 1 and row_number in (1, num_layers + 1),
+                        hovertemplate=(
+                            f"{legend_label}<br>{text}<br>tail-step=%{{text}}"
+                            "<br>x=%{x:.3f}<br>y=%{y:.3f}<extra></extra>"
+                        ),
                     ),
-                    row=layer_number,
-                    col=col_index,
+                    row=row_number,
+                    col=col_number,
                 )
+                if xs:
+                    figure.add_trace(
+                        go.Scatter(
+                            x=[xs[-1]],
+                            y=[ys[-1]],
+                            mode="markers",
+                            marker={
+                                "size": 13,
+                                "symbol": "star",
+                                "color": color,
+                                "line": {"color": "#111827", "width": 1.0},
+                            },
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ),
+                        row=row_number,
+                        col=col_number,
+                    )
+    for row_index in range(1, row_count + 1):
+        for col_index in range(1, col_count + 1):
+            figure.update_xaxes(title_text="state x", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=col_index)
+            figure.update_yaxes(title_text="state y", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=col_index)
     figure.update_layout(
-        title=f"{model_title} hidden-state traces at epoch {epoch}",
-        legend={"orientation": "v", "x": 1.02, "y": 1.0},
-        margin={"t": 95, "r": 210, "b": 60, "l": 60},
+        title=f"{model_title} tail traces across key epochs for {pair_label}",
+        legend={"orientation": "v", "x": 1.01, "y": 1.0, "font": {"size": 11}},
+        margin={"t": 95, "r": 320, "b": 60, "l": 60},
+        width=420 * col_count + 380,
+        height=350 * row_count,
         **FIGURE_STYLE,
     )
     return figure
-
-def build_model_title(num_layers: int) -> str:
-    return "4-unit RNN (1 layer)" if num_layers == 1 else "4-unit RNN (2 layers)"
-
-
-def run_rnn_experiment(
-    *,
-    num_layers: int,
-    seed: int,
-    warmup_max_epochs: int,
-    phase2_epochs: int,
-    train_samples: int,
-    test_samples: int,
-    mean_length: float,
-    max_length: int,
-) -> RNNExperimentResult:
-    seed_everything(seed)
-    model_builder = lambda: TinyTraceRNN(num_layers=num_layers)
-    model = model_builder().to(DEVICE)
-    model_title = build_model_title(num_layers)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    criterion = nn.BCEWithLogitsLoss()
-    warmup_examples = build_warmup_examples()
-    short_test_examples = sample_bucket_examples(
-        total_examples=test_samples,
-        mean_length=mean_length,
-        min_length=1,
-        max_length=SHORT_LENGTH_MAX,
-        seed=seed + 101,
-    )
-    long_test_examples = sample_bucket_examples(
-        total_examples=test_samples,
-        mean_length=mean_length,
-        min_length=SHORT_LENGTH_MAX + 1,
-        max_length=max_length,
-        seed=seed + 211,
-    )
-    response_probe_sequences = list(RESPONSE_PROBES)
-    metrics: list[MetricRow] = []
-    response_history: list[list[float]] = []
-    checkpoints: dict[int, dict[str, torch.Tensor]] = {}
-    representative_train_examples: list[SequenceExample] = []
-    rng = random.Random(seed)
-
-    checkpoints[0] = clone_model_state(model)
-    metrics.append(
-        build_metric_row(
-            epoch=0,
-            phase="initial",
-            train_examples=warmup_examples,
-            short_test_examples=short_test_examples,
-            long_test_examples=long_test_examples,
-            model=model,
-            criterion=criterion,
-        )
-    )
-    response_history.append(evaluate_probabilities(model, response_probe_sequences))
-
-    warmup_end_epoch = 0
-    phase_spans: list[dict[str, object]] = []
-    best_train_acc = 0.0
-    epochs_without_improvement = 0
-    perfect_epochs = 0
-    global_epoch = 0
-
-    log_progress(f"{model_title}: warmup on exhaustive strings up to length {PHASE_ONE_MAX_LENGTH}")
-    for warmup_epoch in range(1, warmup_max_epochs + 1):
-        global_epoch += 1
-        train_rnn_epoch(
-            model,
-            warmup_examples,
-            optimizer,
-            criterion,
-            batch_size=16,
-            rng=rng,
-        )
-        row = build_metric_row(
-            epoch=global_epoch,
-            phase="warmup",
-            train_examples=warmup_examples,
-            short_test_examples=short_test_examples,
-            long_test_examples=long_test_examples,
-            model=model,
-            criterion=criterion,
-        )
-        metrics.append(row)
-        response_history.append(evaluate_probabilities(model, response_probe_sequences))
-        checkpoints[global_epoch] = clone_model_state(model)
-        if row.train_acc > best_train_acc:
-            best_train_acc = row.train_acc
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
-        if row.train_acc >= 0.999:
-            perfect_epochs += 1
-        else:
-            perfect_epochs = 0
-        if perfect_epochs >= 5 or (
-            best_train_acc >= 0.90 and epochs_without_improvement >= 20
-        ):
-            warmup_end_epoch = global_epoch
-            break
-    if warmup_end_epoch == 0:
-        warmup_end_epoch = global_epoch
-    log_progress(f"{model_title}: warmup ended at epoch {warmup_end_epoch}")
-    phase_spans.append(
-        {
-            "name": "warmup",
-            "label": "warmup",
-            "start_epoch": 0,
-            "end_epoch": warmup_end_epoch,
-            "batch_size_start": 16,
-            "batch_size_end": 16,
-            "train_samples": len(warmup_examples),
-            "short_ratio": 1.0,
-            "short_length_max": PHASE_ONE_MAX_LENGTH,
-            "mean_length": PHASE_ONE_MAX_LENGTH / 2,
-            "max_length": PHASE_ONE_MAX_LENGTH,
-        }
-    )
-
-    curriculum_phases = build_curriculum_phases(
-        total_epochs=phase2_epochs,
-        mean_length=mean_length,
-        train_samples=train_samples,
-        max_length=max_length,
-    )
-    for phase_index, curriculum_phase in enumerate(curriculum_phases):
-        if curriculum_phase.epochs <= 0:
-            continue
-        log_progress(
-            f"{model_title}: starting {curriculum_phase.label} "
-            f"for {curriculum_phase.epochs} epochs "
-            f"(batch={curriculum_phase.batch_size_start}->{curriculum_phase.batch_size_end}, "
-            f"short={curriculum_phase.short_ratio:.0%}, "
-            f"mean={curriculum_phase.mean_length:.0f}, "
-            f"samples={curriculum_phase.train_samples}, "
-            f"len<= {curriculum_phase.short_length_max}, max={curriculum_phase.max_length})"
-        )
-        phase_start_epoch = global_epoch + 1
-        for local_epoch in range(1, curriculum_phase.epochs + 1):
-            global_epoch += 1
-            phase_examples = sample_phase2_examples(
-                total_examples=curriculum_phase.train_samples,
-                mean_length=curriculum_phase.mean_length,
-                short_ratio=curriculum_phase.short_ratio,
-                short_length_max=curriculum_phase.short_length_max,
-                max_length=curriculum_phase.max_length,
-                seed=seed + (phase_index + 1) * 10_000 + local_epoch * 1009,
-            )
-            set_optimizer_lr(
-                optimizer,
-                interpolate_lr(
-                    local_epoch - 1,
-                    curriculum_phase.epochs,
-                    start=curriculum_phase.lr_start,
-                    end=curriculum_phase.lr_end,
-                ),
-            )
-            batch_size = interpolate_int(
-                local_epoch - 1,
-                curriculum_phase.epochs,
-                start=curriculum_phase.batch_size_start,
-                end=curriculum_phase.batch_size_end,
-            )
-            train_rnn_epoch(
-                model,
-                phase_examples,
-                optimizer,
-                criterion,
-                batch_size=batch_size,
-                rng=rng,
-            )
-            metrics.append(
-                build_metric_row(
-                    epoch=global_epoch,
-                    phase=curriculum_phase.name,
-                    train_examples=phase_examples,
-                    short_test_examples=short_test_examples,
-                    long_test_examples=long_test_examples,
-                    model=model,
-                    criterion=criterion,
-                )
-            )
-            response_history.append(evaluate_probabilities(model, response_probe_sequences))
-            checkpoints[global_epoch] = clone_model_state(model)
-            representative_train_examples = phase_examples
-        phase_spans.append(
-            {
-                "name": curriculum_phase.name,
-                "label": curriculum_phase.label,
-                "start_epoch": phase_start_epoch,
-                "end_epoch": global_epoch,
-                "batch_size_start": curriculum_phase.batch_size_start,
-                "batch_size_end": curriculum_phase.batch_size_end,
-                "train_samples": curriculum_phase.train_samples,
-                "short_ratio": curriculum_phase.short_ratio,
-                "short_length_max": curriculum_phase.short_length_max,
-                "mean_length": curriculum_phase.mean_length,
-                "max_length": curriculum_phase.max_length,
-            }
-        )
-        log_progress(
-            f"{model_title}: finished {curriculum_phase.label} at epoch {global_epoch}"
-        )
-
-    if not representative_train_examples:
-        representative_train_examples = sample_phase2_examples(
-            total_examples=train_samples,
-            mean_length=mean_length,
-            short_ratio=0.5,
-            short_length_max=SHORT_LENGTH_MAX,
-            max_length=max_length,
-            seed=seed + 503,
-        )
-
-    score_aha_moments(metrics, response_history)
-    strongest_aha_epoch = peak_aha_epoch(metrics)
-    selected_epochs = select_trace_epochs(
-        metrics,
-        warmup_end_epoch=warmup_end_epoch,
-        phase_boundary_epochs=tuple(
-            int(span["end_epoch"]) for span in phase_spans[1:-1]
-        ),
-    )
-    trace_payloads = collect_trace_payloads(
-        model_builder=model_builder,
-        checkpoints=checkpoints,
-        selected_epochs=selected_epochs,
-        trace_probes=TRACE_PROBES,
-    )
-    return RNNExperimentResult(
-        model_key="rnn-1layer" if num_layers == 1 else "rnn-2layer",
-        model_title=model_title,
-        num_layers=num_layers,
-        warmup_end_epoch=warmup_end_epoch,
-        phase_spans=phase_spans,
-        peak_aha_epoch=strongest_aha_epoch,
-        selected_epochs=selected_epochs,
-        metrics=metrics,
-        response_history=response_history,
-        representative_train_examples=representative_train_examples,
-        short_test_examples=short_test_examples,
-        long_test_examples=long_test_examples,
-        trace_payloads=trace_payloads,
-        files=[],
-    )
 
 
 def render_mlp_assets(
@@ -1694,9 +1896,11 @@ def render_mlp_assets(
     seed: int,
     mlp_epochs: int,
     mlp_batch_size: int,
+    mlp_shape: tuple[int, ...],
 ) -> dict[str, object]:
     log_progress(
-        f"training MLP for {mlp_epochs} epochs (batch={mlp_batch_size}, lr=0.08->0.008)"
+        f"training MLP {format_mlp_shape(mlp_shape)} for {mlp_epochs} epochs "
+        f"(batch={mlp_batch_size}, lr=0.08->0.008)"
     )
     loss_history, snapshots, xs, ys = train_mlp(
         epochs=mlp_epochs,
@@ -1704,11 +1908,12 @@ def render_mlp_assets(
         lr_start=0.08,
         lr_end=0.008,
         seed=seed,
+        hidden_layers=mlp_shape,
     )
     files: list[str] = []
     files.extend(
         write_figure(
-            build_mlp_snapshot_figure(xs=xs, ys=ys, snapshots=snapshots),
+            build_mlp_snapshot_figure(xs=xs, ys=ys, snapshots=snapshots, hidden_layers=mlp_shape),
             output_dir=output_dir,
             stem="mlp-sine-approximation-snapshots",
             write_html=write_html,
@@ -1724,6 +1929,7 @@ def render_mlp_assets(
     )
     return {
         "files": files,
+        "shape": list(mlp_shape),
         "snapshot_epochs": sorted(snapshots),
         "final_loss": loss_history[-1],
     }
@@ -1735,107 +1941,108 @@ def render_rnn_assets(
     write_html: bool,
     write_trace_images: bool,
     seed: int,
-    warmup_max_epochs: int,
-    phase2_epochs: int,
+    block_epochs: int,
     train_samples: int,
     test_samples: int,
-    mean_length: float,
-    max_length: int,
 ) -> dict[str, object]:
+    blocks = build_training_blocks(block_epochs=block_epochs, train_samples=train_samples)
     log_progress(
-        f"training RNN studies with warmup_max_epochs={warmup_max_epochs}, "
-        f"phase2_epochs={phase2_epochs}, train_samples={train_samples}, "
-        f"test_samples={test_samples}"
+        f"training RNN studies with {len(blocks)} cohort blocks, block_epochs={block_epochs}, "
+        f"train_samples={train_samples}, test_samples={test_samples}, batch={DEFAULT_BATCH_SIZE}"
     )
+
     results = [
         run_rnn_experiment(
             num_layers=1,
             seed=seed + 100,
-            warmup_max_epochs=warmup_max_epochs,
-            phase2_epochs=phase2_epochs,
+            block_epochs=block_epochs,
             train_samples=train_samples,
             test_samples=test_samples,
-            mean_length=mean_length,
-            max_length=max_length,
         ),
         run_rnn_experiment(
             num_layers=2,
             seed=seed + 200,
-            warmup_max_epochs=warmup_max_epochs,
-            phase2_epochs=phase2_epochs,
+            block_epochs=block_epochs,
             train_samples=train_samples,
             test_samples=test_samples,
-            mean_length=mean_length,
-            max_length=max_length,
         ),
     ]
     for result in results:
         final_metrics = result.metrics[-1]
         log_progress(
             f"{result.model_title}: final train={final_metrics.train_acc:.3f}, "
-            f"short={final_metrics.short_test_acc:.3f}, "
-            f"long={final_metrics.long_test_acc:.3f}, "
-            f"aha_epoch={result.peak_aha_epoch}"
+            f"overall={final_metrics.overall_eval_acc:.3f}, "
+            f"20={final_metrics.cohort_20_acc:.3f}, 50={final_metrics.cohort_50_acc:.3f}, "
+            f"100={final_metrics.cohort_100_acc:.3f}, very-long={final_metrics.very_long_acc:.3f}, "
+            f"balanced={final_metrics.balanced_invalid_acc:.3f}"
         )
     shared_files: list[str] = []
     shared_files.extend(
         write_figure(
             build_dataset_diversity_figure(
                 train_examples=results[0].representative_train_examples,
-                short_test_examples=results[0].short_test_examples,
-                long_test_examples=results[0].long_test_examples,
+                evaluation_sets=results[0].evaluation_sets,
+                balanced_invalid_examples=results[0].balanced_invalid_examples,
             ),
             output_dir=output_dir,
             stem="rnn-dataset-diversity",
             write_html=write_html,
         )
     )
-    shared_files.extend(
-        write_figure(
-            build_rnn_metrics_figure(results),
-            output_dir=output_dir,
-            stem="rnn-training-metrics",
-            write_html=write_html,
+    for result in results:
+        shared_files.extend(
+            write_figure(
+                build_rnn_story_figure(result),
+                output_dir=output_dir,
+                stem=f"{result.model_key}-training-story",
+                write_html=write_html,
+            )
         )
-    )
-    shared_files.extend(
-        write_figure(
-            build_bifurcation_figure(results),
-            output_dir=output_dir,
-            stem="rnn-response-bifurcation",
-            write_html=write_html,
-        )
-    )
     if write_trace_images:
         for result in results:
-            article_aliases = {
-                "initial": 0,
-                "aha": result.peak_aha_epoch,
-                "final": result.metrics[-1].epoch,
-            }
-            for alias, epoch in article_aliases.items():
-                payloads = result.trace_payloads[epoch]
+            epochs = trace_grid_epochs(result)
+            for pair_index, pair_alias in enumerate(("pair-a", "pair-b")):
                 result.files.extend(
                     write_figure(
-                        build_trace_figure(
+                        build_trace_epoch_grid_figure(
                             model_title=result.model_title,
-                            epoch=epoch,
-                            payloads=payloads,
+                            num_layers=result.num_layers,
+                            epochs=epochs,
+                            payloads_by_epoch=result.trace_payloads,
+                            pair_index=pair_index,
+                        ),
+                        output_dir=output_dir,
+                        stem=f"{result.model_key}-traces-{pair_alias}",
+                        write_html=write_html,
+                    )
+                )
+            result.files.extend(
+                write_figure(
+                    build_trace_figure(
+                            model_title=result.model_title,
+                            epoch=result.peak_aha_epoch,
+                            payloads=result.trace_payloads[result.peak_aha_epoch],
                             num_layers=result.num_layers,
                         ),
                         output_dir=output_dir,
-                        stem=f"{result.model_key}-traces-{alias}",
+                        stem=f"{result.model_key}-traces-aha-detail",
                         write_html=write_html,
                     )
                 )
     return {
         "files": shared_files,
+        "block_epochs": block_epochs,
+        "batch_size": DEFAULT_BATCH_SIZE,
+        "train_cohorts": list(TRAIN_COHORTS),
+        "blocks": blocks and [asdict(block) for block in blocks],
+        "evaluation_families": [asdict(family) for family in EVALUATION_FAMILIES],
+        "probe_families": [asdict(probe) for probe in RESPONSE_PROBES],
+        "trace_strings": [asdict(probe) for probe in TRACE_PROBES],
         "models": [
             {
                 "model_key": result.model_key,
                 "model_title": result.model_title,
                 "num_layers": result.num_layers,
-                "warmup_end_epoch": result.warmup_end_epoch,
                 "phase_spans": result.phase_spans,
                 "peak_aha_epoch": result.peak_aha_epoch,
                 "selected_epochs": result.selected_epochs,
@@ -1860,23 +2067,21 @@ def generate(
     seed: int = typer.Option(7, help="Random seed."),
     mlp_epochs: int = typer.Option(400, help="Training epochs for the MLP."),
     mlp_batch_size: int = typer.Option(64, help="Mini-batch size for the MLP."),
-    rnn_warmup_max_epochs: int = typer.Option(
-        60, help="Maximum warmup epochs on exhaustive short strings."
+    mlp_shape: str = typer.Option(
+        "32",
+        help="Comma-separated hidden-layer widths for the MLP, e.g. 32 or 32,32.",
     ),
-    rnn_phase2_epochs: int = typer.Option(
-        80, help="Shock/curriculum epochs for each RNN."
+    rnn_block_epochs: int = typer.Option(
+        DEFAULT_BLOCK_EPOCHS,
+        help="Epochs to run for each cohort-phase block.",
     ),
     rnn_train_samples: int = typer.Option(
-        2048, help="Phase-2 training examples sampled each epoch."
+        512,
+        help="Training examples sampled for each RNN block epoch.",
     ),
     rnn_test_samples: int = typer.Option(
-        512, help="Examples in each fixed evaluation split."
-    ),
-    mean_length: float = typer.Option(
-        40.0, help="Mean of the truncated exponential length sampler."
-    ),
-    max_length: int = typer.Option(
-        DEFAULT_MAX_LENGTH, help="Maximum sampled string length."
+        128,
+        help="Examples in each fixed evaluation family.",
     ),
     html: bool = typer.Option(
         True,
@@ -1886,11 +2091,20 @@ def generate(
     trace_images: bool = typer.Option(
         True,
         "--trace-images/--no-trace-images",
-        help="Whether to emit detailed trace figure PNGs and HTML files.",
+        help="Whether to emit tail-trace figure PNGs and HTML files.",
+    ),
+    clean: bool = typer.Option(
+        True,
+        "--clean/--no-clean",
+        help="Whether to clear the output directory before generating fresh artifacts.",
     ),
 ) -> None:
+    if clean:
+        log_progress(f"cleaning output directory {output_dir}")
+        clean_output_dir(output_dir)
     ensure_dir(output_dir)
     log_progress(f"starting generation for target={target} in {output_dir}")
+    parsed_mlp_shape = parse_mlp_shape(mlp_shape)
     manifest: dict[str, object] = {
         "article": ARTICLE_SLUG,
         "seed": seed,
@@ -1903,6 +2117,7 @@ def generate(
             seed=seed,
             mlp_epochs=mlp_epochs,
             mlp_batch_size=mlp_batch_size,
+            mlp_shape=parsed_mlp_shape,
         )
     if target in {"all", "rnn"}:
         manifest["rnn"] = render_rnn_assets(
@@ -1910,12 +2125,9 @@ def generate(
             write_html=html,
             write_trace_images=trace_images,
             seed=seed,
-            warmup_max_epochs=rnn_warmup_max_epochs,
-            phase2_epochs=rnn_phase2_epochs,
+            block_epochs=rnn_block_epochs,
             train_samples=rnn_train_samples,
             test_samples=rnn_test_samples,
-            mean_length=mean_length,
-            max_length=max_length,
         )
     manifest_path = output_dir / "manifest.json"
     log_progress(f"writing {manifest_path.name}")

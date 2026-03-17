@@ -71,50 +71,108 @@ export type ChartSeriesSpec = {
 };
 
 export type ChartIntent = "bar" | "line" | "pie" | "doughnut" | "scatter";
-export type ChartStylePreset = "editorial" | "sunrise" | "ocean" | "forest" | "mono";
+export type ChartStylePreset =
+  | "editorial"
+  | "sunrise"
+  | "ocean"
+  | "forest"
+  | "mono"
+  | "ledger"
+  | "amber"
+  | "cobalt"
+  | "terracotta"
+  | "midnight";
+
+export type ChartLegendPosition = "top" | "bottom" | "left" | "right";
+export type ChartOrientation = "vertical" | "horizontal";
+export type ChartValueFormat =
+  | "number"
+  | "integer"
+  | "currency"
+  | "percent"
+  | "compact"
+  | "string";
 
 export type ClientChartSpec = {
   type: ChartIntent;
   title: string;
+  subtitle?: string;
   description?: string;
   label_key: string;
   series: ChartSeriesSpec[];
   style_preset?: ChartStylePreset;
+  x_axis_label?: string;
+  y_axis_label?: string;
+  legend_position?: ChartLegendPosition;
+  orientation?: ChartOrientation;
+  value_format?: ChartValueFormat;
   show_legend?: boolean;
   stacked?: boolean;
   smooth?: boolean;
   interactive?: boolean;
+  show_grid?: boolean;
+  show_data_labels?: boolean;
+  fill_area?: boolean;
 };
 
-export type AnalysisPlan = {
+export type AgentPlan = {
+  id: string;
   focus: string;
   planned_steps: string[];
-  chart_opportunities?: string[];
   success_criteria?: string[];
+  follow_on_tool_hints?: string[];
+  created_at?: string;
+};
+
+export type CapabilityHandoffTargetMetadata = {
+  capability_id: string;
+  tool_name: string;
+  description: string;
+};
+
+export type CapabilityAgentSpecMetadata = {
+  capability_id: string;
+  agent_name: string;
+  instructions: string;
+  client_tools: Array<{
+    type: "function";
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    strict?: boolean;
+  }>;
+  handoff_targets: CapabilityHandoffTargetMetadata[];
+};
+
+export type CapabilityBundleMetadata = {
+  root_capability_id: string;
+  capabilities: CapabilityAgentSpecMetadata[];
 };
 
 export type AppThreadMetadata = {
   title?: string;
   investigation_brief?: string;
-  analysis_plan?: AnalysisPlan;
+  plan?: AgentPlan;
+  chart_plan?: AgentPlan;
   chart_cache?: Record<string, string>;
+  surface_key?: string;
+  capability_bundle?: CapabilityBundleMetadata;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
 };
 
 export type UpdateThreadMetadataPayload = Partial<AppThreadMetadata>;
 
-export type RenderChartToolArgs = {
-  query_id: string;
-  query_plan: QueryPlan;
-  chart_plan: ClientChartSpec;
-};
-
 export type RunLocalQueryToolArgs = {
   query_plan: QueryPlan;
 };
 
 export type CreateCsvFileToolArgs = {
+  filename: string;
+  query_plan: QueryPlan;
+};
+
+export type CreateJsonFileToolArgs = {
   filename: string;
   query_plan: QueryPlan;
 };
@@ -133,13 +191,41 @@ export type ListLoadedDatasetsToolArgs = {
   includeSamples?: boolean;
 };
 
+export type InspectChartableFileSchemaToolArgs = {
+  file_id: string;
+};
+
+export type RenderChartFromFileToolArgs = {
+  file_id: string;
+  chart_plan_id: string;
+  chart_plan: ClientChartSpec;
+  x_key: string;
+  y_key?: string;
+  series_key?: string;
+};
+
+export type InspectPdfFileToolArgs = {
+  file_id: string;
+  max_pages?: number;
+};
+
+export type SmartSplitPdfToolArgs = {
+  file_id: string;
+  goal?: string;
+};
+
 export type ClientToolArgsMap = {
   list_workspace_files: ListWorkspaceFilesToolArgs;
-  request_chart_render: RenderChartToolArgs;
-  run_aggregate_query: RunLocalQueryToolArgs;
   list_attached_csv_files: ListLoadedDatasetsToolArgs;
+  run_aggregate_query: RunLocalQueryToolArgs;
   create_csv_file: CreateCsvFileToolArgs;
+  create_json_file: CreateJsonFileToolArgs;
+  list_chartable_files: ListWorkspaceFilesToolArgs;
+  inspect_chartable_file_schema: InspectChartableFileSchemaToolArgs;
+  render_chart_from_file: RenderChartFromFileToolArgs;
+  inspect_pdf_file: InspectPdfFileToolArgs;
   get_pdf_page_range: GetPdfPageRangeToolArgs;
+  smart_split_pdf: SmartSplitPdfToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;
@@ -151,7 +237,8 @@ export type ClientToolCall<Name extends ClientToolName = ClientToolName> = {
 
 export type ChartRenderedEffect = {
   type: "chart_rendered";
-  queryId: string;
+  fileId: string;
+  chartPlanId: string;
   chart: ClientChartSpec;
   imageDataUrl?: string;
   rows: DataRow[];
@@ -163,4 +250,25 @@ export type ReportSectionEffect = {
   markdown: string;
 };
 
-export type ClientEffect = ChartRenderedEffect | ReportSectionEffect;
+export type SmartSplitEntry = {
+  fileId: string;
+  name: string;
+  title: string;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+};
+
+export type PdfSmartSplitEffect = {
+  type: "pdf_smart_split_completed";
+  sourceFileId: string;
+  sourceFileName: string;
+  archiveFileId: string;
+  archiveFileName: string;
+  indexFileId: string;
+  indexFileName: string;
+  entries: SmartSplitEntry[];
+  markdown: string;
+};
+
+export type ClientEffect = ChartRenderedEffect | ReportSectionEffect | PdfSmartSplitEffect;

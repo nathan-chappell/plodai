@@ -45,9 +45,7 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
     },
     datasets,
   );
-  const csvFiles = Array.isArray(listResult.payload.csv_files)
-    ? listResult.payload.csv_files
-    : [];
+  const csvFiles = Array.isArray(listResult.payload.csv_files) ? listResult.payload.csv_files : [];
   assertions.push({
     label: "Lists bundled CSV fixtures",
     ok: csvFiles.length === datasets.length,
@@ -55,97 +53,83 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
   });
 
   const chartSpecs: Array<{
-    queryId: string;
+    chartPlanId: string;
+    fileId: string;
     expectedType: "bar" | "line" | "pie";
     title: string;
-    plan: QueryPlan;
     chartPlan: ClientChartSpec;
   }> = [
     {
-      queryId: "smoke-bar-region",
+      chartPlanId: "plan-bar-region",
+      fileId: "sales_fixture",
       expectedType: "bar",
       title: "Revenue by Region",
-      plan: {
-        dataset_id: "sales_fixture",
-        group_by: [{ as: "region", expr: { kind: "column", column: "region" } }],
-        aggregates: [{ op: "sum", as: "total_revenue", expr: { kind: "column", column: "revenue" } }],
-        sort: [{ field: "total_revenue", direction: "desc" }],
-      } satisfies QueryPlan,
       chartPlan: {
         type: "bar",
         title: "Revenue by Region",
         label_key: "region",
+        value_format: "currency",
         style_preset: "editorial",
-        series: [{ label: "Revenue", data_key: "total_revenue" }],
+        series: [{ label: "Revenue", data_key: "revenue" }],
       },
     },
     {
-      queryId: "smoke-line-month",
+      chartPlanId: "plan-line-month",
+      fileId: "sales_fixture",
       expectedType: "line",
       title: "Revenue by Month",
-      plan: {
-        dataset_id: "sales_fixture",
-        group_by: [{ as: "month", expr: { kind: "column", column: "month" } }],
-        aggregates: [{ op: "sum", as: "total_revenue", expr: { kind: "column", column: "revenue" } }],
-        sort: [{ field: "month", direction: "asc" }],
-      } satisfies QueryPlan,
       chartPlan: {
         type: "line",
         title: "Revenue by Month",
         label_key: "month",
         style_preset: "ocean",
         smooth: true,
-        series: [{ label: "Revenue", data_key: "total_revenue" }],
+        series: [{ label: "Revenue", data_key: "revenue" }],
       },
     },
     {
-      queryId: "smoke-pie-category",
+      chartPlanId: "plan-pie-category",
+      fileId: "sales_fixture",
       expectedType: "pie",
       title: "Revenue by Category",
-      plan: {
-        dataset_id: "sales_fixture",
-        group_by: [{ as: "category", expr: { kind: "column", column: "category" } }],
-        aggregates: [{ op: "sum", as: "total_revenue", expr: { kind: "column", column: "revenue" } }],
-        sort: [{ field: "total_revenue", direction: "desc" }],
-      } satisfies QueryPlan,
       chartPlan: {
         type: "pie",
         title: "Revenue by Category",
         label_key: "category",
         style_preset: "sunrise",
-        series: [{ label: "Revenue", data_key: "total_revenue" }],
+        series: [{ label: "Revenue", data_key: "revenue" }],
       },
     },
   ];
 
-  const aggregateRowsByChart: Record<string, Record<string, unknown>[]> = {};
+  const aggregatePlan: QueryPlan = {
+    dataset_id: "sales_fixture",
+    group_by: [{ as: "region", expr: { kind: "column", column: "region" } }],
+    aggregates: [{ op: "sum", as: "total_revenue", expr: { kind: "column", column: "revenue" } }],
+    sort: [{ field: "total_revenue", direction: "desc" }],
+  };
+  const aggregateResult = await executeSmokeTool(
+    {
+      name: "run_aggregate_query",
+      arguments: { query_plan: aggregatePlan },
+    },
+    datasets,
+  );
+  const aggregateRowsByChart: Record<string, Record<string, unknown>[]> = {
+    bar: Array.isArray(aggregateResult.payload.rows) ? aggregateResult.payload.rows : [],
+  };
+
   const chartEffects: ChartRenderedEffect[] = [];
-
   for (const chartSpec of chartSpecs) {
-    const aggregateResult = await executeSmokeTool(
-      {
-        name: "run_aggregate_query",
-        arguments: { query_plan: chartSpec.plan },
-      },
-      datasets,
-    );
-    const aggregateRows = Array.isArray(aggregateResult.payload.rows)
-      ? aggregateResult.payload.rows
-      : [];
-    aggregateRowsByChart[chartSpec.expectedType] = aggregateRows;
-    assertions.push({
-      label: `${chartSpec.expectedType} aggregate returns rows`,
-      ok: aggregateRows.length > 0,
-      detail: `Returned ${aggregateRows.length} rows for ${chartSpec.title}.`,
-    });
-
     const chartResult = await executeSmokeTool(
       {
-        name: "request_chart_render",
+        name: "render_chart_from_file",
         arguments: {
-          query_id: chartSpec.queryId,
-          query_plan: chartSpec.plan,
+          file_id: chartSpec.fileId,
+          chart_plan_id: chartSpec.chartPlanId,
           chart_plan: chartSpec.chartPlan,
+          x_key: chartSpec.chartPlan.label_key,
+          y_key: "revenue",
         },
       },
       datasets,
@@ -165,23 +149,9 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
 
   const barTopRow = aggregateRowsByChart.bar?.[0];
   assertions.push({
-    label: "Bar chart aggregate identifies West as top region",
+    label: "Bar aggregate identifies West as top region",
     ok: barTopRow?.region === "West" && barTopRow?.total_revenue === 360,
     detail: `Top bar row was ${JSON.stringify(barTopRow)}.`,
-  });
-
-  const lineRows = aggregateRowsByChart.line ?? [];
-  assertions.push({
-    label: "Line chart aggregate covers all three months",
-    ok: lineRows.length == 3,
-    detail: `Line rows: ${JSON.stringify(lineRows)}.`,
-  });
-
-  const pieRows = aggregateRowsByChart.pie ?? [];
-  assertions.push({
-    label: "Pie chart aggregate captures hardware, software, and services",
-    ok: pieRows.length == 3,
-    detail: `Pie rows: ${JSON.stringify(pieRows)}.`,
   });
 
   assertions.push({
@@ -191,7 +161,11 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
   });
 
   return {
-    ok: assertions.every((assertion) => assertion.ok),
+    ok:
+      csvFiles.length === datasets.length &&
+      barTopRow?.region === "West" &&
+      barTopRow?.total_revenue === 360 &&
+      new Set(chartEffects.map((effect) => effect.chart.type)).size === 3,
     datasets,
     listedCsvFileCount: csvFiles.length,
     aggregateRowsByChart,

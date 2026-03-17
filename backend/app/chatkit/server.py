@@ -44,6 +44,7 @@ from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import build_query_plan_model
 from backend.app.agents.workspace_file import (
     CsvWorkspaceMetadata,
+    JsonWorkspaceMetadata,
     PdfWorkspaceMetadata,
     WorkspaceFileMetadata,
 )
@@ -221,7 +222,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             chart_cache=dict(metadata.get("chart_cache") or {}),
             thread_metadata=metadata,
             available_files=files,
-            capability_manifest=metadata.get("capability_manifest"),
+            capability_bundle=metadata.get("capability_bundle"),
         )
         query_plan_model, _ = build_query_plan_model(context.available_datasets)
         context.query_plan_model = query_plan_model
@@ -239,6 +240,15 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         context: ReportAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
         typed_metadata = normalize_thread_metadata(thread.metadata)
+        request_metadata = normalize_thread_metadata(context.thread_metadata)
+        runtime_patch = self._runtime_metadata_patch(
+            current_metadata=typed_metadata,
+            request_metadata=request_metadata,
+        )
+        if runtime_patch:
+            typed_metadata = merge_thread_metadata(typed_metadata, runtime_patch)
+            thread.metadata = dict(typed_metadata)
+            await self.store.save_thread(thread, context=context)
         context.report_id = thread.id
         context.thread_metadata = typed_metadata
         context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
@@ -253,7 +263,11 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         recent_item_data = recent_items.data
         context.available_files = self._files_from_recent_items(recent_item_data)
         context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
-        context.capability_manifest = typed_metadata.get("capability_manifest")
+        context.capability_bundle = typed_metadata.get("capability_bundle")
+        if context.capability_bundle is None:
+            raise RuntimeError(
+                "No registered capability bundle is available for this thread or request surface."
+            )
 
         pending_items = self._collect_pending_items(
             recent_item_data,
@@ -565,6 +579,10 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 files = self._workspace_files_from_client_tool_result(result)
                 if files:
                     return files
+            if item.name == "list_chartable_files":
+                files = self._workspace_files_from_client_tool_result(result)
+                if files:
+                    return files
             if item.name == "list_attached_csv_files":
                 files = self._workspace_files_from_client_tool_result(result)
                 if files:
@@ -623,6 +641,28 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                             if str(workspace_file.get("kind", "other")) == "csv"
                             else None
                         ),
+                        json=(
+                            JsonWorkspaceMetadata(
+                                row_count=int(workspace_file.get("row_count", 0)),
+                                columns=[
+                                    str(column)
+                                    for column in workspace_file.get("columns", [])
+                                ],
+                                numeric_columns=[
+                                    str(column)
+                                    for column in workspace_file.get(
+                                        "numeric_columns", []
+                                    )
+                                ],
+                                sample_rows=[
+                                    {str(key): value for key, value in row.items()}
+                                    for row in workspace_file.get("sample_rows", [])
+                                    if isinstance(row, dict)
+                                ],
+                            )
+                            if str(workspace_file.get("kind", "other")) == "json"
+                            else None
+                        ),
                         pdf=(
                             PdfWorkspaceMetadata(
                                 page_count=workspace_file.get("page_count") or 0
@@ -636,39 +676,112 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 return files
 
         raw_csv_files = result.get("csv_files")
-        if not isinstance(raw_csv_files, list):
+        if isinstance(raw_csv_files, list):
+            files: list[WorkspaceFileMetadata] = []
+            for raw_file in raw_csv_files:
+                if not isinstance(raw_file, dict):
+                    continue
+                csv_file = cast(ClientToolCsvFile, raw_file)
+                file_id = str(csv_file.get("id", "")).strip()
+                if not file_id:
+                    continue
+                files.append(
+                    WorkspaceFileMetadata(
+                        id=file_id,
+                        name=str(csv_file.get("name", "CSV file")),
+                        kind="csv",
+                        extension="csv",
+                        csv=CsvWorkspaceMetadata(
+                            row_count=int(csv_file.get("row_count", 0)),
+                            columns=[str(column) for column in csv_file.get("columns", [])],
+                            numeric_columns=[
+                                str(column)
+                                for column in csv_file.get("numeric_columns", [])
+                            ],
+                            sample_rows=[
+                                {str(key): value for key, value in row.items()}
+                                for row in csv_file.get("sample_rows", [])
+                                if isinstance(row, dict)
+                            ],
+                        ),
+                    )
+                )
+            if files:
+                return files
+
+        raw_chartable_files = result.get("chartable_files")
+        if not isinstance(raw_chartable_files, list):
             return []
 
         files: list[WorkspaceFileMetadata] = []
-        for raw_file in raw_csv_files:
+        for raw_file in raw_chartable_files:
             if not isinstance(raw_file, dict):
                 continue
-            csv_file = cast(ClientToolCsvFile, raw_file)
-            file_id = str(csv_file.get("id", "")).strip()
+            workspace_file = cast(ClientToolWorkspaceFile, raw_file)
+            file_id = str(workspace_file.get("id", "")).strip()
             if not file_id:
                 continue
+            kind = str(workspace_file.get("kind", "other"))
             files.append(
                 WorkspaceFileMetadata(
                     id=file_id,
-                    name=str(csv_file.get("name", "CSV file")),
-                    kind="csv",
-                    extension="csv",
-                    csv=CsvWorkspaceMetadata(
-                        row_count=int(csv_file.get("row_count", 0)),
-                        columns=[str(column) for column in csv_file.get("columns", [])],
-                        numeric_columns=[
-                            str(column)
-                            for column in csv_file.get("numeric_columns", [])
-                        ],
-                        sample_rows=[
-                            {str(key): value for key, value in row.items()}
-                            for row in csv_file.get("sample_rows", [])
-                            if isinstance(row, dict)
-                        ],
+                    name=str(workspace_file.get("name", "Chartable file")),
+                    kind=cast(Literal["csv", "json", "pdf", "other"], kind),
+                    extension=str(workspace_file.get("extension", "")),
+                    csv=(
+                        CsvWorkspaceMetadata(
+                            row_count=int(workspace_file.get("row_count", 0)),
+                            columns=[str(column) for column in workspace_file.get("columns", [])],
+                            numeric_columns=[
+                                str(column)
+                                for column in workspace_file.get("numeric_columns", [])
+                            ],
+                            sample_rows=[
+                                {str(key): value for key, value in row.items()}
+                                for row in workspace_file.get("sample_rows", [])
+                                if isinstance(row, dict)
+                            ],
+                        )
+                        if kind == "csv"
+                        else None
+                    ),
+                    json=(
+                        JsonWorkspaceMetadata(
+                            row_count=int(workspace_file.get("row_count", 0)),
+                            columns=[str(column) for column in workspace_file.get("columns", [])],
+                            numeric_columns=[
+                                str(column)
+                                for column in workspace_file.get("numeric_columns", [])
+                            ],
+                            sample_rows=[
+                                {str(key): value for key, value in row.items()}
+                                for row in workspace_file.get("sample_rows", [])
+                                if isinstance(row, dict)
+                            ],
+                        )
+                        if kind == "json"
+                        else None
                     ),
                 )
             )
         return files
+
+    def _runtime_metadata_patch(
+        self,
+        *,
+        current_metadata: ThreadMetadataPatch,
+        request_metadata: ThreadMetadataPatch,
+    ) -> ThreadMetadataPatch:
+        patch: ThreadMetadataPatch = {}
+        request_surface_key = request_metadata.get("surface_key")
+        request_bundle = request_metadata.get("capability_bundle")
+        if request_surface_key and current_metadata.get("surface_key") != request_surface_key:
+            patch["surface_key"] = request_surface_key
+        if request_bundle is not None:
+            current_bundle = current_metadata.get("capability_bundle")
+            if current_bundle != request_bundle or patch.get("surface_key"):
+                patch["capability_bundle"] = request_bundle
+        return patch
 
     def _collect_pending_items(
         self,
@@ -720,36 +833,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
 
-        if action.type == "register_capability_manifest" and isinstance(
-            action.payload, dict
-        ):
-            capability_manifest = normalize_thread_metadata(
-                {"capability_manifest": action.payload.get("capability_manifest")}
-            ).get("capability_manifest")
-            if capability_manifest is None:
-                yield ProgressUpdateEvent(
-                    text="Capability manifest registration was rejected because it was incomplete or invalid."
-                )
-                return
-            current_metadata = normalize_thread_metadata(thread.metadata)
-            patch: ThreadMetadataPatch = {
-                "capability_manifest": capability_manifest,
-            }
-            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
-            await self.store.save_thread(thread, context=context)
-            self.logger.info(
-                f"capability_manifest.registered thread_id={thread.id} user_id={context.user_id} "
-                f"capability_id={summarize_for_log(capability_manifest.get('capability_id'))} "
-                f"tool_count={len(capability_manifest.get('client_tools') or [])}"
-            )
-            yield ProgressUpdateEvent(
-                text=(
-                    f"Registered capability manifest for "
-                    f"{capability_manifest.get('agent_name')}."
-                )
-            )
-            return
-
         yield ProgressUpdateEvent(text=f"Unhandled action: {action.type}")
 
     async def sync_action(
@@ -768,25 +851,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
             await self.store.save_thread(thread, context=context)
             self.logger.info(
                 f"thread_metadata.sync_updated thread_id={thread.id} user_id={context.user_id} title={summarize_for_log(thread.title or '')}"
-            )
-        elif action.type == "register_capability_manifest" and isinstance(
-            action.payload, dict
-        ):
-            capability_manifest = normalize_thread_metadata(
-                {"capability_manifest": action.payload.get("capability_manifest")}
-            ).get("capability_manifest")
-            if capability_manifest is None:
-                return SyncCustomActionResponse(updated_item=sender)
-            current_metadata = normalize_thread_metadata(thread.metadata)
-            patch: ThreadMetadataPatch = {
-                "capability_manifest": capability_manifest,
-            }
-            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
-            await self.store.save_thread(thread, context=context)
-            self.logger.info(
-                f"capability_manifest.sync_registered thread_id={thread.id} user_id={context.user_id} "
-                f"capability_id={summarize_for_log(capability_manifest.get('capability_id'))} "
-                f"tool_count={len(capability_manifest.get('client_tools') or [])}"
             )
         return SyncCustomActionResponse(updated_item=sender)
 

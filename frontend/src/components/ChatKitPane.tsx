@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
-import type { CapabilityClientTool, CapabilityManifest } from "../capabilities/types";
+import type { CapabilityBundle, CapabilityClientTool } from "../capabilities/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
@@ -13,7 +13,7 @@ import {
   ChatKitPaneToolbar,
   ChatKitPaneToolbarButton,
 } from "./styles";
-import type { ClientEffect, ClientToolCall, ClientToolName, DataRow } from "../types/analysis";
+import type { ClientEffect, ClientToolCall, ClientToolName } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
@@ -36,8 +36,6 @@ const CHATKIT_MODEL_CHOICES = [
 ] as const;
 const CHATKIT_DEFAULT_MODEL_LABEL =
   CHATKIT_MODEL_CHOICES.find((choice) => choice.id === CHATKIT_DEFAULT_MODEL_ID)?.label ?? "Lightweight";
-const REGISTER_CAPABILITY_MANIFEST_ACTION = "register_capability_manifest";
-
 function formatToolLabel(tool: string): string {
   return tool
     .split("_")
@@ -49,13 +47,18 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
   switch (tool) {
     case "list_workspace_files":
     case "list_attached_csv_files":
+    case "list_chartable_files":
+    case "inspect_chartable_file_schema":
       return "cube";
     case "run_aggregate_query":
     case "create_csv_file":
+    case "create_json_file":
       return "analytics";
-    case "request_chart_render":
+    case "render_chart_from_file":
       return "chart";
+    case "inspect_pdf_file":
     case "get_pdf_page_range":
+    case "smart_split_pdf":
       return "document";
   }
 }
@@ -91,7 +94,7 @@ export type ChatKitQuickAction = {
 };
 
 export function ChatKitHarness({
-  capabilityManifest,
+  capabilityBundle,
   files,
   investigationBrief,
   onEffects,
@@ -105,7 +108,7 @@ export function ChatKitHarness({
   colorScheme = "dark",
   showDictation = true,
 }: {
-  capabilityManifest: CapabilityManifest;
+  capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
@@ -126,11 +129,6 @@ export function ChatKitHarness({
   const onFilesAddedRef = useRef(onFilesAdded);
   const clientToolsRef = useRef(clientTools);
   const threadIdRef = useRef<string | null>(null);
-  const registeredCatalogRef = useRef<string | null>(null);
-  const registrationRef = useRef<{
-    key: string;
-    promise: Promise<boolean>;
-  } | null>(null);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -150,26 +148,32 @@ export function ChatKitHarness({
 
   useEffect(() => {
     setChatKitMetadataGetter(() => ({
-      capability_manifest: capabilityManifest,
+      surface_key:
+        typeof window !== "undefined"
+          ? window.location.pathname
+          : capabilityBundle.root_capability_id,
+      capability_bundle: capabilityBundle,
     }));
     return () => {
       setChatKitMetadataGetter(null);
     };
-  }, [capabilityManifest]);
+  }, [capabilityBundle]);
 
+  const rootCapability = useMemo(
+    () =>
+      capabilityBundle.capabilities.find(
+        (capability) => capability.capability_id === capabilityBundle.root_capability_id,
+      ) ?? capabilityBundle.capabilities[0],
+    [capabilityBundle],
+  );
   const starterPrompts = useMemo(
     () => prompts ?? buildStarterPrompts(investigationBrief),
     [investigationBrief, prompts],
   );
   const chatKitTools = useMemo(
-    () => capabilityManifest.client_tools.map((tool) => tool.name as ClientToolName),
-    [capabilityManifest.client_tools],
+    () => rootCapability.client_tools.map((tool) => tool.name as ClientToolName),
+    [rootCapability.client_tools],
   );
-  const clientToolCatalogKey = useMemo(
-    () => JSON.stringify(capabilityManifest),
-    [capabilityManifest],
-  );
-
   const options = useMemo<UseChatKitOptions>(
     () => ({
       api: {
@@ -262,7 +266,11 @@ export function ChatKitHarness({
         if (!event.data) {
           return;
         }
-        if (event.name !== "chart_rendered" && event.name !== "report_section_appended") {
+        if (
+          event.name !== "chart_rendered" &&
+          event.name !== "report_section_appended" &&
+          event.name !== "pdf_smart_split_completed"
+        ) {
           return;
         }
         onEffectsRef.current([event.data as ClientEffect]);
@@ -283,69 +291,8 @@ export function ChatKitHarness({
 
   const chatKit = useChatKit(options);
 
-  async function ensureCapabilityManifestRegistered(): Promise<boolean> {
-    const currentThreadId = threadIdRef.current;
-    const registrationKey = `${currentThreadId ?? "pending"}:${clientToolCatalogKey}`;
-
-    if (registeredCatalogRef.current === registrationKey) {
-      return true;
-    }
-    if (registrationRef.current?.key === registrationKey) {
-      return registrationRef.current.promise;
-    }
-
-    const promise = chatKit
-      .sendCustomAction({
-        type: REGISTER_CAPABILITY_MANIFEST_ACTION,
-        payload: {
-          capability_manifest: capabilityManifest,
-        },
-      })
-      .then(() => {
-        const resolvedThreadId = threadIdRef.current;
-        registeredCatalogRef.current = `${resolvedThreadId ?? currentThreadId ?? "pending"}:${clientToolCatalogKey}`;
-        setStatus("Capability manifest registered for this thread.");
-        return true;
-      })
-      .catch((error) => {
-        registeredCatalogRef.current = null;
-        setStatus(error instanceof Error ? error.message : "Unable to register capability manifest.");
-        return false;
-      })
-      .finally(() => {
-        if (registrationRef.current?.key === registrationKey) {
-          registrationRef.current = null;
-        }
-      });
-
-    registrationRef.current = {
-      key: registrationKey,
-      promise,
-    };
-
-    return promise;
-  }
-
-  useEffect(() => {
-    if (!threadId) {
-      return;
-    }
-    void ensureCapabilityManifestRegistered();
-  }, [clientToolCatalogKey, threadId]);
-
   async function handleQuickAction(action: ChatKitQuickAction) {
     const needsNewThread = !threadIdRef.current;
-    if (!needsNewThread) {
-      const registrationKey = `${threadIdRef.current}:${clientToolCatalogKey}`;
-      if (registeredCatalogRef.current !== registrationKey) {
-        setStatus("Registering client tools for the current thread.");
-        const registered = await ensureCapabilityManifestRegistered();
-        if (!registered) {
-          return;
-        }
-      }
-    }
-
     setStatus(`Starting ${action.label.toLowerCase()}.`);
     await chatKit.sendUserMessage({
       text: action.prompt,
@@ -379,7 +326,7 @@ export function ChatKitHarness({
 }
 
 export function ChatKitPane({
-  capabilityManifest,
+  capabilityBundle,
   enabled,
   files,
   investigationBrief,
@@ -387,7 +334,7 @@ export function ChatKitPane({
   onEffects,
   onFilesAdded,
 }: {
-  capabilityManifest: CapabilityManifest;
+  capabilityBundle: CapabilityBundle;
   enabled: boolean;
   files: LocalWorkspaceFile[];
   investigationBrief: string;
@@ -411,7 +358,7 @@ export function ChatKitPane({
       <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
       {canInvestigate ? (
         <ChatKitHarness
-          capabilityManifest={capabilityManifest}
+          capabilityBundle={capabilityBundle}
           files={files}
           investigationBrief={investigationBrief}
           clientTools={clientTools}

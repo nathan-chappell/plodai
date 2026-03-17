@@ -1,6 +1,14 @@
 import { parseCsvPreview } from "./csv";
+import { parseJsonPreview } from "./json";
 import { inspectPdfBytes, uint8ArrayToBase64 } from "./pdf";
-import type { LocalDataset, LocalOtherFile, LocalPdfFile, LocalWorkspaceFile } from "../types/report";
+import type {
+  LocalChartableFile,
+  LocalDataset,
+  LocalJsonFile,
+  LocalOtherFile,
+  LocalPdfFile,
+  LocalWorkspaceFile,
+} from "../types/report";
 
 export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile> {
   const extension = getFileExtension(file.name);
@@ -26,6 +34,22 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
     } satisfies LocalDataset;
   }
 
+  if (extension === "json") {
+    const preview = await parseJsonPreview(file);
+    return {
+      ...baseFields,
+      kind: "json",
+      row_count: preview.rowCount,
+      columns: preview.columns,
+      numeric_columns: preview.numericColumns,
+      sample_rows: preview.sampleRows,
+      rows: preview.rows,
+      preview_rows: preview.previewRows,
+      json_text: preview.jsonText,
+      mime_type: file.type || "application/json",
+    } satisfies LocalJsonFile;
+  }
+
   if (extension === "pdf") {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const preview = await inspectPdfBytes(bytes);
@@ -45,6 +69,10 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
 
 export function getCsvFiles(files: LocalWorkspaceFile[]): LocalDataset[] {
   return files.filter((file): file is LocalDataset => file.kind === "csv");
+}
+
+export function getChartableFiles(files: LocalWorkspaceFile[]): LocalChartableFile[] {
+  return files.filter((file): file is LocalChartableFile => file.kind === "csv" || file.kind === "json");
 }
 
 export function getPdfFiles(files: LocalWorkspaceFile[]): LocalPdfFile[] {
@@ -71,7 +99,7 @@ export function summarizeWorkspaceFiles(
     extension: file.extension,
     byte_size: file.byte_size,
     mime_type: file.mime_type,
-    ...(file.kind === "csv"
+    ...(file.kind === "csv" || file.kind === "json"
       ? {
           row_count: file.row_count,
           columns: file.columns,
@@ -105,6 +133,10 @@ export function rowsToCsv(rows: Array<Record<string, unknown>>): string {
     .map((row) => columns.map((column) => escapeCsvValue(row[column])).join(","))
     .join("\n");
   return `${header}\n${body}`;
+}
+
+export function rowsToJson(rows: Array<Record<string, unknown>>): string {
+  return JSON.stringify(rows, null, 2);
 }
 
 function escapeCsvValue(value: unknown): string {

@@ -1,199 +1,672 @@
 {
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
   "seed": 7,
-  "output_dir": "frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "output_dir": "/home/uphill/programming/openai/form/ai-portfolio/frontend/public/blog-assets/theoretical-justification-of-neural-networks",
   "rnn": {
     "files": [
       "rnn-dataset-diversity.png",
-      "rnn-training-metrics.png",
-      "rnn-response-bifurcation.png"
+      "rnn-dataset-diversity.html",
+      "rnn-1layer-training-story.png",
+      "rnn-1layer-training-story.html",
+      "rnn-2layer-training-story.png",
+      "rnn-2layer-training-story.html"
+    ],
+    "block_epochs": 10,
+    "batch_size": 16,
+    "train_cohorts": [
+      20,
+      50,
+      100
+    ],
+    "blocks": [
+      {
+        "name": "cohort-20-random",
+        "label": "20/random",
+        "cohort_length": 20,
+        "phase_kind": "random",
+        "active_lengths": [
+          20
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.03
+      },
+      {
+        "name": "cohort-20-off_by_one",
+        "label": "20/off-by-one",
+        "cohort_length": 20,
+        "phase_kind": "off_by_one",
+        "active_lengths": [
+          20
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.025
+      },
+      {
+        "name": "cohort-20-balanced_invalid",
+        "label": "20/balanced-invalid",
+        "cohort_length": 20,
+        "phase_kind": "balanced_invalid",
+        "active_lengths": [
+          20
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.02
+      },
+      {
+        "name": "cohort-50-random",
+        "label": "50/random",
+        "cohort_length": 50,
+        "phase_kind": "random",
+        "active_lengths": [
+          20,
+          50
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.03
+      },
+      {
+        "name": "cohort-50-off_by_one",
+        "label": "50/off-by-one",
+        "cohort_length": 50,
+        "phase_kind": "off_by_one",
+        "active_lengths": [
+          20,
+          50
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.025
+      },
+      {
+        "name": "cohort-50-balanced_invalid",
+        "label": "50/balanced-invalid",
+        "cohort_length": 50,
+        "phase_kind": "balanced_invalid",
+        "active_lengths": [
+          20,
+          50
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.02
+      },
+      {
+        "name": "cohort-100-random",
+        "label": "100/random",
+        "cohort_length": 100,
+        "phase_kind": "random",
+        "active_lengths": [
+          20,
+          50,
+          100
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.03
+      },
+      {
+        "name": "cohort-100-off_by_one",
+        "label": "100/off-by-one",
+        "cohort_length": 100,
+        "phase_kind": "off_by_one",
+        "active_lengths": [
+          20,
+          50,
+          100
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.025
+      },
+      {
+        "name": "cohort-100-balanced_invalid",
+        "label": "100/balanced-invalid",
+        "cohort_length": 100,
+        "phase_kind": "balanced_invalid",
+        "active_lengths": [
+          20,
+          50,
+          100
+        ],
+        "epochs": 10,
+        "train_samples": 512,
+        "learning_rate": 0.02
+      }
+    ],
+    "evaluation_families": [
+      {
+        "key": "cohort-20",
+        "label": "20 / 25 / 30",
+        "lengths": [
+          20,
+          25,
+          30
+        ],
+        "color": "#b91c1c"
+      },
+      {
+        "key": "cohort-50",
+        "label": "50 / 60 / 75",
+        "lengths": [
+          50,
+          60,
+          75
+        ],
+        "color": "#2563eb"
+      },
+      {
+        "key": "cohort-100",
+        "label": "100 / 120 / 150",
+        "lengths": [
+          100,
+          120,
+          150
+        ],
+        "color": "#16a34a"
+      },
+      {
+        "key": "very-long",
+        "label": "200 / 260",
+        "lengths": [
+          200,
+          260
+        ],
+        "color": "#a16207"
+      }
+    ],
+    "probe_families": [
+      {
+        "label": "20 valid",
+        "text": "(())()()()()(()(()))",
+        "family": "cohort-20",
+        "probe_kind": "valid",
+        "color": "#7f1d1d"
+      },
+      {
+        "label": "30 off-by-one",
+        "text": "()(())()((())()))))())(((())))",
+        "family": "cohort-20",
+        "probe_kind": "off_by_one",
+        "color": "#b91c1c"
+      },
+      {
+        "label": "20 balanced-invalid",
+        "text": "))())((())())(()(()(",
+        "family": "cohort-20",
+        "probe_kind": "balanced_invalid",
+        "color": "#ef4444"
+      },
+      {
+        "label": "40 transition",
+        "text": ")()()((()()))((()))()()()()()()()()(()))",
+        "family": "cohort-20",
+        "probe_kind": "transition",
+        "color": "#ef4444"
+      },
+      {
+        "label": "50 valid",
+        "text": "(())()()()(()())(())()()()()(())()()()(())(((())))",
+        "family": "cohort-50",
+        "probe_kind": "valid",
+        "color": "#1d4ed8"
+      },
+      {
+        "label": "60 off-by-one",
+        "text": "()()((())())()))()()(())()()((()(()())((())(()))(((()))())()",
+        "family": "cohort-50",
+        "probe_kind": "off_by_one",
+        "color": "#2563eb"
+      },
+      {
+        "label": "50 balanced-invalid",
+        "text": "(((((((()())())())()))())(())(())))))()()(())(((()",
+        "family": "cohort-50",
+        "probe_kind": "balanced_invalid",
+        "color": "#60a5fa"
+      },
+      {
+        "label": "100 valid",
+        "text": "((()()()()))()((()(()((((())())((()((((()))(())((()(((())()))))))()))(()())())(()()))()))()(((()))))",
+        "family": "cohort-100",
+        "probe_kind": "valid",
+        "color": "#166534"
+      },
+      {
+        "label": "120 off-by-one",
+        "text": "()()(()()(()(())()))()()(()())()))(((((())(()()())())(()))())(()()(()((())(((((()))()))()()()((()(()()()))))((()))))))))",
+        "family": "cohort-100",
+        "probe_kind": "off_by_one",
+        "color": "#16a34a"
+      },
+      {
+        "label": "100 balanced-invalid",
+        "text": "(((((()(((()()(())))))))(((())))))))((())()()()()())()(())(()((()((()))())(())((())()))())()()((())(",
+        "family": "cohort-100",
+        "probe_kind": "balanced_invalid",
+        "color": "#86efac"
+      },
+      {
+        "label": "200 valid",
+        "text": "()(())()()((())())(()())(()())((((())))(()((())())(()())(((()()()()())))(()(()()()(((()()(()(((()))((())())((()()(((())())((())))))))(())())))(()(()()))(()())()))))((((()()))(()((())((((((()))))))))))",
+        "family": "very-long",
+        "probe_kind": "valid",
+        "color": "#7c5c2d"
+      },
+      {
+        "label": "200 balanced-invalid",
+        "text": "()((()))()(())))()()()()()((((((())((()()(((())))(())(()((())(())(((()))()((())))())))()()()())(())()((()())(())(((())()()(())())))))())(((((())))((()(()()()))())(()()))())()()(((()())(())())())))((()",
+        "family": "very-long",
+        "probe_kind": "balanced_invalid",
+        "color": "#d6a856"
+      }
+    ],
+    "trace_strings": [
+      {
+        "label": "A valid tail",
+        "text": "()(()())(()())(()()(()))()(()((())())())",
+        "family": "cohort-50",
+        "probe_kind": "valid",
+        "color": "#7f1d1d"
+      },
+      {
+        "label": "B immediate invalid",
+        "text": ")(((())(((()(()()))(())))((()))())())()(",
+        "family": "cohort-50",
+        "probe_kind": "transition",
+        "color": "#1d4ed8"
+      },
+      {
+        "label": "C valid+valid+bad",
+        "text": "()(()(()()(())()))()(())()()()(()())())(",
+        "family": "cohort-50",
+        "probe_kind": "transition",
+        "color": "#166534"
+      },
+      {
+        "label": "D balanced-invalid",
+        "text": ")(()()())(())()(())(()(()((()((()))))))(",
+        "family": "cohort-50",
+        "probe_kind": "balanced_invalid",
+        "color": "#7c5c2d"
+      },
+      {
+        "label": "E oscillating prefix",
+        "text": "((()(()))))((()(())))(()(()(())()()(()))",
+        "family": "cohort-50",
+        "probe_kind": "transition",
+        "color": "#9333ea"
+      },
+      {
+        "label": "F off-by-one long",
+        "text": "(())()()()((()()(())))()))(((())()((()))",
+        "family": "cohort-50",
+        "probe_kind": "off_by_one",
+        "color": "#db2777"
+      }
     ],
     "models": [
       {
         "model_key": "rnn-1layer",
         "model_title": "4-unit RNN (1 layer)",
         "num_layers": 1,
-        "warmup_end_epoch": 20,
         "phase_spans": [
           {
-            "name": "warmup",
-            "label": "warmup",
-            "start_epoch": 0,
+            "name": "cohort-20-random",
+            "label": "20/random",
+            "start_epoch": 1,
+            "end_epoch": 10,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.03,
+            "cohort_length": 20,
+            "phase_kind": "random",
+            "active_lengths": [
+              20
+            ]
+          },
+          {
+            "name": "cohort-20-off_by_one",
+            "label": "20/off-by-one",
+            "start_epoch": 11,
             "end_epoch": 20,
             "batch_size": 16,
-            "train_samples": 2046,
-            "short_ratio": 1.0,
-            "short_length_max": 10,
-            "mean_length": 5.0,
-            "max_length": 10
+            "train_samples": 512,
+            "learning_rate": 0.025,
+            "cohort_length": 20,
+            "phase_kind": "off_by_one",
+            "active_lengths": [
+              20
+            ]
           },
           {
-            "name": "rollout-short",
-            "label": "rollout short strings",
+            "name": "cohort-20-balanced_invalid",
+            "label": "20/balanced-invalid",
             "start_epoch": 21,
-            "end_epoch": 31,
-            "batch_size": 32,
-            "train_samples": 2048,
-            "short_ratio": 1.0,
-            "short_length_max": 18,
-            "mean_length": 14.0,
-            "max_length": 18
+            "end_epoch": 30,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.02,
+            "cohort_length": 20,
+            "phase_kind": "balanced_invalid",
+            "active_lengths": [
+              20
+            ]
           },
           {
-            "name": "rollout-medium",
-            "label": "rollout medium strings",
-            "start_epoch": 32,
-            "end_epoch": 45,
-            "batch_size": 64,
-            "train_samples": 2048,
-            "short_ratio": 0.85,
-            "short_length_max": 36,
-            "mean_length": 28.0,
-            "max_length": 72
+            "name": "cohort-50-random",
+            "label": "50/random",
+            "start_epoch": 31,
+            "end_epoch": 40,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.03,
+            "cohort_length": 50,
+            "phase_kind": "random",
+            "active_lengths": [
+              20,
+              50
+            ]
           },
           {
-            "name": "shock-long",
-            "label": "shock longer strings",
-            "start_epoch": 46,
-            "end_epoch": 62,
-            "batch_size": 192,
-            "train_samples": 2765,
-            "short_ratio": 0.35,
-            "short_length_max": 80,
-            "mean_length": 64.0,
-            "max_length": 160
+            "name": "cohort-50-off_by_one",
+            "label": "50/off-by-one",
+            "start_epoch": 41,
+            "end_epoch": 50,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.025,
+            "cohort_length": 50,
+            "phase_kind": "off_by_one",
+            "active_lengths": [
+              20,
+              50
+            ]
           },
           {
-            "name": "shock-full",
-            "label": "shock full distribution",
-            "start_epoch": 63,
+            "name": "cohort-50-balanced_invalid",
+            "label": "50/balanced-invalid",
+            "start_epoch": 51,
+            "end_epoch": 60,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.02,
+            "cohort_length": 50,
+            "phase_kind": "balanced_invalid",
+            "active_lengths": [
+              20,
+              50
+            ]
+          },
+          {
+            "name": "cohort-100-random",
+            "label": "100/random",
+            "start_epoch": 61,
+            "end_epoch": 70,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.03,
+            "cohort_length": 100,
+            "phase_kind": "random",
+            "active_lengths": [
+              20,
+              50,
+              100
+            ]
+          },
+          {
+            "name": "cohort-100-off_by_one",
+            "label": "100/off-by-one",
+            "start_epoch": 71,
             "end_epoch": 80,
-            "batch_size": 320,
-            "train_samples": 3482,
-            "short_ratio": 0.15,
-            "short_length_max": 80,
-            "mean_length": 88.0,
-            "max_length": 160
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.025,
+            "cohort_length": 100,
+            "phase_kind": "off_by_one",
+            "active_lengths": [
+              20,
+              50,
+              100
+            ]
+          },
+          {
+            "name": "cohort-100-balanced_invalid",
+            "label": "100/balanced-invalid",
+            "start_epoch": 81,
+            "end_epoch": 90,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.02,
+            "cohort_length": 100,
+            "phase_kind": "balanced_invalid",
+            "active_lengths": [
+              20,
+              50,
+              100
+            ]
           }
         ],
-        "peak_aha_epoch": 21,
+        "peak_aha_epoch": 11,
         "selected_epochs": [
           0,
-          1,
+          2,
+          10,
+          11,
           20,
-          21,
-          31,
-          45,
-          58,
-          62,
-          80
+          24,
+          30,
+          40,
+          50,
+          60,
+          70,
+          80,
+          90
         ],
         "final_metrics": {
-          "epoch": 80,
-          "phase": "shock-full",
-          "train_loss": 0.5273438692092896,
-          "train_acc": 0.7153934240341187,
-          "short_test_loss": 0.5445167422294617,
-          "short_test_acc": 0.6953125,
-          "long_test_loss": 0.5600227117538452,
-          "long_test_acc": 0.69140625,
-          "probe_change": 0.08310736493440345,
-          "aha_score": 0.08310736493440345
+          "epoch": 90,
+          "phase": "cohort-100-balanced_invalid",
+          "train_loss": 0.5158689022064209,
+          "train_acc": 0.712890625,
+          "overall_eval_acc": 0.64453125,
+          "cohort_20_acc": 0.59375,
+          "cohort_50_acc": 0.671875,
+          "cohort_100_acc": 0.6484375,
+          "very_long_acc": 0.6640625,
+          "balanced_invalid_acc": 0.65625,
+          "probe_change": 0.00656982359214453,
+          "aha_score": 0.00656982359214453
         },
-        "files": []
+        "files": [
+          "rnn-1layer-traces-pair-a.png",
+          "rnn-1layer-traces-pair-a.html",
+          "rnn-1layer-traces-pair-b.png",
+          "rnn-1layer-traces-pair-b.html",
+          "rnn-1layer-traces-aha-detail.png",
+          "rnn-1layer-traces-aha-detail.html"
+        ]
       },
       {
         "model_key": "rnn-2layer",
         "model_title": "4-unit RNN (2 layers)",
         "num_layers": 2,
-        "warmup_end_epoch": 20,
         "phase_spans": [
           {
-            "name": "warmup",
-            "label": "warmup",
-            "start_epoch": 0,
+            "name": "cohort-20-random",
+            "label": "20/random",
+            "start_epoch": 1,
+            "end_epoch": 10,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.03,
+            "cohort_length": 20,
+            "phase_kind": "random",
+            "active_lengths": [
+              20
+            ]
+          },
+          {
+            "name": "cohort-20-off_by_one",
+            "label": "20/off-by-one",
+            "start_epoch": 11,
             "end_epoch": 20,
             "batch_size": 16,
-            "train_samples": 2046,
-            "short_ratio": 1.0,
-            "short_length_max": 10,
-            "mean_length": 5.0,
-            "max_length": 10
+            "train_samples": 512,
+            "learning_rate": 0.025,
+            "cohort_length": 20,
+            "phase_kind": "off_by_one",
+            "active_lengths": [
+              20
+            ]
           },
           {
-            "name": "rollout-short",
-            "label": "rollout short strings",
+            "name": "cohort-20-balanced_invalid",
+            "label": "20/balanced-invalid",
             "start_epoch": 21,
-            "end_epoch": 31,
-            "batch_size": 32,
-            "train_samples": 2048,
-            "short_ratio": 1.0,
-            "short_length_max": 18,
-            "mean_length": 14.0,
-            "max_length": 18
+            "end_epoch": 30,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.02,
+            "cohort_length": 20,
+            "phase_kind": "balanced_invalid",
+            "active_lengths": [
+              20
+            ]
           },
           {
-            "name": "rollout-medium",
-            "label": "rollout medium strings",
-            "start_epoch": 32,
-            "end_epoch": 45,
-            "batch_size": 64,
-            "train_samples": 2048,
-            "short_ratio": 0.85,
-            "short_length_max": 36,
-            "mean_length": 28.0,
-            "max_length": 72
+            "name": "cohort-50-random",
+            "label": "50/random",
+            "start_epoch": 31,
+            "end_epoch": 40,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.03,
+            "cohort_length": 50,
+            "phase_kind": "random",
+            "active_lengths": [
+              20,
+              50
+            ]
           },
           {
-            "name": "shock-long",
-            "label": "shock longer strings",
-            "start_epoch": 46,
-            "end_epoch": 62,
-            "batch_size": 192,
-            "train_samples": 2765,
-            "short_ratio": 0.35,
-            "short_length_max": 80,
-            "mean_length": 64.0,
-            "max_length": 160
+            "name": "cohort-50-off_by_one",
+            "label": "50/off-by-one",
+            "start_epoch": 41,
+            "end_epoch": 50,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.025,
+            "cohort_length": 50,
+            "phase_kind": "off_by_one",
+            "active_lengths": [
+              20,
+              50
+            ]
           },
           {
-            "name": "shock-full",
-            "label": "shock full distribution",
-            "start_epoch": 63,
+            "name": "cohort-50-balanced_invalid",
+            "label": "50/balanced-invalid",
+            "start_epoch": 51,
+            "end_epoch": 60,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.02,
+            "cohort_length": 50,
+            "phase_kind": "balanced_invalid",
+            "active_lengths": [
+              20,
+              50
+            ]
+          },
+          {
+            "name": "cohort-100-random",
+            "label": "100/random",
+            "start_epoch": 61,
+            "end_epoch": 70,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.03,
+            "cohort_length": 100,
+            "phase_kind": "random",
+            "active_lengths": [
+              20,
+              50,
+              100
+            ]
+          },
+          {
+            "name": "cohort-100-off_by_one",
+            "label": "100/off-by-one",
+            "start_epoch": 71,
             "end_epoch": 80,
-            "batch_size": 320,
-            "train_samples": 3482,
-            "short_ratio": 0.15,
-            "short_length_max": 80,
-            "mean_length": 88.0,
-            "max_length": 160
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.025,
+            "cohort_length": 100,
+            "phase_kind": "off_by_one",
+            "active_lengths": [
+              20,
+              50,
+              100
+            ]
+          },
+          {
+            "name": "cohort-100-balanced_invalid",
+            "label": "100/balanced-invalid",
+            "start_epoch": 81,
+            "end_epoch": 90,
+            "batch_size": 16,
+            "train_samples": 512,
+            "learning_rate": 0.02,
+            "cohort_length": 100,
+            "phase_kind": "balanced_invalid",
+            "active_lengths": [
+              20,
+              50,
+              100
+            ]
           }
         ],
-        "peak_aha_epoch": 21,
+        "peak_aha_epoch": 1,
         "selected_epochs": [
           0,
+          1,
+          7,
+          10,
           20,
-          21,
-          28,
-          31,
-          39,
-          45,
-          62,
-          80
+          30,
+          40,
+          50,
+          60,
+          70,
+          80,
+          90
         ],
         "final_metrics": {
-          "epoch": 80,
-          "phase": "shock-full",
-          "train_loss": 0.3673817813396454,
-          "train_acc": 0.8360137939453125,
-          "short_test_loss": 0.30125609040260315,
-          "short_test_acc": 0.89453125,
-          "long_test_loss": 0.3913472294807434,
-          "long_test_acc": 0.81640625,
-          "probe_change": 0.003154401376377791,
-          "aha_score": 0.003154401376377791
+          "epoch": 90,
+          "phase": "cohort-100-balanced_invalid",
+          "train_loss": 0.366254061460495,
+          "train_acc": 0.841796875,
+          "overall_eval_acc": 0.818359375,
+          "cohort_20_acc": 0.859375,
+          "cohort_50_acc": 0.796875,
+          "cohort_100_acc": 0.828125,
+          "very_long_acc": 0.7890625,
+          "balanced_invalid_acc": 0.9140625,
+          "probe_change": 0.049411921808617386,
+          "aha_score": 0.049411921808617386
         },
-        "files": []
+        "files": [
+          "rnn-2layer-traces-pair-a.png",
+          "rnn-2layer-traces-pair-a.html",
+          "rnn-2layer-traces-pair-b.png",
+          "rnn-2layer-traces-pair-b.html",
+          "rnn-2layer-traces-aha-detail.png",
+          "rnn-2layer-traces-aha-detail.html"
+        ]
       }
     ]
   }

@@ -1,5 +1,7 @@
 import json
+from datetime import UTC, datetime
 from typing import Any, Literal, Mapping
+from uuid import uuid4
 
 from agents import FunctionTool, function_tool
 from agents.tool_context import ToolContext
@@ -8,12 +10,13 @@ from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import ChartPlan
-from backend.app.chatkit.metadata import AnalysisPlan
+from backend.app.chatkit.metadata import AgentPlan
 from backend.app.core.logging import get_logger, summarize_for_log
 
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
+AgentRole = Literal["csv-agent", "chart-agent", "pdf-agent", "report-agent"]
 
 
 def _log_tool_start(
@@ -45,10 +48,7 @@ def _log_tool_end(
 def get_client_tool_names(
     context: ReportAgentContext,
 ) -> list[str]:
-    registered_tool_names = [
-        name for tool in context.client_tools if (name := tool.get("name"))
-    ]
-    return registered_tool_names
+    return [name for tool in context.client_tools if (name := tool.get("name"))]
 
 
 def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool:
@@ -94,7 +94,12 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
     )
 
 
-def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
+def build_agent_tools(
+    context: ReportAgentContext,
+    *,
+    capability_id: str,
+    allow_append_report_section: bool = False,
+) -> list[FunctionTool]:
     tools: list[FunctionTool] = []
     tool_names = set(get_client_tool_names(context))
     registered_tool_map = {
@@ -108,7 +113,7 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
     async def name_current_thread_tool(
         ctx: ChatKitToolContext,
         title: str,
-    ) -> dict:
+    ) -> dict[str, str]:
         """Rename the current thread to a concise, descriptive title for the current investigation."""
         request_context = ctx.context.request_context
         cleaned_title = title.strip()
@@ -126,172 +131,106 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
         _log_tool_end(request_context, "name_current_thread", title=cleaned_title)
         return result
 
-    tools.append(name_current_thread_tool)
-
-    @function_tool(name_override="plan_analysis")
-    async def plan_analysis_tool(
+    @function_tool(name_override="make_plan")
+    async def make_plan_tool(
         ctx: ChatKitToolContext,
         focus: str,
         planned_steps: list[str],
-        chart_opportunities: list[str] | None = None,
         success_criteria: list[str] | None = None,
-    ) -> dict:
-        """Write down a concise analysis plan, then continue by executing it."""
+        follow_on_tool_hints: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Write down a concise plan, then continue executing it immediately with more tool calls."""
         request_context = ctx.context.request_context
         cleaned_focus = focus.strip()
         cleaned_steps = [step.strip() for step in planned_steps if step.strip()]
-        cleaned_chart_opportunities = [
-            item.strip() for item in chart_opportunities or [] if item.strip()
-        ]
         cleaned_success_criteria = [
             item.strip() for item in success_criteria or [] if item.strip()
         ]
+        cleaned_follow_on_tool_hints = [
+            item.strip() for item in follow_on_tool_hints or [] if item.strip()
+        ]
         _log_tool_start(
             request_context,
-            "plan_analysis",
+            "make_plan",
             focus=cleaned_focus,
             planned_steps=len(cleaned_steps),
-            chart_opportunities=len(cleaned_chart_opportunities),
             success_criteria=len(cleaned_success_criteria),
+            follow_on_tool_hints=len(cleaned_follow_on_tool_hints),
         )
-        plan: AnalysisPlan = {
+        plan: AgentPlan = {
+            "id": f"plan_{uuid4().hex}",
             "focus": cleaned_focus,
             "planned_steps": cleaned_steps,
+            "created_at": datetime.now(UTC).isoformat(),
         }
-        if cleaned_chart_opportunities:
-            plan["chart_opportunities"] = cleaned_chart_opportunities
         if cleaned_success_criteria:
             plan["success_criteria"] = cleaned_success_criteria
-        request_context.thread_metadata["analysis_plan"] = plan
+        if cleaned_follow_on_tool_hints:
+            plan["follow_on_tool_hints"] = cleaned_follow_on_tool_hints
+        request_context.thread_metadata["plan"] = plan
+        if "render_chart_from_file" in cleaned_follow_on_tool_hints or capability_id == "chart-agent":
+            request_context.thread_metadata["chart_plan"] = plan
         ctx.context.thread.metadata = dict(request_context.thread_metadata)
         await ctx.context.stream(
             ProgressUpdateEvent(
                 text=(
-                    f"Analysis plan saved with {len(cleaned_steps)} planned "
-                    "steps. Continue executing it now."
+                    f"Plan saved with {len(cleaned_steps)} step(s). Continue executing it now "
+                    "with more tool calls instead of stopping."
                 )
             )
         )
-        result = {
-            "analysis_plan": plan,
+        _log_tool_end(request_context, "make_plan", plan_id=plan["id"])
+        return {
+            "plan_id": plan["id"],
+            "plan": plan,
             "report_id": request_context.report_id,
         }
-        _log_tool_end(
-            request_context,
-            "plan_analysis",
-            planned_steps=len(cleaned_steps),
-        )
-        return result
 
-    @function_tool(name_override="append_report_section")
-    async def append_report_section_tool(
-        ctx: ChatKitToolContext,
-        title: str,
-        markdown: str,
-    ) -> dict:
-        """Append a markdown narrative section to the in-progress report."""
-        request_context = ctx.context.request_context
-        _log_tool_start(
-            request_context,
-            "append_report_section",
-            title=title,
-            markdown_chars=len(markdown),
-        )
-        await ctx.context.stream(
-            ProgressUpdateEvent(text=f"Appending report section: {title}."),
-        )
-        await ctx.context.stream(
-            ClientEffectEvent(
-                name="report_section_appended",
-                data={
-                    "type": "report_section_appended",
-                    "title": title,
-                    "markdown": markdown,
-                },
-            )
-        )
-        result = {
-            "title": title,
-            "markdown": markdown,
-            "report_id": request_context.report_id,
-        }
-        _log_tool_end(
-            request_context,
-            "append_report_section",
-            title=title,
-            markdown_chars=len(markdown),
-        )
-        return result
+    tools.extend([name_current_thread_tool, make_plan_tool])
 
-    tools.extend([plan_analysis_tool, append_report_section_tool])
+    if allow_append_report_section:
 
-    if "list_workspace_files" in tool_names:
-
-        @function_tool(name_override="list_workspace_files")
-        async def list_workspace_files_tool(
+        @function_tool(name_override="append_report_section")
+        async def append_report_section_tool(
             ctx: ChatKitToolContext,
-            include_samples: bool = True,
-        ) -> dict:
-            """List the current client-side workspace files, including lightweight metadata and optional tiny samples."""
+            title: str,
+            markdown: str,
+        ) -> dict[str, str]:
+            """Append a markdown narrative section to the in-progress report."""
             request_context = ctx.context.request_context
             _log_tool_start(
                 request_context,
-                "list_workspace_files",
-                known_file_count=len(request_context.available_files),
-                include_samples=include_samples,
+                "append_report_section",
+                title=title,
+                markdown_chars=len(markdown),
             )
             await ctx.context.stream(
-                ProgressUpdateEvent(
-                    text="Requesting the current workspace file inventory from the client."
-                )
-            )
-            client_tool_call = ClientToolCall(
-                name="list_workspace_files",
-                arguments={"includeSamples": include_samples},
-            )
-            ctx.context.client_tool_call = client_tool_call
-            _log_tool_end(
-                request_context,
-                "list_workspace_files",
-                mode="client_tool_call",
-            )
-            return client_tool_call.model_dump(mode="json")
-
-        tools.append(list_workspace_files_tool)
-        built_client_tool_names.add("list_workspace_files")
-
-    if "list_attached_csv_files" in tool_names:
-
-        @function_tool(name_override="list_attached_csv_files")
-        async def list_attached_csv_files_tool(
-            ctx: ChatKitToolContext,
-        ) -> dict:
-            """List the CSV files currently available to analyze by asking the client for its local file inventory."""
-            request_context = ctx.context.request_context
-            _log_tool_start(
-                request_context,
-                "list_attached_csv_files",
-                known_csv_file_count=len(request_context.available_datasets),
+                ProgressUpdateEvent(text=f"Appending report section: {title}."),
             )
             await ctx.context.stream(
-                ProgressUpdateEvent(
-                    text="Requesting the current CSV file inventory from the client."
+                ClientEffectEvent(
+                    name="report_section_appended",
+                    data={
+                        "type": "report_section_appended",
+                        "title": title,
+                        "markdown": markdown,
+                    },
                 )
             )
-            client_tool_call = ClientToolCall(
-                name="list_attached_csv_files",
-                arguments={"includeSamples": True},
-            )
-            ctx.context.client_tool_call = client_tool_call
+            result = {
+                "title": title,
+                "markdown": markdown,
+                "report_id": request_context.report_id,
+            }
             _log_tool_end(
                 request_context,
-                "list_attached_csv_files",
-                mode="client_tool_call",
+                "append_report_section",
+                title=title,
+                markdown_chars=len(markdown),
             )
-            return client_tool_call.model_dump(mode="json")
+            return result
 
-        tools.append(list_attached_csv_files_tool)
-        built_client_tool_names.add("list_attached_csv_files")
+        tools.append(append_report_section_tool)
 
     if context.available_datasets:
         dataset_ids = tuple(dataset.id for dataset in context.available_datasets)
@@ -301,8 +240,8 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
         async def inspect_csv_file_schema_tool(
             ctx: ChatKitToolContext,
             dataset_id: DatasetIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
-        ) -> dict:
-            """Inspect one CSV file before writing a query plan so columns and numeric fields are used correctly."""
+        ) -> dict[str, object]:
+            """Inspect one CSV file before writing or revising a query plan."""
             request_context = ctx.context.request_context
             _log_tool_start(
                 request_context, "inspect_csv_file_schema", dataset_id=dataset_id
@@ -329,6 +268,56 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
 
         tools.append(inspect_csv_file_schema_tool)
 
+    if context.available_chartable_files:
+        file_ids = tuple(file.id for file in context.available_chartable_files)
+        ChartableFileIdLiteral = Literal[*file_ids]
+
+        @function_tool(name_override="inspect_chartable_file_schema")
+        async def inspect_chartable_file_schema_tool(
+            ctx: ChatKitToolContext,
+            file_id: ChartableFileIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
+        ) -> dict[str, object]:
+            """Inspect a CSV or JSON chartable artifact before building a chart plan."""
+            request_context = ctx.context.request_context
+            _log_tool_start(
+                request_context, "inspect_chartable_file_schema", file_id=file_id
+            )
+            file = request_context.get_file(file_id)
+            columns: list[str] = []
+            numeric_columns: list[str] = []
+            row_count = 0
+            sample_rows: list[dict[str, Any]] = []
+            kind = None
+            if file is not None:
+                kind = file.kind
+                if file.kind == "csv" and file.csv is not None:
+                    columns = list(file.csv.columns)
+                    numeric_columns = list(file.csv.numeric_columns)
+                    row_count = file.csv.row_count
+                    sample_rows = list(file.csv.sample_rows[:5])
+                elif file.kind == "json" and file.json is not None:
+                    columns = list(file.json.columns)
+                    numeric_columns = list(file.json.numeric_columns)
+                    row_count = file.json.row_count
+                    sample_rows = list(file.json.sample_rows[:5])
+            result = {
+                "file_id": file_id,
+                "kind": kind,
+                "columns": columns,
+                "numeric_columns": numeric_columns,
+                "row_count": row_count,
+                "sample_rows": sample_rows,
+            }
+            _log_tool_end(
+                request_context,
+                "inspect_chartable_file_schema",
+                found=bool(file),
+                column_count=len(columns),
+            )
+            return result
+
+        tools.append(inspect_chartable_file_schema_tool)
+
     query_plan_model = context.query_plan_model
     if query_plan_model is not None and "run_aggregate_query" in tool_names:
 
@@ -336,8 +325,8 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
         async def run_aggregate_query_tool(
             ctx: ChatKitToolContext,
             query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-        ) -> dict:
-            """Validate a structured row/filter/group/aggregate query plan, then ask the client to execute it against local CSV rows."""
+        ) -> dict[str, object]:
+            """Validate a structured row/filter/group/aggregate query plan, then ask the client to execute it."""
             request_context = ctx.context.request_context
             validated_plan = query_plan.model_dump(by_alias=True)
             _log_tool_start(
@@ -345,10 +334,6 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
                 "run_aggregate_query",
                 dataset_id=validated_plan.get("dataset_id"),
                 group_by=len(validated_plan.get("group_by") or []),
-                aggregates=[
-                    measure.get("op")
-                    for measure in validated_plan.get("aggregates") or []
-                ],
             )
             await ctx.context.stream(
                 ProgressUpdateEvent(text="Validating an aggregate query plan.")
@@ -362,7 +347,6 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
                 request_context,
                 "run_aggregate_query",
                 dataset_id=validated_plan.get("dataset_id"),
-                aggregate_count=len(validated_plan.get("aggregates") or []),
                 mode="client_tool_call",
             )
             return client_tool_call.model_dump(mode="json")
@@ -370,78 +354,34 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
         tools.append(run_aggregate_query_tool)
         built_client_tool_names.add("run_aggregate_query")
 
-    if query_plan_model is not None and "request_chart_render" in tool_names:
+    for materialize_tool_name in ("create_csv_file", "create_json_file"):
+        if query_plan_model is None or materialize_tool_name not in tool_names:
+            continue
 
-        @function_tool(name_override="request_chart_render")
-        async def request_chart_render_tool(
-            ctx: ChatKitToolContext,
-            query_id: str,
-            query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-            chart_plan: ChartPlan,
-        ) -> dict:
-            """Validate the query plan, then ask the client to render a chart locally and optionally send back an image."""
-            request_context = ctx.context.request_context
-            validated_plan = query_plan.model_dump(by_alias=True)
-            raw_chart_plan = chart_plan.model_dump(by_alias=True)
-            _log_tool_start(
-                request_context,
-                "request_chart_render",
-                query_id=query_id,
-                dataset_id=validated_plan.get("dataset_id"),
-                chart_type=raw_chart_plan.get("type"),
-                title=raw_chart_plan.get("title"),
-            )
-            await ctx.context.stream(
-                ProgressUpdateEvent(
-                    text=f"Requesting chart render for query {query_id}."
-                )
-            )
-            client_tool_call = ClientToolCall(
-                name="request_chart_render",
-                arguments={
-                    "query_id": query_id,
-                    "query_plan": validated_plan,
-                    "chart_plan": raw_chart_plan,
-                },
-            )
-            ctx.context.client_tool_call = client_tool_call
-            _log_tool_end(
-                request_context,
-                "request_chart_render",
-                query_id=query_id,
-                series_count=len(raw_chart_plan.get("series") or []),
-                mode="client_tool_call",
-            )
-            return client_tool_call.model_dump(mode="json")
-
-        tools.append(request_chart_render_tool)
-        built_client_tool_names.add("request_chart_render")
-
-    if query_plan_model is not None and "create_csv_file" in tool_names:
-
-        @function_tool(name_override="create_csv_file")
-        async def create_csv_file_tool(
+        @function_tool(name_override=materialize_tool_name)
+        async def materialize_query_result_tool(
             ctx: ChatKitToolContext,
             filename: str,
             query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-        ) -> dict:
-            """Validate a query plan, then ask the client to materialize the result rows as a derived CSV file."""
+            _tool_name: str = materialize_tool_name,
+        ) -> dict[str, object]:
+            """Validate a query plan, then ask the client to materialize the result rows as a file."""
             request_context = ctx.context.request_context
             cleaned_filename = filename.strip()
             validated_plan = query_plan.model_dump(by_alias=True)
             _log_tool_start(
                 request_context,
-                "create_csv_file",
+                _tool_name,
                 filename=cleaned_filename,
                 dataset_id=validated_plan.get("dataset_id"),
             )
             await ctx.context.stream(
                 ProgressUpdateEvent(
-                    text=f"Creating derived CSV file {cleaned_filename}."
+                    text=f"Creating derived artifact {cleaned_filename}."
                 )
             )
             client_tool_call = ClientToolCall(
-                name="create_csv_file",
+                name=_tool_name,
                 arguments={
                     "filename": cleaned_filename,
                     "query_plan": validated_plan,
@@ -450,64 +390,67 @@ def build_agent_tools(context: ReportAgentContext) -> list[FunctionTool]:
             ctx.context.client_tool_call = client_tool_call
             _log_tool_end(
                 request_context,
-                "create_csv_file",
+                _tool_name,
                 filename=cleaned_filename,
                 mode="client_tool_call",
             )
             return client_tool_call.model_dump(mode="json")
 
-        tools.append(create_csv_file_tool)
-        built_client_tool_names.add("create_csv_file")
+        tools.append(materialize_query_result_tool)
+        built_client_tool_names.add(materialize_tool_name)
 
-    if "get_pdf_page_range" in tool_names:
-        pdf_file_ids = tuple(
-            file.id for file in context.available_files if file.kind == "pdf"
-        ) or ("unknown_pdf_file",)
-        PdfFileIdLiteral = Literal[*pdf_file_ids]
+    if "render_chart_from_file" in tool_names:
 
-        @function_tool(name_override="get_pdf_page_range")
-        async def get_pdf_page_range_tool(
+        @function_tool(name_override="render_chart_from_file")
+        async def render_chart_from_file_tool(
             ctx: ChatKitToolContext,
-            file_id: PdfFileIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
-            start_page: int,
-            end_page: int,
-        ) -> dict:
-            """Extract an inclusive page range from a PDF and attach the derived sub-PDF back to the model as a file input."""
+            file_id: str,
+            chart_plan_id: str,
+            chart_plan: ChartPlan,
+            x_key: str,
+            y_key: str | None = None,
+            series_key: str | None = None,
+        ) -> dict[str, object]:
+            """Render a chart from a chartable CSV or JSON artifact after the chart has been planned."""
             request_context = ctx.context.request_context
+            active_plan = request_context.thread_metadata.get("plan")
+            if active_plan is None or active_plan.get("id") != chart_plan_id:
+                raise ValueError(
+                    "render_chart_from_file requires a current chart plan id from the latest make_plan call."
+                )
+            raw_chart_plan = chart_plan.model_dump(by_alias=True)
             _log_tool_start(
                 request_context,
-                "get_pdf_page_range",
+                "render_chart_from_file",
                 file_id=file_id,
-                start_page=start_page,
-                end_page=end_page,
+                chart_plan_id=chart_plan_id,
+                chart_type=raw_chart_plan.get("type"),
             )
             await ctx.context.stream(
-                ProgressUpdateEvent(
-                    text=(
-                        f"Extracting PDF pages {start_page}-{end_page} "
-                        f"from file {file_id}."
-                    )
-                )
+                ProgressUpdateEvent(text=f"Requesting chart render for file {file_id}.")
             )
             client_tool_call = ClientToolCall(
-                name="get_pdf_page_range",
+                name="render_chart_from_file",
                 arguments={
                     "file_id": file_id,
-                    "start_page": start_page,
-                    "end_page": end_page,
+                    "chart_plan_id": chart_plan_id,
+                    "chart_plan": raw_chart_plan,
+                    "x_key": x_key,
+                    "y_key": y_key,
+                    "series_key": series_key,
                 },
             )
             ctx.context.client_tool_call = client_tool_call
             _log_tool_end(
                 request_context,
-                "get_pdf_page_range",
+                "render_chart_from_file",
                 file_id=file_id,
                 mode="client_tool_call",
             )
             return client_tool_call.model_dump(mode="json")
 
-        tools.append(get_pdf_page_range_tool)
-        built_client_tool_names.add("get_pdf_page_range")
+        tools.append(render_chart_from_file_tool)
+        built_client_tool_names.add("render_chart_from_file")
 
     for tool_name, tool_definition in registered_tool_map.items():
         if tool_name in built_client_tool_names:

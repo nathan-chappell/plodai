@@ -15,14 +15,12 @@ import { BlogPage } from "./components/BlogPage";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
 import { AdminUsersPage, adminUsersCapability } from "./capabilities/adminUsers";
-import { FileAgentPage, fileAgentCapability } from "./capabilities/fileAgent";
-import { PdfAgentPage, pdfAgentCapability } from "./capabilities/pdfAgent";
-import { ReportFoundryPage, reportFoundryCapability } from "./capabilities/reportFoundry";
+import { capabilityModules } from "./capabilities/registry";
 import type { ShellWorkspaceRegistration } from "./capabilities/types";
 import { isBlogPath } from "./lib/blog";
 import { navigate, usePathname } from "./lib/router";
 
-const allCapabilities = [reportFoundryCapability, fileAgentCapability, pdfAgentCapability, adminUsersCapability];
+const allCapabilities = [...capabilityModules.map((capabilityModule) => capabilityModule.definition), adminUsersCapability];
 
 function filterCapabilities(role: "admin" | "user") {
   return allCapabilities.filter((capability) =>
@@ -108,27 +106,19 @@ export function App() {
           </AppEmptyState>
         ) : null}
 
-        {activeCapability?.id === reportFoundryCapability.id ? (
-          <ReportFoundryPage
-            onRegisterWorkspace={(registration) => {
-              setWorkspaceRegistration(registration);
-            }}
-          />
-        ) : null}
-        {activeCapability?.id === fileAgentCapability.id ? (
-          <FileAgentPage
-            onRegisterWorkspace={(registration) => {
-              setWorkspaceRegistration(registration);
-            }}
-          />
-        ) : null}
-        {activeCapability?.id === pdfAgentCapability.id ? (
-          <PdfAgentPage
-            onRegisterWorkspace={(registration) => {
-              setWorkspaceRegistration(registration);
-            }}
-          />
-        ) : null}
+        {capabilityModules
+          .filter((capabilityModule) => activeCapability?.id === capabilityModule.definition.id)
+          .map((capabilityModule) => {
+            const CapabilityPage = capabilityModule.Page;
+            return (
+              <CapabilityPage
+                key={capabilityModule.definition.id}
+                onRegisterWorkspace={(registration) => {
+                  setWorkspaceRegistration(registration);
+                }}
+              />
+            );
+          })}
         {activeCapability?.id === adminUsersCapability.id ? <AdminUsersPage /> : null}
       </PlatformShell>
       <ToastViewport>

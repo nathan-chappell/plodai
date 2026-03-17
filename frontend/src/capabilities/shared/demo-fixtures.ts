@@ -1,0 +1,87 @@
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+
+import { parseCsvText } from "../../lib/csv";
+import { parseJsonText } from "../../lib/json";
+import { uint8ArrayToBase64 } from "../../lib/pdf";
+import type { LocalDataset, LocalJsonFile, LocalPdfFile } from "../../types/report";
+
+export function buildCsvDemoFile(id: string, name: string, csvText: string): LocalDataset {
+  const preview = parseCsvText(csvText);
+  return {
+    id,
+    name,
+    kind: "csv",
+    extension: "csv",
+    byte_size: new TextEncoder().encode(csvText).length,
+    mime_type: "text/csv",
+    row_count: preview.rowCount,
+    columns: preview.columns,
+    numeric_columns: preview.numericColumns,
+    sample_rows: preview.sampleRows,
+    rows: preview.rows,
+    preview_rows: preview.previewRows,
+  };
+}
+
+export function buildJsonDemoFile(id: string, name: string, jsonText: string): LocalJsonFile {
+  const preview = parseJsonText(jsonText);
+  return {
+    id,
+    name,
+    kind: "json",
+    extension: "json",
+    byte_size: new TextEncoder().encode(jsonText).length,
+    mime_type: "application/json",
+    row_count: preview.rowCount,
+    columns: preview.columns,
+    numeric_columns: preview.numericColumns,
+    sample_rows: preview.sampleRows,
+    rows: preview.rows,
+    preview_rows: preview.previewRows,
+    json_text: preview.jsonText,
+  };
+}
+
+export async function buildPdfDemoFile(options: {
+  id: string;
+  name: string;
+  pages: Array<{ title: string; body: string[] }>;
+}): Promise<LocalPdfFile> {
+  const document = await PDFDocument.create();
+  const titleFont = await document.embedFont(StandardFonts.HelveticaBold);
+  const bodyFont = await document.embedFont(StandardFonts.Helvetica);
+
+  for (const pageSpec of options.pages) {
+    const page = document.addPage([612, 792]);
+    page.drawText(pageSpec.title, {
+      x: 56,
+      y: 730,
+      size: 22,
+      font: titleFont,
+      color: rgb(0.18, 0.12, 0.08),
+    });
+    let y = 690;
+    for (const line of pageSpec.body) {
+      page.drawText(line, {
+        x: 56,
+        y,
+        size: 12,
+        font: bodyFont,
+        color: rgb(0.24, 0.22, 0.2),
+      });
+      y -= 24;
+    }
+  }
+
+  const bytes = await document.save();
+  return {
+    id: options.id,
+    name: options.name,
+    kind: "pdf",
+    extension: "pdf",
+    byte_size: bytes.length,
+    mime_type: "application/pdf",
+    page_count: options.pages.length,
+    bytes_base64: uint8ArrayToBase64(bytes),
+  };
+}

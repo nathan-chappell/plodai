@@ -9,7 +9,15 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
         {
             "title": "Quarterly review",
             "investigation_brief": "  Validate whether the west region is actually underperforming.  ",
+            "plan": {
+                "id": "plan_123",
+                "focus": "Validate west region performance",
+                "planned_steps": ["List files", "Run grouped aggregates"],
+                "success_criteria": ["Explain the strongest variance"],
+                "follow_on_tool_hints": ["run_aggregate_query"],
+            },
             "chart_cache": {"chart-1": "data:image/png;base64,abc", 2: "bad"},
+            "surface_key": "/capabilities/report-agent",
             "openai_conversation_id": "conv_123",
             "openai_previous_response_id": "resp_456",
             "usage": {
@@ -25,7 +33,15 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
     assert metadata == {
         "title": "Quarterly review",
         "investigation_brief": "Validate whether the west region is actually underperforming.",
+        "plan": {
+            "id": "plan_123",
+            "focus": "Validate west region performance",
+            "planned_steps": ["List files", "Run grouped aggregates"],
+            "success_criteria": ["Explain the strongest variance"],
+            "follow_on_tool_hints": ["run_aggregate_query"],
+        },
         "chart_cache": {"chart-1": "data:image/png;base64,abc"},
+        "surface_key": "/capabilities/report-agent",
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_456",
         "usage": {
@@ -41,11 +57,13 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
         {
             "title": "Initial",
             "investigation_brief": "Look for margin pressure.",
+            "surface_key": "/capabilities/csv-agent",
             "openai_conversation_id": "conv_123",
         },
         {
             "title": "Updated",
             "investigation_brief": "Compare east and west performance.",
+            "surface_key": "/capabilities/report-agent",
             "openai_previous_response_id": "resp_789",
         },
     )
@@ -53,6 +71,7 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
     assert merged == {
         "title": "Updated",
         "investigation_brief": "Compare east and west performance.",
+        "surface_key": "/capabilities/report-agent",
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_789",
     }

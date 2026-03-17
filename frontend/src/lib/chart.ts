@@ -70,6 +70,41 @@ const PRESETS: Record<NonNullable<ClientChartSpec["style_preset"]>, ChartPresetT
     accent: "#52606D",
     background: "rgba(249, 250, 251, 0.96)",
   },
+  ledger: {
+    palette: ["#204B57", "#89B0AE", "#E4DCCF", "#A05C39", "#2C2C34", "#D1A054", "#6D8A96", "#6B665C"],
+    grid: "rgba(32, 75, 87, 0.12)",
+    text: "#17313A",
+    accent: "#204B57",
+    background: "rgba(250, 247, 242, 0.96)",
+  },
+  amber: {
+    palette: ["#A95C00", "#E78A00", "#FFD166", "#8B4513", "#7C6A0A", "#D8572A", "#A47148", "#E09F3E"],
+    grid: "rgba(169, 92, 0, 0.14)",
+    text: "#3A2813",
+    accent: "#E78A00",
+    background: "rgba(255, 248, 235, 0.96)",
+  },
+  cobalt: {
+    palette: ["#2448C0", "#4E7BFF", "#7CB7FF", "#163172", "#3A86FF", "#6C9BCF", "#30475E", "#6A8DFF"],
+    grid: "rgba(36, 72, 192, 0.14)",
+    text: "#18264A",
+    accent: "#2448C0",
+    background: "rgba(243, 247, 255, 0.96)",
+  },
+  terracotta: {
+    palette: ["#B8573B", "#D98E73", "#7C3A2B", "#E9C4A1", "#8D5B4C", "#F4A261", "#9C6644", "#E76F51"],
+    grid: "rgba(184, 87, 59, 0.14)",
+    text: "#3D241D",
+    accent: "#B8573B",
+    background: "rgba(255, 246, 242, 0.96)",
+  },
+  midnight: {
+    palette: ["#86A8FF", "#5EEAD4", "#FCA5A5", "#C4B5FD", "#FDE68A", "#67E8F9", "#F9A8D4", "#93C5FD"],
+    grid: "rgba(134, 168, 255, 0.18)",
+    text: "#E5EDF7",
+    accent: "#86A8FF",
+    background: "rgba(16, 24, 40, 0.96)",
+  },
 };
 
 const HIDDEN_CHART_WIDTH = 1200;
@@ -123,7 +158,7 @@ export function buildChartData(spec: ClientChartSpec, rows: DataRow[]) {
         borderWidth: spec.type === "line" ? 3 : 1.5,
         borderRadius: spec.type === "bar" ? 10 : 0,
         borderSkipped: false,
-        fill: spec.type === "line",
+        fill: spec.fill_area ?? (spec.type === "line"),
         tension: (spec.smooth ?? (spec.type === "line")) ? 0.35 : 0,
         pointRadius: spec.type === "line" ? 3 : 0,
         pointHoverRadius: spec.type === "line" ? 6 : 0,
@@ -140,15 +175,18 @@ export function buildChartOptions(spec: ClientChartSpec) {
   const interactive = spec.interactive ?? true;
   const showLegend = spec.show_legend ?? (spec.type === "pie" || spec.type === "doughnut" ? true : spec.series.length > 1);
   const stacked = spec.stacked ?? false;
+  const axisValueFormatter = buildValueFormatter(spec.value_format);
+  const indexAxis = spec.orientation === "horizontal" ? "y" : "x";
 
   return {
     responsive: true,
     maintainAspectRatio: false,
     normalized: true,
+    indexAxis,
     interaction: interactive
       ? {
           mode: "nearest",
-          axis: spec.type === "scatter" ? "xy" : "x",
+          axis: spec.type === "scatter" ? "xy" : indexAxis,
           intersect: false,
         }
       : undefined,
@@ -159,7 +197,7 @@ export function buildChartOptions(spec: ClientChartSpec) {
     plugins: {
       legend: {
         display: showLegend,
-        position: "top",
+        position: spec.legend_position ?? "top",
         labels: {
           color: theme.text,
           usePointStyle: true,
@@ -177,17 +215,37 @@ export function buildChartOptions(spec: ClientChartSpec) {
           weight: 700,
         },
         padding: {
+          bottom: spec.subtitle ? 4 : 16,
+        },
+      },
+      subtitle: {
+        display: Boolean(spec.subtitle),
+        text: spec.subtitle,
+        align: "start",
+        color: theme.text,
+        font: {
+          size: 11,
+          weight: 500,
+        },
+        padding: {
           bottom: 16,
         },
       },
       tooltip: {
         enabled: interactive,
-        backgroundColor: "rgba(23, 30, 36, 0.92)",
-        titleColor: "#F8F6F2",
-        bodyColor: "#F8F6F2",
+        backgroundColor: spec.style_preset === "midnight" ? "rgba(248, 250, 252, 0.96)" : "rgba(23, 30, 36, 0.92)",
+        titleColor: spec.style_preset === "midnight" ? "#111827" : "#F8F6F2",
+        bodyColor: spec.style_preset === "midnight" ? "#111827" : "#F8F6F2",
         padding: 12,
         cornerRadius: 10,
         displayColors: true,
+        callbacks: {
+          label(context: { dataset: { label?: string }; parsed: { x?: number; y?: number }; raw: number }) {
+            const value = spec.type === "scatter" ? context.parsed.y ?? 0 : context.raw;
+            const formatted = axisValueFormatter(value);
+            return context.dataset.label ? `${context.dataset.label}: ${formatted}` : formatted;
+          },
+        },
       },
     },
     scales:
@@ -196,8 +254,14 @@ export function buildChartOptions(spec: ClientChartSpec) {
         : {
             x: {
               stacked,
+              title: {
+                display: Boolean(spec.x_axis_label),
+                text: spec.x_axis_label,
+                color: theme.text,
+              },
               grid: {
-                display: false,
+                display: spec.show_grid ?? false,
+                color: theme.grid,
               },
               ticks: {
                 color: theme.text,
@@ -207,11 +271,18 @@ export function buildChartOptions(spec: ClientChartSpec) {
             y: {
               stacked,
               beginAtZero: true,
+              title: {
+                display: Boolean(spec.y_axis_label),
+                text: spec.y_axis_label,
+                color: theme.text,
+              },
               grid: {
+                display: spec.show_grid ?? true,
                 color: theme.grid,
               },
               ticks: {
                 color: theme.text,
+                callback: axisValueFormatter,
               },
             },
           },
@@ -241,6 +312,30 @@ export function buildChartPlugins(spec: ClientChartSpec): Plugin[] {
         ctx.save();
         ctx.fillStyle = theme.background;
         ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      },
+    },
+    {
+      id: "reportFoundryDataLabels",
+      afterDatasetsDraw(chart) {
+        if (!spec.show_data_labels) {
+          return;
+        }
+        const { ctx } = chart;
+        ctx.save();
+        ctx.fillStyle = theme.text;
+        ctx.font = "600 11px sans-serif";
+        for (const meta of chart.getSortedVisibleDatasetMetas()) {
+          for (let index = 0; index < meta.data.length; index += 1) {
+            const element = meta.data[index];
+            const value = chart.data.datasets[meta.index]?.data?.[index];
+            if (typeof value !== "number") {
+              continue;
+            }
+            ctx.textAlign = "center";
+            ctx.fillText(buildValueFormatter(spec.value_format)(value), element.x, element.y - 8);
+          }
+        }
         ctx.restore();
       },
     },
@@ -360,4 +455,22 @@ function parseHexColor(color: string): [number, number, number] | null {
     ];
   }
   return null;
+}
+
+function buildValueFormatter(format: ClientChartSpec["value_format"]) {
+  switch (format) {
+    case "integer":
+      return (value: unknown) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(value ?? 0));
+    case "currency":
+      return (value: unknown) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value ?? 0));
+    case "percent":
+      return (value: unknown) => new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 }).format(Number(value ?? 0));
+    case "compact":
+      return (value: unknown) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value ?? 0));
+    case "string":
+      return (value: unknown) => String(value ?? "");
+    case "number":
+    default:
+      return (value: unknown) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(Number(value ?? 0));
+  }
 }
