@@ -25,8 +25,13 @@ Back to neural networks, first we observe that most neural networks are paramete
 
 The picture to keep in mind is not mystical at all.  It is just a family of simple parameterized curves getting better and better at hugging some more interesting target curve.  You vary the parameters, the shape changes, and with enough flexibility the model can press itself surprisingly close to what you wanted.  That basic approximation story is the first reason I came to think neural networks deserve to be taken seriously.
 
-`TODO:` implement in our RNN module:
-A simple picture of piecewise linear curves closing in on some wavy function, something with a bit more personality than a straight line, is really the right intuition here.  This is the basic idea behind why even very simple activation schemes can end up providing universal approximation.
+![A small ReLU MLP learning sin(8πx) on [0,1] at several checkpoints.](/blog-assets/theoretical-justification-of-neural-networks/mlp-sine-approximation-snapshots.png)
+
+*This is the plain picture I wanted in my head when first learning the theorem: one very small ReLU network gradually learning to hug a more interesting curve.*
+
+![MLP loss over training while it learns sin(8πx).](/blog-assets/theoretical-justification-of-neural-networks/mlp-sine-loss.png)
+
+*The loss curve is not the point by itself, but it helps anchor the approximation snapshots in an ordinary training process rather than a magical one.*
 
 ### 3. Turing Completeness and Where the Infinity Hides
 
@@ -52,49 +57,37 @@ That is also where the "chaos" starts to become more than a metaphor: it is the 
 
 What is so striking is that Pollack really does say the strong version. In the abstract, he writes that "a small weight adjustment causes a 'bifurcation' in the limit behavior of the network" and that this phase transition corresponds to the onset of generalization to "arbitrary-length strings." He also says the architecture appears capable of generating nonregular languages by exploiting "fractal and chaotic dynamics." Later he makes the wonderfully blunt remark that "a discrete dynamical system is just an iterative computation." And the paper does not leave the idea at the level of metaphor: when discussing parenthesis balancing, he says it is mathematically possible to embed an "infinite state machine" in a dynamical recognizer, with a state space built from fractal self-similarity. That is exactly the kind of claim that made this line of thought hard for me to forget.
 
-<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start;">
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/balanced_parentheses-training-curves.png" alt="Training curves for the balanced-parentheses recognizer, with train, short-test, and long-test accuracy and loss over time." width="560" />
-    <figcaption><em>The thing I wanted to capture from Pollack is already visible here: performance on much longer strings can lag and then change qualitatively once the state dynamics settle into a different regime.</em></figcaption>
-  </figure>
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/balanced_parentheses-response-bifurcation.png" alt="A Pollack-style response diagram showing the balanced-parentheses model outputs on the first 25 characteristic parenthesis strings over training." width="560" />
-    <figcaption><em>This is the closest homage to Pollack's original figure: a fixed set of characteristic strings tracked across training, with a visible split as the recognizer begins to separate regimes.</em></figcaption>
-  </figure>
-</div>
+Rather than projecting the state space down with PCA this time, I wanted to look at the hidden coordinates directly.  That makes the pictures less dramatic in one sense, but more honest in another.  If there is a computational regime change here, I would rather see it in the actual hidden units than in a projection that already did some interpretive work for me.
 
-<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-layered-basepts64.png" alt="A layered symbolic dust figure illustrating how discrete structure can be embedded in a bounded state-space region." width="560" />
-    <figcaption><em>The layered dust version gives the cleaner large-scale geometry.</em></figcaption>
-  </figure>
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-points1000-prefix4.png" alt="A sampled Cantor-dust style point cloud showing a more grainy version of the same symbolic geometry." width="560" />
-    <figcaption><em>The sampled version is rougher and more atmospheric.  I may keep both because they suggest slightly different intuitions.</em></figcaption>
-  </figure>
-</div>
+![Length distribution and invalid-example composition for the balanced-parentheses curriculum.](/blog-assets/theoretical-justification-of-neural-networks/rnn-dataset-diversity.png)
 
-<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-001.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions at epoch 1." width="560" />
-    <figcaption><em>At the beginning these shorter probe strings do not yet seem to live in a cleanly organized region of state space.</em></figcaption>
-  </figure>
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-034.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions at epoch 34." width="560" />
-    <figcaption><em>By the first major checkpoint there is a little more coherence, but the geometry is still visibly unsettled.</em></figcaption>
-  </figure>
-</div>
+*The curriculum here is intentionally mixed.  Short and long strings both stay present, and the invalid examples are not just random garbage but include near-misses and bad concatenations that force the recognizer to learn sharper boundaries.*
 
-<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-134.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions later in training." width="560" />
-    <figcaption><em>Later on, the hidden-state trajectories start to look like the network is discovering a more stable computational regime.</em></figcaption>
-  </figure>
-  <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-200.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions at the end of training." width="560" />
-    <figcaption><em>At the end, the same probe input traces a much more structured picture, which is the closest thing here to Pollack's visual argument.</em></figcaption>
-  </figure>
-</div>
+![Accuracy on train, short-test, and long-test splits for the one-layer and two-layer RNNs.](/blog-assets/theoretical-justification-of-neural-networks/rnn-training-metrics.png)
+
+*This is the first place the Pollack-style story becomes visible again: short strings can become easy well before the longer strings do, and the generalization curve is not especially smooth.*
+
+![Response bifurcation for a fixed set of valid and invalid parenthesis strings across training.](/blog-assets/theoretical-justification-of-neural-networks/rnn-response-bifurcation.png)
+
+*This is the closest direct homage to Pollack's original diagrams: a fixed probe set, tracked through training, so that one can watch qualitative separations appear rather than merely compare the endpoints.*
+
+[Interactive response diagram](/blog-assets/theoretical-justification-of-neural-networks/rnn-response-bifurcation.html)
+
+![One-layer RNN hidden-state traces at initialization, shown directly in paired hidden coordinates.](/blog-assets/theoretical-justification-of-neural-networks/rnn-1layer-traces-initial.png)
+
+*At initialization the probe strings do not yet inhabit anything like a stable symbolic geography.  The traces wander, but they do not clearly separate.*
+
+![One-layer RNN hidden-state traces at its strongest "aha" checkpoint.](/blog-assets/theoretical-justification-of-neural-networks/rnn-1layer-traces-aha.png)
+
+*At the one-layer model's sharpest transition, the traces begin to carve out more legible paths in the hidden coordinates themselves.  That is the sort of behavioral bifurcation I was hoping to catch.*
+
+![Two-layer RNN hidden-state traces at its strongest "aha" checkpoint.](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-traces-aha.png)
+
+*The two-layer model is especially interesting because the second row gives us another dynamical surface to watch.  The extra depth does not merely improve accuracy; it changes where the computation seems to settle.*
+
+![Two-layer RNN hidden-state traces at the end of training.](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-traces-final.png)
+
+*By the end the traces are still not "explained," but they are far more structured than at the start.  That is enough, for me, to keep Pollack's old intuition alive: the geometry of the hidden states is not decorative.  It is where part of the computation lives.*
 
 ### 5. Wrap-Up
 

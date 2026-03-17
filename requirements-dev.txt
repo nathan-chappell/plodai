@@ -1,6 +1,7 @@
 -r requirements.txt
+kaleido
 httpx
-matplotlib
 pytest
 ruff
+plotly
 torch
