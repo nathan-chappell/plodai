@@ -34,7 +34,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type ChartAgentTab = "agent" | "goal" | "demo";
+type ChartAgentTab = "agent" | "demo";
 
 const DEFAULT_STATUS = "Load CSV or JSON chartable artifacts to start using the Chart agent.";
 const DEFAULT_BRIEF =
@@ -80,7 +80,6 @@ export const chartAgentCapability: CapabilityDefinition = {
   description: "Beautiful Chart.js rendering over explicit CSV and JSON artifacts.",
   tabs: [
     { id: "agent", label: "Agent" },
-    { id: "goal", label: "Goal" },
     { id: "demo", label: "Demo" },
   ],
 };
@@ -110,7 +109,7 @@ export function ChartAgentPage({
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
-    allowedTabs: ["agent", "goal", "demo"],
+    allowedTabs: ["agent", "demo"],
   });
   const capabilityBundle = useMemo(() => buildChartAgentBundle(), []);
   const clientTools = useMemo(() => createChartAgentClientTools({ files }), [files]);
@@ -118,7 +117,6 @@ export function ChartAgentPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
-    reloadScenario,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildChartAgentDemoScenario,
@@ -206,10 +204,6 @@ export function ChartAgentPage({
         </ReportWorkspaceLayout>
       ) : null}
 
-      {activeWorkspaceTab === "goal" ? (
-        <GoalPanel investigationBrief={investigationBrief} setInvestigationBrief={setInvestigationBrief} />
-      ) : null}
-
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
@@ -246,7 +240,6 @@ export function ChartAgentPage({
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}
-              onReloadScenario={reloadScenario}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>

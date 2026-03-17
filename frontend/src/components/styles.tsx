@@ -931,11 +931,11 @@ export const ChatKitPanePill = styled.div`
   text-transform: uppercase;
 `;
 
-export const ChatKitPaneSurface = styled.div<{ $light?: boolean }>`
+export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: number }>`
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  min-height: 430px;
+  min-height: ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.08)")};
@@ -951,7 +951,7 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean }>`
 
 export const ChatKitPaneEmpty = styled.div`
   ${emptyStateCss};
-  min-height: 430px;
+  min-height: inherit;
   color: rgba(248, 246, 242, 0.74);
   padding: 1rem;
 `;

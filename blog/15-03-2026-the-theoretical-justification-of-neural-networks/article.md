@@ -29,10 +29,6 @@ The picture to keep in mind is not mystical at all.  It is just a family of simp
 
 *This is the plain picture I wanted in my head when first learning the theorem: one very small ReLU network gradually learning to hug a more interesting curve.*
 
-![MLP loss over training while it learns sin(8πx).](/blog-assets/theoretical-justification-of-neural-networks/mlp-sine-loss.png)
-
-*The loss curve is not the point by itself, but it helps anchor the approximation snapshots in an ordinary training process rather than a magical one.*
-
 ### 3. Turing Completeness and Where the Infinity Hides
 
 Similar considerations can be made for recurrent neural networks (RNNs), but now we are after something stronger.  Rather than approximating some target class of functions, we want Turing completeness.  Glibly, that means the system can in principle carry out any computation a normal programming language can.  In other words, we want to know whether RNNs are really general-purpose problem-solving machines.
@@ -61,33 +57,17 @@ Rather than projecting the state space down with PCA this time, I wanted to look
 
 ![Length distribution and invalid-example composition for the balanced-parentheses curriculum.](/blog-assets/theoretical-justification-of-neural-networks/rnn-dataset-diversity.png)
 
-*The curriculum here is intentionally mixed.  Short and long strings both stay present, and the invalid examples are not just random garbage but include near-misses and bad concatenations that force the recognizer to learn sharper boundaries.*
+*The curriculum here is intentionally staged.  The model is rolled through length cohorts 20, 50, and 100, and each cohort gets harder invalid examples in sequence: random negatives first, then near-misses, then balanced-but-invalid strings that defeat a cheap "just count the net balance" strategy.*
 
-![Accuracy on train, short-test, and long-test splits for the one-layer and two-layer RNNs.](/blog-assets/theoretical-justification-of-neural-networks/rnn-training-metrics.png)
+![Training phases and probe responses for the two-layer RNN across the full curriculum.](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-training-story.png)
 
-*This is the first place the Pollack-style story becomes visible again: short strings can become easy well before the longer strings do, and the generalization curve is not especially smooth.*
+*This is the main Pollack-style picture.  The top panel shows accuracy by evaluation cohort as the training phases roll forward.  The bottom panel holds a fixed probe set in place so we can watch individual strings split apart, recover, or stay confused as the parameters change.  It is much easier to see the model's changing behavior this way than by comparing only the beginning and end.*
 
-![Response bifurcation for a fixed set of valid and invalid parenthesis strings across training.](/blog-assets/theoretical-justification-of-neural-networks/rnn-response-bifurcation.png)
+[Interactive two-layer story chart](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-training-story.html)
 
-*This is the closest direct homage to Pollack's original diagrams: a fixed probe set, tracked through training, so that one can watch qualitative separations appear rather than merely compare the endpoints.*
+The two-layer model is the one I would actually show in a short public-facing writeup.  The one-layer net is still interesting, but the two-layer picture is cleaner: it separates some invalid families much more decisively while still leaving enough mistakes and reversals to make the dynamics visible.  It feels less like a sterile success story and more like watching a recognizer figure out what kind of errors matter.
 
-[Interactive response diagram](/blog-assets/theoretical-justification-of-neural-networks/rnn-response-bifurcation.html)
-
-![One-layer RNN hidden-state traces at initialization, shown directly in paired hidden coordinates.](/blog-assets/theoretical-justification-of-neural-networks/rnn-1layer-traces-initial.png)
-
-*At initialization the probe strings do not yet inhabit anything like a stable symbolic geography.  The traces wander, but they do not clearly separate.*
-
-![One-layer RNN hidden-state traces at its strongest "aha" checkpoint.](/blog-assets/theoretical-justification-of-neural-networks/rnn-1layer-traces-aha.png)
-
-*At the one-layer model's sharpest transition, the traces begin to carve out more legible paths in the hidden coordinates themselves.  That is the sort of behavioral bifurcation I was hoping to catch.*
-
-![Two-layer RNN hidden-state traces at its strongest "aha" checkpoint.](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-traces-aha.png)
-
-*The two-layer model is especially interesting because the second row gives us another dynamical surface to watch.  The extra depth does not merely improve accuracy; it changes where the computation seems to settle.*
-
-![Two-layer RNN hidden-state traces at the end of training.](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-traces-final.png)
-
-*By the end the traces are still not "explained," but they are far more structured than at the start.  That is enough, for me, to keep Pollack's old intuition alive: the geometry of the hidden states is not decorative.  It is where part of the computation lives.*
+I also generated direct hidden-state trace plots, but I would treat those as supporting material rather than headline figures.  They are useful when you want to stare at the geometry itself, but the simpler training-story chart above carries the idea much better for a general reader.  For a short essay or LinkedIn adaptation, that is the balance I would strike.
 
 ### 5. Wrap-Up
 

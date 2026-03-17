@@ -34,7 +34,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type CsvAgentTab = "agent" | "goal" | "demo";
+type CsvAgentTab = "agent" | "demo";
 
 const DEFAULT_STATUS = "Load CSV files to start using the CSV agent.";
 const DEFAULT_BRIEF =
@@ -80,7 +80,6 @@ export const csvAgentCapability: CapabilityDefinition = {
   description: "Structured CSV analysis and chartable artifact creation.",
   tabs: [
     { id: "agent", label: "Agent" },
-    { id: "goal", label: "Goal" },
     { id: "demo", label: "Demo" },
   ],
 };
@@ -110,7 +109,7 @@ export function CsvAgentPage({
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
-    allowedTabs: ["agent", "goal", "demo"],
+    allowedTabs: ["agent", "demo"],
   });
   const capabilityBundle = useMemo(() => buildCsvAgentBundle(), []);
   const clientTools = useMemo(() => createCsvAgentClientTools({ files }), [files]);
@@ -118,7 +117,6 @@ export function CsvAgentPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
-    reloadScenario,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildCsvAgentDemoScenario,
@@ -197,10 +195,6 @@ export function CsvAgentPage({
         </ReportWorkspaceLayout>
       ) : null}
 
-      {activeWorkspaceTab === "goal" ? (
-        <GoalPanel investigationBrief={investigationBrief} setInvestigationBrief={setInvestigationBrief} />
-      ) : null}
-
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
@@ -243,7 +237,6 @@ export function CsvAgentPage({
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}
-              onReloadScenario={reloadScenario}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>

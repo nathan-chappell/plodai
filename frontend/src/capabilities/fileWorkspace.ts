@@ -19,6 +19,7 @@ export function useCapabilityFileWorkspace(options: {
   allowedTabs: string[];
 }) {
   const { user } = useAppState();
+  const allowedTabsKey = options.allowedTabs.join("|");
   const [files, setFiles] = useState<LocalWorkspaceFile[]>([]);
   const [status, setStatus] = useState(options.defaultStatus);
   const [investigationBrief, setInvestigationBrief] = useState(options.defaultBrief);
@@ -68,7 +69,7 @@ export function useCapabilityFileWorkspace(options: {
     return () => {
       cancelled = true;
     };
-  }, [options.allowedTabs, options.capabilityId, options.defaultBrief, options.defaultStatus, options.defaultTab, user]);
+  }, [allowedTabsKey, options.capabilityId, options.defaultBrief, options.defaultStatus, options.defaultTab, user]);
 
   useEffect(() => {
     if (!user || !hydrated) {

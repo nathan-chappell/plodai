@@ -271,4 +271,7 @@ export type PdfSmartSplitEffect = {
   markdown: string;
 };
 
-export type ClientEffect = ChartRenderedEffect | ReportSectionEffect | PdfSmartSplitEffect;
+export type ClientEffect =
+  | ChartRenderedEffect
+  | ReportSectionEffect
+  | PdfSmartSplitEffect;

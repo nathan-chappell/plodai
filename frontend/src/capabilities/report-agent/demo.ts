@@ -46,6 +46,7 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
       "This is the Report Agent demo.",
       "Start by listing the workspace files.",
       "Investigate the sales CSV, create one useful chart through the right specialist flow, inspect the PDF packet if it helps, and append a short report section summarizing the key takeaway.",
+      "Do not stop until you have used append_report_section to add a useful report update.",
       "Do not stop after one tool call.",
     ].join(" "),
     workspaceSeed: [

@@ -107,6 +107,7 @@ export function ChatKitHarness({
   quickActions,
   colorScheme = "dark",
   showDictation = true,
+  surfaceMinHeight,
 }: {
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
@@ -121,6 +122,7 @@ export function ChatKitHarness({
   quickActions?: ChatKitQuickAction[];
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
+  surfaceMinHeight?: number;
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -318,7 +320,7 @@ export function ChatKitHarness({
         </ChatKitPaneToolbar>
       ) : null}
       {status ? <ChatKitPaneHarnessMeta $light={colorScheme === "light"}>{status}</ChatKitPaneHarnessMeta> : null}
-      <ChatKitPaneSurface $light={colorScheme === "light"}>
+      <ChatKitPaneSurface $light={colorScheme === "light"} $minHeight={surfaceMinHeight}>
         <ChatKit control={chatKit.control} />
       </ChatKitPaneSurface>
     </>
@@ -333,6 +335,20 @@ export function ChatKitPane({
   clientTools,
   onEffects,
   onFilesAdded,
+  headerTitle,
+  greeting,
+  prompts,
+  composerPlaceholder,
+  quickActions,
+  colorScheme,
+  showDictation,
+  panePill,
+  paneTitle,
+  paneMeta,
+  emptyMessage,
+  showPaneHeader = true,
+  showDefaultModelMeta = true,
+  surfaceMinHeight,
 }: {
   capabilityBundle: CapabilityBundle;
   enabled: boolean;
@@ -341,21 +357,42 @@ export function ChatKitPane({
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
+  headerTitle?: string;
+  greeting?: string;
+  prompts?: ReadonlyArray<{ label: string; prompt: string; icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle" }>;
+  composerPlaceholder?: string;
+  quickActions?: ChatKitQuickAction[];
+  colorScheme?: "dark" | "light";
+  showDictation?: boolean;
+  panePill?: string;
+  paneTitle?: string;
+  paneMeta?: string;
+  emptyMessage?: string;
+  showPaneHeader?: boolean;
+  showDefaultModelMeta?: boolean;
+  surfaceMinHeight?: number;
 }) {
   const canInvestigate = enabled && files.length > 0;
+  const resolvedMeta =
+    paneMeta ??
+    (canInvestigate
+      ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. ${investigationBrief.trim() ? `Current goal: ${investigationBrief.trim()}` : "Start with a summary, extraction, or investigation pass."}`
+      : enabled
+        ? "Add one or more local files to start the investigation."
+        : "Sign in to start analyzing local files.");
 
   return (
     <ChatKitPaneCard>
-      <ChatKitPanePill>Analyst workspace</ChatKitPanePill>
-      <h2>Investigate your files</h2>
-      <ChatKitPaneMeta>
-        {canInvestigate
-          ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. ${investigationBrief.trim() ? `Current goal: ${investigationBrief.trim()}` : "Start with a summary, extraction, or investigation pass."}`
-          : enabled
-            ? "Add one or more local files to start the investigation."
-            : "Sign in to start analyzing local files."}
-      </ChatKitPaneMeta>
-      <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
+      {showPaneHeader ? (
+        <>
+          <ChatKitPanePill>{panePill ?? "Analyst workspace"}</ChatKitPanePill>
+          <h2>{paneTitle ?? "Investigate your files"}</h2>
+          <ChatKitPaneMeta>{resolvedMeta}</ChatKitPaneMeta>
+        </>
+      ) : null}
+      {showDefaultModelMeta ? (
+        <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
+      ) : null}
       {canInvestigate ? (
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
@@ -364,11 +401,19 @@ export function ChatKitPane({
           clientTools={clientTools}
           onEffects={onEffects}
           onFilesAdded={onFilesAdded}
+          headerTitle={headerTitle}
+          greeting={greeting}
+          prompts={prompts}
+          composerPlaceholder={composerPlaceholder}
+          quickActions={quickActions}
+          colorScheme={colorScheme}
+          showDictation={showDictation}
+          surfaceMinHeight={surfaceMinHeight}
         />
       ) : (
-        <ChatKitPaneSurface>
+        <ChatKitPaneSurface $minHeight={surfaceMinHeight}>
           <ChatKitPaneEmpty>
-            {enabled ? "The agent is ready once you add local CSV files." : "Sign in to open the analyst workspace."}
+            {emptyMessage ?? (enabled ? "The agent is ready once you add local CSV files." : "Sign in to open the analyst workspace.")}
           </ChatKitPaneEmpty>
         </ChatKitPaneSurface>
       )}

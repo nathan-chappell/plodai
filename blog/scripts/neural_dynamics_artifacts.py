@@ -48,7 +48,7 @@ INVALID_KIND_ORDER: tuple[str, ...] = (
     INVALID_KIND_CORRUPTION,
     INVALID_KIND_BALANCED,
 )
-DEFAULT_BLOCK_EPOCHS = 10
+DEFAULT_BLOCK_EPOCHS = 20
 DEFAULT_BATCH_SIZE = 16
 VERY_LONG_LENGTHS: tuple[int, ...] = (200, 260)
 VERY_LONG_LENGTH_MIN = VERY_LONG_LENGTHS[0]
@@ -115,6 +115,7 @@ class ProbeSpec:
     family: str
     probe_kind: str
     color: str
+    highlight: bool = True
 
 
 @dataclass
@@ -388,9 +389,9 @@ def build_training_blocks(
 ) -> list[CohortBlock]:
     blocks: list[CohortBlock] = []
     learning_rates = {
-        PHASE_KIND_RANDOM: 0.03,
-        PHASE_KIND_OFF_BY_ONE: 0.025,
-        PHASE_KIND_BALANCED: 0.02,
+        PHASE_KIND_RANDOM: 0.1,
+        PHASE_KIND_OFF_BY_ONE: 0.1,
+        PHASE_KIND_BALANCED: 0.1,
     }
     for cohort_index, cohort_length in enumerate(TRAIN_COHORTS):
         active_lengths = TRAIN_COHORTS[: cohort_index + 1]
@@ -464,8 +465,16 @@ def deterministic_invalid(length: int, kind: str, seed: int) -> str:
     return sample_invalid_sequence(random.Random(seed), length, kind=kind).text
 
 
+def deterministic_transition(length: int, seed: int) -> str:
+    if length <= 2:
+        return ")" * length
+    if (length - 2) % 2 == 0 and length >= 4:
+        return ")" + deterministic_valid(length - 2, seed) + "("
+    return ")" + deterministic_invalid(length - 1, INVALID_KIND_CORRUPTION, seed)
+
+
 def build_response_probes() -> tuple[ProbeSpec, ...]:
-    return (
+    highlighted = (
         ProbeSpec("20 valid", deterministic_valid(20, 1_020), "cohort-20", "valid", FAMILY_PALETTES["cohort-20"][0]),
         ProbeSpec("30 off-by-one", deterministic_invalid(30, INVALID_KIND_CORRUPTION, 1_030), "cohort-20", PHASE_KIND_OFF_BY_ONE, FAMILY_PALETTES["cohort-20"][1]),
         ProbeSpec("20 balanced-invalid", deterministic_invalid(20, INVALID_KIND_BALANCED, 1_040), "cohort-20", PHASE_KIND_BALANCED, FAMILY_PALETTES["cohort-20"][2]),
@@ -479,7 +488,65 @@ def build_response_probes() -> tuple[ProbeSpec, ...]:
         ProbeSpec("200 valid", deterministic_valid(200, 4_200), "very-long", "valid", FAMILY_PALETTES["very-long"][0]),
         ProbeSpec("200 balanced-invalid", deterministic_invalid(200, INVALID_KIND_BALANCED, 4_240), "very-long", PHASE_KIND_BALANCED, FAMILY_PALETTES["very-long"][2]),
     )
-
+    background_specs: list[ProbeSpec] = []
+    background_lengths = {
+        "cohort-20": (20, 25, 30),
+        "cohort-50": (50, 60, 75),
+        "cohort-100": (100, 120, 150),
+        "very-long": VERY_LONG_LENGTHS,
+    }
+    family_offsets = {
+        "cohort-20": 10_000,
+        "cohort-50": 20_000,
+        "cohort-100": 30_000,
+        "very-long": 40_000,
+    }
+    for family, lengths in background_lengths.items():
+        palette = FAMILY_PALETTES[family]
+        for index, length in enumerate(lengths):
+            seed_base = family_offsets[family] + length * 17
+            if length % 2 == 0:
+                background_specs.append(
+                    ProbeSpec(
+                        f"{family}-{length}-valid",
+                        deterministic_valid(length, seed_base + 1),
+                        family,
+                        "valid",
+                        palette[0],
+                        False,
+                    )
+                )
+                background_specs.append(
+                    ProbeSpec(
+                        f"{family}-{length}-balanced",
+                        deterministic_invalid(length, INVALID_KIND_BALANCED, seed_base + 2),
+                        family,
+                        PHASE_KIND_BALANCED,
+                        palette[2],
+                        False,
+                    )
+                )
+            background_specs.append(
+                ProbeSpec(
+                    f"{family}-{length}-off",
+                    deterministic_invalid(length, INVALID_KIND_CORRUPTION, seed_base + 3),
+                    family,
+                    PHASE_KIND_OFF_BY_ONE,
+                    palette[1],
+                    False,
+                )
+            )
+            background_specs.append(
+                ProbeSpec(
+                    f"{family}-{length}-transition",
+                    deterministic_transition(length, seed_base + 4),
+                    family,
+                    "transition",
+                    palette[min(index, 2)],
+                    False,
+                )
+            )
+    return (*highlighted, *background_specs)
 
 def build_trace_probes() -> tuple[ProbeSpec, ...]:
     valid_40 = deterministic_valid(40, 9_001)
@@ -832,7 +899,7 @@ def run_rnn_experiment(
     model_builder = lambda: TinyTraceRNN(num_layers=num_layers)
     model = model_builder().to(DEVICE)
     model_title = build_model_title(num_layers)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.03, momentum=0.9)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
     criterion = nn.BCEWithLogitsLoss()
     blocks = build_training_blocks(block_epochs=block_epochs, train_samples=train_samples)
     evaluation_sets, balanced_invalid_examples = build_evaluation_sets(
@@ -1398,20 +1465,16 @@ def build_bifurcation_figure(results: list[RNNExperimentResult]) -> go.Figure:
             values = [response[probe_index] for response in result.response_history]
             final_prediction = final_probabilities[probe_index] >= 0.5
             actual_valid = is_balanced_parentheses(probe.text)
-            final_correct = final_prediction == actual_valid
-            legend_name = (
-                ("valid" if actual_valid else "invalid")
-                + " / "
-                + ("correct" if final_correct else "wrong")
-            )
+            legend_name = probe_status_label(actual_valid, final_prediction)
             dash = {
                 "valid": "solid",
                 PHASE_KIND_OFF_BY_ONE: "dash",
                 PHASE_KIND_BALANCED: "dot",
                 "transition": "dashdot",
             }[probe.probe_kind]
-            showlegend = legend_name not in shown_legends
-            shown_legends.add(legend_name)
+            showlegend = probe.highlight and legend_name not in shown_legends
+            if probe.highlight:
+                shown_legends.add(legend_name)
             figure.add_trace(
                 go.Scatter(
                     x=epochs,
@@ -1427,7 +1490,7 @@ def build_bifurcation_figure(results: list[RNNExperimentResult]) -> go.Figure:
                         "width": 2.2,
                         "dash": dash,
                     },
-                    opacity=0.84,
+                    opacity=0.92 if probe.highlight else 0.38,
                     name=legend_name,
                     showlegend=showlegend,
                     customdata=[[probe.label, probe.text, probe.probe_kind, legend_name]] * len(epochs),
@@ -1441,6 +1504,30 @@ def build_bifurcation_figure(results: list[RNNExperimentResult]) -> go.Figure:
                 row=row_index,
                 col=1,
             )
+            switch_index = probe_switch_epoch(values, actual_valid)
+            if probe.highlight and switch_index is not None:
+                figure.add_trace(
+                    go.Scatter(
+                        x=[epochs[switch_index]],
+                        y=[values[switch_index]],
+                        mode="markers",
+                        marker={
+                            "size": 11,
+                            "symbol": "star",
+                            "color": "#111111",
+                            "line": {"color": "#f59e0b", "width": 1.4},
+                        },
+                        name="switch to correct",
+                        showlegend=False,
+                        customdata=[[probe.label, probe.text]],
+                        hovertemplate=(
+                            "switch to correct<br>epoch=%{x}<br>p(valid)=%{y:.3f}"
+                            "<br>%{customdata[0]}<br>%{customdata[1]}<extra></extra>"
+                        ),
+                    ),
+                    row=row_index,
+                    col=1,
+                )
         figure.update_yaxes(title_text="p(valid)", range=[0.0, 1.0], row=row_index, col=1)
         figure.update_xaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
         figure.update_yaxes(showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=1)
@@ -1547,12 +1634,7 @@ def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
         values = [response[probe_index] for response in result.response_history]
         final_prediction = final_probabilities[probe_index] >= 0.5
         actual_valid = is_balanced_parentheses(probe.text)
-        final_correct = final_prediction == actual_valid
-        status_label = (
-            ("valid" if actual_valid else "invalid")
-            + " / "
-            + ("correct" if final_correct else "wrong")
-        )
+        status_label = probe_status_label(actual_valid, final_prediction)
         legend_name = status_label
         dash = {
             "valid": "solid",
@@ -1561,7 +1643,8 @@ def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
             "transition": "dashdot",
         }[probe.probe_kind]
         showlegend = legend_name not in shown_legends
-        shown_legends.add(legend_name)
+        if probe.highlight:
+            shown_legends.add(legend_name)
         figure.add_trace(
             go.Scatter(
                 x=epochs,
@@ -1577,9 +1660,9 @@ def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
                     "width": 2.2,
                     "dash": dash,
                 },
-                opacity=0.84,
+                    opacity=0.92 if probe.highlight else 0.38,
                 name=legend_name,
-                showlegend=showlegend,
+                showlegend=probe.highlight and showlegend,
                 customdata=[[probe.label, probe.text, probe.probe_kind, status_label]] * len(epochs),
                 hovertemplate=(
                     "epoch=%{x}<br>p(valid)=%{y:.3f}"
@@ -1591,6 +1674,30 @@ def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
             row=2,
             col=1,
         )
+        switch_index = probe_switch_epoch(values, actual_valid)
+        if probe.highlight and switch_index is not None:
+            figure.add_trace(
+                go.Scatter(
+                    x=[epochs[switch_index]],
+                    y=[values[switch_index]],
+                    mode="markers",
+                    marker={
+                        "size": 11,
+                        "symbol": "star",
+                        "color": "#111111",
+                        "line": {"color": "#f59e0b", "width": 1.4},
+                    },
+                    name="switch to correct",
+                    showlegend=False,
+                    customdata=[[probe.label, probe.text]],
+                    hovertemplate=(
+                        "switch to correct<br>epoch=%{x}<br>p(valid)=%{y:.3f}"
+                        "<br>%{customdata[0]}<br>%{customdata[1]}<extra></extra>"
+                    ),
+                ),
+                row=2,
+                col=1,
+            )
     figure.update_xaxes(title_text="epoch", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=2, col=1)
     figure.update_yaxes(title_text="p(valid)", range=[0.0, 1.0], showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=2, col=1)
 
@@ -1611,6 +1718,33 @@ def rgba(hex_color: str, alpha: float) -> str:
     green = int(hex_color[2:4], 16)
     blue = int(hex_color[4:6], 16)
     return f"rgba({red},{green},{blue},{alpha:.3f})"
+
+
+def probe_status_label(actual_valid: bool, predicted_valid: bool) -> str:
+    return (
+        ("valid" if actual_valid else "invalid")
+        + " / "
+        + ("correct" if predicted_valid == actual_valid else "wrong")
+    )
+
+
+def probe_switch_epoch(values: list[float], actual_valid: bool) -> int | None:
+    previous_correct = None
+    for epoch_index, value in enumerate(values):
+        current_correct = (value >= 0.5) == actual_valid
+        if previous_correct is False and current_correct is True:
+            return epoch_index
+        previous_correct = current_correct
+    return None
+
+
+def row_string_annotation(payloads: list[dict[str, object]], *, valid_only: bool) -> str:
+    filtered = [payload for payload in payloads if bool(payload["is_valid"]) == valid_only]
+    lines = [
+        f"{payload['label']}: {payload['text']}"
+        for payload in filtered
+    ]
+    return "<br>".join(lines[:4]) if lines else ""
 
 
 def tail_slice(points: list[list[float]]) -> tuple[list[list[float]], int]:
@@ -1718,7 +1852,10 @@ def build_trace_figure(
                             "size": 8,
                             "color": color,
                             "symbol": symbol,
-                            "line": {"color": "#fdfcf8", "width": 0.8},
+                            "line": {
+                                "color": "#111111" if bool(payload["correct"]) else "#dc2626",
+                                "width": 1.4,
+                            },
                         },
                         text=text_values,
                         textposition="top center",
@@ -1741,9 +1878,12 @@ def build_trace_figure(
                             mode="markers",
                             marker={
                                 "size": 15,
-                                "symbol": "star",
+                                "symbol": "star" if bool(payload["correct"]) else "x",
                                 "color": color,
-                                "line": {"color": "#111827", "width": 1.2},
+                                "line": {
+                                    "color": "#111827" if bool(payload["correct"]) else "#dc2626",
+                                    "width": 1.4,
+                                },
                             },
                             showlegend=False,
                             hoverinfo="skip",
@@ -1756,10 +1896,23 @@ def build_trace_figure(
         figure.update_xaxes(title_text="state x", row=row_index, col=2)
         figure.update_yaxes(title_text="state y", row=row_index, col=1)
         figure.update_yaxes(title_text="state y", row=row_index, col=2)
+    valid_strings = row_string_annotation(payloads, valid_only=True)
+    invalid_strings = row_string_annotation(payloads, valid_only=False)
+    for row_index in range(1, row_count + 1):
+        figure.add_annotation(
+            x=1.02,
+            y=1 - ((row_index - 0.5) / row_count),
+            xref="paper",
+            yref="paper",
+            text=valid_strings if row_index <= num_layers else invalid_strings,
+            showarrow=False,
+            align="left",
+            font={"size": 10, "color": "#374151"},
+        )
     figure.update_layout(
         title=f"{model_title} hidden-state tail scatter at epoch {epoch}",
         legend={"orientation": "v", "x": 1.01, "y": 1.0, "font": {"size": 11}},
-        margin={"t": 95, "r": 320, "b": 60, "l": 60},
+        margin={"t": 95, "r": 420, "b": 60, "l": 60},
         width=1650,
         height=410 * row_count,
         **FIGURE_STYLE,
@@ -1841,7 +1994,10 @@ def build_trace_epoch_grid_figure(
                             "size": 7,
                             "color": color,
                             "symbol": symbol,
-                            "line": {"color": "#fdfcf8", "width": 0.8},
+                            "line": {
+                                "color": "#111111" if bool(payload["correct"]) else "#dc2626",
+                                "width": 1.3,
+                            },
                         },
                         text=text_values,
                         textposition="top center",
@@ -1864,9 +2020,12 @@ def build_trace_epoch_grid_figure(
                             mode="markers",
                             marker={
                                 "size": 13,
-                                "symbol": "star",
+                                "symbol": "star" if bool(payload["correct"]) else "x",
                                 "color": color,
-                                "line": {"color": "#111827", "width": 1.0},
+                                "line": {
+                                    "color": "#111827" if bool(payload["correct"]) else "#dc2626",
+                                    "width": 1.2,
+                                },
                             },
                             showlegend=False,
                             hoverinfo="skip",
@@ -1878,10 +2037,24 @@ def build_trace_epoch_grid_figure(
         for col_index in range(1, col_count + 1):
             figure.update_xaxes(title_text="state x", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=col_index)
             figure.update_yaxes(title_text="state y", showgrid=True, gridcolor="#e5e7eb", zeroline=False, row=row_index, col=col_index)
+    final_epoch_payloads = payloads_by_epoch[epochs[-1]]
+    valid_strings = row_string_annotation(final_epoch_payloads, valid_only=True)
+    invalid_strings = row_string_annotation(final_epoch_payloads, valid_only=False)
+    for row_index in range(1, row_count + 1):
+        figure.add_annotation(
+            x=1.015,
+            y=1 - ((row_index - 0.5) / row_count),
+            xref="paper",
+            yref="paper",
+            text=valid_strings if row_index <= num_layers else invalid_strings,
+            showarrow=False,
+            align="left",
+            font={"size": 10, "color": "#374151"},
+        )
     figure.update_layout(
         title=f"{model_title} tail traces across key epochs for {pair_label}",
         legend={"orientation": "v", "x": 1.01, "y": 1.0, "font": {"size": 11}},
-        margin={"t": 95, "r": 320, "b": 60, "l": 60},
+        margin={"t": 95, "r": 460, "b": 60, "l": 60},
         width=420 * col_count + 380,
         height=350 * row_count,
         **FIGURE_STYLE,

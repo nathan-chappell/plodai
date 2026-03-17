@@ -33,7 +33,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type PdfAgentTab = "agent" | "goal" | "demo";
+type PdfAgentTab = "agent" | "demo";
 
 const DEFAULT_STATUS = "Load PDF files to start carving bounded page ranges.";
 const DEFAULT_BRIEF =
@@ -79,7 +79,6 @@ export const pdfAgentCapability: CapabilityDefinition = {
   description: "Bounded PDF extraction and decomposition workspace.",
   tabs: [
     { id: "agent", label: "Agent" },
-    { id: "goal", label: "Goal" },
     { id: "demo", label: "Demo" },
   ],
 };
@@ -109,7 +108,7 @@ export function PdfAgentPage({
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
-    allowedTabs: ["agent", "goal", "demo"],
+    allowedTabs: ["agent", "demo"],
   });
   const capabilityBundle = useMemo(() => buildPdfAgentBundle(), []);
   const clientTools = useMemo(() => createPdfAgentClientTools({ files }), [files]);
@@ -117,7 +116,6 @@ export function PdfAgentPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
-    reloadScenario,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildPdfAgentDemoScenario,
@@ -211,10 +209,6 @@ export function PdfAgentPage({
         </ReportWorkspaceLayout>
       ) : null}
 
-      {activeWorkspaceTab === "goal" ? (
-        <GoalPanel investigationBrief={investigationBrief} setInvestigationBrief={setInvestigationBrief} />
-      ) : null}
-
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
@@ -255,7 +249,6 @@ export function PdfAgentPage({
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}
-              onReloadScenario={reloadScenario}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>

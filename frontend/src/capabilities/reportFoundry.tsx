@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import styled from "styled-components";
 
 import { useAppState } from "../app/context";
 import { MetaText } from "../app/styles";
@@ -7,6 +8,7 @@ import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
 import { NarrativeCard } from "../components/NarrativeCard";
+import { WorkspaceArtifactInspector } from "../components/WorkspaceArtifactInspector";
 import { buildReportAgentDemoScenario } from "./report-agent/demo";
 import { createReportAgentClientTools } from "./report-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
@@ -36,7 +38,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type ReportAgentTab = "report" | "goal" | "demo";
+type ReportAgentTab = "report" | "demo";
 
 const DEFAULT_STATUS = "Load local files to begin a report-led investigation.";
 const DEFAULT_BRIEF =
@@ -80,6 +82,24 @@ export function createReportFoundryClientTools(files: LocalWorkspaceFile[]): Cap
   return createReportAgentClientTools({ files });
 }
 
+function ReportSummaryArtifacts({ files }: { files: LocalWorkspaceFile[] }) {
+  return (
+    <CapabilityPanel>
+      <CapabilitySectionHeader>
+        <CapabilitySectionTitle>Workspace artifacts</CapabilitySectionTitle>
+        <CapabilityMetaText>
+          Click an artifact to inspect it.
+        </CapabilityMetaText>
+      </CapabilitySectionHeader>
+      <WorkspaceArtifactInspector
+        files={[...files].reverse()}
+        compact
+        emptyMessage="No workspace artifacts yet. As the report agent and its delegates create files, they will appear here."
+      />
+    </CapabilityPanel>
+  );
+}
+
 export const reportFoundryCapability: CapabilityDefinition = {
   id: "report-agent",
   path: "/capabilities/report-agent",
@@ -89,7 +109,6 @@ export const reportFoundryCapability: CapabilityDefinition = {
   description: "Narrative report assembly with CSV, chart, and PDF handoffs.",
   tabs: [
     { id: "report", label: "Report" },
-    { id: "goal", label: "Goal" },
     { id: "demo", label: "Demo" },
   ],
 };
@@ -124,7 +143,7 @@ export function ReportFoundryPage({
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "report",
-    allowedTabs: ["report", "goal", "demo"],
+    allowedTabs: ["report", "demo"],
   });
   const capabilityBundle = useMemo(() => buildReportAgentBundle(), []);
   const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(files), [files]);
@@ -132,7 +151,6 @@ export function ReportFoundryPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
-    reloadScenario,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildReportAgentDemoScenario,
@@ -140,6 +158,7 @@ export function ReportFoundryPage({
     setStatus,
     setReportEffects,
   });
+  const demoSeedIds = useMemo(() => new Set((demoScenario?.workspaceSeed ?? []).map((file) => file.id)), [demoScenario]);
 
   useEffect(() => {
     onRegisterWorkspace?.({
@@ -190,7 +209,7 @@ export function ReportFoundryPage({
               </CapabilitySectionHeader>
               <MetaText>Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}</MetaText>
               <MetaText>
-                Current goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the investigation."}
+                Current goal: {investigationBrief.trim() || "No goal set yet."}
               </MetaText>
               <MetaText>Use the sidebar workspace panel to add, inspect, or remove the files feeding this report.</MetaText>
             </CapabilityPanel>
@@ -220,6 +239,8 @@ export function ReportFoundryPage({
                 ))}
               </ReportEffectsPanel>
             ) : null}
+
+            <ReportSummaryArtifacts files={files} />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
@@ -235,13 +256,6 @@ export function ReportFoundryPage({
         </ReportWorkspaceLayout>
       ) : null}
 
-      {activeWorkspaceTab === "goal" ? (
-        <InvestigationBriefPanel
-          investigationBrief={investigationBrief}
-          setInvestigationBrief={setInvestigationBrief}
-        />
-      ) : null}
-
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
@@ -252,8 +266,20 @@ export function ReportFoundryPage({
                   {demoLoading ? "Preparing the report demo." : demoError ?? status}
                 </CapabilityMetaText>
               </CapabilitySectionHeader>
-              <MetaText>Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}</MetaText>
-              <MetaText>Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
+              <CompactSummaryGrid>
+                <CompactSummaryItem>
+                  <strong>{demoScenario?.title ?? "Preparing scenario"}</strong>
+                  <MetaText>{files.length} workspace file{files.length === 1 ? "" : "s"}</MetaText>
+                </CompactSummaryItem>
+                <CompactSummaryItem>
+                  <strong>{files.filter((file) => !demoSeedIds.has(file.id)).length}</strong>
+                  <MetaText>derived artifacts</MetaText>
+                </CompactSummaryItem>
+                <CompactSummaryItem>
+                  <strong>{reportEffects.length}</strong>
+                  <MetaText>visible effects</MetaText>
+                </CompactSummaryItem>
+              </CompactSummaryGrid>
             </CapabilityPanel>
 
             {reportEffects.length ? (
@@ -281,6 +307,8 @@ export function ReportFoundryPage({
                 ))}
               </ReportEffectsPanel>
             ) : null}
+
+            <ReportSummaryArtifacts files={files} />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <CapabilityDemoPane
@@ -292,7 +320,6 @@ export function ReportFoundryPage({
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}
-              onReloadScenario={reloadScenario}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
@@ -300,3 +327,20 @@ export function ReportFoundryPage({
     </>
   );
 }
+
+const CompactSummaryGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const CompactSummaryItem = styled.div`
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.56);
+  padding: 0.7rem 0.78rem;
+`;

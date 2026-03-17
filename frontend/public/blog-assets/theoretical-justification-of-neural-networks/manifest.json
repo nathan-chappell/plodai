@@ -2,6 +2,26 @@
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
   "seed": 7,
   "output_dir": "/home/uphill/programming/openai/form/ai-portfolio/frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "mlp": {
+    "files": [
+      "mlp-sine-approximation-snapshots.png",
+      "mlp-sine-approximation-snapshots.html",
+      "mlp-sine-loss.png",
+      "mlp-sine-loss.html"
+    ],
+    "shape": [
+      32
+    ],
+    "snapshot_epochs": [
+      0,
+      12,
+      32,
+      72,
+      160,
+      400
+    ],
+    "final_loss": 0.11772041767835617
+  },
   "rnn": {
     "files": [
       "rnn-dataset-diversity.png",
@@ -11,7 +31,7 @@
       "rnn-2layer-training-story.png",
       "rnn-2layer-training-story.html"
     ],
-    "block_epochs": 10,
+    "block_epochs": 20,
     "batch_size": 16,
     "train_cohorts": [
       20,
@@ -27,9 +47,9 @@
         "active_lengths": [
           20
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.03
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-20-off_by_one",
@@ -39,9 +59,9 @@
         "active_lengths": [
           20
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.025
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-20-balanced_invalid",
@@ -51,9 +71,9 @@
         "active_lengths": [
           20
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.02
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-50-random",
@@ -64,9 +84,9 @@
           20,
           50
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.03
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-50-off_by_one",
@@ -77,9 +97,9 @@
           20,
           50
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.025
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-50-balanced_invalid",
@@ -90,9 +110,9 @@
           20,
           50
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.02
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-100-random",
@@ -104,9 +124,9 @@
           50,
           100
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.03
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-100-off_by_one",
@@ -118,9 +138,9 @@
           50,
           100
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.025
+        "learning_rate": 0.1
       },
       {
         "name": "cohort-100-balanced_invalid",
@@ -132,9 +152,9 @@
           50,
           100
         ],
-        "epochs": 10,
+        "epochs": 20,
         "train_samples": 512,
-        "learning_rate": 0.02
+        "learning_rate": 0.1
       }
     ],
     "evaluation_families": [
@@ -184,84 +204,416 @@
         "text": "(())()()()()(()(()))",
         "family": "cohort-20",
         "probe_kind": "valid",
-        "color": "#7f1d1d"
+        "color": "#7f1d1d",
+        "highlight": true
       },
       {
         "label": "30 off-by-one",
         "text": "()(())()((())()))))())(((())))",
         "family": "cohort-20",
         "probe_kind": "off_by_one",
-        "color": "#b91c1c"
+        "color": "#b91c1c",
+        "highlight": true
       },
       {
         "label": "20 balanced-invalid",
         "text": "))())((())())(()(()(",
         "family": "cohort-20",
         "probe_kind": "balanced_invalid",
-        "color": "#ef4444"
+        "color": "#ef4444",
+        "highlight": true
       },
       {
         "label": "40 transition",
         "text": ")()()((()()))((()))()()()()()()()()(()))",
         "family": "cohort-20",
         "probe_kind": "transition",
-        "color": "#ef4444"
+        "color": "#ef4444",
+        "highlight": true
       },
       {
         "label": "50 valid",
         "text": "(())()()()(()())(())()()()()(())()()()(())(((())))",
         "family": "cohort-50",
         "probe_kind": "valid",
-        "color": "#1d4ed8"
+        "color": "#1d4ed8",
+        "highlight": true
       },
       {
         "label": "60 off-by-one",
         "text": "()()((())())()))()()(())()()((()(()())((())(()))(((()))())()",
         "family": "cohort-50",
         "probe_kind": "off_by_one",
-        "color": "#2563eb"
+        "color": "#2563eb",
+        "highlight": true
       },
       {
         "label": "50 balanced-invalid",
         "text": "(((((((()())())())()))())(())(())))))()()(())(((()",
         "family": "cohort-50",
         "probe_kind": "balanced_invalid",
-        "color": "#60a5fa"
+        "color": "#60a5fa",
+        "highlight": true
       },
       {
         "label": "100 valid",
         "text": "((()()()()))()((()(()((((())())((()((((()))(())((()(((())()))))))()))(()())())(()()))()))()(((()))))",
         "family": "cohort-100",
         "probe_kind": "valid",
-        "color": "#166534"
+        "color": "#166534",
+        "highlight": true
       },
       {
         "label": "120 off-by-one",
         "text": "()()(()()(()(())()))()()(()())()))(((((())(()()())())(()))())(()()(()((())(((((()))()))()()()((()(()()()))))((()))))))))",
         "family": "cohort-100",
         "probe_kind": "off_by_one",
-        "color": "#16a34a"
+        "color": "#16a34a",
+        "highlight": true
       },
       {
         "label": "100 balanced-invalid",
         "text": "(((((()(((()()(())))))))(((())))))))((())()()()()())()(())(()((()((()))())(())((())()))())()()((())(",
         "family": "cohort-100",
         "probe_kind": "balanced_invalid",
-        "color": "#86efac"
+        "color": "#86efac",
+        "highlight": true
       },
       {
         "label": "200 valid",
         "text": "()(())()()((())())(()())(()())((((())))(()((())())(()())(((()()()()())))(()(()()()(((()()(()(((()))((())())((()()(((())())((())))))))(())())))(()(()()))(()())()))))((((()()))(()((())((((((()))))))))))",
         "family": "very-long",
         "probe_kind": "valid",
-        "color": "#7c5c2d"
+        "color": "#7c5c2d",
+        "highlight": true
       },
       {
         "label": "200 balanced-invalid",
         "text": "()((()))()(())))()()()()()((((((())((()()(((())))(())(()((())(())(((()))()((())))())))()()()())(())()((()())(())(((())()()(())())))))())(((((())))((()(()()()))())(()()))())()()(((()())(())())())))((()",
         "family": "very-long",
         "probe_kind": "balanced_invalid",
-        "color": "#d6a856"
+        "color": "#d6a856",
+        "highlight": true
+      },
+      {
+        "label": "cohort-20-20-valid",
+        "text": "((()(()((()()))))())",
+        "family": "cohort-20",
+        "probe_kind": "valid",
+        "color": "#7f1d1d",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-20-balanced",
+        "text": ")()((()()()((())))()",
+        "family": "cohort-20",
+        "probe_kind": "balanced_invalid",
+        "color": "#ef4444",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-20-off",
+        "text": ")((()((()()((())))))",
+        "family": "cohort-20",
+        "probe_kind": "off_by_one",
+        "color": "#b91c1c",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-20-transition",
+        "text": ")()()(())()((()))()(",
+        "family": "cohort-20",
+        "probe_kind": "transition",
+        "color": "#7f1d1d",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-25-off",
+        "text": ")((()()((())(()(((()(())(",
+        "family": "cohort-20",
+        "probe_kind": "off_by_one",
+        "color": "#b91c1c",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-25-transition",
+        "text": ")()()(((()((()()()())(())",
+        "family": "cohort-20",
+        "probe_kind": "transition",
+        "color": "#b91c1c",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-30-valid",
+        "text": "()()()()()(())(()()()())((()))",
+        "family": "cohort-20",
+        "probe_kind": "valid",
+        "color": "#7f1d1d",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-30-balanced",
+        "text": "()()()(((()))))))()()(()()((()",
+        "family": "cohort-20",
+        "probe_kind": "balanced_invalid",
+        "color": "#ef4444",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-30-off",
+        "text": ")((())())(()(())()((()())(()))",
+        "family": "cohort-20",
+        "probe_kind": "off_by_one",
+        "color": "#b91c1c",
+        "highlight": false
+      },
+      {
+        "label": "cohort-20-30-transition",
+        "text": ")()((((((()())))(()((()))))))(",
+        "family": "cohort-20",
+        "probe_kind": "transition",
+        "color": "#ef4444",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-50-valid",
+        "text": "(())((()))((()))()(()((()))(()(()()()()()())))(())",
+        "family": "cohort-50",
+        "probe_kind": "valid",
+        "color": "#1d4ed8",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-50-balanced",
+        "text": ")())(()())))()((())())()(((()()())))()()((())(()((",
+        "family": "cohort-50",
+        "probe_kind": "balanced_invalid",
+        "color": "#60a5fa",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-50-off",
+        "text": "(())(((()(())(())()(((((()((()))()())()))())(())()",
+        "family": "cohort-50",
+        "probe_kind": "off_by_one",
+        "color": "#2563eb",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-50-transition",
+        "text": ")()()(((((((((()(()(((()(((((()))))))))))))))))))(",
+        "family": "cohort-50",
+        "probe_kind": "transition",
+        "color": "#1d4ed8",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-60-valid",
+        "text": "()()()((()(()(()(((()))()()()())))((()))((()(((()))())()))))",
+        "family": "cohort-50",
+        "probe_kind": "valid",
+        "color": "#1d4ed8",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-60-balanced",
+        "text": "(((((((()(()))(()())()((()))((()))())())()))))))(())((()))((",
+        "family": "cohort-50",
+        "probe_kind": "balanced_invalid",
+        "color": "#60a5fa",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-60-off",
+        "text": "))((())(())))()(()((()()()()))((((())(((()())(()())))))))())",
+        "family": "cohort-50",
+        "probe_kind": "off_by_one",
+        "color": "#2563eb",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-60-transition",
+        "text": ")(()(())())()(()())()()()((((())))((())(())()))()()(()(()))(",
+        "family": "cohort-50",
+        "probe_kind": "transition",
+        "color": "#2563eb",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-75-off",
+        "text": "(((((((((()(()(())))()()()()())())(()))))))((()))(())((((((((()(((())))(())",
+        "family": "cohort-50",
+        "probe_kind": "off_by_one",
+        "color": "#2563eb",
+        "highlight": false
+      },
+      {
+        "label": "cohort-50-75-transition",
+        "text": "))()()(()(())(())))((()))(()((())))((()()((()())()))()(()((()((())()))()())",
+        "family": "cohort-50",
+        "probe_kind": "transition",
+        "color": "#60a5fa",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-100-valid",
+        "text": "(())((()))()(()()(((((((()))()()((()))((((()()(()(())())(())))()((())(()())())())))()))))(((())))())",
+        "family": "cohort-100",
+        "probe_kind": "valid",
+        "color": "#166534",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-100-balanced",
+        "text": "()()())(()))()()()(()()())()(()())()(()())()()(()(()()())(())(())()()(((()()(()))))(()))()(((()()())",
+        "family": "cohort-100",
+        "probe_kind": "balanced_invalid",
+        "color": "#86efac",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-100-off",
+        "text": "()()()(()(((((((((((((((())))((()()()()))()(()()))(()(((()(()))())()((((()()))))()))))))))))))))))))",
+        "family": "cohort-100",
+        "probe_kind": "off_by_one",
+        "color": "#16a34a",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-100-transition",
+        "text": ")(())()()()(()())()(()())()()()(())()(()(((()(((())()()(()((((()()))(()())(((((()(())))))))))))))))(",
+        "family": "cohort-100",
+        "probe_kind": "transition",
+        "color": "#166534",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-120-valid",
+        "text": "()()()()((()((())()()(()()(())((((()()()(()(()())((((())()(())))()()())(()))(())())()))((())()()())))())((((()(())))))))",
+        "family": "cohort-100",
+        "probe_kind": "valid",
+        "color": "#166534",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-120-balanced",
+        "text": ")(()()(()))))(()()))(((()()))))))()()((()()))(())()(()()(()((()(())))((())(()()))((()()())()((((()()(((()(()())(())))())",
+        "family": "cohort-100",
+        "probe_kind": "balanced_invalid",
+        "color": "#86efac",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-120-off",
+        "text": "(())()()()(())((((()()())())(((())()()(()(()())(()()(())))((()()()(())()))(((((())()())())()))))))(()())(()((()))())))))",
+        "family": "cohort-100",
+        "probe_kind": "off_by_one",
+        "color": "#16a34a",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-120-transition",
+        "text": ")()(((()()))(()())()((((()())()(()((()())())(())())()))(()(()))))()((((()))())())(((()()()()())()()(()(())()(())))()())(",
+        "family": "cohort-100",
+        "probe_kind": "transition",
+        "color": "#16a34a",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-150-valid",
+        "text": "((()))(())()()()(()((((((()()())())()))(((()))(())()))(())()((())(((()()()))(()))((((((()))))()))())(()(()(()))())(())))(())((((()((())(((())())))))))",
+        "family": "cohort-100",
+        "probe_kind": "valid",
+        "color": "#166534",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-150-balanced",
+        "text": "(()(()))))()(()())()()(())((())())()(()()()(())()()()()((((()(((((())))())))()((()((()()))()))))((()()))))()()()(())()()(((())(((()))))()(((()())()))(",
+        "family": "cohort-100",
+        "probe_kind": "balanced_invalid",
+        "color": "#86efac",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-150-off",
+        "text": "(()())()()(())(())()()(())()(()((()()((((()(((()()))((())(((())()))()(((((()()()(()(())()(()(()(()()(((()(((()()()())(((()(())()))))))))))))))))))))))",
+        "family": "cohort-100",
+        "probe_kind": "off_by_one",
+        "color": "#16a34a",
+        "highlight": false
+      },
+      {
+        "label": "cohort-100-150-transition",
+        "text": ")()()((())()(((())((()()((())))))()(((())()((((()))()()()(()()))))()))())(())(())(((())()))(())()((()))((()(())(((()()))((())()(())()((((()()))))))))(",
+        "family": "cohort-100",
+        "probe_kind": "transition",
+        "color": "#86efac",
+        "highlight": false
+      },
+      {
+        "label": "very-long-200-valid",
+        "text": "()()(()()()((())())()())((())()())(())()()((()))(((())((((())())))(((()())(()(((((()))())())())((((((()())())))))(())))(((()((()((())))))())()()(((((())((((()))(())()())((()()(()))))))((()())())))))))",
+        "family": "very-long",
+        "probe_kind": "valid",
+        "color": "#7c5c2d",
+        "highlight": false
+      },
+      {
+        "label": "very-long-200-balanced",
+        "text": "(((()(((()()))(((()))))))))()(((())(()())(())(()()))))()()()((()()(()())(((()(((()((()())((())()()()()())()))))))))))))((((())(())))())((()()())(()((((((())()))(()))(()())))())())(()())((((()())(((())",
+        "family": "very-long",
+        "probe_kind": "balanced_invalid",
+        "color": "#d6a856",
+        "highlight": false
+      },
+      {
+        "label": "very-long-200-off",
+        "text": "((())))()())(((((()(((())(()(()()())))))())((()((()())())))(()()((()())())))()((((()()(((())()())((())))(()))(()())()()()()())))((()()((())((((()))()(((()()()())))((()(((()(()(((())))()))))))()())))))",
+        "family": "very-long",
+        "probe_kind": "off_by_one",
+        "color": "#a16207",
+        "highlight": false
+      },
+      {
+        "label": "very-long-200-transition",
+        "text": ")()((()((()()()))(())))()()()(((((())()(())))()))(((()(()))()))()(()(())()(()()))()(()()((())()()()((()((()()))()))))()()(())(()())(()(()()))(((()()()())(())((())())((())())())())(()()()(()()()))(())(",
+        "family": "very-long",
+        "probe_kind": "transition",
+        "color": "#7c5c2d",
+        "highlight": false
+      },
+      {
+        "label": "very-long-260-valid",
+        "text": "()((())(((())(())(())(()()(((()))()))(((()(())((())(())())())))()())(())(())())((((())()))))()()(())(())()((())())((()()))()()(((())((((()))))))()()()()()()()()(((()(()((()())((()()((())()((())()))())(()(()()()()))()))))(()()(((((())((())((()())()(()))))))))))",
+        "family": "very-long",
+        "probe_kind": "valid",
+        "color": "#7c5c2d",
+        "highlight": false
+      },
+      {
+        "label": "very-long-260-balanced",
+        "text": "))((((((())((()(())()()())()()))(()((()((())()(()((()()))))))))))()(())))()((((()())((((()()))()(()())))())(())))(())(()())()(())()()((()(()())()(((())))()))()(()())(()()((())()()))()()()()(()(()()())()(((()()(()))()))()(((()(((())()()()()))()()))(())))()((()(",
+        "family": "very-long",
+        "probe_kind": "balanced_invalid",
+        "color": "#d6a856",
+        "highlight": false
+      },
+      {
+        "label": "very-long-260-off",
+        "text": "()((()))()(())((())()(((()()))(()(())(())(())())))(()(((()((()(()(()(()(()))()((((((())(((()((()((())(()((())))(((((()()(((())(()(()())(())()(((()())(()())()()))))))))()(()))))())())()))))(()()()))(((((())(())())(()((((((()))()()()(()())())(())()))))))))))))))",
+        "family": "very-long",
+        "probe_kind": "off_by_one",
+        "color": "#a16207",
+        "highlight": false
+      },
+      {
+        "label": "very-long-260-transition",
+        "text": ")(())()(())()(((())())()()(()))()((()))(())()((()))()()()(())()()((((())((()(()((()())))))((()()(())((()(((()((()()()(())()()(()))()()(()))(())))()))()()(()(()(()(()(((()((()))()())()())(((()((())))()()))))((())())))))(()()(((((((()))()((()()(()))))))))))))))(",
+        "family": "very-long",
+        "probe_kind": "transition",
+        "color": "#a16207",
+        "highlight": false
       }
     ],
     "trace_strings": [
@@ -270,42 +622,48 @@
         "text": "()(()())(()())(()()(()))()(()((())())())",
         "family": "cohort-50",
         "probe_kind": "valid",
-        "color": "#7f1d1d"
+        "color": "#7f1d1d",
+        "highlight": true
       },
       {
         "label": "B immediate invalid",
         "text": ")(((())(((()(()()))(())))((()))())())()(",
         "family": "cohort-50",
         "probe_kind": "transition",
-        "color": "#1d4ed8"
+        "color": "#1d4ed8",
+        "highlight": true
       },
       {
         "label": "C valid+valid+bad",
         "text": "()(()(()()(())()))()(())()()()(()())())(",
         "family": "cohort-50",
         "probe_kind": "transition",
-        "color": "#166534"
+        "color": "#166534",
+        "highlight": true
       },
       {
         "label": "D balanced-invalid",
         "text": ")(()()())(())()(())(()(()((()((()))))))(",
         "family": "cohort-50",
         "probe_kind": "balanced_invalid",
-        "color": "#7c5c2d"
+        "color": "#7c5c2d",
+        "highlight": true
       },
       {
         "label": "E oscillating prefix",
         "text": "((()(()))))((()(())))(()(()(())()()(()))",
         "family": "cohort-50",
         "probe_kind": "transition",
-        "color": "#9333ea"
+        "color": "#9333ea",
+        "highlight": true
       },
       {
         "label": "F off-by-one long",
         "text": "(())()()()((()()(())))()))(((())()((()))",
         "family": "cohort-50",
         "probe_kind": "off_by_one",
-        "color": "#db2777"
+        "color": "#db2777",
+        "highlight": true
       }
     ],
     "models": [
@@ -318,10 +676,10 @@
             "name": "cohort-20-random",
             "label": "20/random",
             "start_epoch": 1,
-            "end_epoch": 10,
+            "end_epoch": 20,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.03,
+            "learning_rate": 0.1,
             "cohort_length": 20,
             "phase_kind": "random",
             "active_lengths": [
@@ -331,11 +689,11 @@
           {
             "name": "cohort-20-off_by_one",
             "label": "20/off-by-one",
-            "start_epoch": 11,
-            "end_epoch": 20,
+            "start_epoch": 21,
+            "end_epoch": 40,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.025,
+            "learning_rate": 0.1,
             "cohort_length": 20,
             "phase_kind": "off_by_one",
             "active_lengths": [
@@ -345,11 +703,11 @@
           {
             "name": "cohort-20-balanced_invalid",
             "label": "20/balanced-invalid",
-            "start_epoch": 21,
-            "end_epoch": 30,
+            "start_epoch": 41,
+            "end_epoch": 60,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.02,
+            "learning_rate": 0.1,
             "cohort_length": 20,
             "phase_kind": "balanced_invalid",
             "active_lengths": [
@@ -359,11 +717,11 @@
           {
             "name": "cohort-50-random",
             "label": "50/random",
-            "start_epoch": 31,
-            "end_epoch": 40,
+            "start_epoch": 61,
+            "end_epoch": 80,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.03,
+            "learning_rate": 0.1,
             "cohort_length": 50,
             "phase_kind": "random",
             "active_lengths": [
@@ -374,11 +732,11 @@
           {
             "name": "cohort-50-off_by_one",
             "label": "50/off-by-one",
-            "start_epoch": 41,
-            "end_epoch": 50,
+            "start_epoch": 81,
+            "end_epoch": 100,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.025,
+            "learning_rate": 0.1,
             "cohort_length": 50,
             "phase_kind": "off_by_one",
             "active_lengths": [
@@ -389,11 +747,11 @@
           {
             "name": "cohort-50-balanced_invalid",
             "label": "50/balanced-invalid",
-            "start_epoch": 51,
-            "end_epoch": 60,
+            "start_epoch": 101,
+            "end_epoch": 120,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.02,
+            "learning_rate": 0.1,
             "cohort_length": 50,
             "phase_kind": "balanced_invalid",
             "active_lengths": [
@@ -404,11 +762,11 @@
           {
             "name": "cohort-100-random",
             "label": "100/random",
-            "start_epoch": 61,
-            "end_epoch": 70,
+            "start_epoch": 121,
+            "end_epoch": 140,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.03,
+            "learning_rate": 0.1,
             "cohort_length": 100,
             "phase_kind": "random",
             "active_lengths": [
@@ -420,11 +778,11 @@
           {
             "name": "cohort-100-off_by_one",
             "label": "100/off-by-one",
-            "start_epoch": 71,
-            "end_epoch": 80,
+            "start_epoch": 141,
+            "end_epoch": 160,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.025,
+            "learning_rate": 0.1,
             "cohort_length": 100,
             "phase_kind": "off_by_one",
             "active_lengths": [
@@ -436,11 +794,11 @@
           {
             "name": "cohort-100-balanced_invalid",
             "label": "100/balanced-invalid",
-            "start_epoch": 81,
-            "end_epoch": 90,
+            "start_epoch": 161,
+            "end_epoch": 180,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.02,
+            "learning_rate": 0.1,
             "cohort_length": 100,
             "phase_kind": "balanced_invalid",
             "active_lengths": [
@@ -450,35 +808,35 @@
             ]
           }
         ],
-        "peak_aha_epoch": 11,
+        "peak_aha_epoch": 110,
         "selected_epochs": [
           0,
-          2,
-          10,
-          11,
+          1,
           20,
-          24,
-          30,
           40,
-          50,
           60,
-          70,
           80,
-          90
+          100,
+          110,
+          120,
+          140,
+          143,
+          160,
+          180
         ],
         "final_metrics": {
-          "epoch": 90,
+          "epoch": 180,
           "phase": "cohort-100-balanced_invalid",
-          "train_loss": 0.5158689022064209,
-          "train_acc": 0.712890625,
+          "train_loss": 0.555244505405426,
+          "train_acc": 0.673828125,
           "overall_eval_acc": 0.64453125,
           "cohort_20_acc": 0.59375,
           "cohort_50_acc": 0.671875,
           "cohort_100_acc": 0.6484375,
           "very_long_acc": 0.6640625,
           "balanced_invalid_acc": 0.65625,
-          "probe_change": 0.00656982359214453,
-          "aha_score": 0.00656982359214453
+          "probe_change": 0.10272742937097344,
+          "aha_score": 0.10272742937097344
         },
         "files": [
           "rnn-1layer-traces-pair-a.png",
@@ -498,10 +856,10 @@
             "name": "cohort-20-random",
             "label": "20/random",
             "start_epoch": 1,
-            "end_epoch": 10,
+            "end_epoch": 20,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.03,
+            "learning_rate": 0.1,
             "cohort_length": 20,
             "phase_kind": "random",
             "active_lengths": [
@@ -511,11 +869,11 @@
           {
             "name": "cohort-20-off_by_one",
             "label": "20/off-by-one",
-            "start_epoch": 11,
-            "end_epoch": 20,
+            "start_epoch": 21,
+            "end_epoch": 40,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.025,
+            "learning_rate": 0.1,
             "cohort_length": 20,
             "phase_kind": "off_by_one",
             "active_lengths": [
@@ -525,11 +883,11 @@
           {
             "name": "cohort-20-balanced_invalid",
             "label": "20/balanced-invalid",
-            "start_epoch": 21,
-            "end_epoch": 30,
+            "start_epoch": 41,
+            "end_epoch": 60,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.02,
+            "learning_rate": 0.1,
             "cohort_length": 20,
             "phase_kind": "balanced_invalid",
             "active_lengths": [
@@ -539,11 +897,11 @@
           {
             "name": "cohort-50-random",
             "label": "50/random",
-            "start_epoch": 31,
-            "end_epoch": 40,
+            "start_epoch": 61,
+            "end_epoch": 80,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.03,
+            "learning_rate": 0.1,
             "cohort_length": 50,
             "phase_kind": "random",
             "active_lengths": [
@@ -554,11 +912,11 @@
           {
             "name": "cohort-50-off_by_one",
             "label": "50/off-by-one",
-            "start_epoch": 41,
-            "end_epoch": 50,
+            "start_epoch": 81,
+            "end_epoch": 100,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.025,
+            "learning_rate": 0.1,
             "cohort_length": 50,
             "phase_kind": "off_by_one",
             "active_lengths": [
@@ -569,11 +927,11 @@
           {
             "name": "cohort-50-balanced_invalid",
             "label": "50/balanced-invalid",
-            "start_epoch": 51,
-            "end_epoch": 60,
+            "start_epoch": 101,
+            "end_epoch": 120,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.02,
+            "learning_rate": 0.1,
             "cohort_length": 50,
             "phase_kind": "balanced_invalid",
             "active_lengths": [
@@ -584,11 +942,11 @@
           {
             "name": "cohort-100-random",
             "label": "100/random",
-            "start_epoch": 61,
-            "end_epoch": 70,
+            "start_epoch": 121,
+            "end_epoch": 140,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.03,
+            "learning_rate": 0.1,
             "cohort_length": 100,
             "phase_kind": "random",
             "active_lengths": [
@@ -600,11 +958,11 @@
           {
             "name": "cohort-100-off_by_one",
             "label": "100/off-by-one",
-            "start_epoch": 71,
-            "end_epoch": 80,
+            "start_epoch": 141,
+            "end_epoch": 160,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.025,
+            "learning_rate": 0.1,
             "cohort_length": 100,
             "phase_kind": "off_by_one",
             "active_lengths": [
@@ -616,11 +974,11 @@
           {
             "name": "cohort-100-balanced_invalid",
             "label": "100/balanced-invalid",
-            "start_epoch": 81,
-            "end_epoch": 90,
+            "start_epoch": 161,
+            "end_epoch": 180,
             "batch_size": 16,
             "train_samples": 512,
-            "learning_rate": 0.02,
+            "learning_rate": 0.1,
             "cohort_length": 100,
             "phase_kind": "balanced_invalid",
             "active_lengths": [
@@ -630,34 +988,35 @@
             ]
           }
         ],
-        "peak_aha_epoch": 1,
+        "peak_aha_epoch": 42,
         "selected_epochs": [
           0,
           1,
-          7,
-          10,
           20,
-          30,
+          33,
           40,
-          50,
+          42,
           60,
-          70,
           80,
-          90
+          100,
+          120,
+          140,
+          160,
+          180
         ],
         "final_metrics": {
-          "epoch": 90,
+          "epoch": 180,
           "phase": "cohort-100-balanced_invalid",
-          "train_loss": 0.366254061460495,
-          "train_acc": 0.841796875,
-          "overall_eval_acc": 0.818359375,
-          "cohort_20_acc": 0.859375,
-          "cohort_50_acc": 0.796875,
-          "cohort_100_acc": 0.828125,
-          "very_long_acc": 0.7890625,
-          "balanced_invalid_acc": 0.9140625,
-          "probe_change": 0.049411921808617386,
-          "aha_score": 0.049411921808617386
+          "train_loss": 0.45100268721580505,
+          "train_acc": 0.779296875,
+          "overall_eval_acc": 0.7578125,
+          "cohort_20_acc": 0.7890625,
+          "cohort_50_acc": 0.765625,
+          "cohort_100_acc": 0.765625,
+          "very_long_acc": 0.7109375,
+          "balanced_invalid_acc": 0.828125,
+          "probe_change": 0.025428154680263597,
+          "aha_score": 0.025428154680263597
         },
         "files": [
           "rnn-2layer-traces-pair-a.png",

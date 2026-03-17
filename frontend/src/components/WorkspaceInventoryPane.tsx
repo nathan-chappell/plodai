@@ -20,6 +20,7 @@ import {
   DatasetInventoryUploadInput,
 } from "./styles";
 import { MetaText } from "../app/styles";
+import { downloadWorkspaceFile, openWorkspaceFileInNewTab } from "../lib/workspace-artifacts";
 import type { LocalWorkspaceFile } from "../types/report";
 
 const PAGE_SIZE = 10;
@@ -160,11 +161,21 @@ export function WorkspaceInventoryPane({
                           : "This file is listed for awareness, but there are no specialized tools for it yet."}
                       </MetaText>
                     ) : null}
-                    {onRemoveFile ? (
-                      <DatasetInventoryButton onClick={() => onRemoveFile(file.id)} type="button">
-                        Remove file
+                    <DatasetInventoryToolbar>
+                      {file.kind === "pdf" || file.kind === "json" || (file.kind === "other" && file.text_content != null) ? (
+                        <DatasetInventoryButton onClick={() => openWorkspaceFileInNewTab(file)} type="button">
+                          Open file
+                        </DatasetInventoryButton>
+                      ) : null}
+                      <DatasetInventoryButton onClick={() => downloadWorkspaceFile(file)} type="button">
+                        Download file
                       </DatasetInventoryButton>
-                    ) : null}
+                      {onRemoveFile ? (
+                        <DatasetInventoryButton onClick={() => onRemoveFile(file.id)} type="button">
+                          Remove file
+                        </DatasetInventoryButton>
+                      ) : null}
+                    </DatasetInventoryToolbar>
                   </DatasetInventoryExpanded>
                 ) : null}
               </DatasetInventoryCard>

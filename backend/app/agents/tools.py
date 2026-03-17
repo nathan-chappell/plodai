@@ -51,6 +51,116 @@ def get_client_tool_names(
     return [name for tool in context.client_tools if (name := tool.get("name"))]
 
 
+def _format_tool_label(tool_name: str) -> str:
+    return " ".join(
+        part.capitalize() for part in tool_name.strip().split("_") if part.strip()
+    )
+
+
+def _build_tool_trace_widget(
+    tool_name: str,
+    summary: str,
+    details: list[str] | None = None,
+) -> dict[str, object]:
+    children: list[dict[str, object]] = [
+        {
+            "type": "Badge",
+            "label": "Tool call",
+            "color": "info",
+            "variant": "soft",
+            "pill": True,
+        },
+        {"type": "Title", "value": _format_tool_label(tool_name), "size": "md"},
+        {"type": "Caption", "value": summary, "color": "secondary"},
+    ]
+
+    clean_details = [detail.strip() for detail in details or [] if detail.strip()]
+    if clean_details:
+        children.append({"type": "Divider"})
+        children.extend(
+            {"type": "Text", "value": detail, "size": "sm"}
+            for detail in clean_details[:6]
+        )
+
+    return {
+        "type": "Card",
+        "size": "sm",
+        "status": {"text": "Tool requested", "icon": "bolt"},
+        "children": children,
+    }
+
+
+async def _stream_tool_trace_widget(
+    ctx: ChatKitToolContext,
+    tool_name: str,
+    summary: str,
+    details: list[str] | None = None,
+) -> None:
+    clean_details = [detail.strip() for detail in details or [] if detail.strip()]
+    await ctx.context.stream_widget(
+        _build_tool_trace_widget(tool_name, summary, clean_details),
+        copy_text="\n".join(
+            [_format_tool_label(tool_name), summary, *clean_details]
+        ).strip(),
+    )
+
+
+def _build_plan_widget(plan: AgentPlan) -> dict[str, object]:
+    steps = plan.get("planned_steps", [])
+    success_criteria = plan.get("success_criteria", [])
+    follow_on_tool_hints = plan.get("follow_on_tool_hints", [])
+    focus = plan.get("focus") or "Execution plan"
+
+    children: list[dict[str, object]] = [
+        {"type": "Badge", "label": "Plan", "color": "discovery", "variant": "soft", "pill": True},
+        {"type": "Title", "value": focus, "size": "lg"},
+        {
+            "type": "Caption",
+            "value": f"{len(steps)} step{'s' if len(steps) != 1 else ''} queued",
+            "color": "secondary",
+        },
+        {"type": "Divider"},
+    ]
+
+    children.extend(
+        {"type": "Text", "value": f"{index}. {step}", "size": "sm"}
+        for index, step in enumerate(steps, start=1)
+    )
+
+    if success_criteria:
+        children.extend(
+            [
+                {"type": "Divider"},
+                {"type": "Text", "value": "Success criteria", "size": "sm", "weight": "semibold"},
+                *(
+                    {"type": "Text", "value": f"- {criterion}", "size": "sm"}
+                    for criterion in success_criteria
+                ),
+            ]
+        )
+
+    if follow_on_tool_hints:
+        children.extend(
+            [
+                {"type": "Divider"},
+                {"type": "Text", "value": "Suggested next tools", "size": "sm", "weight": "semibold"},
+                {
+                    "type": "Text",
+                    "value": ", ".join(follow_on_tool_hints),
+                    "size": "sm",
+                    "color": "secondary",
+                },
+            ]
+        )
+
+    return {
+        "type": "Card",
+        "size": "md",
+        "status": {"text": "Plan captured", "icon": "check-circle"},
+        "children": children,
+    }
+
+
 def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool:
     tool_name = str(tool_definition.get("name", "")).strip()
     if not tool_name:
@@ -79,6 +189,12 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
         _log_tool_start(request_context, tool_name, mode="client_proxy")
         await ctx.context.stream(
             ProgressUpdateEvent(text=f"Requesting client tool {tool_name}.")
+        )
+        await _stream_tool_trace_widget(
+            ctx,
+            tool_name,
+            "Queued for client-side execution.",
+            [f"Argument fields: {', '.join(sorted(arguments.keys()))}" if arguments else "No arguments."],
         )
         client_tool_call = ClientToolCall(name=tool_name, arguments=arguments)
         ctx.context.client_tool_call = client_tool_call
@@ -123,6 +239,12 @@ def build_agent_tools(
         ctx.context.thread.metadata = dict(request_context.thread_metadata)
         await ctx.context.stream(
             ProgressUpdateEvent(text=f"Renaming thread to: {cleaned_title}.")
+        )
+        await _stream_tool_trace_widget(
+            ctx,
+            "name_current_thread",
+            "Updated the thread title.",
+            [f"Title: {cleaned_title}"],
         )
         result = {
             "thread_title": cleaned_title,
@@ -179,6 +301,32 @@ def build_agent_tools(
                 )
             )
         )
+        await ctx.context.stream_widget(
+            _build_plan_widget(plan),
+            copy_text="\n".join(
+                [
+                    f"Plan: {cleaned_focus}" if cleaned_focus else "Plan",
+                    *(
+                        f"{index}. {step}"
+                        for index, step in enumerate(cleaned_steps, start=1)
+                    ),
+                ]
+                + (
+                    ["", "Success criteria:", *[f"- {item}" for item in cleaned_success_criteria]]
+                    if cleaned_success_criteria
+                    else []
+                )
+                + (
+                    [
+                        "",
+                        "Suggested next tools:",
+                        ", ".join(cleaned_follow_on_tool_hints),
+                    ]
+                    if cleaned_follow_on_tool_hints
+                    else []
+                )
+            ).strip(),
+        )
         _log_tool_end(request_context, "make_plan", plan_id=plan["id"])
         return {
             "plan_id": plan["id"],
@@ -206,6 +354,12 @@ def build_agent_tools(
             )
             await ctx.context.stream(
                 ProgressUpdateEvent(text=f"Appending report section: {title}."),
+            )
+            await _stream_tool_trace_widget(
+                ctx,
+                "append_report_section",
+                "Added narrative to the in-progress report.",
+                [f"Section: {title}", f"Markdown length: {len(markdown)} chars"],
             )
             await ctx.context.stream(
                 ClientEffectEvent(
@@ -248,6 +402,12 @@ def build_agent_tools(
             )
             await ctx.context.stream(
                 ProgressUpdateEvent(text=f"Inspecting schema for CSV file {dataset_id}.")
+            )
+            await _stream_tool_trace_widget(
+                ctx,
+                "inspect_csv_file_schema",
+                "Inspecting one CSV schema.",
+                [f"Dataset: {dataset_id}"],
             )
             dataset = request_context.get_dataset(dataset_id)
             result = {
@@ -308,6 +468,12 @@ def build_agent_tools(
                 "row_count": row_count,
                 "sample_rows": sample_rows,
             }
+            await _stream_tool_trace_widget(
+                ctx,
+                "inspect_chartable_file_schema",
+                "Inspecting a chartable artifact schema.",
+                [f"File: {file_id}", f"Kind: {kind or 'unknown'}"],
+            )
             _log_tool_end(
                 request_context,
                 "inspect_chartable_file_schema",
@@ -338,6 +504,16 @@ def build_agent_tools(
             await ctx.context.stream(
                 ProgressUpdateEvent(text="Validating an aggregate query plan.")
             )
+            await _stream_tool_trace_widget(
+                ctx,
+                "run_aggregate_query",
+                "Validated a grouped aggregate query plan.",
+                [
+                    f"Dataset: {validated_plan.get('dataset_id') or 'unknown'}",
+                    f"Group by: {len(validated_plan.get('group_by') or [])}",
+                    f"Aggregates: {len(validated_plan.get('aggregates') or [])}",
+                ],
+            )
             client_tool_call = ClientToolCall(
                 name="run_aggregate_query",
                 arguments={"query_plan": validated_plan},
@@ -358,45 +534,56 @@ def build_agent_tools(
         if query_plan_model is None or materialize_tool_name not in tool_names:
             continue
 
-        @function_tool(name_override=materialize_tool_name)
-        async def materialize_query_result_tool(
-            ctx: ChatKitToolContext,
-            filename: str,
-            query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-            _tool_name: str = materialize_tool_name,
-        ) -> dict[str, object]:
-            """Validate a query plan, then ask the client to materialize the result rows as a file."""
-            request_context = ctx.context.request_context
-            cleaned_filename = filename.strip()
-            validated_plan = query_plan.model_dump(by_alias=True)
-            _log_tool_start(
-                request_context,
-                _tool_name,
-                filename=cleaned_filename,
-                dataset_id=validated_plan.get("dataset_id"),
-            )
-            await ctx.context.stream(
-                ProgressUpdateEvent(
-                    text=f"Creating derived artifact {cleaned_filename}."
+        def build_materialize_query_result_tool(tool_name: str) -> FunctionTool:
+            @function_tool(name_override=tool_name)
+            async def materialize_query_result_tool(
+                ctx: ChatKitToolContext,
+                filename: str,
+                query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
+            ) -> dict[str, object]:
+                """Validate a query plan, then ask the client to materialize the result rows as a file."""
+                request_context = ctx.context.request_context
+                cleaned_filename = filename.strip()
+                validated_plan = query_plan.model_dump(by_alias=True)
+                _log_tool_start(
+                    request_context,
+                    tool_name,
+                    filename=cleaned_filename,
+                    dataset_id=validated_plan.get("dataset_id"),
                 )
-            )
-            client_tool_call = ClientToolCall(
-                name=_tool_name,
-                arguments={
-                    "filename": cleaned_filename,
-                    "query_plan": validated_plan,
-                },
-            )
-            ctx.context.client_tool_call = client_tool_call
-            _log_tool_end(
-                request_context,
-                _tool_name,
-                filename=cleaned_filename,
-                mode="client_tool_call",
-            )
-            return client_tool_call.model_dump(mode="json")
+                await ctx.context.stream(
+                    ProgressUpdateEvent(
+                        text=f"Creating derived artifact {cleaned_filename}."
+                    )
+                )
+                await _stream_tool_trace_widget(
+                    ctx,
+                    tool_name,
+                    "Preparing a derived artifact from a query result.",
+                    [
+                        f"Filename: {cleaned_filename}",
+                        f"Dataset: {validated_plan.get('dataset_id') or 'unknown'}",
+                    ],
+                )
+                client_tool_call = ClientToolCall(
+                    name=tool_name,
+                    arguments={
+                        "filename": cleaned_filename,
+                        "query_plan": validated_plan,
+                    },
+                )
+                ctx.context.client_tool_call = client_tool_call
+                _log_tool_end(
+                    request_context,
+                    tool_name,
+                    filename=cleaned_filename,
+                    mode="client_tool_call",
+                )
+                return client_tool_call.model_dump(mode="json")
 
-        tools.append(materialize_query_result_tool)
+            return materialize_query_result_tool
+
+        tools.append(build_materialize_query_result_tool(materialize_tool_name))
         built_client_tool_names.add(materialize_tool_name)
 
     if "render_chart_from_file" in tool_names:
@@ -428,6 +615,17 @@ def build_agent_tools(
             )
             await ctx.context.stream(
                 ProgressUpdateEvent(text=f"Requesting chart render for file {file_id}.")
+            )
+            await _stream_tool_trace_widget(
+                ctx,
+                "render_chart_from_file",
+                "Queued a chart render on the client.",
+                [
+                    f"File: {file_id}",
+                    f"Chart: {raw_chart_plan.get('type') or 'unknown'}",
+                    f"X key: {x_key}",
+                    f"Y key: {y_key or 'auto'}",
+                ],
             )
             client_tool_call = ClientToolCall(
                 name="render_chart_from_file",

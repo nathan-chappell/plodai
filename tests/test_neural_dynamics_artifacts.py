@@ -123,6 +123,8 @@ def test_response_and_trace_probes_cover_balanced_invalid_and_very_long() -> Non
     trace_probes = demo.TRACE_PROBES
     assert any(probe.family == "very-long" for probe in response_probes)
     assert any(probe.probe_kind == demo.PHASE_KIND_BALANCED for probe in response_probes)
+    assert any(not probe.highlight for probe in response_probes)
+    assert sum(1 for probe in response_probes if probe.highlight) >= 8
     assert any(probe.probe_kind == "transition" for probe in trace_probes)
     assert all(len(probe.text) >= 38 for probe in trace_probes)
 
