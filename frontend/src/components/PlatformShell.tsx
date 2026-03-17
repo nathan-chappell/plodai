@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAppState } from "../app/context";
-import type { CapabilityDefinition } from "../capabilities/types";
+import type { CapabilityDefinition, ShellWorkspaceRegistration } from "../capabilities/types";
 import { BLOG_INDEX_PATH, isBlogPath } from "../lib/blog";
 import { navigate } from "../lib/router";
 import { AuthPanel } from "./AuthPanel";
+import { WorkspaceInventoryPane } from "./WorkspaceInventoryPane";
 import { usePlatformShellState } from "./hooks";
 import {
   PlatformBrandBlock,
@@ -38,6 +39,13 @@ import {
   PlatformThemePickerRow,
   PlatformThemeValue,
   PlatformTitle,
+  WorkspaceModalBackdrop,
+  WorkspaceModalCard,
+  WorkspaceModalCloseButton,
+  WorkspaceModalHeader,
+  WorkspaceModalMeta,
+  WorkspaceModalTitle,
+  WorkspaceModalTitleBlock,
 } from "./styles";
 
 type ThemePreset = {
@@ -187,12 +195,20 @@ export function PlatformShell({
   activeCapabilityId,
   currentPathname,
   onSelectCapability,
+  workspaceRegistration,
+  workspaceModalOpen,
+  onOpenWorkspaceModal,
+  onCloseWorkspaceModal,
   children,
 }: {
   capabilities: CapabilityDefinition[];
   activeCapabilityId: string | null;
   currentPathname: string;
   onSelectCapability: (path: string) => void;
+  workspaceRegistration: ShellWorkspaceRegistration | null;
+  workspaceModalOpen: boolean;
+  onOpenWorkspaceModal: () => void;
+  onCloseWorkspaceModal: () => void;
   children: ReactNode;
 }) {
   const { collapsed, setCollapsed, themeId, setThemeId, themeMode, setThemeMode } =
@@ -253,6 +269,26 @@ export function PlatformShell({
                 ))}
               </PlatformNavGrid>
             </PlatformSidebarSection>
+
+            {workspaceRegistration ? (
+              <PlatformSidebarSection $collapsed={collapsed}>
+                <PlatformSidebarSectionIcon $collapsed={collapsed}>F</PlatformSidebarSectionIcon>
+                <PlatformSectionTitle $collapsed={collapsed}>Workspace</PlatformSectionTitle>
+                <PlatformNavGrid>
+                  <PlatformNavButton
+                    $active={workspaceModalOpen}
+                    $collapsed={collapsed}
+                    onClick={onOpenWorkspaceModal}
+                    type="button"
+                    title={workspaceRegistration.title}
+                  >
+                    <PlatformNavGlyph $active={workspaceModalOpen} />
+                    <PlatformNavLabel $collapsed={collapsed}>{workspaceRegistration.title}</PlatformNavLabel>
+                    <PlatformNavMeta $collapsed={collapsed}>{workspaceRegistration.description}</PlatformNavMeta>
+                  </PlatformNavButton>
+                </PlatformNavGrid>
+              </PlatformSidebarSection>
+            ) : null}
 
             <PlatformSidebarSection $collapsed={collapsed}>
               <PlatformSidebarSectionIcon $collapsed={collapsed}>B</PlatformSidebarSectionIcon>
@@ -337,6 +373,29 @@ export function PlatformShell({
 
         <PlatformMain>{children}</PlatformMain>
       </PlatformLayout>
+      {workspaceRegistration && workspaceModalOpen ? (
+        <WorkspaceModalBackdrop onClick={onCloseWorkspaceModal}>
+          <WorkspaceModalCard onClick={(event) => event.stopPropagation()}>
+            <WorkspaceModalHeader>
+              <WorkspaceModalTitleBlock>
+                <PlatformEyebrow>Workspace</PlatformEyebrow>
+                <WorkspaceModalTitle>{workspaceRegistration.title}</WorkspaceModalTitle>
+                <WorkspaceModalMeta>{workspaceRegistration.description}</WorkspaceModalMeta>
+              </WorkspaceModalTitleBlock>
+              <WorkspaceModalCloseButton onClick={onCloseWorkspaceModal} type="button">
+                Close
+              </WorkspaceModalCloseButton>
+            </WorkspaceModalHeader>
+            <WorkspaceInventoryPane
+              files={workspaceRegistration.files}
+              accept={workspaceRegistration.accept}
+              onSelectFiles={workspaceRegistration.onSelectFiles}
+              onClearFiles={workspaceRegistration.onClearFiles}
+              onRemoveFile={workspaceRegistration.onRemoveFile}
+            />
+          </WorkspaceModalCard>
+        </WorkspaceModalBackdrop>
+      ) : null}
     </PlatformPage>
   );
 }

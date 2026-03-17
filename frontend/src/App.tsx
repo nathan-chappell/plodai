@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { AppStateProvider } from "./app/context";
 import { useAppRouteGuards, useAppSessionState, useToastState } from "./app/hooks";
 import {
@@ -16,6 +18,7 @@ import { AdminUsersPage, adminUsersCapability } from "./capabilities/adminUsers"
 import { FileAgentPage, fileAgentCapability } from "./capabilities/fileAgent";
 import { PdfAgentPage, pdfAgentCapability } from "./capabilities/pdfAgent";
 import { ReportFoundryPage, reportFoundryCapability } from "./capabilities/reportFoundry";
+import type { ShellWorkspaceRegistration } from "./capabilities/types";
 import { isBlogPath } from "./lib/blog";
 import { navigate, usePathname } from "./lib/router";
 
@@ -37,6 +40,8 @@ export function App() {
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const { dismissToast, toasts } = useToastState();
   const viewingBlog = isBlogPath(pathname);
+  const [workspaceRegistration, setWorkspaceRegistration] = useState<ShellWorkspaceRegistration | null>(null);
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
 
   useAppRouteGuards({
     authError,
@@ -81,14 +86,20 @@ export function App() {
   const currentUser = user;
   const capabilities = filterCapabilities(currentUser.role);
   const activeCapability = resolveVisibleCapability(pathname, currentUser.role);
-
   return (
     <AppStateProvider value={{ authError, setAuthError, user: currentUser, setUser }}>
       <PlatformShell
         capabilities={capabilities}
         activeCapabilityId={activeCapability?.id ?? null}
         currentPathname={pathname}
-        onSelectCapability={navigate}
+        onSelectCapability={(path) => {
+          setWorkspaceModalOpen(false);
+          navigate(path);
+        }}
+        workspaceRegistration={workspaceRegistration}
+        workspaceModalOpen={workspaceModalOpen}
+        onOpenWorkspaceModal={() => setWorkspaceModalOpen(true)}
+        onCloseWorkspaceModal={() => setWorkspaceModalOpen(false)}
       >
         {!activeCapability ? (
           <AppEmptyState>
@@ -97,9 +108,27 @@ export function App() {
           </AppEmptyState>
         ) : null}
 
-        {activeCapability?.id === reportFoundryCapability.id ? <ReportFoundryPage /> : null}
-        {activeCapability?.id === fileAgentCapability.id ? <FileAgentPage /> : null}
-        {activeCapability?.id === pdfAgentCapability.id ? <PdfAgentPage /> : null}
+        {activeCapability?.id === reportFoundryCapability.id ? (
+          <ReportFoundryPage
+            onRegisterWorkspace={(registration) => {
+              setWorkspaceRegistration(registration);
+            }}
+          />
+        ) : null}
+        {activeCapability?.id === fileAgentCapability.id ? (
+          <FileAgentPage
+            onRegisterWorkspace={(registration) => {
+              setWorkspaceRegistration(registration);
+            }}
+          />
+        ) : null}
+        {activeCapability?.id === pdfAgentCapability.id ? (
+          <PdfAgentPage
+            onRegisterWorkspace={(registration) => {
+              setWorkspaceRegistration(registration);
+            }}
+          />
+        ) : null}
         {activeCapability?.id === adminUsersCapability.id ? <AdminUsersPage /> : null}
       </PlatformShell>
       <ToastViewport>

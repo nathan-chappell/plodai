@@ -9,6 +9,7 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    sourcemap: process.env.VITE_BUILD_SOURCEMAP !== "false",
   },
   server: {
     host: "127.0.0.1",

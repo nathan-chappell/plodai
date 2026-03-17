@@ -11,19 +11,28 @@ import {
 import type { ClientEffect } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
 
-type WorkspaceTab = "report" | "datasets" | "goal" | "smoke";
+type WorkspaceTab = "report" | "datasets" | "goal" | "integration" | "smoke";
+type ActiveWorkspaceTab = Exclude<WorkspaceTab, "datasets" | "smoke">;
 const DEFAULT_STATUS = "Add CSV files to begin a local-first investigation.";
 const DEFAULT_BRIEF =
   "Summarize the attached files, identify the strongest trends and anomalies, and explain what deserves follow-up.";
+const ACTIVE_TABS: ActiveWorkspaceTab[] = ["report", "goal", "integration"];
 
 export function useReportFoundryWorkspace() {
   const { user } = useAppState();
   const [datasets, setDatasets] = useState<LocalDataset[]>([]);
   const [status, setStatus] = useState<string>(DEFAULT_STATUS);
   const [investigationBrief, setInvestigationBrief] = useState(DEFAULT_BRIEF);
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("report");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<ActiveWorkspaceTab>("report");
   const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
   const [hydrated, setHydrated] = useState(false);
+
+  function normalizeTab(tab: WorkspaceTab): ActiveWorkspaceTab {
+    if (tab === "smoke") {
+      return "integration";
+    }
+    return (ACTIVE_TABS as readonly string[]).includes(tab) ? (tab as ActiveWorkspaceTab) : "report";
+  }
 
   useEffect(() => {
     if (!user) {
@@ -48,7 +57,7 @@ export function useReportFoundryWorkspace() {
         setDatasets(snapshot.datasets);
         setStatus(snapshot.status);
         setInvestigationBrief(snapshot.investigationBrief);
-        setActiveWorkspaceTab(snapshot.activeWorkspaceTab);
+        setActiveWorkspaceTab(normalizeTab(snapshot.activeWorkspaceTab));
         setReportEffects(snapshot.reportEffects);
       } else {
         setDatasets([]);
@@ -111,9 +120,12 @@ export function useReportFoundryWorkspace() {
       }),
     );
 
-    setDatasets(nextDatasets);
-    setReportEffects([]);
-    setStatus(`Prepared ${nextDatasets.length} dataset summary${nextDatasets.length === 1 ? "" : "ies"} for analysis.`);
+    setDatasets((current) => [...current, ...nextDatasets]);
+    setStatus(
+      `Added ${nextDatasets.length} CSV file${nextDatasets.length === 1 ? "" : "s"}. ${
+        nextDatasets.length === 1 ? "The file is" : "The files are"
+      } ready for analysis.`,
+    );
   }
 
   function handleClearDatasets() {
@@ -128,8 +140,16 @@ export function useReportFoundryWorkspace() {
   function handleLoadSmokeDatasets(nextDatasets: LocalDataset[]) {
     setDatasets(nextDatasets);
     setReportEffects([]);
-    setStatus(`Loaded ${nextDatasets.length} smoke dataset${nextDatasets.length === 1 ? "" : "s"} into the workspace.`);
+    setStatus(
+      `Loaded ${nextDatasets.length} integration test dataset${nextDatasets.length === 1 ? "" : "s"} into the workspace.`,
+    );
     setActiveWorkspaceTab("report");
+  }
+
+  function handleRemoveDataset(datasetId: string) {
+    setDatasets((current) => current.filter((dataset) => dataset.id !== datasetId));
+    setReportEffects([]);
+    setStatus("Removed the selected CSV file from the workspace.");
   }
 
   return {
@@ -144,7 +164,8 @@ export function useReportFoundryWorkspace() {
     handleFiles,
     handleClearDatasets,
     handleLoadSmokeDatasets,
+    handleRemoveDataset,
   };
 }
 
-export type ReportFoundryWorkspaceTab = WorkspaceTab;
+export type ReportFoundryWorkspaceTab = ActiveWorkspaceTab;

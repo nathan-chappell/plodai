@@ -28,6 +28,7 @@ from chatkit.types import (
 from fastapi import Depends
 from openai import AsyncOpenAI
 from openai.types.conversations.conversation_item import ConversationItem
+from openai.types.responses import ResponseFunctionCallOutputItemListParam
 from openai.types.responses.response_function_tool_call_item import (
     ResponseFunctionToolCallItem,
 )
@@ -40,7 +41,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.agent_builder import build_registered_agent
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.query_models import build_query_plan_model
 from backend.app.agents.workspace_file import (
     CsvWorkspaceMetadata,
@@ -132,15 +132,15 @@ class ClientToolResultConverter(ThreadItemConverter):
             "output": json.dumps(sanitized_result, ensure_ascii=True),
         }
 
-        rich_output: list[dict[str, object]] = []
+        rich_output: ResponseFunctionCallOutputItemListParam = []
         if isinstance(image_url, str) and image_url or isinstance(file_input, dict):
             description = "The client tool completed successfully."
             if tool_name:
-                description = (
-                    f"The client tool '{tool_name}' completed successfully."
-                )
+                description = f"The client tool '{tool_name}' completed successfully."
             if isinstance(image_url, str) and image_url:
-                description += " A rendered chart image is attached for visual inspection."
+                description += (
+                    " A rendered chart image is attached for visual inspection."
+                )
             if isinstance(file_input, dict):
                 description += " A derived file is attached for downstream inspection."
             if isinstance(query_id, str) and query_id:
@@ -167,7 +167,12 @@ class ClientToolResultConverter(ThreadItemConverter):
         if isinstance(file_input, dict):
             filename = file_input.get("filename")
             file_data = file_input.get("file_data")
-            if isinstance(filename, str) and filename and isinstance(file_data, str) and file_data:
+            if (
+                isinstance(filename, str)
+                and filename
+                and isinstance(file_data, str)
+                and file_data
+            ):
                 rich_output.append(
                     {
                         "type": "input_file",
@@ -209,25 +214,23 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         thread_id = getattr(parsed_request.params, "thread_id", None)
         recent_items = await self._load_recent_items(thread_id, user_id)
         files = self._files_from_recent_items(recent_items)
-        datasets = self._datasets_from_workspace_files(files)
-        query_plan_model, _ = build_query_plan_model(datasets)
-
-        self.logger.info(
-            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_id={user_id} file_count={len(files)} dataset_count={len(datasets)}"
-        )
-
-        return ReportAgentContext(
+        context = ReportAgentContext(
             report_id=thread_id or "pending_thread",
             user_id=user_id,
             db=self.db,
-            dataset_ids=[dataset.id for dataset in datasets],
             chart_cache=dict(metadata.get("chart_cache") or {}),
             thread_metadata=metadata,
             available_files=files,
-            available_datasets=datasets,
-            query_plan_model=query_plan_model,
             capability_manifest=metadata.get("capability_manifest"),
         )
+        query_plan_model, _ = build_query_plan_model(context.available_datasets)
+        context.query_plan_model = query_plan_model
+
+        self.logger.info(
+            f"request_context.build op={parsed_request.type} thread_id={thread_id} user_id={user_id} file_count={len(files)} dataset_count={len(context.available_datasets)}"
+        )
+
+        return context
 
     async def respond(
         self,
@@ -249,10 +252,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
         )
         recent_item_data = recent_items.data
         context.available_files = self._files_from_recent_items(recent_item_data)
-        context.available_datasets = self._datasets_from_workspace_files(
-            context.available_files
-        )
-        context.dataset_ids = [dataset.id for dataset in context.available_datasets]
         context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
         context.capability_manifest = typed_metadata.get("capability_manifest")
 
@@ -540,9 +539,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
     ) -> list[ThreadItem]:
         if not thread_id:
             return []
-        context = ReportAgentContext(
-            report_id=thread_id, user_id=user_id, db=self.db
-        )
+        context = ReportAgentContext(report_id=thread_id, user_id=user_id, db=self.db)
         try:
             page = await self.store.load_thread_items(
                 thread_id,
@@ -603,11 +600,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                             if workspace_file.get("mime_type")
                             else None
                         ),
-                        byte_size=(
-                            int(workspace_file.get("byte_size"))
-                            if workspace_file.get("byte_size") is not None
-                            else None
-                        ),
+                        byte_size=workspace_file.get("byte_size") or 0,
                         csv=(
                             CsvWorkspaceMetadata(
                                 row_count=int(workspace_file.get("row_count", 0)),
@@ -632,11 +625,7 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                         ),
                         pdf=(
                             PdfWorkspaceMetadata(
-                                page_count=(
-                                    int(workspace_file.get("page_count"))
-                                    if workspace_file.get("page_count") is not None
-                                    else None
-                                )
+                                page_count=workspace_file.get("page_count") or 0
                             )
                             if str(workspace_file.get("kind", "other")) == "pdf"
                             else None
@@ -668,7 +657,8 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                         row_count=int(csv_file.get("row_count", 0)),
                         columns=[str(column) for column in csv_file.get("columns", [])],
                         numeric_columns=[
-                            str(column) for column in csv_file.get("numeric_columns", [])
+                            str(column)
+                            for column in csv_file.get("numeric_columns", [])
                         ],
                         sample_rows=[
                             {str(key): value for key, value in row.items()}
@@ -679,25 +669,6 @@ class ReportFoundryChatKitServer(ChatKitServer[ReportAgentContext]):
                 )
             )
         return files
-
-    def _datasets_from_workspace_files(
-        self, files: list[WorkspaceFileMetadata]
-    ) -> list[DatasetMetadata]:
-        datasets: list[DatasetMetadata] = []
-        for file in files:
-            if file.kind != "csv" or file.csv is None:
-                continue
-            datasets.append(
-                DatasetMetadata(
-                    id=file.id,
-                    name=file.name,
-                    columns=list(file.csv.columns),
-                    sample_rows=list(file.csv.sample_rows),
-                    row_count=file.csv.row_count,
-                    numeric_columns=list(file.csv.numeric_columns),
-                )
-            )
-        return datasets
 
     def _collect_pending_items(
         self,

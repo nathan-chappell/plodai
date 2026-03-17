@@ -1,4 +1,4 @@
-from typing import Literal, NotRequired, TypeAlias, TypedDict
+from typing import Literal, NotRequired, TypeAlias, TypeGuard, TypedDict
 
 from backend.app.chatkit.usage import ThreadUsageTotals, empty_usage_totals
 
@@ -125,7 +125,7 @@ def _normalize_analysis_plan(raw_plan: object) -> AnalysisPlan | None:
     return plan
 
 
-def _is_strict_json_schema(raw_schema: object) -> bool:
+def _is_strict_json_schema(raw_schema: object) -> TypeGuard[JsonSchema]:
     if not isinstance(raw_schema, dict):
         return False
     schema_type = raw_schema.get("type")

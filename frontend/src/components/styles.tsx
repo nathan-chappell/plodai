@@ -400,6 +400,51 @@ export const AdminPanelModalActions = styled.div`
   justify-content: flex-end;
 `;
 
+export const WorkspaceModalBackdrop = styled.div`
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(12, 18, 24, 0.5);
+  backdrop-filter: blur(10px);
+`;
+
+export const WorkspaceModalCard = styled.section`
+  ${sectionPanelCss("1rem", "0.7rem")};
+  width: min(820px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 28px 80px rgba(10, 10, 10, 0.24);
+`;
+
+export const WorkspaceModalHeader = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+`;
+
+export const WorkspaceModalTitleBlock = styled.div`
+  ${gridStackCss("0.25rem")};
+`;
+
+export const WorkspaceModalTitle = styled.h2`
+  margin: 0;
+  font-size: 1.2rem;
+`;
+
+export const WorkspaceModalMeta = styled(MetaText)`
+  margin: 0;
+`;
+
+export const WorkspaceModalCloseButton = styled.button`
+  ${secondaryButtonCss};
+  align-self: start;
+`;
+
 export const PlatformPage = styled.main`
   width: 100%;
   height: 100vh;

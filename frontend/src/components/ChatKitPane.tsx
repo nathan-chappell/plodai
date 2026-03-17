@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
-import { authenticatedFetch, getChatKitConfig } from "../lib/api";
+import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
 import type { CapabilityClientTool, CapabilityManifest } from "../capabilities/types";
 import {
   ChatKitPaneCard,
@@ -125,7 +125,12 @@ export function ChatKitHarness({
   const onEffectsRef = useRef(onEffects);
   const onFilesAddedRef = useRef(onFilesAdded);
   const clientToolsRef = useRef(clientTools);
+  const threadIdRef = useRef<string | null>(null);
   const registeredCatalogRef = useRef<string | null>(null);
+  const registrationRef = useRef<{
+    key: string;
+    promise: Promise<boolean>;
+  } | null>(null);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -138,6 +143,19 @@ export function ChatKitHarness({
   useEffect(() => {
     clientToolsRef.current = clientTools;
   }, [clientTools]);
+
+  useEffect(() => {
+    threadIdRef.current = threadId;
+  }, [threadId]);
+
+  useEffect(() => {
+    setChatKitMetadataGetter(() => ({
+      capability_manifest: capabilityManifest,
+    }));
+    return () => {
+      setChatKitMetadataGetter(null);
+    };
+  }, [capabilityManifest]);
 
   const starterPrompts = useMemo(
     () => prompts ?? buildStarterPrompts(investigationBrief),
@@ -265,35 +283,74 @@ export function ChatKitHarness({
 
   const chatKit = useChatKit(options);
 
-  useEffect(() => {
-    if (!threadId) {
-      return;
-    }
-    const registrationKey = `${threadId}:${clientToolCatalogKey}`;
+  async function ensureCapabilityManifestRegistered(): Promise<boolean> {
+    const currentThreadId = threadIdRef.current;
+    const registrationKey = `${currentThreadId ?? "pending"}:${clientToolCatalogKey}`;
+
     if (registeredCatalogRef.current === registrationKey) {
-      return;
+      return true;
     }
-    registeredCatalogRef.current = registrationKey;
-    void chatKit
+    if (registrationRef.current?.key === registrationKey) {
+      return registrationRef.current.promise;
+    }
+
+    const promise = chatKit
       .sendCustomAction({
         type: REGISTER_CAPABILITY_MANIFEST_ACTION,
         payload: {
           capability_manifest: capabilityManifest,
         },
       })
-      .then(() => setStatus("Capability manifest registered for this thread."))
+      .then(() => {
+        const resolvedThreadId = threadIdRef.current;
+        registeredCatalogRef.current = `${resolvedThreadId ?? currentThreadId ?? "pending"}:${clientToolCatalogKey}`;
+        setStatus("Capability manifest registered for this thread.");
+        return true;
+      })
       .catch((error) => {
         registeredCatalogRef.current = null;
         setStatus(error instanceof Error ? error.message : "Unable to register capability manifest.");
+        return false;
+      })
+      .finally(() => {
+        if (registrationRef.current?.key === registrationKey) {
+          registrationRef.current = null;
+        }
       });
-  }, [capabilityManifest, chatKit, clientToolCatalogKey, threadId]);
+
+    registrationRef.current = {
+      key: registrationKey,
+      promise,
+    };
+
+    return promise;
+  }
+
+  useEffect(() => {
+    if (!threadId) {
+      return;
+    }
+    void ensureCapabilityManifestRegistered();
+  }, [clientToolCatalogKey, threadId]);
 
   async function handleQuickAction(action: ChatKitQuickAction) {
+    const needsNewThread = !threadIdRef.current;
+    if (!needsNewThread) {
+      const registrationKey = `${threadIdRef.current}:${clientToolCatalogKey}`;
+      if (registeredCatalogRef.current !== registrationKey) {
+        setStatus("Registering client tools for the current thread.");
+        const registered = await ensureCapabilityManifestRegistered();
+        if (!registered) {
+          return;
+        }
+      }
+    }
+
     setStatus(`Starting ${action.label.toLowerCase()}.`);
     await chatKit.sendUserMessage({
       text: action.prompt,
       model: action.model ?? CHATKIT_DEFAULT_MODEL_ID,
-      newThread: true,
+      newThread: needsNewThread,
     });
   }
 
@@ -364,9 +421,7 @@ export function ChatKitPane({
       ) : (
         <ChatKitPaneSurface>
           <ChatKitPaneEmpty>
-            {enabled
-              ? "The agent is ready once you add local CSV files."
-              : "Sign in to open the analyst workspace."}
+            {enabled ? "The agent is ready once you add local CSV files." : "Sign in to open the analyst workspace."}
           </ChatKitPaneEmpty>
         </ChatKitPaneSurface>
       )}

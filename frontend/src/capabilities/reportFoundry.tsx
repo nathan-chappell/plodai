@@ -1,16 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { useAppState } from "../app/context";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
-import { DatasetInventoryPane } from "../components/DatasetInventoryPane";
 import { NarrativeCard } from "../components/NarrativeCard";
 import { SmokeTestPane } from "../components/SmokeTestPane";
 import { useReportFoundryWorkspace, type ReportFoundryWorkspaceTab } from "./hooks";
 import type { ClientEffect } from "../types/analysis";
 import type { LocalDataset } from "../types/report";
 import { MetaText } from "../app/styles";
-import type { CapabilityClientTool, CapabilityDefinition } from "./types";
+import type { CapabilityClientTool, CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
+import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { buildReportAgentManifest } from "./manifests";
 import { createWorkspaceClientTools } from "../lib/file-agent-tools";
 import {
@@ -83,13 +83,16 @@ export const reportFoundryCapability: CapabilityDefinition = {
   description: "Investigative report generation over local files.",
   tabs: [
     { id: "report", label: "Report" },
-    { id: "datasets", label: "Datasets" },
     { id: "goal", label: "Goal" },
-    { id: "smoke", label: "Smoke" },
+    { id: "integration", label: "Integration Test" },
   ],
 };
 
-export function ReportFoundryPage() {
+export function ReportFoundryPage({
+  onRegisterWorkspace,
+}: {
+  onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
+}) {
   const { user } = useAppState();
   if (!user) {
     return null;
@@ -106,9 +109,23 @@ export function ReportFoundryPage() {
     handleFiles,
     handleClearDatasets,
     handleLoadSmokeDatasets,
+    handleRemoveDataset,
   } = useReportFoundryWorkspace();
   const capabilityManifest = useMemo(() => buildReportAgentManifest(), []);
   const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(datasets), [datasets]);
+
+  useEffect(() => {
+    onRegisterWorkspace?.({
+      capabilityId: reportFoundryCapability.id,
+      title: "Files",
+      description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      files: datasets,
+      accept: ".csv",
+      onSelectFiles: handleFiles,
+      onClearFiles: handleClearDatasets,
+      onRemoveFile: handleRemoveDataset,
+    });
+  }, [datasets, handleClearDatasets, handleFiles, handleRemoveDataset, onRegisterWorkspace]);
 
   return (
     <>
@@ -117,7 +134,7 @@ export function ReportFoundryPage() {
           <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
           <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
           <CapabilitySubhead>
-            Load local CSVs, set the goal, and investigate through safe queries and charts.
+            Load local files, set the goal, and investigate through safe queries and charts.
           </CapabilitySubhead>
         </CapabilityHeader>
         <AuthPanel mode="account" heading="Account" />
@@ -142,14 +159,13 @@ export function ReportFoundryPage() {
             <CapabilityPanel>
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Report canvas</CapabilitySectionTitle>
-                <CapabilityMetaText>{status}</CapabilityMetaText>
+              <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
-              <CapabilityMetaText>
-                Uploaded files: {datasets.length ? datasets.map((dataset) => dataset.name).join(", ") : "none yet"}
-              </CapabilityMetaText>
+              <CapabilityMetaText>Files: {datasets.length ? datasets.map((dataset) => dataset.name).join(", ") : "none yet"}</CapabilityMetaText>
               <CapabilityMetaText>
                 Current goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the investigation."}
               </CapabilityMetaText>
+              <CapabilityMetaText>Use the sidebar workspace panel to add, inspect, or remove the files feeding this report.</CapabilityMetaText>
             </CapabilityPanel>
 
             {reportEffects.length ? (
@@ -184,14 +200,6 @@ export function ReportFoundryPage() {
         </ReportWorkspaceLayout>
       ) : null}
 
-      {activeWorkspaceTab === "datasets" ? (
-        <DatasetInventoryPane
-          datasets={datasets}
-          onSelectFiles={handleFiles}
-          onClearDatasets={handleClearDatasets}
-        />
-      ) : null}
-
       {activeWorkspaceTab === "goal" ? (
         <InvestigationBriefPanel
           investigationBrief={investigationBrief}
@@ -199,7 +207,7 @@ export function ReportFoundryPage() {
         />
       ) : null}
 
-      {activeWorkspaceTab === "smoke" ? <SmokeTestPane onLoadFixtures={handleLoadSmokeDatasets} /> : null}
+      {activeWorkspaceTab === "integration" ? <SmokeTestPane onLoadFixtures={handleLoadSmokeDatasets} /> : null}
     </>
   );
 }

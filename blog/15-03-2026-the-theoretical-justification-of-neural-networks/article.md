@@ -54,23 +54,45 @@ What is so striking is that Pollack really does say the strong version. In the a
 
 <div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start;">
   <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/dyck1-training-curves.png" alt="Training curves for the Dyck-1 recognizer, with train, short-test, and long-test accuracy and loss over time." width="560" />
+    <img src="./images/rnn-fractal-demo/balanced_parentheses-training-curves.png" alt="Training curves for the balanced-parentheses recognizer, with train, short-test, and long-test accuracy and loss over time." width="560" />
     <figcaption><em>The thing I wanted to capture from Pollack is already visible here: performance on much longer strings can lag and then change qualitatively once the state dynamics settle into a different regime.</em></figcaption>
   </figure>
   <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/dyck1-dataset-distribution.png" alt="Distribution of train, short-test, and long-test Dyck-1 examples by complexity." width="560" />
-    <figcaption><em>This makes the split explicit.  Training stays on short strings, while the long-test set lives well outside the training range.</em></figcaption>
+    <img src="./images/rnn-fractal-demo/balanced_parentheses-response-bifurcation.png" alt="A Pollack-style response diagram showing the balanced-parentheses model outputs on the first 25 characteristic parenthesis strings over training." width="560" />
+    <figcaption><em>This is the closest homage to Pollack's original figure: a fixed set of characteristic strings tracked across training, with a visible split as the recognizer begins to separate regimes.</em></figcaption>
   </figure>
 </div>
 
 <div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
   <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/dyck1-trace-cloud-01.png" alt="PCA projection of recurrent hidden-state trajectories for balanced-parentheses examples." width="560" />
-    <figcaption><em>A simple projection of hidden-state trajectories is enough to make the computation feel geometric rather than merely symbolic.</em></figcaption>
+    <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-layered-basepts64.png" alt="A layered symbolic dust figure illustrating how discrete structure can be embedded in a bounded state-space region." width="560" />
+    <figcaption><em>The layered dust version gives the cleaner large-scale geometry.</em></figcaption>
   </figure>
   <figure style="flex: 1 1 320px; margin: 0;">
-    <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-layered-basepts64.png" alt="A layered symbolic dust figure illustrating how discrete structure can be embedded in a bounded state-space region." width="560" />
-    <figcaption><em>The dust image is not meant as a literal hidden-state reconstruction.  It is there to make the fractal encoding idea concrete enough to visualize.</em></figcaption>
+    <img src="./images/rnn-fractal-demo/dust-depth10-base3-digits02-points1000-prefix4.png" alt="A sampled Cantor-dust style point cloud showing a more grainy version of the same symbolic geometry." width="560" />
+    <figcaption><em>The sampled version is rougher and more atmospheric.  I may keep both because they suggest slightly different intuitions.</em></figcaption>
+  </figure>
+</div>
+
+<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-001.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions at epoch 1." width="560" />
+    <figcaption><em>At the beginning these shorter probe strings do not yet seem to live in a cleanly organized region of state space.</em></figcaption>
+  </figure>
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-034.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions at epoch 34." width="560" />
+    <figcaption><em>By the first major checkpoint there is a little more coherence, but the geometry is still visibly unsettled.</em></figcaption>
+  </figure>
+</div>
+
+<div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items:flex-start; margin-top: 1rem;">
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-134.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions later in training." width="560" />
+    <figcaption><em>Later on, the hidden-state trajectories start to look like the network is discovering a more stable computational regime.</em></figcaption>
+  </figure>
+  <figure style="flex: 1 1 320px; margin: 0;">
+    <img src="./images/rnn-fractal-demo/balanced_parentheses-trace-valid-1-c10-epoch-200.png" alt="A balanced-parentheses hidden-state trace for a valid complexity-10 string projected into two dimensions at the end of training." width="560" />
+    <figcaption><em>At the end, the same probe input traces a much more structured picture, which is the closest thing here to Pollack's visual argument.</em></figcaption>
   </figure>
 </div>
 

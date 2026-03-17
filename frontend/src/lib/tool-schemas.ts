@@ -1,5 +1,7 @@
 import type { JsonSchema } from "../types/json-schema";
 
+const MAX_ROW_EXPR_SCHEMA_DEPTH = 4;
+
 const primitiveValueSchema: JsonSchema = {
   anyOf: [
     { type: "string" },
@@ -8,8 +10,6 @@ const primitiveValueSchema: JsonSchema = {
     { type: "null" },
   ],
 };
-
-const rowExprSchema: JsonSchema = { anyOf: [] };
 
 const literalExprSchema: JsonSchema = {
   type: "object",
@@ -31,52 +31,7 @@ const columnExprSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-const unaryExprSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    kind: { enum: ["unary"] },
-    op: { enum: ["not", "negate"] },
-    value: rowExprSchema,
-  },
-  required: ["kind", "op", "value"],
-  additionalProperties: false,
-};
-
-const binaryExprSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    kind: { enum: ["binary"] },
-    op: {
-      enum: ["add", "sub", "mul", "div", "mod", "eq", "neq", "gt", "gte", "lt", "lte", "and", "or"],
-    },
-    left: rowExprSchema,
-    right: rowExprSchema,
-  },
-  required: ["kind", "op", "left", "right"],
-  additionalProperties: false,
-};
-
-const callExprSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    kind: { enum: ["call"] },
-    fn: { enum: ["lower", "upper", "trim", "abs", "round", "floor", "ceil", "coalesce"] },
-    args: {
-      type: "array",
-      items: rowExprSchema,
-    },
-  },
-  required: ["kind", "fn", "args"],
-  additionalProperties: false,
-};
-
-(rowExprSchema as { anyOf: JsonSchema[] }).anyOf = [
-  literalExprSchema,
-  columnExprSchema,
-  unaryExprSchema,
-  binaryExprSchema,
-  callExprSchema,
-];
+const rowExprSchema = buildRowExprSchema(MAX_ROW_EXPR_SCHEMA_DEPTH);
 
 const projectFieldSchema: JsonSchema = {
   type: "object",
@@ -276,3 +231,66 @@ export const getPdfPageRangeToolSchema: JsonSchema = {
   required: ["file_id", "start_page", "end_page"],
   additionalProperties: false,
 };
+
+function buildRowExprSchema(depth: number): JsonSchema {
+  if (depth <= 0) {
+    return {
+      anyOf: [literalExprSchema, columnExprSchema],
+    };
+  }
+
+  return {
+    anyOf: [
+      literalExprSchema,
+      columnExprSchema,
+      buildUnaryExprSchema(depth - 1),
+      buildBinaryExprSchema(depth - 1),
+      buildCallExprSchema(depth - 1),
+    ],
+  };
+}
+
+function buildUnaryExprSchema(childDepth: number): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      kind: { enum: ["unary"] },
+      op: { enum: ["not", "negate"] },
+      value: buildRowExprSchema(childDepth),
+    },
+    required: ["kind", "op", "value"],
+    additionalProperties: false,
+  };
+}
+
+function buildBinaryExprSchema(childDepth: number): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      kind: { enum: ["binary"] },
+      op: {
+        enum: ["add", "sub", "mul", "div", "mod", "eq", "neq", "gt", "gte", "lt", "lte", "and", "or"],
+      },
+      left: buildRowExprSchema(childDepth),
+      right: buildRowExprSchema(childDepth),
+    },
+    required: ["kind", "op", "left", "right"],
+    additionalProperties: false,
+  };
+}
+
+function buildCallExprSchema(childDepth: number): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      kind: { enum: ["call"] },
+      fn: { enum: ["lower", "upper", "trim", "abs", "round", "floor", "ceil", "coalesce"] },
+      args: {
+        type: "array",
+        items: buildRowExprSchema(childDepth),
+      },
+    },
+    required: ["kind", "fn", "args"],
+    additionalProperties: false,
+  };
+}

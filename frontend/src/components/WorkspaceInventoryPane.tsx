@@ -29,11 +29,13 @@ export function WorkspaceInventoryPane({
   accept,
   onSelectFiles,
   onClearFiles,
+  onRemoveFile,
 }: {
   files: LocalWorkspaceFile[];
-  accept: string;
+  accept?: string;
   onSelectFiles: (files: FileList | null) => Promise<void>;
   onClearFiles: () => void;
+  onRemoveFile?: (fileId: string) => void;
 }) {
   const [expandedFileId, setExpandedFileId] = useState<string | null>(null);
   const [pageByFileId, setPageByFileId] = useState<Record<string, number>>({});
@@ -67,9 +69,17 @@ export function WorkspaceInventoryPane({
         <MetaText>Select local files, inspect safe metadata, and let the agent derive new files into the same workspace.</MetaText>
       </DatasetInventoryHeader>
       <DatasetInventoryToolbar>
-        <DatasetInventoryUploadInput type="file" accept={accept} multiple onChange={(event) => void onSelectFiles(event.target.files)} />
+        <DatasetInventoryUploadInput
+          type="file"
+          accept={accept}
+          multiple
+          onChange={(event) => {
+            void onSelectFiles(event.target.files);
+            event.currentTarget.value = "";
+          }}
+        />
         <DatasetInventoryButton disabled={!files.length} onClick={onClearFiles} type="button">
-          Clear files
+          Remove all files
         </DatasetInventoryButton>
       </DatasetInventoryToolbar>
       {files.length ? (
@@ -144,6 +154,11 @@ export function WorkspaceInventoryPane({
                     {file.kind === "other" ? (
                       <MetaText>This file is listed for awareness, but there are no specialized tools for it yet.</MetaText>
                     ) : null}
+                    {onRemoveFile ? (
+                      <DatasetInventoryButton onClick={() => onRemoveFile(file.id)} type="button">
+                        Remove file
+                      </DatasetInventoryButton>
+                    ) : null}
                   </DatasetInventoryExpanded>
                 ) : null}
               </DatasetInventoryCard>
@@ -151,7 +166,7 @@ export function WorkspaceInventoryPane({
           })}
         </DatasetInventoryList>
       ) : (
-        <MetaText>No files selected yet.</MetaText>
+        <MetaText>No workspace files yet.</MetaText>
       )}
     </DatasetInventoryPanel>
   );

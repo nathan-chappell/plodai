@@ -1,13 +1,13 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { AuthPanel } from "../components/AuthPanel";
 import { ChatKitPane } from "../components/ChatKitPane";
-import { WorkspaceInventoryPane } from "../components/WorkspaceInventoryPane";
 import { buildFileAgentManifest } from "./manifests";
+import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { createWorkspaceClientTools } from "../lib/file-agent-tools";
 import { MetaText } from "../app/styles";
-import type { CapabilityDefinition } from "./types";
+import type { CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
 import {
   CapabilityEyebrow,
   CapabilityHeader,
@@ -27,7 +27,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type FileAgentTab = "agent" | "files" | "goal";
+type FileAgentTab = "agent" | "goal";
 
 const DEFAULT_STATUS = "Load CSV or PDF files to start using the file agent.";
 const DEFAULT_BRIEF =
@@ -69,12 +69,15 @@ export const fileAgentCapability: CapabilityDefinition = {
   description: "Structured file operations across CSV and PDF inputs.",
   tabs: [
     { id: "agent", label: "Agent" },
-    { id: "files", label: "Files" },
     { id: "goal", label: "Goal" },
   ],
 };
 
-export function FileAgentPage() {
+export function FileAgentPage({
+  onRegisterWorkspace,
+}: {
+  onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
+}) {
   const {
     files,
     appendFiles,
@@ -87,17 +90,31 @@ export function FileAgentPage() {
     setReportEffects,
     handleFiles,
     handleClearFiles,
+    handleRemoveFile,
   } = useCapabilityFileWorkspace({
     capabilityId: fileAgentCapability.id,
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
+    allowedTabs: ["agent", "goal"],
   });
   const capabilityManifest = useMemo(() => buildFileAgentManifest(), []);
   const clientTools = useMemo(
     () => createWorkspaceClientTools(files, { includeCsvCreation: true, includePdfRange: true }),
     [files],
   );
+
+  useEffect(() => {
+    onRegisterWorkspace?.({
+      capabilityId: fileAgentCapability.id,
+      title: "Files",
+      description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      files,
+      onSelectFiles: handleFiles,
+      onClearFiles: handleClearFiles,
+      onRemoveFile: handleRemoveFile,
+    });
+  }, [files, handleClearFiles, handleFiles, handleRemoveFile, onRegisterWorkspace]);
 
   return (
     <>
@@ -139,6 +156,9 @@ export function FileAgentPage() {
               <MetaText>
                 Goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the current file operation."}
               </MetaText>
+              <MetaText>
+                Manage files from the sidebar workspace panel whenever you need to add or remove inputs.
+              </MetaText>
               {reportEffects.length ? <MetaText>Client effects captured this session: {reportEffects.length}</MetaText> : null}
             </CapabilityPanel>
           </ReportWorkspaceColumn>
@@ -154,10 +174,6 @@ export function FileAgentPage() {
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
-      ) : null}
-
-      {activeWorkspaceTab === "files" ? (
-        <WorkspaceInventoryPane files={files} accept=".csv,.pdf" onSelectFiles={handleFiles} onClearFiles={handleClearFiles} />
       ) : null}
 
       {activeWorkspaceTab === "goal" ? (

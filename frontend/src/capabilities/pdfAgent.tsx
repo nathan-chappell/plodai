@@ -1,13 +1,13 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { AuthPanel } from "../components/AuthPanel";
 import { ChatKitPane } from "../components/ChatKitPane";
-import { WorkspaceInventoryPane } from "../components/WorkspaceInventoryPane";
+import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { buildPdfAgentManifest } from "./manifests";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { createWorkspaceClientTools } from "../lib/file-agent-tools";
 import { MetaText } from "../app/styles";
-import type { CapabilityDefinition } from "./types";
+import type { CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
 import {
   CapabilityEyebrow,
   CapabilityHeader,
@@ -27,7 +27,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type PdfAgentTab = "agent" | "files" | "goal";
+type PdfAgentTab = "agent" | "goal";
 
 const DEFAULT_STATUS = "Load PDF files to start carving bounded page ranges.";
 const DEFAULT_BRIEF =
@@ -69,12 +69,15 @@ export const pdfAgentCapability: CapabilityDefinition = {
   description: "Bounded PDF extraction and decomposition workspace.",
   tabs: [
     { id: "agent", label: "Agent" },
-    { id: "files", label: "Files" },
     { id: "goal", label: "Goal" },
   ],
 };
 
-export function PdfAgentPage() {
+export function PdfAgentPage({
+  onRegisterWorkspace,
+}: {
+  onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
+}) {
   const {
     files,
     appendFiles,
@@ -87,17 +90,32 @@ export function PdfAgentPage() {
     setReportEffects,
     handleFiles,
     handleClearFiles,
+    handleRemoveFile,
   } = useCapabilityFileWorkspace({
     capabilityId: pdfAgentCapability.id,
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
+    allowedTabs: ["agent", "goal"],
   });
   const capabilityManifest = useMemo(() => buildPdfAgentManifest(), []);
   const clientTools = useMemo(
     () => createWorkspaceClientTools(files, { includeCsvTools: false, includePdfRange: true }),
     [files],
   );
+
+  useEffect(() => {
+    onRegisterWorkspace?.({
+      capabilityId: pdfAgentCapability.id,
+      title: "Files",
+      description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      files,
+      accept: ".pdf",
+      onSelectFiles: handleFiles,
+      onClearFiles: handleClearFiles,
+      onRemoveFile: handleRemoveFile,
+    });
+  }, [files, handleClearFiles, handleFiles, handleRemoveFile, onRegisterWorkspace]);
 
   return (
     <>
@@ -139,6 +157,7 @@ export function PdfAgentPage() {
               <MetaText>
                 Goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the current extraction task."}
               </MetaText>
+              <MetaText>Use the sidebar workspace panel to load PDFs or remove them from the current session.</MetaText>
               {reportEffects.length ? <MetaText>Client effects captured this session: {reportEffects.length}</MetaText> : null}
             </CapabilityPanel>
           </ReportWorkspaceColumn>
@@ -154,10 +173,6 @@ export function PdfAgentPage() {
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
-      ) : null}
-
-      {activeWorkspaceTab === "files" ? (
-        <WorkspaceInventoryPane files={files} accept=".pdf" onSelectFiles={handleFiles} onClearFiles={handleClearFiles} />
       ) : null}
 
       {activeWorkspaceTab === "goal" ? (

@@ -16,6 +16,7 @@ export function useCapabilityFileWorkspace(options: {
   defaultStatus: string;
   defaultBrief: string;
   defaultTab: string;
+  allowedTabs: string[];
 }) {
   const { user } = useAppState();
   const [files, setFiles] = useState<LocalWorkspaceFile[]>([]);
@@ -24,6 +25,10 @@ export function useCapabilityFileWorkspace(options: {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState(options.defaultTab);
   const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
   const [hydrated, setHydrated] = useState(false);
+
+  function normalizeTab(tab: string): string {
+    return options.allowedTabs.includes(tab) ? tab : options.defaultTab;
+  }
 
   useEffect(() => {
     if (!user) {
@@ -48,7 +53,7 @@ export function useCapabilityFileWorkspace(options: {
         setFiles(snapshot.files);
         setStatus(snapshot.status);
         setInvestigationBrief(snapshot.investigationBrief);
-        setActiveWorkspaceTab(snapshot.activeWorkspaceTab);
+        setActiveWorkspaceTab(normalizeTab(snapshot.activeWorkspaceTab));
         setReportEffects(snapshot.reportEffects);
       } else {
         setFiles([]);
@@ -63,7 +68,7 @@ export function useCapabilityFileWorkspace(options: {
     return () => {
       cancelled = true;
     };
-  }, [options.capabilityId, options.defaultBrief, options.defaultStatus, options.defaultTab, user]);
+  }, [options.allowedTabs, options.capabilityId, options.defaultBrief, options.defaultStatus, options.defaultTab, user]);
 
   useEffect(() => {
     if (!user || !hydrated) {
@@ -101,9 +106,12 @@ export function useCapabilityFileWorkspace(options: {
 
     setStatus("Profiling selected files locally before exposing safe metadata to the agent.");
     const builtFiles = await Promise.all(Array.from(nextFiles).map((file) => buildWorkspaceFile(file)));
-    setFiles(builtFiles);
-    setReportEffects([]);
-    setStatus(`Prepared ${builtFiles.length} workspace file${builtFiles.length === 1 ? "" : "s"} for the agent.`);
+    setFiles((current) => [...current, ...builtFiles]);
+    setStatus(
+      `Added ${builtFiles.length} workspace file${builtFiles.length === 1 ? "" : "s"}. ${
+        builtFiles.length === 1 ? "The file is" : "The files are"
+      } ready for the agent.`,
+    );
   }
 
   function appendFiles(nextFiles: LocalWorkspaceFile[]) {
@@ -123,6 +131,12 @@ export function useCapabilityFileWorkspace(options: {
     }
   }
 
+  function handleRemoveFile(fileId: string) {
+    setFiles((current) => current.filter((file) => file.id !== fileId));
+    setReportEffects([]);
+    setStatus("Removed the selected file from the workspace.");
+  }
+
   return {
     files,
     setFiles,
@@ -137,5 +151,6 @@ export function useCapabilityFileWorkspace(options: {
     setReportEffects,
     handleFiles,
     handleClearFiles,
+    handleRemoveFile,
   };
 }

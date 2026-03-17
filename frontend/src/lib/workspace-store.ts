@@ -6,7 +6,7 @@ export type ReportFoundryWorkspaceSnapshot = {
   datasets: LocalDataset[];
   status: string;
   investigationBrief: string;
-  activeWorkspaceTab: "report" | "datasets" | "goal" | "smoke";
+  activeWorkspaceTab: "report" | "datasets" | "goal" | "integration";
   reportEffects: ClientEffect[];
 };
 

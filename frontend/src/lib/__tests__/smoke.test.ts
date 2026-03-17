@@ -4,9 +4,17 @@ vi.mock("../chart", () => ({
   renderChartToDataUrl: vi.fn(async () => "data:image/png;base64,smoke-chart"),
 }));
 
+import { buildReportAgentManifest } from "../../capabilities/manifests";
 import { createSmokeDatasets, runFrontendSmokeTest } from "../smoke";
 
 describe("frontend smoke harness", () => {
+  it("builds a serializable report manifest for the browser harness", () => {
+    const manifest = buildReportAgentManifest();
+
+    expect(() => JSON.stringify(manifest)).not.toThrow();
+    expect(manifest.client_tools.map((tool) => tool.name)).toContain("request_chart_render");
+  });
+
   it("creates bundled smoke datasets", () => {
     const datasets = createSmokeDatasets();
 

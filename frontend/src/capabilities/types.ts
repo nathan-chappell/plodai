@@ -48,3 +48,14 @@ export type CapabilityDefinition = {
   description: string;
   tabs: CapabilityTab[];
 };
+
+export type ShellWorkspaceRegistration = {
+  capabilityId: string;
+  title: string;
+  description: string;
+  files: LocalWorkspaceFile[];
+  accept?: string;
+  onSelectFiles: (files: FileList | null) => Promise<void>;
+  onClearFiles: () => void;
+  onRemoveFile?: (fileId: string) => void;
+};

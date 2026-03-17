@@ -4,6 +4,7 @@ const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
 const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce2224e586b";
 let clerkTokenGetter: (() => Promise<string | null>) | null = null;
+let chatKitMetadataGetter: (() => Record<string, unknown> | null) | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -17,6 +18,10 @@ export class ApiError extends Error {
 
 export function setClerkTokenGetter(getter: (() => Promise<string | null>) | null): void {
   clerkTokenGetter = getter;
+}
+
+export function setChatKitMetadataGetter(getter: (() => Record<string, unknown> | null) | null): void {
+  chatKitMetadataGetter = getter;
 }
 
 export function getChatKitConfig() {
@@ -33,8 +38,10 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
     headers.set("Authorization", `Bearer ${token}`);
   }
 
+  const nextInit = maybeAttachChatKitMetadata(input, init);
+
   const response = await fetch(input, {
-    ...init,
+    ...nextInit,
     headers,
   });
   if (response.status === 402) {
@@ -106,5 +113,51 @@ async function notifyPaymentRequired(response: Response): Promise<void> {
     publishPaymentRequiredToast();
   } catch {
     publishPaymentRequiredToast();
+  }
+}
+
+function maybeAttachChatKitMetadata(input: RequestInfo | URL, init?: RequestInit): RequestInit | undefined {
+  if (!isChatKitRequest(input) || typeof init?.body !== "string") {
+    return init;
+  }
+
+  const metadata = chatKitMetadataGetter?.();
+  if (!metadata || !Object.keys(metadata).length) {
+    return init;
+  }
+
+  try {
+    const payload = JSON.parse(init.body) as { metadata?: Record<string, unknown> };
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return init;
+    }
+
+    return {
+      ...init,
+      body: JSON.stringify({
+        ...payload,
+        metadata: {
+          ...(typeof payload.metadata === "object" && payload.metadata && !Array.isArray(payload.metadata)
+            ? payload.metadata
+            : {}),
+          ...metadata,
+        },
+      }),
+    };
+  } catch {
+    return init;
+  }
+}
+
+function isChatKitRequest(input: RequestInfo | URL): boolean {
+  const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  return normalizeRequestPath(requestUrl) === normalizeRequestPath(CHATKIT_URL);
+}
+
+function normalizeRequestPath(url: string): string {
+  try {
+    return new URL(url, window.location.origin).pathname.replace(/\/$/, "");
+  } catch {
+    return url.replace(/\/$/, "");
   }
 }

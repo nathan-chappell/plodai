@@ -1,8 +1,21 @@
+from typing import TypedDict
+
 from clerk_backend_api import models
 from clerk_backend_api.sdk import Clerk
 
 from backend.app.core.config import get_settings
 from backend.app.models.types import UserRole
+
+
+class UserSummaryMapping(TypedDict):
+    id: str
+    email: str | None
+    full_name: str | None
+    image_url: str | None
+    role: UserRole
+    is_active: bool
+    created_at_ms: int
+    last_sign_in_at_ms: int | None
 
 
 def _client() -> Clerk:
@@ -56,7 +69,7 @@ async def list_users(
     return await client.users.list_async(request=request)
 
 
-def map_user_summary(user: models.User) -> dict[str, object]:
+def map_user_summary(user: models.User) -> UserSummaryMapping:
     return {
         "id": user.id,
         "email": _resolve_primary_email(user),

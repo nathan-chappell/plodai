@@ -22,11 +22,11 @@ import type { LocalDataset } from "../types/report";
 import { MetaText } from "../app/styles";
 
 const FORCING_PROMPT = [
-  "This is a system smoke test for AI Portfolio.",
+  "This is a ChatKit integration test for AI Portfolio.",
   "Use the attached CSV file tools that are already available in this thread.",
   "Start by listing the attached CSV files.",
   "Create exactly three charts from the sales fixture: a bar chart of revenue by region, a line chart of revenue by month, and a pie chart of revenue by category.",
-  "Append a short report section titled Systems Test Summary that confirms whether the smoke test succeeded.",
+  "Append a short report section titled Systems Test Summary that confirms whether the integration test succeeded.",
   "Do not ask the user what to do next unless the test is blocked.",
 ].join(" ");
 
@@ -62,20 +62,20 @@ export function SmokeTestPane({
   return (
     <SmokeTestPanel>
       <div>
-        <h2>Frontend smoke test</h2>
+        <h2>Frontend integration test</h2>
         <MetaText>
           The deterministic runner below is a quick sanity check for the local query and chart helpers. The shared
-          ChatKit harness further down runs the real browser-based flow with a forcing prompt and shows whatever the
-          model actually produces.
+          ChatKit integration harness further down runs the real browser-based flow with a forcing prompt and shows
+          whatever the model actually produces.
         </MetaText>
       </div>
 
       <SmokeTestToolbar>
         <SmokeTestButton type="button" onClick={handleRun} disabled={running}>
-          {running ? "Running smoke test..." : "Run smoke test"}
+          {running ? "Running integration test..." : "Run integration test"}
         </SmokeTestButton>
         <SmokeTestButton type="button" onClick={() => onLoadFixtures(smokeDatasets)}>
-          Load smoke datasets into workspace
+          Load integration datasets into workspace
         </SmokeTestButton>
       </SmokeTestToolbar>
 
@@ -148,11 +148,11 @@ export function SmokeTestPane({
       <ChatKitHarness
         capabilityManifest={capabilityManifest}
         files={smokeDatasets}
-        investigationBrief="Run the systems smoke scenario against the bundled CSV files and show the real browser rendering path."
+        investigationBrief="Run the ChatKit integration scenario against the bundled CSV files and show the real browser rendering path."
         clientTools={createReportFoundryClientTools(smokeDatasets)}
-        headerTitle="Smoke harness"
+        headerTitle="Integration test harness"
         greeting="Run the forcing prompt against bundled CSV fixtures."
-        composerPlaceholder="Use the forcing prompt or explore the smoke fixtures manually"
+        composerPlaceholder="Use the forcing prompt or explore the integration fixtures manually"
         colorScheme="light"
         showDictation={false}
         prompts={[
