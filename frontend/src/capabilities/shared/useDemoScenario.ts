@@ -45,6 +45,5 @@ export function useDemoScenario(options: {
     scenario,
     loading,
     error,
-    reloadScenario: loadScenario,
   };
 }

@@ -16,6 +16,12 @@ import {
 import type { ClientEffect, ClientToolCall, ClientToolName } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 
+type ChatKitStarterPrompt = {
+  label: string;
+  prompt: string;
+  icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle";
+};
+
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
 const CHATKIT_MODEL_CHOICES = [
   {
@@ -34,8 +40,10 @@ const CHATKIT_MODEL_CHOICES = [
     description: "Best available capability for hard cases",
   },
 ] as const;
+
 const CHATKIT_DEFAULT_MODEL_LABEL =
   CHATKIT_MODEL_CHOICES.find((choice) => choice.id === CHATKIT_DEFAULT_MODEL_ID)?.label ?? "Lightweight";
+
 function formatToolLabel(tool: string): string {
   return tool
     .split("_")
@@ -63,7 +71,7 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
   }
 }
 
-function buildStarterPrompts(investigationBrief: string) {
+function buildStarterPrompts(investigationBrief: string): readonly ChatKitStarterPrompt[] {
   const briefSuffix = investigationBrief.trim()
     ? ` Focus on this goal: ${investigationBrief.trim()}`
     : "";
@@ -117,7 +125,7 @@ export function ChatKitHarness({
   clientTools: CapabilityClientTool[];
   headerTitle?: string;
   greeting?: string;
-  prompts?: ReadonlyArray<{ label: string; prompt: string; icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle" }>;
+  prompts?: readonly ChatKitStarterPrompt[];
   composerPlaceholder?: string;
   quickActions?: ChatKitQuickAction[];
   colorScheme?: "dark" | "light";
@@ -211,6 +219,7 @@ export function ChatKitHarness({
           icon: prompt.icon,
         })),
       },
+      widgets: {},
       composer: {
         placeholder:
           composerPlaceholder ??
@@ -359,7 +368,7 @@ export function ChatKitPane({
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
   headerTitle?: string;
   greeting?: string;
-  prompts?: ReadonlyArray<{ label: string; prompt: string; icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle" }>;
+  prompts?: readonly ChatKitStarterPrompt[];
   composerPlaceholder?: string;
   quickActions?: ChatKitQuickAction[];
   colorScheme?: "dark" | "light";

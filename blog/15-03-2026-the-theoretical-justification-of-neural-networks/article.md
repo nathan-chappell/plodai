@@ -25,9 +25,9 @@ Back to neural networks, first we observe that most neural networks are paramete
 
 The picture to keep in mind is not mystical at all.  It is just a family of simple parameterized curves getting better and better at hugging some more interesting target curve.  You vary the parameters, the shape changes, and with enough flexibility the model can press itself surprisingly close to what you wanted.  That basic approximation story is the first reason I came to think neural networks deserve to be taken seriously.
 
-![A small ReLU MLP learning sin(8πx) on [0,1] at several checkpoints.](/blog-assets/theoretical-justification-of-neural-networks/mlp-sine-approximation-snapshots.png)
+![A small ReLU MLP learning sin(8πx) on [0,1], with selected checkpoints above and loss below.](/blog-assets/theoretical-justification-of-neural-networks/mlp-sine-story.png)
 
-*This is the plain picture I wanted in my head when first learning the theorem: one very small ReLU network gradually learning to hug a more interesting curve.*
+*Story of the figure: at epoch 0 the network is basically just a line.  By epoch 30 it has started to notice that the target alternates, but it is still missing the rhythm.  By epoch 200 it has learned most of the peaks and troughs, and by the end it is close enough that the universal-approximation idea stops feeling abstract and starts feeling mechanical.*
 
 ### 3. Turing Completeness and Where the Infinity Hides
 
@@ -53,21 +53,19 @@ That is also where the "chaos" starts to become more than a metaphor: it is the 
 
 What is so striking is that Pollack really does say the strong version. In the abstract, he writes that "a small weight adjustment causes a 'bifurcation' in the limit behavior of the network" and that this phase transition corresponds to the onset of generalization to "arbitrary-length strings." He also says the architecture appears capable of generating nonregular languages by exploiting "fractal and chaotic dynamics." Later he makes the wonderfully blunt remark that "a discrete dynamical system is just an iterative computation." And the paper does not leave the idea at the level of metaphor: when discussing parenthesis balancing, he says it is mathematically possible to embed an "infinite state machine" in a dynamical recognizer, with a state space built from fractal self-similarity. That is exactly the kind of claim that made this line of thought hard for me to forget.
 
-Rather than projecting the state space down with PCA this time, I wanted to look at the hidden coordinates directly.  That makes the pictures less dramatic in one sense, but more honest in another.  If there is a computational regime change here, I would rather see it in the actual hidden units than in a projection that already did some interpretive work for me.
+For this pass I simplified the experiment quite a bit.  I trained one small recurrent net with eight hidden units on strings of exact length twenty, evaluated it on lengths ten, twenty, and thirty, and rolled the data out in only three phases: random invalid strings first, then off-by-one errors, then balanced-but-invalid strings that specifically break the cheap strategy of tracking only net parenthesis count.  That gave a much cleaner picture than the larger curriculum.
 
-![Length distribution and invalid-example composition for the balanced-parentheses curriculum.](/blog-assets/theoretical-justification-of-neural-networks/rnn-dataset-diversity.png)
+![Training phases and probe responses for the simplified one-layer RNN.](/blog-assets/theoretical-justification-of-neural-networks/rnn-training-story.png)
 
-*The curriculum here is intentionally staged.  The model is rolled through length cohorts 20, 50, and 100, and each cohort gets harder invalid examples in sequence: random negatives first, then near-misses, then balanced-but-invalid strings that defeat a cheap "just count the net balance" strategy.*
+*Story of the figure: the top panel shows that performance on lengths ten, twenty, and thirty moves together but not perfectly smoothly.  The bottom panel is the real Pollack-style view: hold a fixed set of strings in place and watch the model's judgments reorganize as new error types are introduced.  The balanced-invalid rollout is the important moment here, because it forces the recognizer to stop confusing "total count is zero" with "the whole prefix history stayed legal."*
 
-![Training phases and probe responses for the two-layer RNN across the full curriculum.](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-training-story.png)
+[Interactive training story chart](/blog-assets/theoretical-justification-of-neural-networks/rnn-training-story.html)
 
-*This is the main Pollack-style picture.  The top panel shows accuracy by evaluation cohort as the training phases roll forward.  The bottom panel holds a fixed probe set in place so we can watch individual strings split apart, recover, or stay confused as the parameters change.  It is much easier to see the model's changing behavior this way than by comparing only the beginning and end.*
+What I especially like here is that the balanced-invalid rollout really does seem to matter.  Those examples are not random junk; they are the cases that force the recognizer to notice the difference between "net balance is zero" and "every prefix stayed legal."  That is the kind of small conceptual correction that makes the bifurcation diagram feel alive.
 
-[Interactive two-layer story chart](/blog-assets/theoretical-justification-of-neural-networks/rnn-2layer-training-story.html)
+![Full hidden-state traces for a few longer probe strings, projected into one shared PCA plane at the end of each phase.](/blog-assets/theoretical-justification-of-neural-networks/rnn-phase-traces.png)
 
-The two-layer model is the one I would actually show in a short public-facing writeup.  The one-layer net is still interesting, but the two-layer picture is cleaner: it separates some invalid families much more decisively while still leaving enough mistakes and reversals to make the dynamics visible.  It feels less like a sterile success story and more like watching a recognizer figure out what kind of errors matter.
-
-I also generated direct hidden-state trace plots, but I would treat those as supporting material rather than headline figures.  They are useful when you want to stare at the geometry itself, but the simpler training-story chart above carries the idea much better for a general reader.  For a short essay or LinkedIn adaptation, that is the balance I would strike.
+*Story of the figure: read this one column by column.  Each column is one fixed longer string, and each row is the end of another training phase.  The point is not to decode every bend in every line.  The point is that the geometry itself settles down.  The same strings start tracing more regular paths once the model has been forced to notice the right kind of mistakes.*
 
 ### 5. Wrap-Up
 

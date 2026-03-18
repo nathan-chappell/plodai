@@ -1,6 +1,6 @@
 import json
 from datetime import UTC, datetime
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Sequence, cast
 from uuid import uuid4
 
 from agents import FunctionTool, function_tool
@@ -10,6 +10,12 @@ from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import ChartPlan
+from backend.app.agents.widgets import (
+    build_plan_copy_text,
+    build_plan_widget,
+    build_tool_trace_copy_text,
+    build_tool_trace_widget,
+)
 from backend.app.chatkit.metadata import AgentPlan
 from backend.app.core.logging import get_logger, summarize_for_log
 
@@ -51,114 +57,107 @@ def get_client_tool_names(
     return [name for tool in context.client_tools if (name := tool.get("name"))]
 
 
-def _format_tool_label(tool_name: str) -> str:
-    return " ".join(
-        part.capitalize() for part in tool_name.strip().split("_") if part.strip()
-    )
-
-
-def _build_tool_trace_widget(
-    tool_name: str,
-    summary: str,
-    details: list[str] | None = None,
-) -> dict[str, object]:
-    children: list[dict[str, object]] = [
-        {
-            "type": "Badge",
-            "label": "Tool call",
-            "color": "info",
-            "variant": "soft",
-            "pill": True,
-        },
-        {"type": "Title", "value": _format_tool_label(tool_name), "size": "md"},
-        {"type": "Caption", "value": summary, "color": "secondary"},
+def _tool_summary_from_query_plan(query_plan: Mapping[str, object]) -> list[str]:
+    return [
+        f"Dataset: {query_plan.get('dataset_id') or 'unknown'}",
+        f"Group by: {len(cast(list[object], query_plan.get('group_by') or []))}",
+        f"Aggregates: {len(cast(list[object], query_plan.get('aggregates') or []))}",
+        *(
+            [f"Limit: {limit}"]
+            if isinstance((limit := query_plan.get("limit")), int)
+            else []
+        ),
     ]
 
-    clean_details = [detail.strip() for detail in details or [] if detail.strip()]
-    if clean_details:
-        children.append({"type": "Divider"})
-        children.extend(
-            {"type": "Text", "value": detail, "size": "sm"}
-            for detail in clean_details[:6]
+
+def _summarize_client_tool_request(
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> tuple[str, list[str]]:
+    if tool_name in {"list_workspace_files", "list_attached_csv_files", "list_chartable_files"}:
+        include_samples = arguments.get("includeSamples")
+        return (
+            "Queued a workspace inventory request.",
+            [
+                (
+                    f"Include samples: {'yes' if include_samples else 'no'}"
+                    if isinstance(include_samples, bool)
+                    else "Using default inventory options."
+                )
+            ],
         )
 
-    return {
-        "type": "Card",
-        "size": "sm",
-        "status": {"text": "Tool requested", "icon": "bolt"},
-        "children": children,
-    }
+    if tool_name == "inspect_chartable_file_schema":
+        return (
+            "Queued a chartable schema inspection.",
+            [f"File: {arguments.get('file_id') or 'unknown'}"],
+        )
+
+    if tool_name == "inspect_pdf_file":
+        details = [f"File: {arguments.get('file_id') or 'unknown'}"]
+        if isinstance(arguments.get("max_pages"), int):
+            details.append(f"Max pages: {arguments['max_pages']}")
+        return ("Queued a PDF inspection.", details)
+
+    if tool_name == "get_pdf_page_range":
+        return (
+            "Queued a PDF page extraction.",
+            [
+                f"File: {arguments.get('file_id') or 'unknown'}",
+                f"Pages: {arguments.get('start_page') or '?'}-{arguments.get('end_page') or '?'}",
+            ],
+        )
+
+    if tool_name == "smart_split_pdf":
+        details = [f"File: {arguments.get('file_id') or 'unknown'}"]
+        if isinstance(arguments.get("goal"), str) and arguments["goal"].strip():
+            details.append(f"Goal: {arguments['goal'].strip()}")
+        return ("Queued a smart PDF split.", details)
+
+    if tool_name == "run_aggregate_query":
+        query_plan = arguments.get("query_plan")
+        if isinstance(query_plan, Mapping):
+            return (
+                "Queued a grouped aggregate query.",
+                _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)),
+            )
+
+    if tool_name in {"create_csv_file", "create_json_file"}:
+        details = [f"Filename: {arguments.get('filename') or 'unknown'}"]
+        query_plan = arguments.get("query_plan")
+        if isinstance(query_plan, Mapping):
+            details.extend(_tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)))
+        return ("Queued a derived artifact build.", details)
+
+    if tool_name == "render_chart_from_file":
+        chart_plan = arguments.get("chart_plan")
+        details = [f"File: {arguments.get('file_id') or 'unknown'}"]
+        if isinstance(chart_plan, Mapping):
+            details.append(f"Chart: {chart_plan.get('type') or 'unknown'}")
+        if isinstance(arguments.get("x_key"), str):
+            details.append(f"X key: {arguments['x_key']}")
+        if isinstance(arguments.get("y_key"), str) and arguments["y_key"].strip():
+            details.append(f"Y key: {arguments['y_key']}")
+        return ("Queued a chart render.", details)
+
+    argument_fields = ", ".join(sorted(arguments.keys())) if arguments else "none"
+    return (
+        "Queued for client-side execution.",
+        [f"Argument fields: {argument_fields}"],
+    )
 
 
 async def _stream_tool_trace_widget(
     ctx: ChatKitToolContext,
     tool_name: str,
     summary: str,
-    details: list[str] | None = None,
+    details: Sequence[str] | None = None,
 ) -> None:
     clean_details = [detail.strip() for detail in details or [] if detail.strip()]
     await ctx.context.stream_widget(
-        _build_tool_trace_widget(tool_name, summary, clean_details),
-        copy_text="\n".join(
-            [_format_tool_label(tool_name), summary, *clean_details]
-        ).strip(),
+        build_tool_trace_widget(tool_name, summary, clean_details),
+        copy_text=build_tool_trace_copy_text(tool_name, summary, clean_details),
     )
-
-
-def _build_plan_widget(plan: AgentPlan) -> dict[str, object]:
-    steps = plan.get("planned_steps", [])
-    success_criteria = plan.get("success_criteria", [])
-    follow_on_tool_hints = plan.get("follow_on_tool_hints", [])
-    focus = plan.get("focus") or "Execution plan"
-
-    children: list[dict[str, object]] = [
-        {"type": "Badge", "label": "Plan", "color": "discovery", "variant": "soft", "pill": True},
-        {"type": "Title", "value": focus, "size": "lg"},
-        {
-            "type": "Caption",
-            "value": f"{len(steps)} step{'s' if len(steps) != 1 else ''} queued",
-            "color": "secondary",
-        },
-        {"type": "Divider"},
-    ]
-
-    children.extend(
-        {"type": "Text", "value": f"{index}. {step}", "size": "sm"}
-        for index, step in enumerate(steps, start=1)
-    )
-
-    if success_criteria:
-        children.extend(
-            [
-                {"type": "Divider"},
-                {"type": "Text", "value": "Success criteria", "size": "sm", "weight": "semibold"},
-                *(
-                    {"type": "Text", "value": f"- {criterion}", "size": "sm"}
-                    for criterion in success_criteria
-                ),
-            ]
-        )
-
-    if follow_on_tool_hints:
-        children.extend(
-            [
-                {"type": "Divider"},
-                {"type": "Text", "value": "Suggested next tools", "size": "sm", "weight": "semibold"},
-                {
-                    "type": "Text",
-                    "value": ", ".join(follow_on_tool_hints),
-                    "size": "sm",
-                    "color": "secondary",
-                },
-            ]
-        )
-
-    return {
-        "type": "Card",
-        "size": "md",
-        "status": {"text": "Plan captured", "icon": "check-circle"},
-        "children": children,
-    }
 
 
 def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool:
@@ -190,11 +189,15 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
         await ctx.context.stream(
             ProgressUpdateEvent(text=f"Requesting client tool {tool_name}.")
         )
+        trace_summary, trace_details = _summarize_client_tool_request(
+            tool_name,
+            arguments,
+        )
         await _stream_tool_trace_widget(
             ctx,
             tool_name,
-            "Queued for client-side execution.",
-            [f"Argument fields: {', '.join(sorted(arguments.keys()))}" if arguments else "No arguments."],
+            trace_summary,
+            trace_details,
         )
         client_tool_call = ClientToolCall(name=tool_name, arguments=arguments)
         ctx.context.client_tool_call = client_tool_call
@@ -302,30 +305,8 @@ def build_agent_tools(
             )
         )
         await ctx.context.stream_widget(
-            _build_plan_widget(plan),
-            copy_text="\n".join(
-                [
-                    f"Plan: {cleaned_focus}" if cleaned_focus else "Plan",
-                    *(
-                        f"{index}. {step}"
-                        for index, step in enumerate(cleaned_steps, start=1)
-                    ),
-                ]
-                + (
-                    ["", "Success criteria:", *[f"- {item}" for item in cleaned_success_criteria]]
-                    if cleaned_success_criteria
-                    else []
-                )
-                + (
-                    [
-                        "",
-                        "Suggested next tools:",
-                        ", ".join(cleaned_follow_on_tool_hints),
-                    ]
-                    if cleaned_follow_on_tool_hints
-                    else []
-                )
-            ).strip(),
+            build_plan_widget(plan),
+            copy_text=build_plan_copy_text(plan),
         )
         _log_tool_end(request_context, "make_plan", plan_id=plan["id"])
         return {

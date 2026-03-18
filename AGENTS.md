@@ -28,6 +28,11 @@ The agent should feel investigative instead of chatbot-like. It should list file
 - Keep ChatKit conversation memory in the same database through mapped dataclass models.
 - Build the ChatKit server/store per request so it can attach to the request-scoped async session.
 
+## Commit message style
+- Prefer one big commit message with an umbrella conventional commit title.
+- In the body, include multiple conventional-commit-style sections when the work spans multiple themes.
+- Include emojis in the title and section headers when writing commit messages for this repo.
+
 ## Near-term next steps
 - Add real Agents SDK orchestration and replace stub tool definitions.
 - Add CSV storage plus a query layer, likely DuckDB for analysis over uploaded files.
