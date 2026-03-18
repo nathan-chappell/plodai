@@ -133,18 +133,18 @@ def build_tool_trace_widget(
 ) -> WidgetRoot:
     children: list[WidgetComponent] = [
         _badge_widget("Tool", color="info", size="sm"),
-        _title_widget(format_tool_label(tool_name), size="sm"),
+        _text_widget(format_tool_label(tool_name), size="sm", weight="semibold"),
         _caption_widget(summary, size="sm"),
     ]
 
     clean_details = [detail.strip() for detail in details or [] if detail.strip()]
     if clean_details:
-        children.append(_divider_widget(size=1, spacing=8))
+        children.append(_divider_widget(size=1, spacing=6))
         children.extend(_text_widget(detail) for detail in clean_details[:6])
 
     return _card_widget(
         size="sm",
-        padding="12px",
+        padding="10px",
         status_text="Tool requested",
         status_icon="bolt",
         children=children,
@@ -168,21 +168,21 @@ def build_workspace_context_widget(
 ) -> WidgetRoot:
     children: list[WidgetComponent] = [
         _badge_widget("Workspace", color="info", size="sm"),
-        _title_widget(action_label, size="sm"),
+        _text_widget(action_label, size="sm", weight="semibold"),
         _caption_widget(f"Current directory: {cwd_path}", size="sm"),
     ]
 
     if target_path and target_path != cwd_path:
         children.extend(
             [
-                _divider_widget(size=1, spacing=8),
+                _divider_widget(size=1, spacing=6),
                 _text_widget(f"Target: {target_path}"),
             ]
         )
 
     return _card_widget(
         size="sm",
-        padding="12px",
+        padding="10px",
         status_text="Workspace updated",
         status_icon="cube",
         children=children,

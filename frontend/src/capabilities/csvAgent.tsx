@@ -99,6 +99,7 @@ export function CsvAgentPage({
     createDirectory,
     changeDirectory,
     workspaceContext,
+    workspaceHydrated,
     getState,
     updateFilesystem,
     syncToolCatalog,
@@ -117,12 +118,15 @@ export function CsvAgentPage({
     () => createCsvAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
     [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
   );
+  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
   const {
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
+    capabilityId: csvAgentCapability.id,
+    ready: workspaceHydrated,
     buildDemoScenario: buildCsvAgentDemoScenario,
     setExecutionMode,
     setFiles,
@@ -147,8 +151,8 @@ export function CsvAgentPage({
   }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
-    syncToolCatalog(clientTools.map((tool) => tool.name));
-  }, [clientTools, syncToolCatalog]);
+    syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
+  }, [clientToolCatalogKey, syncToolCatalog]);
 
   return (
     <>

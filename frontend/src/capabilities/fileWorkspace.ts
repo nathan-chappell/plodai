@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useAppState } from "../app/context";
 import { useWorkspaceSurface } from "../app/workspace";
@@ -85,7 +85,7 @@ export function useCapabilityFileWorkspace(options: {
     legacySnapshot,
   });
 
-  async function handleFiles(nextFiles: FileList | null) {
+  const handleFiles = useCallback(async (nextFiles: FileList | null) => {
     if (!nextFiles?.length) {
       return;
     }
@@ -98,9 +98,9 @@ export function useCapabilityFileWorkspace(options: {
         builtCount === 1 ? "The file is" : "The files are"
       } ready for the agent.`,
     );
-  }
+  }, [workspace.cwdPath, workspace.handleSelectFiles]);
 
-  function appendFiles(nextFiles: LocalWorkspaceFile[]) {
+  const appendFiles = useCallback((nextFiles: LocalWorkspaceFile[]) => {
     if (!nextFiles.length) {
       return [];
     }
@@ -109,29 +109,30 @@ export function useCapabilityFileWorkspace(options: {
       `Added ${nextFiles.length} derived file${nextFiles.length === 1 ? "" : "s"} to ${workspace.cwdPath}.`,
     );
     return storedFiles;
-  }
+  }, [workspace.appendFiles, workspace.cwdPath]);
 
-  function setFiles(nextFiles: LocalWorkspaceFile[]) {
+  const setFiles = useCallback((nextFiles: LocalWorkspaceFile[]) => {
     workspace.replaceFiles(nextFiles, "demo");
-  }
+  }, [workspace.replaceFiles]);
 
-  function handleRemoveEntry(entryId: string) {
+  const handleRemoveEntry = useCallback((entryId: string) => {
     workspace.handleRemoveEntry(entryId);
     contract.setReportEffects([]);
     setStatus("Removed the selected workspace entry.");
-  }
+  }, [contract.setReportEffects, workspace.handleRemoveEntry]);
 
-  function syncToolCatalog(toolNames: string[]) {
+  const syncToolCatalog = useCallback((toolNames: string[]) => {
     workspace.updateFilesystem((filesystem) =>
       syncWorkspaceToolCatalog(filesystem, options.capabilityId, toolNames),
     );
-  }
+  }, [options.capabilityId, workspace.updateFilesystem]);
 
   return {
     cwdPath: workspace.cwdPath,
     entries: workspace.entries,
     files: workspace.files,
     workspaceContext: workspace.workspaceContext,
+    workspaceHydrated: workspace.hydrated,
     breadcrumbs: workspace.breadcrumbs,
     getState: workspace.getState,
     setFiles,

@@ -14,6 +14,18 @@ const CapabilitySurface = styled.section`
   border-radius: var(--radius-xl);
 `;
 
+export const CapabilityPage = styled.section`
+  min-width: 0;
+  min-height: 100%;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+
+  @media (min-width: 1181px) {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+`;
+
 export const CapabilityHeroRow = styled.section`
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -86,23 +98,33 @@ export const CapabilityTabButton = styled.button<{ $active: boolean }>`
 `;
 
 export const ReportWorkspaceLayout = styled.section`
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 400px;
   gap: 0.8rem;
-  align-items: start;
+  align-items: stretch;
 
   @media (max-width: 1180px) {
     grid-template-columns: 1fr;
+    align-items: start;
   }
 `;
 
 export const ReportWorkspaceColumn = styled.div`
   min-width: 0;
+  min-height: 0;
   ${gridStackCss("0.6rem")};
+
+  @media (min-width: 1181px) {
+    overflow: auto;
+    padding-right: 0.12rem;
+  }
 `;
 
 export const ReportChatColumn = styled.div`
   min-width: 0;
+  min-height: 0;
+  display: flex;
 `;
 
 export const CapabilityPanel = styled(CapabilitySurface)``;
@@ -114,6 +136,55 @@ export const CapabilitySectionHeader = styled.div`
 export const CapabilitySectionTitle = styled.h3`
   margin: 0;
   font-size: 1.05rem;
+`;
+
+export const CapabilityInlineToolbar = styled.div`
+  ${flexWrapRowCss("0.5rem")};
+  align-items: center;
+  justify-content: space-between;
+`;
+
+export const CapabilityInlineLabel = styled.span`
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+`;
+
+export const CapabilitySegmentedControl = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.08rem;
+  padding: 0.14rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.5);
+`;
+
+export const CapabilitySegmentButton = styled.button<{ $active: boolean }>`
+  border: 0;
+  border-radius: 999px;
+  padding: 0.34rem 0.68rem;
+  background: ${({ $active }) => ($active ? "var(--ink)" : "transparent")};
+  color: ${({ $active }) => ($active ? "#fffaf4" : "var(--muted)")};
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+`;
+
+export const CapabilityNoteList = styled.ul`
+  margin: 0;
+  padding-left: 1rem;
+  ${gridStackCss("0.38rem")};
+  color: var(--ink);
 `;
 
 export const CapabilityTextarea = styled.textarea`

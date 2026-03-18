@@ -5,6 +5,7 @@ import { useAppState } from "../app/context";
 import { MetaText } from "../app/styles";
 import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
+import { hasDemoScenarioNotes } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
 import { NarrativeCard } from "../components/NarrativeCard";
@@ -17,14 +18,20 @@ import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { buildReportAgentBundle } from "./manifests";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import type { CapabilityClientTool, CapabilityWorkspaceContext, ShellWorkspaceRegistration } from "./types";
-import type { ClientEffect } from "../types/analysis";
+import type { ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import {
+  CapabilityInlineLabel,
+  CapabilityInlineToolbar,
+  CapabilityPage,
   CapabilityEyebrow,
   CapabilityHeader,
   CapabilityHeroRow,
   CapabilityMetaText,
+  CapabilityNoteList,
   CapabilityPanel,
+  CapabilitySegmentButton,
+  CapabilitySegmentedControl,
   CapabilitySectionHeader,
   CapabilitySectionTitle,
   CapabilitySubhead,
@@ -118,6 +125,71 @@ function ReportSummaryArtifacts({ files }: { files: LocalWorkspaceFile[] }) {
   );
 }
 
+function DemoRunModePanel({
+  executionMode,
+  onExecutionModeChange,
+}: {
+  executionMode: ExecutionMode;
+  onExecutionModeChange: (mode: ExecutionMode) => void;
+}) {
+  return (
+    <CapabilityPanel>
+      <CapabilityInlineToolbar>
+        <CapabilityInlineLabel>Run mode</CapabilityInlineLabel>
+        <CapabilitySegmentedControl>
+          {(["interactive", "batch"] as const).map((mode) => (
+            <CapabilitySegmentButton
+              key={mode}
+              $active={executionMode === mode}
+              data-testid={`report-agent-demo-execution-mode-${mode}`}
+              onClick={() => onExecutionModeChange(mode)}
+              type="button"
+            >
+              {mode === "interactive" ? "Interactive" : "Batch"}
+            </CapabilitySegmentButton>
+          ))}
+        </CapabilitySegmentedControl>
+      </CapabilityInlineToolbar>
+      <CapabilityMetaText>
+        Interactive mode can pause for confirmation. Batch mode continues with the strongest reasonable next step.
+      </CapabilityMetaText>
+    </CapabilityPanel>
+  );
+}
+
+function DemoNotesPanel({
+  scenario,
+}: {
+  scenario: ReturnType<typeof useDemoScenario>["scenario"];
+}) {
+  if (!hasDemoScenarioNotes(scenario)) {
+    return null;
+  }
+
+  return (
+    <CapabilityPanel data-testid="report-agent-demo-notes">
+      <CapabilitySectionHeader>
+        <CapabilitySectionTitle>Demo notes</CapabilitySectionTitle>
+        <CapabilityMetaText>Reference notes for the scripted walkthrough.</CapabilityMetaText>
+      </CapabilitySectionHeader>
+      {scenario?.expectedOutcomes?.length ? (
+        <CapabilityNoteList>
+          {scenario.expectedOutcomes.map((outcome, index) => (
+            <li key={`expected-${index}`}>{outcome}</li>
+          ))}
+        </CapabilityNoteList>
+      ) : null}
+      {scenario?.notes?.length ? (
+        <CapabilityNoteList>
+          {scenario.notes.map((note, index) => (
+            <li key={`note-${index}`}>{note}</li>
+          ))}
+        </CapabilityNoteList>
+      ) : null}
+    </CapabilityPanel>
+  );
+}
+
 export function ReportFoundryPage({
   onRegisterWorkspace,
 }: {
@@ -150,6 +222,7 @@ export function ReportFoundryPage({
     createDirectory,
     changeDirectory,
     workspaceContext,
+    workspaceHydrated,
     getState,
     updateFilesystem,
     syncToolCatalog,
@@ -169,12 +242,15 @@ export function ReportFoundryPage({
     () => createReportFoundryClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
     [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
   );
+  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
   const {
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
+    capabilityId: reportAgentCapability.id,
+    ready: workspaceHydrated,
     buildDemoScenario: buildReportAgentDemoScenario,
     setExecutionMode,
     setFiles,
@@ -200,11 +276,11 @@ export function ReportFoundryPage({
   }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
-    syncToolCatalog(clientTools.map((tool) => tool.name));
-  }, [clientTools, syncToolCatalog]);
+    syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
+  }, [clientToolCatalogKey, syncToolCatalog]);
 
   return (
-    <>
+    <CapabilityPage>
       <CapabilityHeroRow>
         <CapabilityHeader>
           <CapabilityEyebrow>{reportAgentCapability.eyebrow}</CapabilityEyebrow>
@@ -322,6 +398,10 @@ export function ReportFoundryPage({
               </CompactSummaryGrid>
             </CapabilityPanel>
 
+            <DemoRunModePanel executionMode={executionMode} onExecutionModeChange={setExecutionMode} />
+
+            <DemoNotesPanel scenario={demoScenario} />
+
             {reportEffects.length ? (
               <ReportEffectsPanel data-testid="report-agent-demo-effects">
                 {reportEffects.map((effect, index) => (
@@ -376,11 +456,15 @@ export function ReportFoundryPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              showScenarioNotes={false}
+              showExecutionModeControls={false}
+              feedbackButtonVariant="icon"
+              showChatKitHeader={false}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
       ) : null}
-    </>
+    </CapabilityPage>
   );
 }
 

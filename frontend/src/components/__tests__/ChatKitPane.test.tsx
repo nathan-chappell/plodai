@@ -107,15 +107,18 @@ vi.mock("@openai/chatkit-react", async () => {
 
 vi.mock("../../lib/dev-logging", () => ({
   devLogger: {
+    chatKitGate: vi.fn(),
     clientToolError: vi.fn(),
     clientToolStart: vi.fn(),
     clientToolSuccess: vi.fn(),
+    demoState: vi.fn(),
     responseEnd: vi.fn(),
     responseStart: vi.fn(),
+    workspaceEvent: vi.fn(),
   },
 }));
 
-import { ChatKitHarness, buildChatKitRequestMetadata } from "../ChatKitPane";
+import { ChatKitHarness, ChatKitPane, buildChatKitRequestMetadata } from "../ChatKitPane";
 import type { CapabilityBundle, CapabilityClientTool } from "../../capabilities/types";
 import type { ExecutionMode } from "../../types/analysis";
 import type { LocalWorkspaceFile } from "../../types/report";
@@ -223,6 +226,28 @@ describe("ChatKitHarness auto-scroll", () => {
     });
   }
 
+  async function renderPane(
+    investigationBrief: string,
+    overrides: Partial<React.ComponentProps<typeof ChatKitPane>> = {},
+  ) {
+    await act(async () => {
+      root.render(
+        <ChatKitPane
+          capabilityBundle={capabilityBundle}
+          enabled
+          files={files}
+          workspaceContext={workspaceContext}
+          executionMode="interactive"
+          onExecutionModeChange={() => {}}
+          investigationBrief={investigationBrief}
+          clientTools={[]}
+          onEffects={() => {}}
+          {...overrides}
+        />,
+      );
+    });
+  }
+
   it("scrolls on response end only while auto-scroll is enabled", async () => {
     await renderHarness();
     expect(latestHandlers).not.toBeNull();
@@ -299,5 +324,41 @@ describe("ChatKitHarness auto-scroll", () => {
       execution_mode: "batch",
       origin: "interactive",
     });
+  });
+
+  it("does not echo the current goal into ChatKit chrome", async () => {
+    const goal = "Protect the margin story and focus on the west region.";
+
+    await renderPane(goal);
+
+    expect(container.textContent).not.toContain(goal);
+    expect(container.textContent).not.toContain("Current goal:");
+
+    const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
+    expect(composer?.placeholder).toBe("Ask the agent to inspect, transform, or investigate your local files");
+
+    const startScreen = latestChatKitOptions?.startScreen as
+      | { prompts?: Array<{ prompt: string }> }
+      | undefined;
+    const prompts = startScreen?.prompts?.map((prompt) => prompt.prompt) ?? [];
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.some((prompt) => prompt.includes(goal))).toBe(false);
+    expect(prompts.some((prompt) => prompt.includes("Focus on this goal"))).toBe(false);
+  });
+
+  it("can hide inline run mode controls and use an icon-sized feedback affordance", async () => {
+    await renderPane("", {
+      showExecutionModeControls: false,
+      feedbackButtonVariant: "icon",
+      showChatKitHeader: false,
+    });
+
+    await act(async () => {
+      latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
+    });
+
+    expect(container.textContent).not.toContain("Run mode");
+    expect(container.querySelector("[data-testid='chatkit-provide-feedback']")).not.toBeNull();
+    expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
   });
 });

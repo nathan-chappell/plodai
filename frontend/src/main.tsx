@@ -43,6 +43,7 @@ const GlobalStyle = createGlobalStyle`
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
+    min-height: 100dvh;
     font-family: var(--font-body);
     font-size: 15px;
     color: var(--ink);
@@ -61,6 +62,7 @@ const GlobalStyle = createGlobalStyle`
 
   #root {
     min-height: 100vh;
+    min-height: 100dvh;
   }
 `;
 

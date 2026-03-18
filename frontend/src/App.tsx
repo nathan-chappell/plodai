@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, type ComponentType, type LazyExoticComponent } from "react";
+import { Suspense, lazy, useCallback, useState, type ComponentType, type LazyExoticComponent } from "react";
 
 import { AppStateProvider } from "./app/context";
 import { WorkspaceProvider } from "./app/workspace";
@@ -91,6 +91,19 @@ export function App() {
   const viewingBlog = isBlogPath(pathname);
   const [workspaceRegistration, setWorkspaceRegistration] = useState<ShellWorkspaceRegistration | null>(null);
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
+  const handleRegisterWorkspace = useCallback((registration: ShellWorkspaceRegistration | null) => {
+    setWorkspaceRegistration(registration);
+  }, []);
+  const handleSelectCapability = useCallback((path: string) => {
+    setWorkspaceModalOpen(false);
+    navigate(path);
+  }, []);
+  const handleOpenWorkspaceModal = useCallback(() => {
+    setWorkspaceModalOpen(true);
+  }, []);
+  const handleCloseWorkspaceModal = useCallback(() => {
+    setWorkspaceModalOpen(false);
+  }, []);
 
   useAppRouteGuards({
     authError,
@@ -145,14 +158,11 @@ export function App() {
           capabilities={capabilities}
           activeCapabilityId={activeCapability?.id ?? null}
           currentPathname={pathname}
-          onSelectCapability={(path) => {
-            setWorkspaceModalOpen(false);
-            navigate(path);
-          }}
+          onSelectCapability={handleSelectCapability}
           workspaceRegistration={workspaceRegistration}
           workspaceModalOpen={workspaceModalOpen}
-          onOpenWorkspaceModal={() => setWorkspaceModalOpen(true)}
-          onCloseWorkspaceModal={() => setWorkspaceModalOpen(false)}
+          onOpenWorkspaceModal={handleOpenWorkspaceModal}
+          onCloseWorkspaceModal={handleCloseWorkspaceModal}
         >
           {!activeCapability ? (
             <AppEmptyState>
@@ -163,9 +173,7 @@ export function App() {
           {activeCapability && ActiveCapabilityPage ? (
             <Suspense fallback={<RouteLoadingState label={activeCapability.title} />}>
               <ActiveCapabilityPage
-                onRegisterWorkspace={(registration) => {
-                  setWorkspaceRegistration(registration);
-                }}
+                onRegisterWorkspace={handleRegisterWorkspace}
               />
             </Suspense>
           ) : null}

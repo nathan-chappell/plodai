@@ -98,6 +98,7 @@ export function PdfAgentPage({
     createDirectory,
     changeDirectory,
     workspaceContext,
+    workspaceHydrated,
     getState,
     updateFilesystem,
     syncToolCatalog,
@@ -116,12 +117,15 @@ export function PdfAgentPage({
     () => createPdfAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
     [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
   );
+  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
   const {
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
+    capabilityId: pdfAgentCapability.id,
+    ready: workspaceHydrated,
     buildDemoScenario: buildPdfAgentDemoScenario,
     setExecutionMode,
     setFiles,
@@ -146,8 +150,8 @@ export function PdfAgentPage({
   }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
-    syncToolCatalog(clientTools.map((tool) => tool.name));
-  }, [clientTools, syncToolCatalog]);
+    syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
+  }, [clientToolCatalogKey, syncToolCatalog]);
 
   return (
     <>

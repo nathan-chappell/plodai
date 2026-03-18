@@ -29,12 +29,45 @@ type ResponseLog = {
   threadId: string | null;
 };
 
+type ChatKitGateLog = {
+  capabilityId: string;
+  clientToolCount: number;
+  enabled: boolean;
+  canInvestigate: boolean;
+  fileCount: number;
+  emptyMessage?: string;
+};
+
+type DemoStateLog = {
+  capabilityId: string;
+  active: boolean;
+  ready: boolean;
+  loading: boolean;
+  fileCount?: number;
+  seedCount?: number;
+  demoReady?: boolean;
+  error?: string | null;
+  scenarioId?: string | null;
+};
+
+type WorkspaceEventLog = {
+  surfaceKey: string;
+  event: string;
+  cwdPath?: string;
+  entryCount?: number;
+  fileCount?: number;
+  detail?: Record<string, unknown>;
+};
+
 export type DevLogger = {
+  chatKitGate: (payload: ChatKitGateLog) => void;
   clientToolError: (payload: ClientToolErrorLog) => void;
   clientToolStart: (payload: ClientToolLogContext & { args: unknown }) => void;
   clientToolSuccess: (payload: ClientToolSuccessLog) => void;
+  demoState: (payload: DemoStateLog) => void;
   responseEnd: (payload: ResponseLog) => void;
   responseStart: (payload: ResponseLog) => void;
+  workspaceEvent: (payload: WorkspaceEventLog) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,11 +180,14 @@ function summarizeError(error: unknown): Record<string, unknown> {
 
 function buildNoopLogger(): DevLogger {
   return {
+    chatKitGate() {},
     clientToolError() {},
     clientToolStart() {},
     clientToolSuccess() {},
+    demoState() {},
     responseEnd() {},
     responseStart() {},
+    workspaceEvent() {},
   };
 }
 
@@ -177,6 +213,9 @@ export function createDevLogger({
     return buildNoopLogger();
   }
   return {
+    chatKitGate(payload) {
+      writeGroup(sink, "info", "[chatkit] gate", payload);
+    },
     responseStart(payload) {
       writeGroup(sink, "info", "[chatkit] response.start", payload);
     },
@@ -214,11 +253,23 @@ export function createDevLogger({
         ...summarizeError(payload.error),
       });
     },
+    demoState(payload) {
+      writeGroup(sink, "info", "[demo] state", compactRecord(payload));
+    },
+    workspaceEvent(payload) {
+      writeGroup(sink, "info", `[workspace] ${payload.event}`, compactRecord({
+        surfaceKey: payload.surfaceKey,
+        cwdPath: payload.cwdPath,
+        fileCount: payload.fileCount,
+        entryCount: payload.entryCount,
+        detail: payload.detail,
+      }));
+    },
   };
 }
 
 export const devLogger = createDevLogger({
-  enabled: import.meta.env.DEV,
+  enabled: import.meta.env.DEV && !import.meta.env.TEST,
 });
 
 export {

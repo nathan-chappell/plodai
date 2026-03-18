@@ -15,11 +15,15 @@ import type { CapabilityBundle, CapabilityClientTool } from "../capabilities/typ
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
+  ChatKitPaneHarness,
+  ChatKitPaneIconButton,
   ChatKitPaneHarnessMeta,
   ChatKitPaneMeta,
   ChatKitPaneModeButton,
   ChatKitPaneModeRow,
   ChatKitPanePill,
+  ChatKitPaneStatusRow,
+  ChatKitPaneStatusText,
   ChatKitPaneSurface,
   ChatKitPaneToolbar,
   ChatKitPaneToolbarButton,
@@ -105,25 +109,21 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
   return "cube";
 }
 
-function buildStarterPrompts(investigationBrief: string): readonly ChatKitStarterPrompt[] {
-  const briefSuffix = investigationBrief.trim()
-    ? ` Focus on this goal: ${investigationBrief.trim()}`
-    : "";
-
+function buildStarterPrompts(): readonly ChatKitStarterPrompt[] {
   return [
     {
       label: "Summarize files",
-      prompt: `Give me a concise summary of all attached files, including likely business meaning, key columns, and the most important first questions to investigate.${briefSuffix}`,
+      prompt: "Give me a concise summary of all attached files, including likely business meaning, key columns, and the most important first questions to investigate.",
       icon: "document",
     },
     {
       label: "Find anomalies",
-      prompt: `Investigate the attached files for anomalies, outliers, or suspicious shifts. Validate the strongest ones with follow-up queries and charts before concluding.${briefSuffix}`,
+      prompt: "Investigate the attached files for anomalies, outliers, or suspicious shifts. Validate the strongest ones with follow-up queries and charts before concluding.",
       icon: "analytics",
     },
     {
       label: "Suggest charts",
-      prompt: `Review the attached files and suggest the most informative charts to build first. Then create the strongest ones and explain what each chart reveals.${briefSuffix}`,
+      prompt: "Review the attached files and suggest the most informative charts to build first. Then create the strongest ones and explain what each chart reveals.",
       icon: "chart",
     },
   ] as const;
@@ -161,6 +161,21 @@ export function buildChatKitRequestMetadata(options: {
   };
 }
 
+function FeedbackIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 16 16">
+      <path
+        d="M10.57 2.57a1.5 1.5 0 0 1 2.12 0l.74.74a1.5 1.5 0 0 1 0 2.12l-6.6 6.6-2.76.64.64-2.76 6.6-6.6Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.25"
+      />
+      <path d="M9.5 3.5 12.5 6.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.25" />
+    </svg>
+  );
+}
+
 export function ChatKitHarness({
   capabilityBundle,
   files,
@@ -180,6 +195,8 @@ export function ChatKitHarness({
   colorScheme = "dark",
   showDictation = true,
   surfaceMinHeight,
+  feedbackButtonVariant = "button",
+  showChatKitHeader = true,
 }: {
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
@@ -199,10 +216,13 @@ export function ChatKitHarness({
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
   surfaceMinHeight?: number;
+  feedbackButtonVariant?: "button" | "icon";
+  showChatKitHeader?: boolean;
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [activeClientToolName, setActiveClientToolName] = useState<string | null>(null);
   const onEffectsRef = useRef(onEffects);
   const onFilesAddedRef = useRef(onFilesAdded);
   const clientToolsRef = useRef(clientTools);
@@ -214,6 +234,9 @@ export function ChatKitHarness({
   const cleanupScrollListenerRef = useRef<(() => void) | null>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
   const lastExecutionModeRef = useRef<ExecutionMode | null>(null);
+  const runningRef = useRef(false);
+  const activeClientToolRef = useRef<string | null>(null);
+  const finishStatusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -230,6 +253,31 @@ export function ChatKitHarness({
   useEffect(() => {
     threadIdRef.current = threadId;
   }, [threadId]);
+
+  useEffect(() => {
+    activeClientToolRef.current = activeClientToolName;
+  }, [activeClientToolName]);
+
+  function clearFinishStatusTimeout() {
+    if (finishStatusTimeoutRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(finishStatusTimeoutRef.current);
+      finishStatusTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleIdleStatus(nextStatus: string) {
+    if (typeof window === "undefined") {
+      setStatus(nextStatus);
+      return;
+    }
+    clearFinishStatusTimeout();
+    finishStatusTimeoutRef.current = window.setTimeout(() => {
+      finishStatusTimeoutRef.current = null;
+      if (!runningRef.current && !activeClientToolRef.current) {
+        setStatus(nextStatus);
+      }
+    }, 180);
+  }
 
   useEffect(() => {
     setChatKitMetadataGetter(() =>
@@ -314,10 +362,7 @@ export function ChatKitHarness({
       ) ?? capabilityBundle.capabilities[0],
     [capabilityBundle],
   );
-  const starterPrompts = useMemo(
-    () => prompts ?? buildStarterPrompts(investigationBrief),
-    [investigationBrief, prompts],
-  );
+  const starterPrompts = useMemo(() => prompts ?? buildStarterPrompts(), [prompts]);
   const chatKitTools = useMemo(
     () => rootCapability.client_tools.map((tool) => tool.name as ClientToolName),
     [rootCapability.client_tools],
@@ -332,7 +377,7 @@ export function ChatKitHarness({
       theme: {
         colorScheme,
         radius: "round",
-        density: "normal",
+        density: "compact",
       },
       history: {
         enabled: true,
@@ -342,12 +387,17 @@ export function ChatKitHarness({
       threadItemActions: {
         feedback: false,
       },
-      header: {
-        title: {
-          enabled: true,
-          text: headerTitle,
-        },
-      },
+      header: showChatKitHeader
+        ? {
+            enabled: true,
+            title: {
+              enabled: true,
+              text: headerTitle,
+            },
+          }
+        : {
+            enabled: false,
+          },
       startScreen: {
         greeting:
           greeting ??
@@ -375,9 +425,7 @@ export function ChatKitHarness({
       composer: {
         placeholder:
           composerPlaceholder ??
-          (investigationBrief.trim()
-            ? `Work toward this goal: ${investigationBrief.trim().slice(0, 80)}`
-            : "Ask the agent to inspect, transform, or investigate your local files"),
+          "Ask the agent to inspect, transform, or investigate your local files",
         attachments: {
           enabled: false,
         },
@@ -393,11 +441,14 @@ export function ChatKitHarness({
         })),
       },
       onReady: () => {
-        setStatus("ChatKit ready.");
+        clearFinishStatusTimeout();
+        setStatus("Chat ready.");
         resolveScrollTarget();
         scheduleScrollToBottom(true);
       },
       onResponseStart: () => {
+        clearFinishStatusTimeout();
+        runningRef.current = true;
         setRunning(true);
         setStatus("Agent run in progress.");
         devLogger.responseStart({
@@ -408,9 +459,14 @@ export function ChatKitHarness({
         });
       },
       onResponseEnd: () => {
+        runningRef.current = false;
         setRunning(false);
-        setStatus("Agent run finished.");
         scheduleScrollToBottom();
+        if (activeClientToolRef.current) {
+          setStatus(`Running ${formatToolLabel(activeClientToolRef.current)} locally.`);
+        } else {
+          scheduleIdleStatus("Agent run finished.");
+        }
         devLogger.responseEnd({
           capabilityId: capabilityBundle.root_capability_id,
           fileCount: files.length,
@@ -433,6 +489,10 @@ export function ChatKitHarness({
         if (!tool) {
           throw new Error(`Unknown client tool: ${name}`);
         }
+        clearFinishStatusTimeout();
+        activeClientToolRef.current = name;
+        setActiveClientToolName(name);
+        setStatus(`Running ${formatToolLabel(name)} locally.`);
         const startedAt = nowMs();
         let effectCount = 0;
         let appendedFileCount = 0;
@@ -481,6 +541,10 @@ export function ChatKitHarness({
             appendedFileCount,
             result,
           });
+          setStatus(`Sent ${formatToolLabel(name)} back to the agent.`);
+          if (!runningRef.current) {
+            scheduleIdleStatus("Agent run finished.");
+          }
           return result;
         } catch (error) {
           devLogger.clientToolError({
@@ -492,6 +556,11 @@ export function ChatKitHarness({
             error,
           });
           throw error;
+        } finally {
+          if (activeClientToolRef.current === name) {
+            activeClientToolRef.current = null;
+          }
+          setActiveClientToolName((current) => (current === name ? null : current));
         }
       },
       onEffect: (event) => {
@@ -517,7 +586,7 @@ export function ChatKitHarness({
       files.length,
       greeting,
       headerTitle,
-      investigationBrief,
+      showChatKitHeader,
       showDictation,
       starterPrompts,
       threadOrigin,
@@ -541,6 +610,7 @@ export function ChatKitHarness({
         window.cancelAnimationFrame(pendingScrollFrameRef.current);
         pendingScrollFrameRef.current = null;
       }
+      clearFinishStatusTimeout();
     };
   }, [chatKit]);
 
@@ -558,6 +628,7 @@ export function ChatKitHarness({
     if (!threadIdRef.current) {
       return;
     }
+    clearFinishStatusTimeout();
     setStatus("Starting feedback flow.");
     await chatKit.sendUserMessage({
       text: buildProvideFeedbackPrompt(),
@@ -565,9 +636,13 @@ export function ChatKitHarness({
     });
   }
 
+  const isBusy = running || activeClientToolName !== null;
+  const showFeedbackIcon = feedbackButtonVariant === "icon" && Boolean(threadId);
+  const showFeedbackButton = feedbackButtonVariant === "button" && Boolean(threadId);
+
   return (
-    <>
-      {quickActions?.length || threadId ? (
+    <ChatKitPaneHarness>
+      {quickActions?.length || showFeedbackButton ? (
         <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
           {(quickActions ?? []).map((action) => (
             <ChatKitPaneToolbarButton
@@ -575,25 +650,42 @@ export function ChatKitHarness({
               data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
               type="button"
               onClick={() => void handleQuickAction(action)}
-              disabled={running}
+              disabled={isBusy}
             >
               {action.label}
             </ChatKitPaneToolbarButton>
           ))}
-          <ChatKitPaneToolbarButton
-            data-testid="chatkit-provide-feedback"
-            type="button"
-            onClick={() => void handleProvideFeedback()}
-            disabled={running || !threadId}
-          >
-            Provide feedback
-          </ChatKitPaneToolbarButton>
+          {showFeedbackButton ? (
+            <ChatKitPaneToolbarButton
+              data-testid="chatkit-provide-feedback"
+              type="button"
+              onClick={() => void handleProvideFeedback()}
+              disabled={isBusy || !threadId}
+            >
+              Provide feedback
+            </ChatKitPaneToolbarButton>
+          ) : null}
         </ChatKitPaneToolbar>
       ) : null}
-      {status ? (
-        <ChatKitPaneHarnessMeta $light={colorScheme === "light"} data-testid="chatkit-status">
-          {status}
-        </ChatKitPaneHarnessMeta>
+      {status || showFeedbackIcon ? (
+        <ChatKitPaneStatusRow>
+          <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
+            {status}
+          </ChatKitPaneStatusText>
+          {showFeedbackIcon ? (
+            <ChatKitPaneIconButton
+              $light={colorScheme === "light"}
+              aria-label="Provide feedback"
+              data-testid="chatkit-provide-feedback"
+              onClick={() => void handleProvideFeedback()}
+              disabled={isBusy || !threadId}
+              title="Provide feedback"
+              type="button"
+            >
+              <FeedbackIcon />
+            </ChatKitPaneIconButton>
+          ) : null}
+        </ChatKitPaneStatusRow>
       ) : null}
       <ChatKitPaneSurface
         ref={surfaceRef}
@@ -603,7 +695,7 @@ export function ChatKitHarness({
       >
         <ChatKit control={chatKit.control} />
       </ChatKitPaneSurface>
-    </>
+    </ChatKitPaneHarness>
   );
 }
 
@@ -634,6 +726,9 @@ export function ChatKitPane({
   showPaneHeader = true,
   showDefaultModelMeta = true,
   surfaceMinHeight,
+  showExecutionModeControls = true,
+  feedbackButtonVariant = "button",
+  showChatKitHeader = true,
 }: {
   capabilityBundle: CapabilityBundle;
   enabled: boolean;
@@ -661,15 +756,29 @@ export function ChatKitPane({
   showPaneHeader?: boolean;
   showDefaultModelMeta?: boolean;
   surfaceMinHeight?: number;
+  showExecutionModeControls?: boolean;
+  feedbackButtonVariant?: "button" | "icon";
+  showChatKitHeader?: boolean;
 }) {
   const canInvestigate = enabled && (files.length > 0 || clientTools.length > 0);
   const resolvedMeta =
     paneMeta ??
     (canInvestigate
-      ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. ${investigationBrief.trim() ? `Current goal: ${investigationBrief.trim()}` : "Start with a summary, extraction, or investigation pass."}`
+      ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. Start with a summary, extraction, or investigation pass.`
       : enabled
         ? "Add one or more local files to start the investigation."
         : "Sign in to start analyzing local files.");
+
+  useEffect(() => {
+    devLogger.chatKitGate({
+      capabilityId: capabilityBundle.root_capability_id,
+      clientToolCount: clientTools.length,
+      enabled,
+      canInvestigate,
+      fileCount: files.length,
+      emptyMessage,
+    });
+  }, [capabilityBundle.root_capability_id, canInvestigate, clientTools.length, emptyMessage, enabled, files.length]);
 
   return (
     <ChatKitPaneCard>
@@ -683,20 +792,22 @@ export function ChatKitPane({
       {showDefaultModelMeta ? (
         <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
       ) : null}
-      <ChatKitPaneModeRow>
-        <ChatKitPaneMeta>Run mode</ChatKitPaneMeta>
-        {(["interactive", "batch"] as const).map((mode) => (
-          <ChatKitPaneModeButton
-            key={mode}
-            type="button"
-            $active={executionMode === mode}
-            onClick={() => onExecutionModeChange(mode)}
-            data-testid={`chatkit-execution-mode-${mode}`}
-          >
-            {EXECUTION_MODE_LABELS[mode]}
-          </ChatKitPaneModeButton>
-        ))}
-      </ChatKitPaneModeRow>
+      {showExecutionModeControls ? (
+        <ChatKitPaneModeRow>
+          <ChatKitPaneMeta>Run mode</ChatKitPaneMeta>
+          {(["interactive", "batch"] as const).map((mode) => (
+            <ChatKitPaneModeButton
+              key={mode}
+              type="button"
+              $active={executionMode === mode}
+              onClick={() => onExecutionModeChange(mode)}
+              data-testid={`chatkit-execution-mode-${mode}`}
+            >
+              {EXECUTION_MODE_LABELS[mode]}
+            </ChatKitPaneModeButton>
+          ))}
+        </ChatKitPaneModeRow>
+      ) : null}
       {canInvestigate ? (
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
@@ -717,6 +828,8 @@ export function ChatKitPane({
           colorScheme={colorScheme}
           showDictation={showDictation}
           surfaceMinHeight={surfaceMinHeight}
+          feedbackButtonVariant={feedbackButtonVariant}
+          showChatKitHeader={showChatKitHeader}
         />
       ) : (
         <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">

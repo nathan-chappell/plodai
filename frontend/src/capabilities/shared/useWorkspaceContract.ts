@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 
 import {
   appendWorkspaceReportItems,
@@ -116,6 +116,7 @@ export function useWorkspaceContract(options: {
   });
 
   const filesystem = options.workspace.getState().filesystem;
+  const toolNamesKey = (options.toolNames ?? []).join("|");
 
   useEffect(() => {
     migrateLegacySnapshot(options.workspace, options);
@@ -123,14 +124,14 @@ export function useWorkspaceContract(options: {
   }, [
     options.capabilityId,
     options.capabilityTitle,
-      options.defaultExecutionMode,
-      options.defaultGoal,
-      options.defaultTab,
-      options.legacySnapshot,
-      options.toolNames,
-      options.workspace,
-      options.workspace.cwdPath,
-    ]);
+    options.defaultExecutionMode,
+    options.defaultGoal,
+    options.defaultTab,
+    options.legacySnapshot,
+    options.workspace.cwdPath,
+    options.workspace.updateFilesystem,
+    toolNamesKey,
+  ]);
 
   const appState = useMemo(
     () => readWorkspaceAppState(filesystem),
@@ -153,27 +154,25 @@ export function useWorkspaceContract(options: {
     [filesystem],
   );
 
-  function setInvestigationBrief(value: string) {
-    options.workspace.updateFilesystem((filesystem) =>
-      updateWorkspaceCurrentGoal(filesystem, value),
-    );
-  }
+  const setInvestigationBrief = useCallback((value: string) => {
+    options.workspace.updateFilesystem((filesystem) => updateWorkspaceCurrentGoal(filesystem, value));
+  }, [options.workspace.updateFilesystem]);
 
-  function setActiveWorkspaceTab(nextTab: string) {
+  const setActiveWorkspaceTab = useCallback((nextTab: string) => {
     options.workspace.updateFilesystem((filesystem) =>
       updateWorkspaceAppState(filesystem, { active_workspace_tab: nextTab }),
     );
-  }
+  }, [options.workspace.updateFilesystem]);
 
-  function setExecutionMode(nextMode: ExecutionMode) {
+  const setExecutionMode = useCallback((nextMode: ExecutionMode) => {
     options.workspace.updateFilesystem((filesystem) =>
       updateWorkspaceAppState(filesystem, { execution_mode: nextMode }),
     );
-  }
+  }, [options.workspace.updateFilesystem]);
 
-  function setReportEffects(
+  const setReportEffects = useCallback((
     value: ClientEffect[] | ((current: ClientEffect[]) => ClientEffect[]),
-  ) {
+  ) => {
     const currentEffects = reportItemsToEffects(currentReport?.items ?? []);
     const nextEffects = typeof value === "function" ? value(currentEffects) : value;
     const reportId =
@@ -184,9 +183,9 @@ export function useWorkspaceContract(options: {
     options.workspace.updateFilesystem((filesystem) =>
       replaceWorkspaceReportItems(filesystem, reportId, effectsToReportItems(nextEffects)),
     );
-  }
+  }, [appState, currentReport, options.workspace.updateFilesystem, reportIndex]);
 
-  function appendReportEffects(effects: ClientEffect[]) {
+  const appendReportEffects = useCallback((effects: ClientEffect[]) => {
     if (!effects.length) {
       return;
     }
@@ -198,13 +197,13 @@ export function useWorkspaceContract(options: {
     options.workspace.updateFilesystem((filesystem) =>
       appendWorkspaceReportItems(filesystem, reportId, effectsToReportItems(effects)),
     );
-  }
+  }, [appState, options.workspace.updateFilesystem, reportIndex]);
 
-  function syncToolCatalog(toolNames: string[]) {
+  const syncToolCatalog = useCallback((toolNames: string[]) => {
     options.workspace.updateFilesystem((filesystem) =>
       syncWorkspaceToolCatalog(filesystem, options.capabilityId, toolNames),
     );
-  }
+  }, [options.capabilityId, options.workspace.updateFilesystem]);
 
   return {
     ready: uiState.ready,

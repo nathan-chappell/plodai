@@ -1,8 +1,15 @@
+import { useEffect } from "react";
+
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
 import { ChatKitPaneMeta } from "./styles";
 import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
 import type { AppThreadMetadata, ClientEffect, ExecutionMode } from "../types/analysis";
+import { devLogger } from "../lib/dev-logging";
 import type { LocalWorkspaceFile } from "../types/report";
+
+export function hasDemoScenarioNotes(scenario: CapabilityDemoScenario | null): boolean {
+  return Boolean(scenario?.expectedOutcomes?.length || scenario?.notes?.length);
+}
 
 export function CapabilityDemoPane({
   scenario,
@@ -16,6 +23,10 @@ export function CapabilityDemoPane({
   clientTools,
   onEffects,
   onFilesAdded,
+  showScenarioNotes = true,
+  showExecutionModeControls = true,
+  feedbackButtonVariant = "button",
+  showChatKitHeader = true,
 }: {
   scenario: CapabilityDemoScenario | null;
   loading: boolean;
@@ -28,7 +39,27 @@ export function CapabilityDemoPane({
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
+  showScenarioNotes?: boolean;
+  showExecutionModeControls?: boolean;
+  feedbackButtonVariant?: "button" | "icon";
+  showChatKitHeader?: boolean;
 }) {
+  const workspaceFileIds = new Set(files.map((file) => file.id));
+  const demoReady = scenario ? scenario.workspaceSeed.every((file) => workspaceFileIds.has(file.id)) : false;
+  const demoPreparing = loading || (!error && !demoReady);
+  useEffect(() => {
+    devLogger.demoState({
+      capabilityId: capabilityBundle.root_capability_id,
+      active: true,
+      ready: true,
+      loading,
+      fileCount: files.length,
+      seedCount: scenario?.workspaceSeed.length,
+      demoReady,
+      error,
+      scenarioId: scenario?.id ?? null,
+    });
+  }, [capabilityBundle.root_capability_id, demoReady, error, files.length, loading, scenario]);
   const prompts = scenario
     ? [
         {
@@ -50,21 +81,21 @@ export function CapabilityDemoPane({
 
   return (
     <>
-      {scenario?.expectedOutcomes?.length || scenario?.notes?.length ? (
-        <details>
-          <summary>Demo notes</summary>
+      {showScenarioNotes && hasDemoScenarioNotes(scenario) ? (
+        <section data-testid="capability-demo-notes">
+          <strong>Demo notes</strong>
           {scenario?.expectedOutcomes?.length ? (
             <ChatKitPaneMeta>{scenario.expectedOutcomes.join(" ")}</ChatKitPaneMeta>
           ) : null}
           {scenario?.notes?.length ? (
             <ChatKitPaneMeta>{scenario.notes.join(" ")}</ChatKitPaneMeta>
           ) : null}
-        </details>
+        </section>
       ) : null}
 
       <ChatKitPane
         capabilityBundle={capabilityBundle}
-        enabled={Boolean(scenario && files.length)}
+        enabled={demoReady}
         files={files}
         workspaceBootstrap={workspaceBootstrap}
         investigationBrief={scenario?.summary ?? ""}
@@ -83,7 +114,10 @@ export function CapabilityDemoPane({
         showPaneHeader={false}
         showDefaultModelMeta={false}
         surfaceMinHeight={620}
-        emptyMessage={loading ? "Preparing the demo workspace..." : error ?? "Load the demo scenario to begin."}
+        emptyMessage={demoPreparing ? "Preparing the demo workspace..." : error ?? "Demo unavailable."}
+        showExecutionModeControls={showExecutionModeControls}
+        feedbackButtonVariant={feedbackButtonVariant}
+        showChatKitHeader={showChatKitHeader}
       />
     </>
   );

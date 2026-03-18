@@ -64,6 +64,7 @@ const PlainTable = styled.table`
 
 export const SignInPageRoot = styled.main`
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 2rem;
@@ -448,7 +449,9 @@ export const WorkspaceModalCloseButton = styled.button`
 export const PlatformPage = styled.main`
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   overflow: hidden;
   padding: 0;
 
@@ -463,6 +466,7 @@ export const PlatformPage = styled.main`
 export const PlatformLayout = styled.div<{ $collapsed: boolean }>`
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: ${({ $collapsed }) => ($collapsed ? "94px" : "338px")} minmax(0, 1fr);
   gap: 0;
@@ -480,7 +484,10 @@ export const PlatformSidebar = styled.aside`
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -517,8 +524,11 @@ export const PlatformSidebar = styled.aside`
 
 export const PlatformMain = styled.div`
   min-width: 0;
+  min-height: 0;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   overflow: auto;
   ${gridStackCss("0.7rem")};
   align-content: start;
@@ -910,15 +920,78 @@ export const ChatKitPaneCard = styled.section`
   position: sticky;
   top: 0.8rem;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   background: linear-gradient(135deg, rgba(44, 62, 80, 0.96), rgba(26, 36, 47, 0.98));
   color: #f8f6f2;
   border-radius: var(--radius-xl);
-  padding: 0.82rem;
+  padding: 0.72rem;
   box-shadow: var(--shadow);
-  ${gridStackCss("0.45rem")};
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+
+  @media (max-width: 1180px) {
+    height: auto;
+  }
 `;
 
 export const ChatKitPaneMeta = styled(OverlayMetaText)``;
+
+export const ChatKitPaneHarness = styled.div`
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 0;
+`;
+
+export const ChatKitPaneStatusRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-height: 1.75rem;
+`;
+
+export const ChatKitPaneStatusText = styled(OverlayMetaText)<{ $light?: boolean }>`
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.72)")};
+  font-size: 0.8rem;
+  line-height: 1.35;
+`;
+
+export const ChatKitPaneIconButton = styled.button<{ $light?: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.14)" : "rgba(255, 255, 255, 0.18)")};
+  background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.92)" : "rgba(255, 255, 255, 0.08)")};
+  color: ${({ $light }) => ($light ? "#1f2937" : "#f8f6f2")};
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.98)" : "rgba(255, 255, 255, 0.12)")};
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.48;
+  }
+
+  svg {
+    width: 0.95rem;
+    height: 0.95rem;
+  }
+`;
 
 export const ChatKitPanePill = styled.div`
   display: inline-flex;
@@ -935,7 +1008,8 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  min-height: ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
+  flex: 1 1 ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
+  min-height: 0;
   border-radius: var(--radius-lg);
   overflow: auto;
   overscroll-behavior: contain;
@@ -948,6 +1022,10 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
     max-width: 100%;
     min-width: 0;
   }
+
+  @media (max-width: 1180px) {
+    min-height: ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
+  }
 `;
 
 export const ChatKitPaneEmpty = styled.div`
@@ -957,23 +1035,27 @@ export const ChatKitPaneEmpty = styled.div`
   padding: 1rem;
 `;
 
-export const ChatKitPaneToolbar = styled(WrapRow)``;
+export const ChatKitPaneToolbar = styled(WrapRow)`
+  gap: 0.35rem;
+`;
 
 export const ChatKitPaneToolbarButton = styled.button`
   border: 1px solid rgba(31, 41, 55, 0.14);
   background: rgba(255, 255, 255, 0.92);
   color: #1f2937;
   border-radius: 999px;
-  padding: 0.65rem 0.95rem;
+  padding: 0.48rem 0.78rem;
   font: inherit;
   font-weight: 700;
+  font-size: 0.84rem;
+  line-height: 1;
   cursor: pointer;
 `;
 
 export const ChatKitPaneModeRow = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   flex-wrap: wrap;
 `;
 
@@ -983,15 +1065,19 @@ export const ChatKitPaneModeButton = styled.button<{ $active?: boolean }>`
   background: ${({ $active }) => ($active ? "rgba(244, 196, 48, 0.18)" : "rgba(255, 255, 255, 0.08)")};
   color: #f8f6f2;
   border-radius: 999px;
-  padding: 0.45rem 0.78rem;
+  padding: 0.34rem 0.64rem;
   font: inherit;
   font-weight: 700;
+  font-size: 0.84rem;
+  line-height: 1;
   cursor: pointer;
 `;
 
 export const ChatKitPaneHarnessMeta = styled(OverlayMetaText)<{ $light?: boolean }>`
   margin: 0;
   color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.74)")};
+  font-size: 0.8rem;
+  line-height: 1.35;
 `;
 
 export const DatasetInventoryPanel = styled(CardSection)``;

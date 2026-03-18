@@ -7,6 +7,7 @@ import json
 import math
 import random
 import shutil
+from statistics import NormalDist
 from typing import Callable, Literal
 
 import plotly.graph_objects as go
@@ -36,8 +37,12 @@ TRAIN_LENGTH = 20
 EVAL_LENGTHS: tuple[int, ...] = (10, 20, 30)
 STORY_PROBE_LENGTH = 10
 TRACE_LENGTH = 64
-DEFAULT_PHASE_EPOCHS = 10
-DEFAULT_TRAIN_SAMPLES = 48
+DEFAULT_RANDOM_PHASE_EPOCHS = 10
+DEFAULT_COUNTEREXAMPLE_PHASE_EPOCHS = 20
+DEFAULT_PHASE_EPOCHS = DEFAULT_RANDOM_PHASE_EPOCHS
+DEFAULT_COUNTEREXAMPLE_COHORT_SIZE = 64
+DEFAULT_RANDOM_COHORT_SIZE = 768
+DEFAULT_TRAIN_SAMPLES = DEFAULT_COUNTEREXAMPLE_COHORT_SIZE
 DEFAULT_TEST_SAMPLES = 128
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_RNN_LR_START = 0.001
@@ -47,13 +52,16 @@ RNN_OPTIMIZER_NAME = "adam"
 RNN_HIDDEN_SIZE = 8
 RNN_NUM_LAYERS = 2
 MLP_DEFAULT_SHAPE = (32,)
+RANDOM_BASELINE_MULTIPLIER = DEFAULT_RANDOM_COHORT_SIZE // DEFAULT_COUNTEREXAMPLE_COHORT_SIZE
 
 PHASE_KIND_RANDOM = "random"
+PHASE_KIND_COUNTEREXAMPLES = "counterexamples"
 PHASE_KIND_OFF_BY_ONE = "off_by_one"
 PHASE_KIND_BALANCED = "balanced_invalid"
 PHASE_KIND_VALID_PREFIX = "valid_prefix"
 PHASE_KIND_ORDER: tuple[str, ...] = (
     PHASE_KIND_RANDOM,
+    PHASE_KIND_COUNTEREXAMPLES,
     PHASE_KIND_OFF_BY_ONE,
     PHASE_KIND_BALANCED,
     PHASE_KIND_VALID_PREFIX,
@@ -87,6 +95,7 @@ FIGURE_STYLE = {
 }
 PHASE_COLORS = {
     PHASE_KIND_RANDOM: "#f3e8d3",
+    PHASE_KIND_COUNTEREXAMPLES: "#e8eef9",
     PHASE_KIND_OFF_BY_ONE: "#efe4f8",
     PHASE_KIND_BALANCED: "#e6f3ea",
     PHASE_KIND_VALID_PREFIX: "#e0f2f1",
@@ -121,6 +130,16 @@ STORY_STATUS_COLORS = {
     "ever wrong": "#dc2626",
 }
 TRACE_COLORS = ("#7f1d1d", "#1d4ed8", "#166534", "#9333ea", "#db2777")
+SIGMA_CLIP_PROBABILITY = 1e-6
+TRACE_SIGMA_RANGE = 4.0
+TRACE_SIGMA_COLORSCALE = [
+    [0.0, "#991b1b"],
+    [0.2, "#ef4444"],
+    [0.5, "#c7d0c8"],
+    [0.8, "#4ade80"],
+    [1.0, "#166534"],
+]
+NORMAL_DIST = NormalDist()
 
 
 @app.callback()
@@ -140,11 +159,31 @@ class SequenceExample:
 class TrainingPhase:
     name: str
     label: str
-    cohort_weights: tuple[float, ...]
+    phase_kind: str
     epochs: int
-    cohort_size: int
+    cohort_sizes: tuple[int, ...]
     lr_start: float
     lr_end: float
+
+    @property
+    def cohort_weights(self) -> tuple[float, ...]:
+        return tuple(1.0 if size > 0 else 0.0 for size in self.cohort_sizes)
+
+    @property
+    def cohort_size(self) -> int:
+        return max(self.cohort_sizes, default=0)
+
+    @property
+    def support_size(self) -> int:
+        return sum(self.cohort_sizes)
+
+    @property
+    def active_cohorts(self) -> list[str]:
+        return [
+            cohort_name
+            for cohort_name, size in zip(SUPPORT_COHORT_ORDER, self.cohort_sizes, strict=True)
+            if size > 0
+        ]
 
 
 @dataclass(frozen=True)
@@ -211,8 +250,8 @@ class TraceGridPayload:
     backgrounds: list[TraceBackground]
     landmarks: list[TraceLandmark]
     projection_mode: str
-    axis_labels: tuple[str, str]
-    explained_variance: tuple[float, float]
+    axis_labels: tuple[str, ...]
+    explained_variance: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -566,49 +605,49 @@ def sample_invalid_examples(
 
 def build_training_phases(
     *,
-    phase_epochs: int,
-    train_samples: int,
+    random_phase_epochs: int,
+    counterexample_phase_epochs: int,
+    random_cohort_size: int,
+    counterexample_cohort_size: int,
     lr_start: float,
     lr_end: float,
 ) -> list[TrainingPhase]:
     return [
         TrainingPhase(
-            name="phase-1-random",
-            label="Phase 1: random",
-            cohort_weights=(1.0, 0.0, 0.0, 0.0),
-            epochs=phase_epochs,
-            cohort_size=train_samples,
+            name="phase-1-random-baseline",
+            label="Phase 1: random baseline",
+            phase_kind=PHASE_KIND_RANDOM,
+            epochs=random_phase_epochs,
+            cohort_sizes=(random_cohort_size, 0, 0, 0),
             lr_start=lr_start,
             lr_end=lr_end,
         ),
         TrainingPhase(
-            name="phase-2-off-by-one",
-            label="Phase 2: add off-by-one",
-            cohort_weights=(1.0, 1.0, 0.0, 0.0),
-            epochs=phase_epochs,
-            cohort_size=train_samples,
-            lr_start=lr_start,
-            lr_end=lr_end,
-        ),
-        TrainingPhase(
-            name="phase-3-balanced-invalid",
-            label="Phase 3: add balanced-invalid",
-            cohort_weights=(1.0, 1.0, 1.0, 0.0),
-            epochs=phase_epochs,
-            cohort_size=train_samples,
-            lr_start=lr_start,
-            lr_end=lr_end,
-        ),
-        TrainingPhase(
-            name="phase-4-valid-prefix",
-            label="Phase 4: add valid-prefix",
-            cohort_weights=(1.0, 1.0, 1.0, 1.0),
-            epochs=phase_epochs,
-            cohort_size=train_samples,
+            name="phase-2-counterexamples",
+            label="Phase 2: add counterexamples",
+            phase_kind=PHASE_KIND_COUNTEREXAMPLES,
+            epochs=counterexample_phase_epochs,
+            cohort_sizes=(
+                random_cohort_size,
+                counterexample_cohort_size,
+                counterexample_cohort_size,
+                counterexample_cohort_size,
+            ),
             lr_start=lr_start,
             lr_end=lr_end,
         ),
     ]
+
+
+def counterexample_phase_epochs(random_phase_epochs: int) -> int:
+    return max(
+        1,
+        random_phase_epochs * (DEFAULT_COUNTEREXAMPLE_PHASE_EPOCHS // DEFAULT_RANDOM_PHASE_EPOCHS),
+    )
+
+
+def random_baseline_cohort_size(counterexample_cohort_size: int) -> int:
+    return counterexample_cohort_size * RANDOM_BASELINE_MULTIPLIER
 
 
 def build_evaluation_sets(
@@ -636,12 +675,13 @@ def build_evaluation_sets(
 
 def build_retained_support(
     *,
-    cohort_size: int,
+    random_cohort_size: int,
+    counterexample_cohort_size: int,
     seed: int,
 ) -> dict[str, list[SequenceExample]]:
     return {
         SUPPORT_COHORT_RANDOM: sample_exact_length_examples(
-            total_examples=cohort_size,
+            total_examples=random_cohort_size,
             length=TRAIN_LENGTH,
             invalid_weights=(1.0,),
             invalid_kinds=(INVALID_KIND_RANDOM,),
@@ -649,7 +689,7 @@ def build_retained_support(
             family=SUPPORT_COHORT_RANDOM,
         ),
         SUPPORT_COHORT_OFF_BY_ONE: sample_exact_length_examples(
-            total_examples=cohort_size,
+            total_examples=counterexample_cohort_size,
             length=TRAIN_LENGTH,
             invalid_weights=(1.0,),
             invalid_kinds=(INVALID_KIND_CORRUPTION,),
@@ -657,7 +697,7 @@ def build_retained_support(
             family=SUPPORT_COHORT_OFF_BY_ONE,
         ),
         SUPPORT_COHORT_BALANCED: sample_exact_length_examples(
-            total_examples=cohort_size,
+            total_examples=counterexample_cohort_size,
             length=TRAIN_LENGTH,
             invalid_weights=(1.0,),
             invalid_kinds=(INVALID_KIND_BALANCED,),
@@ -665,7 +705,7 @@ def build_retained_support(
             family=SUPPORT_COHORT_BALANCED,
         ),
         SUPPORT_COHORT_VALID_PREFIX: sample_exact_length_examples(
-            total_examples=cohort_size,
+            total_examples=counterexample_cohort_size,
             length=TRAIN_LENGTH,
             invalid_weights=(1.0,),
             invalid_kinds=(INVALID_KIND_VALID_PREFIX,),
@@ -680,10 +720,10 @@ def materialize_phase_examples(
     phase: TrainingPhase,
 ) -> list[SequenceExample]:
     examples: list[SequenceExample] = []
-    for cohort_name, weight in zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True):
-        if weight <= 0:
+    for cohort_name, size in zip(SUPPORT_COHORT_ORDER, phase.cohort_sizes, strict=True):
+        if size <= 0:
             continue
-        examples.extend(support[cohort_name])
+        examples.extend(support[cohort_name][:size])
     return list(examples)
 
 
@@ -959,27 +999,35 @@ def projection_axis_label(component_index: int, explained_variance: float) -> st
     return f"PC{component_index} ({explained_variance * 100:.0f}% var)"
 
 
-def fit_pca_projection(points: list[list[float]]) -> tuple[torch.Tensor, torch.Tensor, tuple[float, float]]:
+def fit_pca_projection(
+    points: list[list[float]],
+    *,
+    num_components: int = 3,
+) -> tuple[torch.Tensor, torch.Tensor, tuple[float, ...]]:
     point_tensor = torch.tensor(points, dtype=torch.float32)
     mean = point_tensor.mean(dim=0, keepdim=True)
     centered = point_tensor - mean
     if centered.shape[0] < 2:
-        components = torch.eye(centered.shape[1], dtype=torch.float32)[:2]
-        return mean.squeeze(0), components, (0.0, 0.0)
+        components = torch.eye(centered.shape[1], dtype=torch.float32)
+        if components.shape[0] < num_components:
+            padding = torch.zeros((num_components - components.shape[0], centered.shape[1]), dtype=torch.float32)
+            components = torch.cat([components, padding], dim=0)
+        components = components[:num_components]
+        return mean.squeeze(0), components, tuple(0.0 for _ in range(num_components))
     _, singular_values, right_vectors = torch.linalg.svd(centered, full_matrices=False)
-    components = right_vectors[:2]
-    if components.shape[0] < 2:
-        padding = torch.eye(centered.shape[1], dtype=torch.float32)[: 2 - components.shape[0]]
+    components = right_vectors[:num_components]
+    if components.shape[0] < num_components:
+        padding = torch.eye(centered.shape[1], dtype=torch.float32)[: num_components - components.shape[0]]
         components = torch.cat([components, padding], dim=0)
     variance = singular_values.square()
     total_variance = float(variance.sum().item()) if float(variance.sum().item()) > 0 else 1.0
     explained: list[float] = []
-    for index in range(2):
+    for index in range(num_components):
         if index < len(variance):
             explained.append(float(variance[index].item() / total_variance))
         else:
             explained.append(0.0)
-    return mean.squeeze(0), components, (explained[0], explained[1])
+    return mean.squeeze(0), components, tuple(explained)
 
 
 def project_with_pca(
@@ -994,6 +1042,114 @@ def project_with_pca(
     centered = point_tensor - mean
     projected = centered @ components.T
     return projected.tolist()
+
+
+def probability_to_sigma(probability: float, *, clip: float = SIGMA_CLIP_PROBABILITY) -> float:
+    clipped = min(max(probability, clip), 1.0 - clip)
+    return float(NORMAL_DIST.inv_cdf(clipped))
+
+
+def sigma_tick_text(value: int) -> str:
+    return f"{value:+d}s" if value else "0s"
+
+
+def trace_anchor_steps(length: int) -> list[int]:
+    if length <= 0:
+        return []
+    anchors: list[int] = []
+    for step in (1, math.ceil(length / 3), math.ceil(2 * length / 3), length):
+        if step not in anchors:
+            anchors.append(step)
+    return anchors
+
+
+def trace_step_text(length: int) -> list[str]:
+    anchors = set(trace_anchor_steps(length))
+    return [str(step) if step in anchors else "" for step in range(1, length + 1)]
+
+
+def depth_scaled_marker_sizes(
+    points: list[list[float]],
+    *,
+    x_range: list[float],
+    y_range: list[float],
+    z_range: list[float],
+    camera_eye: dict[str, float],
+    base_size: float,
+    min_scale: float,
+    max_scale: float,
+) -> list[float]:
+    if not points:
+        return []
+    x_mid = (x_range[0] + x_range[1]) / 2
+    y_mid = (y_range[0] + y_range[1]) / 2
+    z_mid = (z_range[0] + z_range[1]) / 2
+    x_span = max(1e-6, x_range[1] - x_range[0])
+    y_span = max(1e-6, y_range[1] - y_range[0])
+    z_span = max(1e-6, z_range[1] - z_range[0])
+    eye = torch.tensor(
+        [camera_eye["x"], camera_eye["y"], camera_eye["z"]],
+        dtype=torch.float32,
+    )
+    eye = eye / torch.linalg.norm(eye)
+    normalized_points = torch.tensor(
+        [
+            [
+                (point[0] - x_mid) / x_span,
+                (point[1] - y_mid) / y_span,
+                (point[2] - z_mid) / z_span,
+            ]
+            for point in points
+        ],
+        dtype=torch.float32,
+    )
+    depth = normalized_points @ eye
+    if float(depth.max().item() - depth.min().item()) < 1e-6:
+        return [base_size for _ in points]
+    scaled = (depth - depth.min()) / (depth.max() - depth.min())
+    return [
+        float(base_size * (min_scale + (max_scale - min_scale) * value.item()))
+        for value in scaled
+    ]
+
+
+def build_trace_reference_axes(
+    *,
+    x_range: list[float],
+    y_range: list[float],
+    z_range: list[float],
+) -> list[dict[str, object]]:
+    x_span = max(1e-6, x_range[1] - x_range[0])
+    y_span = max(1e-6, y_range[1] - y_range[0])
+    z_span = max(1e-6, z_range[1] - z_range[0])
+    origin = (
+        x_range[0] + 0.08 * x_span,
+        y_range[0] + 0.1 * y_span,
+        z_range[0] + 0.06 * z_span,
+    )
+    return [
+        {
+            "label": "x",
+            "x": [origin[0], origin[0] + 0.34 * x_span],
+            "y": [origin[1], origin[1]],
+            "z": [origin[2], origin[2]],
+            "color": "rgba(239,68,68,0.96)",
+        },
+        {
+            "label": "y",
+            "x": [origin[0], origin[0]],
+            "y": [origin[1], origin[1] + 0.34 * y_span],
+            "z": [origin[2], origin[2]],
+            "color": "rgba(59,130,246,0.95)",
+        },
+        {
+            "label": "z",
+            "x": [origin[0], origin[0]],
+            "y": [origin[1], origin[1]],
+            "z": [origin[2], origin[2] + 0.36 * z_span],
+            "color": "rgba(34,197,94,0.95)",
+        },
+    ]
 
 
 def examples_to_tensors(
@@ -1239,6 +1395,12 @@ def probe_kind_label(probe_kind: str) -> str:
     return mapping.get(probe_kind, probe_kind)
 
 
+def probe_display_label(probe: ProbeSpec) -> str:
+    if "full-space" in probe.label:
+        return probe.label.rsplit(" ", maxsplit=1)[-1]
+    return probe.short_label
+
+
 def build_model_title(hidden_size: int, num_layers: int) -> str:
     layer_text = "layer" if num_layers == 1 else "layers"
     return f"{hidden_size}-unit RNN ({num_layers} {layer_text})"
@@ -1466,14 +1628,36 @@ def select_trace_story_probes(
     *,
     highlighted_trajectories: list[ProbeTrajectory] | None = None,
 ) -> TraceStorySelection:
-    highlighted_trajectories = highlighted_trajectories or []
+    story_trajectories = build_probe_trajectories(
+        result,
+        probes=result.story_probes,
+        response_history=result.story_response_history,
+    )
+    if highlighted_trajectories is None:
+        highlighted_trajectories = select_highlighted_probe_trajectories(story_trajectories, limit=1)
     checkpoints = probe_checkpoint_epochs(result)
     target_fix = [
         flip for flip in flips
         if flip.kind == "wrong_to_right" and flip.from_epoch == checkpoints[-2] and flip.to_epoch == checkpoints[-1]
     ]
     any_fix = [flip for flip in flips if flip.kind == "wrong_to_right"]
-    if highlighted_trajectories:
+    phase_two_span = result.phase_spans[-1]
+    phase_two_reversals = [
+        trajectory
+        for trajectory in story_trajectories
+        if any(
+            int(phase_two_span["start_epoch"]) <= epoch <= int(phase_two_span["end_epoch"])
+            for epoch in trajectory.flip_epochs
+        )
+    ]
+    if highlighted_trajectories and any(trajectory.turn_count >= 2 for trajectory in highlighted_trajectories):
+        focus_probe = highlighted_trajectories[0].probe
+    elif phase_two_reversals:
+        focus_probe = max(
+            phase_two_reversals,
+            key=probe_trajectory_priority,
+        ).probe
+    elif highlighted_trajectories:
         focus_probe = highlighted_trajectories[0].probe
     elif target_fix:
         focus_probe = max(
@@ -1486,19 +1670,11 @@ def select_trace_story_probes(
             key=lambda flip: abs(flip.to_probability - flip.from_probability),
         ).probe
     else:
-        probe_index_by_label = {
-            probe.short_label: index for index, probe in enumerate(RESPONSE_PROBES)
-        }
-
-        def probe_max_swing(probe: ProbeSpec) -> float:
-            probe_index = probe_index_by_label[probe.short_label]
-            values = [responses[probe_index] for responses in result.response_history]
-            return max(abs(after - before) for before, after in zip(values[:-1], values[1:], strict=True))
-
         focus_probe = max(
-            RESPONSE_PROBES,
-            key=probe_max_swing,
+            story_trajectories,
+            key=probe_trajectory_priority,
         )
+        focus_probe = focus_probe.probe
     length = focus_probe.length
     preferred_index = (
         probe_variant_index(focus_probe)
@@ -1546,9 +1722,15 @@ def run_rnn_experiment(
     lr_end: float,
 ) -> tuple[RNNExperimentResult, dict[int, dict[str, torch.Tensor]]]:
     seed_everything(seed)
+    random_phase_epoch_count = phase_epochs
+    counterexample_phase_epoch_count = counterexample_phase_epochs(phase_epochs)
+    counterexample_cohort_size = train_samples
+    random_cohort_size = random_baseline_cohort_size(train_samples)
     phases = build_training_phases(
-        phase_epochs=phase_epochs,
-        train_samples=train_samples,
+        random_phase_epochs=random_phase_epoch_count,
+        counterexample_phase_epochs=counterexample_phase_epoch_count,
+        random_cohort_size=random_cohort_size,
+        counterexample_cohort_size=counterexample_cohort_size,
         lr_start=lr_start,
         lr_end=lr_end,
     )
@@ -1556,7 +1738,11 @@ def run_rnn_experiment(
     optimizer = torch.optim.Adam(model.parameters(), lr=DEFAULT_RNN_LR)
     criterion = nn.BCEWithLogitsLoss()
     evaluation_sets = build_evaluation_sets(test_samples=test_samples, seed=seed + 7_000)
-    retained_support = build_retained_support(cohort_size=train_samples, seed=seed + 17_000)
+    retained_support = build_retained_support(
+        random_cohort_size=random_cohort_size,
+        counterexample_cohort_size=counterexample_cohort_size,
+        seed=seed + 17_000,
+    )
     response_sequences = [probe.text for probe in RESPONSE_PROBES]
     story_sequences = [probe.text for probe in STORY_PROBES]
     rng = random.Random(seed + 99)
@@ -1619,17 +1805,15 @@ def run_rnn_experiment(
             {
                 "name": phase.name,
                 "label": phase.label,
+                "phase_kind": phase.phase_kind,
                 "start_epoch": start_epoch,
                 "end_epoch": global_epoch,
                 "epochs": phase.epochs,
-                "support_size": len(phase_examples),
+                "support_size": phase.support_size,
                 "cohort_size": phase.cohort_size,
+                "cohort_sizes": list(phase.cohort_sizes),
                 "cohort_weights": list(phase.cohort_weights),
-                "active_cohorts": [
-                    cohort_name
-                    for cohort_name, weight in zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True)
-                    if weight > 0
-                ],
+                "active_cohorts": phase.active_cohorts,
                 "optimizer": RNN_OPTIMIZER_NAME,
                 "learning_rate": DEFAULT_RNN_LR,
                 "lr_start": DEFAULT_RNN_LR,
@@ -1735,7 +1919,7 @@ def build_trace_grid_payload(
             )
             raw_projection_points.extend(states.tolist())
 
-    mean, components, explained_variance = fit_pca_projection(raw_projection_points)
+    mean, components, explained_variance = fit_pca_projection(raw_projection_points, num_components=3)
     projected_cells: list[TraceCell] = []
     for cell in cells:
         projected_cells.append(
@@ -1789,10 +1973,10 @@ def build_trace_grid_payload(
         cells=projected_cells,
         backgrounds=backgrounds,
         landmarks=landmarks,
-        projection_mode="pca_top_layer",
-        axis_labels=(
-            projection_axis_label(1, explained_variance[0]),
-            projection_axis_label(2, explained_variance[1]),
+        projection_mode="pca_top_layer_3d",
+        axis_labels=tuple(
+            projection_axis_label(component_index + 1, explained_variance[component_index])
+            for component_index in range(3)
         ),
         explained_variance=explained_variance,
     )
@@ -1893,6 +2077,11 @@ def compact_trace_phase_label(phase_label: str) -> str:
         phase_number = phase_label.removeprefix("After phase ").split(":", maxsplit=1)[0]
         return f"After P{phase_number}"
     return phase_label
+
+
+def trace_scene_name(row_index: int, col_index: int, cols: int) -> str:
+    scene_index = (row_index - 1) * cols + col_index
+    return "scene" if scene_index == 1 else f"scene{scene_index}"
 
 
 def write_figure(
@@ -2029,13 +2218,13 @@ def build_dataset_figure(
     ):
         values = []
         for phase in phases:
-            cohort_mapping = dict(zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True))
+            cohort_mapping = dict(zip(SUPPORT_COHORT_ORDER, phase.cohort_sizes, strict=True))
             values.append(
                 {
-                    INVALID_KIND_RANDOM: cohort_mapping.get(SUPPORT_COHORT_RANDOM, 0.0),
-                    INVALID_KIND_CORRUPTION: cohort_mapping.get(SUPPORT_COHORT_OFF_BY_ONE, 0.0),
-                    INVALID_KIND_BALANCED: cohort_mapping.get(SUPPORT_COHORT_BALANCED, 0.0),
-                    INVALID_KIND_VALID_PREFIX: cohort_mapping.get(SUPPORT_COHORT_VALID_PREFIX, 0.0),
+                    INVALID_KIND_RANDOM: cohort_mapping.get(SUPPORT_COHORT_RANDOM, 0.0) / 2,
+                    INVALID_KIND_CORRUPTION: cohort_mapping.get(SUPPORT_COHORT_OFF_BY_ONE, 0.0) / 2,
+                    INVALID_KIND_BALANCED: cohort_mapping.get(SUPPORT_COHORT_BALANCED, 0.0) / 2,
+                    INVALID_KIND_VALID_PREFIX: cohort_mapping.get(SUPPORT_COHORT_VALID_PREFIX, 0.0) / 2,
                 }.get(kind, 0.0)
             )
         figure.add_trace(
@@ -2084,13 +2273,7 @@ def phase_plot_bounds(phase_spans: list[dict[str, object]]) -> list[dict[str, fl
             if index + 1 < len(phase_spans)
             else end_epoch + 1.0
         )
-        phase_kind = str(span["name"]).split("-")[-1]
-        if phase_kind == "one":
-            phase_kind = PHASE_KIND_OFF_BY_ONE
-        if phase_kind == "invalid":
-            phase_kind = PHASE_KIND_BALANCED
-        if phase_kind == "prefix":
-            phase_kind = PHASE_KIND_VALID_PREFIX
+        phase_kind = str(span.get("phase_kind", PHASE_KIND_RANDOM))
         bounds.append(
             {
                 "phase_kind": phase_kind,
@@ -2129,7 +2312,7 @@ def add_phase_bands(figure: go.Figure, phase_spans: list[dict[str, object]], row
             yref=f"y{'' if row == 1 else 2} domain",
             text=f"<b>{bound['label']}</b>",
             showarrow=False,
-            font={"size": 13, "color": "#4b5563"},
+            font={"size": 15, "color": "#374151"},
             bgcolor="rgba(255,255,255,0.9)",
             bordercolor="#d1d5db",
             borderwidth=1,
@@ -2142,7 +2325,11 @@ def build_rnn_story_figure(
     focus_short_label: str | None = None,
     highlighted_trajectories: list[ProbeTrajectory] | None = None,
 ) -> go.Figure:
-    probe_trajectories = build_probe_trajectories(result)
+    probe_trajectories = build_probe_trajectories(
+        result,
+        probes=result.story_probes,
+        response_history=result.story_response_history,
+    )
     trajectory_by_label = {
         trajectory.probe.short_label: trajectory for trajectory in probe_trajectories
     }
@@ -2154,6 +2341,9 @@ def build_rnn_story_figure(
     highlight_index_by_label = {
         trajectory.probe.short_label: index for index, trajectory in enumerate(highlighted_trajectories)
     }
+    random_support_size = int(result.phase_spans[0]["cohort_sizes"][0])
+    counterexample_support_size = int(result.phase_spans[-1]["cohort_sizes"][1])
+    dense_story = len(result.story_probes) > 256
     figure = make_subplots(
         rows=2,
         cols=1,
@@ -2189,35 +2379,51 @@ def build_rnn_story_figure(
     add_phase_bands(figure, result.phase_spans, row=1)
     add_phase_bands(figure, result.phase_spans, row=2)
 
-    for probe_index, probe in enumerate(RESPONSE_PROBES):
-        values = [responses[probe_index] for responses in result.response_history]
+    for probe_index, probe in enumerate(result.story_probes):
+        probabilities = [responses[probe_index] for responses in result.story_response_history]
+        sigma_values = [probability_to_sigma(value) for value in probabilities]
         actual_valid = is_balanced_parentheses(probe.text)
-        predicted_values = [value >= 0.5 for value in values]
+        predicted_values = [value >= 0.5 for value in probabilities]
         status = probe_story_status(actual_valid, predicted_values)
         trajectory = trajectory_by_label[probe.short_label]
         line_color = STORY_STATUS_COLORS[status]
         is_focus_probe = probe.short_label == focus_short_label
         is_interesting = probe.short_label in interesting_labels
         is_highlighted = probe.short_label in highlighted_labels
-        if is_focus_probe:
-            line_width = 3.2
-            line_opacity = 1.0
-        elif is_highlighted:
-            line_width = 2.5
-            line_opacity = 0.94
-        elif is_interesting:
-            line_width = 1.85
-            line_opacity = 0.78
+        if dense_story:
+            if is_focus_probe:
+                line_width = 3.0
+                line_opacity = 0.98
+            elif is_highlighted:
+                line_width = 2.2
+                line_opacity = 0.74
+            elif is_interesting:
+                line_width = 1.0
+                line_opacity = 0.16
+            else:
+                line_width = 0.65 if status == "ever wrong" else 0.5
+                line_opacity = 0.035 if status == "ever wrong" else 0.015
         else:
-            line_width = 1.05 if status == "ever wrong" else 0.9
-            line_opacity = 0.34 if status == "ever wrong" else 0.18
+            if is_focus_probe:
+                line_width = 3.2
+                line_opacity = 1.0
+            elif is_highlighted:
+                line_width = 2.5
+                line_opacity = 0.94
+            elif is_interesting:
+                line_width = 1.85
+                line_opacity = 0.78
+            else:
+                line_width = 1.05 if status == "ever wrong" else 0.9
+                line_opacity = 0.34 if status == "ever wrong" else 0.18
         figure.add_trace(
             go.Scatter(
                 x=epochs,
-                y=values,
+                y=sigma_values,
                 mode="lines",
                 name=probe.short_label,
                 showlegend=False,
+                customdata=probabilities,
                 line={
                     "color": line_color,
                     "width": line_width,
@@ -2228,10 +2434,11 @@ def build_rnn_story_figure(
                     f"{probe.short_label} · {probe.label}<br>"
                     f"status={status}<br>"
                     f"turns={trajectory.turn_label}<br>"
-                    f"type={probe.probe_kind}<br>"
+                    f"type={probe_kind_label(probe.probe_kind)}<br>"
                     f"length={probe.length}<br>"
+                    f"bits={probe.label.rsplit(' ', maxsplit=1)[-1]}<br>"
                     f"text={probe.text}<br>"
-                    "epoch=%{x}<br>p(valid)=%{y:.3f}<extra></extra>"
+                    "epoch=%{x}<br>sigma(valid)=%{y:.2f}s<br>p(valid)=%{customdata:.3f}<extra></extra>"
                 ),
             ),
             row=2,
@@ -2242,13 +2449,14 @@ def build_rnn_story_figure(
             figure.add_trace(
                 go.Scatter(
                     x=[epochs[-1]],
-                    y=[values[-1]],
+                    y=[sigma_values[-1]],
                     mode="markers+text",
-                    text=[f"{probe.short_label} {trajectory.compact_turn_label}"],
+                    text=[f"{probe_display_label(probe)} {trajectory.compact_turn_label}"],
                     textposition=probe_end_label_position(label_index),
                     textfont={"size": 10, "color": line_color},
                     name=status,
                     showlegend=False,
+                    customdata=[probabilities[-1]],
                     marker={
                         "color": line_color,
                         "size": 11 if is_focus_probe else 9,
@@ -2259,7 +2467,7 @@ def build_rnn_story_figure(
                         f"{probe.short_label} final<br>"
                         f"status={status}<br>"
                         f"turns={trajectory.turn_label}<br>"
-                        "epoch=%{x}<br>p(valid)=%{y:.3f}<extra></extra>"
+                        "epoch=%{x}<br>sigma(valid)=%{y:.2f}s<br>p(valid)=%{customdata:.3f}<extra></extra>"
                     ),
                 ),
                 row=2,
@@ -2273,7 +2481,14 @@ def build_rnn_story_figure(
 
     figure.update_xaxes(title_text="epoch", row=2, col=1)
     figure.update_yaxes(title_text="accuracy", range=[lower_bound, upper_bound], row=1, col=1)
-    figure.update_yaxes(title_text="p(valid)", range=[0, 1.02], row=2, col=1)
+    figure.update_yaxes(
+        title_text="sigma(valid)",
+        range=[-TRACE_SIGMA_RANGE, TRACE_SIGMA_RANGE],
+        tickvals=list(range(-3, 4)),
+        ticktext=[sigma_tick_text(value) for value in range(-3, 4)],
+        row=2,
+        col=1,
+    )
     figure.update_layout(
         title=result.model_title + ": training phases and Pollack-style probe bifurcations",
         width=1580,
@@ -2284,7 +2499,7 @@ def build_rnn_story_figure(
     )
     highlight_lines = [
         (
-            f"{trajectory.probe.short_label} · {trajectory.turn_label} · "
+            f"{probe_display_label(trajectory.probe)} · {trajectory.turn_label} · "
             f"{probe_kind_label(trajectory.probe.probe_kind)} · len {trajectory.probe.length}"
             f"<br><span style='font-size:10px'>{trajectory.probe.text[:18]}{'...' if len(trajectory.probe.text) > 18 else ''}</span>"
         )
@@ -2296,11 +2511,15 @@ def build_rnn_story_figure(
         xref="paper",
         yref="paper",
         text=(
-            "Probe key: green = always-correct valid, yellow = always-correct invalid, red = ever wrong"
+            f"Probe slice: all {len(result.story_probes)} binary strings of length {STORY_PROBE_LENGTH}"
+            f"<br>P1 = {random_support_size} random-only strings; "
+            f"P2 keeps P1 and adds {counterexample_support_size} from each counterexample family"
+            "<br>green = always-correct valid, yellow = always-correct invalid, red = ever wrong"
+            "<br>bottom axis uses signed sigma units, not raw probability"
             "<br>dashed = multi-turn correctness path, solid = everything else"
             "<br>C = correct, I = incorrect"
             + (
-                "<br><br><b>Highlighted flips</b><br>" + "<br>".join(highlight_lines)
+                "<br><br><b>Highlighted turn paths</b><br>" + "<br>".join(highlight_lines)
                 if highlight_lines
                 else ""
             )
@@ -2322,7 +2541,7 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
     rows = len(payload.phase_labels)
     subplot_titles = [
         (
-            f"{label}<br>"
+            f"{label.rsplit(' ', maxsplit=1)[-1] if 'full-space' in label else label}<br>"
             f"{'valid' if is_balanced_parentheses(text) else 'invalid'}<br>"
             f"<span style='font-size:10px'>{wrap_sequence(text)}</span>"
         )
@@ -2331,18 +2550,33 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
     figure = make_subplots(
         rows=rows,
         cols=cols,
+        specs=[[{"type": "scene"} for _ in range(cols)] for _ in range(rows)],
         subplot_titles=subplot_titles,
-        vertical_spacing=0.08,
-        horizontal_spacing=0.04,
+        vertical_spacing=0.07,
+        horizontal_spacing=0.035,
     )
     all_x = [point[0] for cell in payload.cells for point in cell.projected_points]
     all_y = [point[1] for cell in payload.cells for point in cell.projected_points]
+    all_z = [point[2] for cell in payload.cells for point in cell.projected_points]
     all_x.extend(point[0] for background in payload.backgrounds for point in background.projected_points)
     all_y.extend(point[1] for background in payload.backgrounds for point in background.projected_points)
+    all_z.extend(point[2] for background in payload.backgrounds for point in background.projected_points)
     x_pad = 0.08 * max(1e-6, max(all_x) - min(all_x))
     y_pad = 0.08 * max(1e-6, max(all_y) - min(all_y))
-    x_range = [min(all_x) - x_pad, max(all_x) + x_pad]
-    y_range = [min(all_y) - y_pad, max(all_y) + y_pad]
+    z_pad = 0.08 * max(1e-6, max(all_z) - min(all_z))
+    x_range = [min(all_x) - x_pad * 0.45, max(all_x) + x_pad * 0.45]
+    y_range = [min(all_y) - y_pad * 0.45, max(all_y) + y_pad * 0.45]
+    z_range = [min(all_z) - z_pad * 0.45, max(all_z) + z_pad * 0.45]
+    scene_camera = {
+        "eye": {"x": 0.88, "y": 1.22, "z": 0.52},
+        "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+        "center": {"x": 0.02, "y": -0.03, "z": 0.0},
+    }
+    reference_axes = build_trace_reference_axes(
+        x_range=x_range,
+        y_range=y_range,
+        z_range=z_range,
+    )
 
     cell_lookup = {(cell.phase_label, cell.probe_label): cell for cell in payload.cells}
     background_lookup = {background.phase_label: background for background in payload.backgrounds}
@@ -2353,106 +2587,213 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
     for row_index, phase_label in enumerate(payload.phase_labels, start=1):
         background = background_lookup[phase_label]
         for col_index, probe_label in enumerate(payload.probe_labels, start=1):
+            scene_name = trace_scene_name(row_index, col_index, cols)
+            scene = getattr(figure.layout, scene_name)
             cell = cell_lookup[(phase_label, probe_label)]
             status = probe_status_label(cell.is_valid, cell.predicted_valid)
             style = PROBE_STATUS_STYLES[status]
             showlegend = status not in legend_seen
             legend_seen.add(status)
+            for axis in reference_axes:
+                figure.add_trace(
+                    go.Scatter3d(
+                        x=axis["x"],
+                        y=axis["y"],
+                        z=axis["z"],
+                        mode="lines",
+                        line={"color": axis["color"], "width": 7},
+                        meta="frame-axis",
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row_index,
+                    col=col_index,
+                )
             xs = [point[0] for point in cell.projected_points]
             ys = [point[1] for point in cell.projected_points]
+            zs = [point[2] for point in cell.projected_points]
+            step_labels = trace_step_text(len(xs))
+            step_numbers = list(range(1, len(xs) + 1))
+            background_sigmas = [probability_to_sigma(probability) for probability in background.probabilities]
+            background_sizes = depth_scaled_marker_sizes(
+                background.projected_points,
+                x_range=x_range,
+                y_range=y_range,
+                z_range=z_range,
+                camera_eye=scene_camera["eye"],
+                base_size=4.8,
+                min_scale=0.58,
+                max_scale=2.05,
+            )
+            trace_points = cell.projected_points
+            trace_sizes = depth_scaled_marker_sizes(
+                trace_points,
+                x_range=x_range,
+                y_range=y_range,
+                z_range=z_range,
+                camera_eye=scene_camera["eye"],
+                base_size=8.4,
+                min_scale=0.72,
+                max_scale=1.55,
+            )
             figure.add_trace(
-                go.Scatter(
+                go.Scatter3d(
                     x=[point[0] for point in background.projected_points],
                     y=[point[1] for point in background.projected_points],
+                    z=[point[2] for point in background.projected_points],
                     mode="markers",
+                    customdata=background.probabilities,
                     marker={
-                        "size": 20,
-                        "opacity": 0.62,
-                        "color": background.probabilities,
-                        "colorscale": [
-                            [0.0, "#2563eb"],
-                            [0.5, "#d1d5db"],
-                            [1.0, "#16a34a"],
-                        ],
-                        "line": {"color": "rgba(255,255,255,0.55)", "width": 0.8},
-                        "cmin": 0,
-                        "cmax": 1,
+                        "size": background_sizes,
+                        "opacity": 0.24,
+                        "color": background_sigmas,
+                        "colorscale": TRACE_SIGMA_COLORSCALE,
+                        "line": {"color": "rgba(255,255,255,0.14)", "width": 0.2},
+                        "cmin": -TRACE_SIGMA_RANGE,
+                        "cmax": TRACE_SIGMA_RANGE,
                         "showscale": row_index == 1 and col_index == cols,
                         "colorbar": {
-                            "title": "p(valid)",
-                            "x": 1.03,
+                            "title": "sigma(valid)",
+                            "x": 1.02,
                             "y": 0.5,
                             "len": 0.8,
+                            "tickvals": list(range(-3, 4)),
+                            "ticktext": [sigma_tick_text(value) for value in range(-3, 4)],
                         },
                     },
                     showlegend=False,
-                    hovertemplate="map point<br>p(valid)=%{marker.color:.3f}<extra></extra>",
+                    hovertemplate=(
+                        "map point<br>"
+                        "sigma(valid)=%{marker.color:.2f}s<br>"
+                        "p(valid)=%{customdata:.3f}<extra></extra>"
+                    ),
                 ),
                 row=row_index,
                 col=col_index,
             )
             if col_index == 1:
                 landmarks = landmark_lookup.get(phase_label, [])
+                landmark_sigmas = [probability_to_sigma(landmark.probability) for landmark in landmarks]
+                landmark_sizes = depth_scaled_marker_sizes(
+                    [landmark.projected_point for landmark in landmarks],
+                    x_range=x_range,
+                    y_range=y_range,
+                    z_range=z_range,
+                    camera_eye=scene_camera["eye"],
+                    base_size=10.5,
+                    min_scale=0.82,
+                    max_scale=1.5,
+                )
                 figure.add_trace(
-                    go.Scatter(
+                    go.Scatter3d(
                         x=[landmark.projected_point[0] for landmark in landmarks],
                         y=[landmark.projected_point[1] for landmark in landmarks],
+                        z=[landmark.projected_point[2] for landmark in landmarks],
                         mode="markers",
+                        customdata=[landmark.probability for landmark in landmarks],
                         marker={
-                            "size": 10,
-                            "color": [landmark.probability for landmark in landmarks],
-                            "colorscale": [
-                                [0.0, "#2563eb"],
-                                [0.5, "#d1d5db"],
-                                [1.0, "#16a34a"],
-                            ],
-                            "cmin": 0,
-                            "cmax": 1,
+                            "size": landmark_sizes,
+                            "color": landmark_sigmas,
+                            "colorscale": TRACE_SIGMA_COLORSCALE,
+                            "cmin": -TRACE_SIGMA_RANGE,
+                            "cmax": TRACE_SIGMA_RANGE,
                             "line": {"color": "#111111", "width": 1.2},
                         },
                         showlegend=False,
                         hovertemplate=(
                             "%{text}<br>"
                             "text=%{customdata}<br>"
-                            "p(valid)=%{marker.color:.3f}<extra></extra>"
+                            "sigma(valid)=%{marker.color:.2f}s<br>"
+                            "p(valid)=%{customdata:.3f}<extra></extra>"
                         ),
                         text=[landmark.label for landmark in landmarks],
-                        customdata=[landmark.text for landmark in landmarks],
                     ),
                     row=row_index,
                     col=col_index,
                 )
+                scene_annotations: list[dict[str, object]] = []
+                for landmark_index, landmark in enumerate(landmarks):
+                    label_text, ax_offset, ay_offset = {
+                        "alt": ("alt valid", 56, -18),
+                        "nest": ("nested valid", 88, -48),
+                        "prefix": ("open prefix", 80, 24),
+                    }.get(
+                        landmark.label,
+                        (landmark.label, 56, -18 - landmark_index * 14),
+                    )
+                    scene_annotations.append(
+                        {
+                            "x": landmark.projected_point[0],
+                            "y": landmark.projected_point[1],
+                            "z": landmark.projected_point[2],
+                            "text": label_text,
+                            "showarrow": True,
+                            "arrowhead": 0,
+                            "arrowsize": 1,
+                            "arrowwidth": 1,
+                            "arrowcolor": "#4b5563",
+                            "ax": ax_offset,
+                            "ay": ay_offset,
+                            "font": {"size": 9, "color": "#374151"},
+                            "bgcolor": "rgba(255,255,255,0.92)",
+                            "bordercolor": "#d1d5db",
+                            "borderwidth": 1,
+                        }
+                    )
+                scene.annotations = tuple(scene_annotations)
+            else:
+                scene.annotations = ()
             figure.add_trace(
-                go.Scatter(
+                go.Scatter3d(
                     x=xs,
                     y=ys,
-                    mode="lines+markers",
+                    z=zs,
+                    mode="lines+markers+text",
+                    customdata=step_numbers,
+                    text=step_labels,
+                    textposition="top center",
+                    textfont={"size": 9, "color": style["color"]},
                     line={
                         "color": style["color"],
-                        "width": 1.8,
+                        "width": 2.1,
                         "dash": style["dash"],
                     },
-                    marker={"color": style["color"], "size": 7, "opacity": 0.95},
+                    marker={"color": style["color"], "size": trace_sizes, "opacity": 0.96},
                     name=status,
                     showlegend=showlegend,
                     hovertemplate=(
                         f"{cell.probe_label}<br>"
                         f"{cell.text}<br>"
                         f"phase={cell.phase_label}<br>"
+                        "step=%{customdata}<br>"
                         f"status={status}<br>"
-                        f"p(valid)={cell.probability:.3f}<br>"
-                        "PC1=%{x:.3f}<br>PC2=%{y:.3f}<extra></extra>"
+                        f"end p(valid)={cell.probability:.3f}<br>"
+                        "PC1=%{x:.3f}<br>PC2=%{y:.3f}<br>PC3=%{z:.3f}<extra></extra>"
                     ),
                 ),
                 row=row_index,
                 col=col_index,
             )
             figure.add_trace(
-                go.Scatter(
+                go.Scatter3d(
                     x=[xs[0]],
                     y=[ys[0]],
+                    z=[zs[0]],
                     mode="markers",
-                    marker={"color": "#111111", "size": 7, "symbol": "circle"},
+                    marker={
+                        "color": "#111111",
+                        "size": depth_scaled_marker_sizes(
+                            [trace_points[0]],
+                            x_range=x_range,
+                            y_range=y_range,
+                            z_range=z_range,
+                            camera_eye=scene_camera["eye"],
+                            base_size=8.5,
+                            min_scale=1.0,
+                            max_scale=1.0,
+                        ),
+                        "symbol": "circle",
+                    },
                     name="start" if row_index == 1 and col_index == 1 else None,
                     showlegend=row_index == 1 and col_index == 1,
                     hovertemplate="start<extra></extra>",
@@ -2461,14 +2802,27 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                 col=col_index,
             )
             figure.add_trace(
-                go.Scatter(
+                go.Scatter3d(
                     x=[xs[-1]],
                     y=[ys[-1]],
-                    mode="markers",
+                    z=[zs[-1]],
+                    mode="markers+text",
+                    text=["*" if cell.correct else ""],
+                    textposition="middle center",
+                    textfont={"size": 16, "color": "#111111"},
                     marker={
                         "color": style["color"],
-                        "size": 12,
-                        "symbol": "star" if cell.correct else "x",
+                        "size": depth_scaled_marker_sizes(
+                            [trace_points[-1]],
+                            x_range=x_range,
+                            y_range=y_range,
+                            z_range=z_range,
+                            camera_eye=scene_camera["eye"],
+                            base_size=13.5,
+                            min_scale=1.0,
+                            max_scale=1.0,
+                        ),
+                        "symbol": "circle" if cell.correct else "x",
                         "line": {"color": "#111111", "width": 1.0},
                     },
                     name="end" if row_index == 1 and col_index == 1 else None,
@@ -2478,28 +2832,58 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                 row=row_index,
                 col=col_index,
             )
-            figure.update_xaxes(
-                range=x_range,
-                showticklabels=row_index == rows,
-                row=row_index,
-                col=col_index,
-            )
-            figure.update_yaxes(
-                range=y_range,
-                showticklabels=col_index == 1,
-                row=row_index,
-                col=col_index,
-            )
-            axis_number = (row_index - 1) * cols + col_index
-            xref = "x domain" if axis_number == 1 else f"x{axis_number} domain"
-            yref = "y domain" if axis_number == 1 else f"y{axis_number} domain"
-            xaxis_ref = "x" if axis_number == 1 else f"x{axis_number}"
-            yaxis_ref = "y" if axis_number == 1 else f"y{axis_number}"
+            scene.xaxis = {
+                "range": x_range,
+                "title": "",
+                "showticklabels": False,
+                "showspikes": False,
+                "showbackground": True,
+                "backgroundcolor": "rgba(248,250,252,0.88)",
+                "showgrid": True,
+                "gridcolor": "rgba(148,163,184,0.36)",
+                "zeroline": True,
+                "zerolinecolor": "rgba(100,116,139,0.44)",
+                "showline": True,
+                "linecolor": "rgba(100,116,139,0.6)",
+            }
+            scene.yaxis = {
+                "range": y_range,
+                "title": "",
+                "showticklabels": False,
+                "showspikes": False,
+                "showbackground": True,
+                "backgroundcolor": "rgba(249,250,251,0.84)",
+                "showgrid": True,
+                "gridcolor": "rgba(148,163,184,0.36)",
+                "zeroline": True,
+                "zerolinecolor": "rgba(100,116,139,0.44)",
+                "showline": True,
+                "linecolor": "rgba(100,116,139,0.6)",
+            }
+            scene.zaxis = {
+                "range": z_range,
+                "title": "",
+                "showticklabels": False,
+                "showspikes": False,
+                "showbackground": True,
+                "backgroundcolor": "rgba(245,247,250,0.8)",
+                "showgrid": True,
+                "gridcolor": "rgba(148,163,184,0.36)",
+                "zeroline": True,
+                "zerolinecolor": "rgba(100,116,139,0.44)",
+                "showline": True,
+                "linecolor": "rgba(100,116,139,0.6)",
+            }
+            scene.camera = scene_camera
+            scene.aspectmode = "cube"
+            scene.dragmode = "orbit"
+            scene_domain_x = [float(value) for value in scene.domain.x]
+            scene_domain_y = [float(value) for value in scene.domain.y]
             figure.add_annotation(
-                x=0.03,
-                y=0.97,
-                xref=xref,
-                yref=yref,
+                x=scene_domain_x[0] + 0.015 * (scene_domain_x[1] - scene_domain_x[0]),
+                y=scene_domain_y[1] - 0.03 * (scene_domain_y[1] - scene_domain_y[0]),
+                xref="paper",
+                yref="paper",
                 text=f"{'accepts' if cell.predicted_valid else 'rejects'} · {'correct' if cell.correct else 'wrong'}",
                 showarrow=False,
                 xanchor="left",
@@ -2509,34 +2893,6 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                 bordercolor=style["color"],
                 borderwidth=1,
             )
-            if col_index == 1:
-                for landmark_index, landmark in enumerate(landmark_lookup.get(phase_label, [])):
-                    label_text, ax_offset, ay_offset = {
-                        "alt": ("alt valid", 54, -18),
-                        "nest": ("nested valid", 86, -48),
-                        "prefix": ("open prefix", 78, 28),
-                    }.get(
-                        landmark.label,
-                        (landmark.label, 54, -18 - landmark_index * 14),
-                    )
-                    figure.add_annotation(
-                        x=landmark.projected_point[0],
-                        y=landmark.projected_point[1],
-                        xref=xaxis_ref,
-                        yref=yaxis_ref,
-                        text=label_text,
-                        showarrow=True,
-                        arrowhead=0,
-                        arrowsize=1,
-                        arrowwidth=1,
-                        arrowcolor="#4b5563",
-                        ax=ax_offset,
-                        ay=ay_offset,
-                        font={"size": 9.5, "color": "#374151"},
-                        bgcolor="rgba(255,255,255,0.92)",
-                        bordercolor="#d1d5db",
-                        borderwidth=1,
-                    )
         if rows > 1:
             figure.add_annotation(
                 x=-0.07,
@@ -2551,12 +2907,12 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
 
     figure.update_layout(
         title={
-            "text": "Probe traces in a PCA view of the learned state space",
+            "text": "Probe traces in a 3D PCA view of the learned state space",
             "y": 0.99,
         },
-        width=max(1380, 400 * cols),
-        height=max(820, 220 * rows + 110),
-        margin={"t": 152, "l": 78, "r": 92, "b": 88},
+        width=max(1620, 500 * cols),
+        height=max(940, 410 * rows + 130),
+        margin={"t": 168, "l": 78, "r": 112, "b": 88},
         legend={"orientation": "h", "yanchor": "top", "y": -0.08, "x": 0.0},
         **FIGURE_STYLE,
     )
@@ -2568,7 +2924,9 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
         text=(
             "Shared PCA axes: "
             f"PC1 {payload.explained_variance[0] * 100:.0f}% var, "
-            f"PC2 {payload.explained_variance[1] * 100:.0f}% var"
+            f"PC2 {payload.explained_variance[1] * 100:.0f}% var, "
+            f"PC3 {payload.explained_variance[2] * 100:.0f}% var"
+            "<br>Color map: negative sigma = reject-leaning, positive sigma = accept-leaning"
         ),
         showarrow=False,
         xanchor="right",
@@ -2634,9 +2992,14 @@ def render_rnn_assets(
     lr_start: float,
     lr_end: float,
 ) -> dict[str, object]:
+    random_epoch_count = phase_epochs
+    counterexample_epoch_count = counterexample_phase_epochs(phase_epochs)
+    counterexample_cohort_size = train_samples
+    random_cohort_size = random_baseline_cohort_size(train_samples)
     log_progress(
         "training simplified RNN "
-        f"(phases=4, phase_epochs={phase_epochs}, samples={train_samples}, "
+        f"(phases=2, phase1_epochs={random_epoch_count}, phase2_epochs={counterexample_epoch_count}, "
+        f"random_support={random_cohort_size}, counterexample_support={counterexample_cohort_size}, "
         f"test_samples={test_samples}, batch={DEFAULT_BATCH_SIZE}, "
         f"optimizer={RNN_OPTIMIZER_NAME}, lr={DEFAULT_RNN_LR:.3f})"
     )
@@ -2648,14 +3011,26 @@ def render_rnn_assets(
         lr_start=lr_start,
         lr_end=lr_end,
     )
-    probe_flips = build_probe_flips(result)
-    probe_trajectories = build_probe_trajectories(result)
-    highlighted_trajectories = select_highlighted_probe_trajectories(probe_trajectories)
+    story_probe_flips = build_probe_flips(
+        result,
+        probes=result.story_probes,
+        response_history=result.story_response_history,
+    )
+    story_probe_trajectories = build_probe_trajectories(
+        result,
+        probes=result.story_probes,
+        response_history=result.story_response_history,
+    )
+    highlighted_trajectories = select_highlighted_probe_trajectories(story_probe_trajectories)
     highlighted_short_labels = {trajectory.probe.short_label for trajectory in highlighted_trajectories}
     highlighted_flips = [
-        flip for flip in probe_flips if flip.probe.short_label in highlighted_short_labels
+        flip for flip in story_probe_flips if flip.probe.short_label in highlighted_short_labels
     ]
-    trace_selection = select_trace_story_probes(result, probe_flips)
+    trace_selection = select_trace_story_probes(
+        result,
+        story_probe_flips,
+        highlighted_trajectories=highlighted_trajectories,
+    )
     trace_payload = build_trace_grid_payload(
         model_builder=lambda: TinyTraceRNN(hidden_size=RNN_HIDDEN_SIZE, num_layers=RNN_NUM_LAYERS),
         checkpoints=checkpoints,
@@ -2666,8 +3041,10 @@ def render_rnn_assets(
 
     shared_files: list[str] = []
     phases = build_training_phases(
-        phase_epochs=phase_epochs,
-        train_samples=train_samples,
+        random_phase_epochs=random_epoch_count,
+        counterexample_phase_epochs=counterexample_epoch_count,
+        random_cohort_size=random_cohort_size,
+        counterexample_cohort_size=counterexample_cohort_size,
         lr_start=lr_start,
         lr_end=lr_end,
     )
@@ -2706,34 +3083,38 @@ def render_rnn_assets(
         "batch_size": DEFAULT_BATCH_SIZE,
         "optimizer": RNN_OPTIMIZER_NAME,
         "learning_rate": DEFAULT_RNN_LR,
-        "phase_epochs": phase_epochs,
-        "cohort_size": train_samples,
-        "retained_support_size": train_samples * len(SUPPORT_COHORT_ORDER),
+        "phase_count": len(phases),
+        "phase_epochs": random_epoch_count,
+        "phase_epoch_split": [random_epoch_count, counterexample_epoch_count],
+        "random_cohort_size": random_cohort_size,
+        "counterexample_cohort_size": counterexample_cohort_size,
+        "cohort_size": random_cohort_size,
+        "retained_support_size": random_cohort_size + counterexample_cohort_size * 3,
         "test_samples": test_samples,
         "support_cohorts": {
-            SUPPORT_COHORT_RANDOM: train_samples,
-            SUPPORT_COHORT_OFF_BY_ONE: train_samples,
-            SUPPORT_COHORT_BALANCED: train_samples,
-            SUPPORT_COHORT_VALID_PREFIX: train_samples,
+            SUPPORT_COHORT_RANDOM: random_cohort_size,
+            SUPPORT_COHORT_OFF_BY_ONE: counterexample_cohort_size,
+            SUPPORT_COHORT_BALANCED: counterexample_cohort_size,
+            SUPPORT_COHORT_VALID_PREFIX: counterexample_cohort_size,
         },
         "phase_weighting_schedule": [
             {
                 "label": phase.label,
                 "cohort_weights": list(phase.cohort_weights),
+                "cohort_sizes": list(phase.cohort_sizes),
                 "optimizer": RNN_OPTIMIZER_NAME,
                 "learning_rate": DEFAULT_RNN_LR,
                 "lr_start": DEFAULT_RNN_LR,
                 "lr_end": DEFAULT_RNN_LR,
-                "active_cohorts": [
-                    cohort_name
-                    for cohort_name, weight in zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True)
-                    if weight > 0
-                ],
+                "active_cohorts": phase.active_cohorts,
             }
             for phase in phases
         ],
         "phases": result.phase_spans,
         "probes": [asdict(probe) for probe in RESPONSE_PROBES],
+        "story_probe_mode": f"all_binary_strings_length_{STORY_PROBE_LENGTH}",
+        "story_probe_count": len(result.story_probes),
+        "story_probe_lengths": [STORY_PROBE_LENGTH],
         "highlighted_probe_flips": [
             {
                 "probe": asdict(flip.probe),
@@ -2758,6 +3139,7 @@ def render_rnn_assets(
         ],
         "trace_strings": [asdict(probe) for probe in trace_selection.selected_probes],
         "trace_phase_epochs": trace_payload.phase_epochs,
+        "trace_phase_labels": trace_payload.phase_labels,
         "trace_projection_mode": trace_payload.projection_mode,
         "trace_axis_labels": list(trace_payload.axis_labels),
         "trace_explained_variance": list(trace_payload.explained_variance),
@@ -2786,11 +3168,11 @@ def generate(
     ),
     rnn_phase_epochs: int = typer.Option(
         DEFAULT_PHASE_EPOCHS,
-        help="Epochs to run for each of the four RNN phases.",
+        help="Epochs to run for the random-baseline RNN phase; the counterexample phase runs for twice as long.",
     ),
     rnn_train_samples: int = typer.Option(
         DEFAULT_TRAIN_SAMPLES,
-        help="Training examples sampled for each RNN epoch.",
+        help="Examples per counterexample family in phase 2; the random baseline uses a larger fixed multiple of this size.",
     ),
     rnn_test_samples: int = typer.Option(
         DEFAULT_TEST_SAMPLES,

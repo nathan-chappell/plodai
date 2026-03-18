@@ -22,6 +22,7 @@ from chatkit.types import (
     AudioInput,
     ChatKitReq,
     ClientToolCallItem,
+    StreamingReq,
     HiddenContextItem,
     ProgressUpdateEvent,
     SyncCustomActionResponse,
@@ -31,6 +32,7 @@ from chatkit.types import (
     ThreadItemReplacedEvent,
     ThreadMetadata,
     ThreadStreamEvent,
+    ThreadsAddClientToolOutputReq,
     TranscriptionResult,
     UserMessageItem,
     WidgetItem,
@@ -139,6 +141,8 @@ BATCH_MODE_CONTINUE_TEXT = (
     "make from the current request, the workspace, and the existing results. Only stop "
     "if you are genuinely blocked by missing data, permissions, or an unavailable capability."
 )
+CLIENT_TOOL_OUTPUT_LOOKBACK_LIMIT = 20
+CLIENT_TOOL_OUTPUT_RETRY_DELAYS = (0.0, 0.05, 0.12, 0.25)
 
 
 def _summarize_client_tool_result_for_log(
@@ -418,6 +422,87 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         )
 
         return context
+
+    async def _find_pending_client_tool_call(
+        self,
+        thread_id: str,
+        context: ReportAgentContext,
+    ) -> ClientToolCallItem | None:
+        for attempt, delay_seconds in enumerate(CLIENT_TOOL_OUTPUT_RETRY_DELAYS, start=1):
+            if delay_seconds:
+                await asyncio.sleep(delay_seconds)
+
+            items = await self.store.load_thread_items(
+                thread_id,
+                after=None,
+                limit=CLIENT_TOOL_OUTPUT_LOOKBACK_LIMIT,
+                order="desc",
+                context=context,
+            )
+            tool_call = next(
+                (
+                    item
+                    for item in items.data
+                    if isinstance(item, ClientToolCallItem) and item.status == "pending"
+                ),
+                None,
+            )
+            if tool_call is not None:
+                if attempt > 1:
+                    log_event(
+                        self.logger,
+                        logging.INFO,
+                        "client_tool_output.pending_call_recovered",
+                        thread_id=thread_id,
+                        user_id=context.user_id,
+                        attempt=attempt,
+                        call_id=tool_call.call_id,
+                        item_id=tool_call.id,
+                    )
+                return tool_call
+
+        log_event(
+            self.logger,
+            logging.WARNING,
+            "client_tool_output.pending_call_missing",
+            thread_id=thread_id,
+            user_id=context.user_id,
+            lookback_limit=CLIENT_TOOL_OUTPUT_LOOKBACK_LIMIT,
+            attempts=len(CLIENT_TOOL_OUTPUT_RETRY_DELAYS),
+        )
+        return None
+
+    async def _process_streaming_impl(
+        self,
+        request: StreamingReq,
+        context: ReportAgentContext,
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        if isinstance(request, ThreadsAddClientToolOutputReq):
+            thread = await self.store.load_thread(
+                request.params.thread_id,
+                context=context,
+            )
+            tool_call = await self._find_pending_client_tool_call(thread.id, context)
+            if tool_call is None:
+                raise ValueError(
+                    f"No pending ClientToolCallItem found in recent items for {thread.id}"
+                )
+
+            tool_call.output = request.params.result
+            tool_call.status = "completed"
+            await self.store.save_item(thread.id, tool_call, context=context)
+            await self._cleanup_pending_client_tool_call(thread, context)
+
+            async for event in self._process_events(
+                thread,
+                context,
+                lambda: self.respond(thread, None, context),
+            ):
+                yield event
+            return
+
+        async for event in super()._process_streaming_impl(request, context):
+            yield event
 
     async def respond(
         self,
