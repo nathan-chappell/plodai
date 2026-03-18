@@ -53,19 +53,21 @@ That is also where the "chaos" starts to become more than a metaphor: it is the 
 
 What is so striking is that Pollack really does say the strong version. In the abstract, he writes that "a small weight adjustment causes a 'bifurcation' in the limit behavior of the network" and that this phase transition corresponds to the onset of generalization to "arbitrary-length strings." He also says the architecture appears capable of generating nonregular languages by exploiting "fractal and chaotic dynamics." Later he makes the wonderfully blunt remark that "a discrete dynamical system is just an iterative computation." And the paper does not leave the idea at the level of metaphor: when discussing parenthesis balancing, he says it is mathematically possible to embed an "infinite state machine" in a dynamical recognizer, with a state space built from fractal self-similarity. That is exactly the kind of claim that made this line of thought hard for me to forget.
 
-For this pass I simplified the experiment quite a bit.  I trained one small recurrent net with eight hidden units on strings of exact length twenty, evaluated it on lengths ten, twenty, and thirty, and rolled the data out in only three phases: random invalid strings first, then off-by-one errors, then balanced-but-invalid strings that specifically break the cheap strategy of tracking only net parenthesis count.  That gave a much cleaner picture than the larger curriculum.
+For this pass I simplified the experiment quite a bit.  I trained one small recurrent net with four hidden units on strings of exact length twenty, evaluated it on lengths ten, twenty, and thirty, and rolled the data out in only three phases: random invalid strings first, then off-by-one errors, then balanced-but-invalid strings that specifically break the cheap strategy of tracking only net parenthesis count.  That gave a much cleaner picture than the larger curriculum.
 
 ![Training phases and probe responses for the simplified one-layer RNN.](/blog-assets/theoretical-justification-of-neural-networks/rnn-training-story.png)
 
-*Story of the figure: the top panel shows that performance on lengths ten, twenty, and thirty moves together but not perfectly smoothly.  The bottom panel is the real Pollack-style view: hold a fixed set of strings in place and watch the model's judgments reorganize as new error types are introduced.  The balanced-invalid rollout is the important moment here, because it forces the recognizer to stop confusing "total count is zero" with "the whole prefix history stayed legal."*
+*Story of the figure: the top panel shows that performance on lengths ten, twenty, and thirty moves together but not perfectly smoothly.  The bottom panel is the real Pollack-style view: hold many fixed strings in place and watch the model's judgments reorganize as new error types are introduced.  Here color means problem class, line dash means length, and the short tags at the right are labels like `20B1` or `10O1`: a length, a class, and an example index.  The balanced-invalid rollout is the important moment, because it forces the recognizer to stop confusing "total count is zero" with "the whole prefix history stayed legal."*
 
 [Interactive training story chart](/blog-assets/theoretical-justification-of-neural-networks/rnn-training-story.html)
 
 What I especially like here is that the balanced-invalid rollout really does seem to matter.  Those examples are not random junk; they are the cases that force the recognizer to notice the difference between "net balance is zero" and "every prefix stayed legal."  That is the kind of small conceptual correction that makes the bifurcation diagram feel alive.
 
-![Full hidden-state traces for a few longer probe strings, projected into one shared PCA plane at the end of each phase.](/blog-assets/theoretical-justification-of-neural-networks/rnn-phase-traces.png)
+![Full hidden-state traces for a few longer probe strings in direct hidden coordinates `(h3,h4)` at the end of each phase.](/blog-assets/theoretical-justification-of-neural-networks/rnn-phase-traces-pair-b.png)
 
-*Story of the figure: read this one column by column.  Each column is one fixed longer string, and each row is the end of another training phase.  The point is not to decode every bend in every line.  The point is that the geometry itself settles down.  The same strings start tracing more regular paths once the model has been forced to notice the right kind of mistakes.*
+*Story of the figure: read this one column by column.  Each column is one fixed longer string, and each row is the end of another training phase.  This time the axes are not a PCA projection at all; they are actual hidden coordinates from the four-unit model.  The point is not to decode every bend in every line.  The point is that the geometry itself settles down.  The same strings start tracing more regular paths once the model has been forced to notice the right kind of mistakes.*
+
+[Alternate hidden-state printout in `(h1,h2)` coordinates](/blog-assets/theoretical-justification-of-neural-networks/rnn-phase-traces-pair-a.html)
 
 ### 5. Wrap-Up
 

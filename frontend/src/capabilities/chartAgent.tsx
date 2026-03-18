@@ -155,6 +155,7 @@ export function ChartAgentPage({
         {chartAgentCapability.tabs.map((tab) => (
           <CapabilityTabButton
             key={tab.id}
+            data-testid={`chart-agent-tab-${tab.id}`}
             $active={activeWorkspaceTab === tab.id}
             onClick={() => setActiveWorkspaceTab(tab.id as ChartAgentTab)}
             type="button"
@@ -207,23 +208,23 @@ export function ChartAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
+            <CapabilityPanel data-testid="chart-agent-demo-workspace">
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
                 <CapabilityMetaText>
                   {demoLoading ? "Preparing the chart demo." : demoError ?? status}
                 </CapabilityMetaText>
               </CapabilitySectionHeader>
-              <MetaText>
+              <MetaText data-testid="chart-agent-demo-files">
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
               </MetaText>
-              <MetaText>Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
+              <MetaText data-testid="chart-agent-demo-title">Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
             </CapabilityPanel>
 
             {reportEffects.filter(isChartEffect).length ? (
-              <ReportEffectsPanel>
+              <ReportEffectsPanel data-testid="chart-agent-demo-effects">
                 {reportEffects.filter(isChartEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`}>
+                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`} data-testid="chart-agent-demo-chart-effect">
                     <DatasetChart spec={effect.chart} rows={effect.rows} />
                   </ReportEffectCard>
                 ))}

@@ -13,7 +13,7 @@ export function DatasetChart({ spec, rows }: { spec: ClientChartSpec; rows: Data
   const surface = useMemo(() => getChartSurfaceStyle(spec), [spec]);
 
   return (
-    <DatasetChartWrapper $background={surface.background} $border={surface.border}>
+    <DatasetChartWrapper $background={surface.background} $border={surface.border} data-testid="dataset-chart">
       {hasRows ? (
         <>
           {spec.type === "line" ? <Line data={chartData as never} options={options as never} plugins={plugins} /> : null}

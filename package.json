@@ -8,7 +8,9 @@
     "build": "tsc -p frontend/tsconfig.json && vite build --config frontend/vite.config.ts",
     "preview": "vite preview --config frontend/vite.config.ts",
     "test": "vitest run --config frontend/vite.config.ts",
-    "build:watch": "vite build --watch --config frontend/vite.config.ts"
+    "build:watch": "vite build --watch --config frontend/vite.config.ts",
+    "test:fire": "playwright test --config playwright.config.ts",
+    "test:fire:headed": "playwright test --config playwright.config.ts --headed"
   },
   "dependencies": {
     "@clerk/react": "^6.1.0",
@@ -26,9 +28,11 @@
     "styled-components": "^6.1.18"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^5.0.0",
+    "dotenv": "^17.3.1",
     "typescript": "^5.8.2",
     "vite": "^7.0.0",
     "vitest": "^3.1.1"

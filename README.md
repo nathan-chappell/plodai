@@ -83,3 +83,42 @@ This scaffold provides:
 
 The biggest missing pieces are fuller CSV tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
 
+## Live fire tests
+
+The repo now includes a manual Playwright fire-test suite that drives the real app, real Clerk sign-in, and real OpenAI-backed demo runs.
+
+Before running it:
+
+1. Start the app separately with `uvicorn` or `python main.py`.
+2. Make sure your local `.env` includes `BASE_URL` and one of these login modes:
+   `FIRE_TEST_LOGIN_MODE=clerk_password` with `FIRE_TEST_CLERK_EMAIL` and `FIRE_TEST_CLERK_PASSWORD`
+   `FIRE_TEST_LOGIN_MODE=google` with `FIRE_TEST_GOOGLE_EMAIL` and `FIRE_TEST_GOOGLE_PASSWORD`
+3. Make sure the test account can sign in and has enough credit.
+4. Install the browser once with `npx playwright install chromium`.
+
+Run the full suite:
+
+```bash
+npm run test:fire
+```
+
+Run it headed for debugging:
+
+```bash
+npm run test:fire:headed
+```
+
+If your account only signs in through Google, prefer headed mode:
+
+```bash
+FIRE_TEST_LOGIN_MODE=google npm run test:fire:headed
+```
+
+Run a single live demo:
+
+```bash
+FIRE_TEST_DEMO=report-agent npm run test:fire:headed
+```
+
+The suite fails fast if the external app is not reachable, signs in through the real `/sign-in` flow, and attaches Playwright traces plus captured tool/effect/ChatKit stream evidence when a demo fails.
+

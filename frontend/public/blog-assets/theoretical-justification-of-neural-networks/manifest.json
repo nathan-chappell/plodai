@@ -2,12 +2,30 @@
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
   "seed": 7,
   "output_dir": "/home/uphill/programming/openai/form/ai-portfolio/frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "mlp": {
+    "files": [
+      "mlp-sine-story.png",
+      "mlp-sine-story.html"
+    ],
+    "shape": [
+      8
+    ],
+    "selected_epochs": [
+      0,
+      30,
+      200,
+      400
+    ],
+    "final_loss": 0.3639656901359558
+  },
   "rnn": {
     "files": [
       "rnn-training-story.png",
       "rnn-training-story.html",
-      "rnn-phase-traces.png",
-      "rnn-phase-traces.html"
+      "rnn-phase-traces-pair-a.png",
+      "rnn-phase-traces-pair-a.html",
+      "rnn-phase-traces-pair-b.png",
+      "rnn-phase-traces-pair-b.html"
     ],
     "train_length": 20,
     "eval_lengths": [
@@ -357,11 +375,11 @@
     "final_metrics": {
       "epoch": 15,
       "phase": "phase-3-balanced-invalid",
-      "train_loss": 0.4453223943710327,
-      "train_acc": 0.76953125,
-      "eval_10_acc": 0.7265625,
-      "eval_20_acc": 0.796875,
-      "eval_30_acc": 0.7734375
+      "train_loss": 0.43994298577308655,
+      "train_acc": 0.7890625,
+      "eval_10_acc": 0.71875,
+      "eval_20_acc": 0.8203125,
+      "eval_30_acc": 0.8125
     }
   }
 }

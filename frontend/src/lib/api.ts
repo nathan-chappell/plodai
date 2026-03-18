@@ -1,4 +1,5 @@
 import { publishPaymentRequiredToast } from "../app/toasts";
+import { recordFireTestChatKitResponse } from "./fire-test";
 
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
@@ -44,6 +45,9 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
     ...nextInit,
     headers,
   });
+  if (isChatKitRequest(input)) {
+    void captureChatKitResponse(response.clone(), input);
+  }
   if (response.status === 402) {
     void notifyPaymentRequired(response.clone());
   }
@@ -152,6 +156,25 @@ function maybeAttachChatKitMetadata(input: RequestInfo | URL, init?: RequestInit
 function isChatKitRequest(input: RequestInfo | URL): boolean {
   const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   return normalizeRequestPath(requestUrl) === normalizeRequestPath(CHATKIT_URL);
+}
+
+async function captureChatKitResponse(response: Response, input: RequestInfo | URL): Promise<void> {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  try {
+    recordFireTestChatKitResponse({
+      url,
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? "",
+      body: await response.text(),
+    });
+  } catch (error) {
+    recordFireTestChatKitResponse({
+      url,
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? "",
+      body: error instanceof Error ? `[capture error] ${error.message}` : "[capture error]",
+    });
+  }
 }
 
 function normalizeRequestPath(url: string): string {

@@ -155,6 +155,7 @@ export function CsvAgentPage({
         {csvAgentCapability.tabs.map((tab) => (
           <CapabilityTabButton
             key={tab.id}
+            data-testid={`csv-agent-tab-${tab.id}`}
             $active={activeWorkspaceTab === tab.id}
             onClick={() => setActiveWorkspaceTab(tab.id as CsvAgentTab)}
             type="button"
@@ -198,7 +199,7 @@ export function CsvAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
+            <CapabilityPanel data-testid="csv-agent-demo-workspace">
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
                 <CapabilityMetaText>
@@ -207,20 +208,20 @@ export function CsvAgentPage({
                     : demoError ?? status}
                 </CapabilityMetaText>
               </CapabilitySectionHeader>
-              <MetaText>
+              <MetaText data-testid="csv-agent-demo-files">
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
               </MetaText>
-              <MetaText>
+              <MetaText data-testid="csv-agent-demo-title">
                 Demo: {demoScenario?.title ?? "Preparing scenario"}
               </MetaText>
-              <MetaText>
+              <MetaText data-testid="csv-agent-demo-effect-count">
                 Effects captured this run: {reportEffects.length}
               </MetaText>
             </CapabilityPanel>
             {reportEffects.filter(isChartEffect).length ? (
-              <ReportEffectsPanel>
+              <ReportEffectsPanel data-testid="csv-agent-demo-effects">
                 {reportEffects.filter(isChartEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`}>
+                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`} data-testid="csv-agent-demo-chart-effect">
                     <DatasetChart spec={effect.chart} rows={effect.rows} />
                   </ReportEffectCard>
                 ))}

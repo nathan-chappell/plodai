@@ -256,6 +256,7 @@ export function PlatformShell({
                 {capabilities.map((capability) => (
                   <PlatformNavButton
                     key={capability.id}
+                    data-testid={`capability-nav-${capability.id}`}
                     $active={capability.id === activeCapabilityId}
                     $collapsed={collapsed}
                     onClick={() => onSelectCapability(capability.path)}

@@ -5,7 +5,7 @@ import type { ReportSection } from "../types/report";
 
 export function NarrativeCard({ section }: { section: ReportSection }) {
   return (
-    <NarrativeCardShell>
+    <NarrativeCardShell data-testid="narrative-card">
       <NarrativeCardHeading>{section.title}</NarrativeCardHeading>
       <NarrativeCardBody>
         <ReactMarkdown>{section.markdown}</ReactMarkdown>

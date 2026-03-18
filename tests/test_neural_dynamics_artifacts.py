@@ -94,18 +94,18 @@ def test_evaluation_sets_use_only_lengths_10_20_30() -> None:
         assert all(len(example.text) == length for example in examples)
 
 
-def test_trace_rnn_returns_single_layer_eight_state_traces() -> None:
+def test_trace_rnn_returns_single_layer_four_state_traces() -> None:
     tokens, lengths = demo.encode_sequences(["()()" * 5, "((()))" * 3 + "()"])
-    model = demo.TinyTraceRNN(hidden_size=8, num_layers=1)
+    model = demo.TinyTraceRNN(hidden_size=4, num_layers=1)
     logits, traces = model(tokens, lengths, capture_traces=True)
     assert logits.shape == (2,)
     assert traces is not None
     assert len(traces) == 1
     assert traces[0].shape[0] == 2
-    assert traces[0].shape[2] == 8
+    assert traces[0].shape[2] == 4
 
 
-def test_pca_trace_payload_uses_one_shared_basis() -> None:
+def test_trace_payload_keeps_raw_hidden_state_points() -> None:
     result, checkpoints = demo.run_rnn_experiment(
         seed=7,
         phase_epochs=1,
@@ -115,7 +115,7 @@ def test_pca_trace_payload_uses_one_shared_basis() -> None:
         lr_end=0.02,
     )
     payload = demo.build_trace_grid_payload(
-        model_builder=lambda: demo.TinyTraceRNN(hidden_size=8, num_layers=1),
+        model_builder=lambda: demo.TinyTraceRNN(hidden_size=4, num_layers=1),
         checkpoints=checkpoints,
         phase_spans=result.phase_spans,
         trace_probes=demo.TRACE_PROBES,
@@ -123,9 +123,8 @@ def test_pca_trace_payload_uses_one_shared_basis() -> None:
     assert payload.phase_epochs == [1, 2, 3]
     assert len(payload.phase_labels) == 3
     assert len(payload.probe_labels) == len(demo.TRACE_PROBES)
-    assert len(payload.basis) == 8
-    assert len(payload.basis[0]) == 2
     assert len(payload.cells) == 3 * len(demo.TRACE_PROBES)
+    assert len(payload.cells[0].points[0]) == 4
 
 
 def test_mlp_story_epoch_selector_uses_fixed_story_checkpoints() -> None:

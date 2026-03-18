@@ -2,6 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
+import {
+  recordFireTestClientToolCall,
+  recordFireTestEffectEvent,
+  recordFireTestFilesAppended,
+  recordFireTestStatus,
+  recordFireTestThreadId,
+} from "../lib/fire-test";
 import type { CapabilityBundle, CapabilityClientTool } from "../capabilities/types";
 import {
   ChatKitPaneCard,
@@ -49,6 +56,10 @@ function formatToolLabel(tool: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function slugifyLabel(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
@@ -242,19 +253,24 @@ export function ChatKitHarness({
       },
       onReady: () => {
         setStatus("ChatKit ready.");
+        recordFireTestStatus("ChatKit ready.");
       },
       onResponseStart: () => {
         setRunning(true);
         setStatus("Agent run in progress.");
+        recordFireTestStatus("Agent run in progress.");
       },
       onResponseEnd: () => {
         setRunning(false);
         setStatus("Agent run finished.");
+        recordFireTestStatus("Agent run finished.");
       },
       onThreadChange: ({ threadId: nextThreadId }) => {
         setThreadId(nextThreadId);
+        recordFireTestThreadId(nextThreadId);
       },
       onClientTool: async ({ name, params }) => {
+        recordFireTestClientToolCall(name, (params as Record<string, unknown>) ?? {});
         const tool = clientToolsRef.current.find((candidate) => candidate.name === name);
         if (!tool) {
           throw new Error(`Unknown client tool: ${name}`);
@@ -268,6 +284,7 @@ export function ChatKitHarness({
           },
           appendFiles: (nextFiles) => {
             if (nextFiles.length) {
+              recordFireTestFilesAppended(nextFiles);
               onFilesAddedRef.current?.(nextFiles);
             }
           },
@@ -284,6 +301,7 @@ export function ChatKitHarness({
         ) {
           return;
         }
+        recordFireTestEffectEvent(event.name, event.data as ClientEffect);
         onEffectsRef.current([event.data as ClientEffect]);
       },
     }),
@@ -305,6 +323,7 @@ export function ChatKitHarness({
   async function handleQuickAction(action: ChatKitQuickAction) {
     const needsNewThread = !threadIdRef.current;
     setStatus(`Starting ${action.label.toLowerCase()}.`);
+    recordFireTestStatus(`Starting ${action.label.toLowerCase()}.`);
     await chatKit.sendUserMessage({
       text: action.prompt,
       model: action.model ?? CHATKIT_DEFAULT_MODEL_ID,
@@ -315,10 +334,11 @@ export function ChatKitHarness({
   return (
     <>
       {quickActions?.length ? (
-        <ChatKitPaneToolbar>
+        <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
           {quickActions.map((action) => (
             <ChatKitPaneToolbarButton
               key={action.label}
+              data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
               type="button"
               onClick={() => void handleQuickAction(action)}
               disabled={running}
@@ -328,8 +348,12 @@ export function ChatKitHarness({
           ))}
         </ChatKitPaneToolbar>
       ) : null}
-      {status ? <ChatKitPaneHarnessMeta $light={colorScheme === "light"}>{status}</ChatKitPaneHarnessMeta> : null}
-      <ChatKitPaneSurface $light={colorScheme === "light"} $minHeight={surfaceMinHeight}>
+      {status ? (
+        <ChatKitPaneHarnessMeta $light={colorScheme === "light"} data-testid="chatkit-status">
+          {status}
+        </ChatKitPaneHarnessMeta>
+      ) : null}
+      <ChatKitPaneSurface $light={colorScheme === "light"} $minHeight={surfaceMinHeight} data-testid="chatkit-surface">
         <ChatKit control={chatKit.control} />
       </ChatKitPaneSurface>
     </>
@@ -420,7 +444,7 @@ export function ChatKitPane({
           surfaceMinHeight={surfaceMinHeight}
         />
       ) : (
-        <ChatKitPaneSurface $minHeight={surfaceMinHeight}>
+        <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">
           <ChatKitPaneEmpty>
             {emptyMessage ?? (enabled ? "The agent is ready once you add local CSV files." : "Sign in to open the analyst workspace.")}
           </ChatKitPaneEmpty>

@@ -190,6 +190,7 @@ export function ReportFoundryPage({
         {reportFoundryCapability.tabs.map((tab) => (
           <CapabilityTabButton
             key={tab.id}
+            data-testid={`report-agent-tab-${tab.id}`}
             $active={activeWorkspaceTab === tab.id}
             onClick={() => setActiveWorkspaceTab(tab.id as ReportAgentTab)}
             type="button"
@@ -259,7 +260,7 @@ export function ReportFoundryPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
+            <CapabilityPanel data-testid="report-agent-demo-workspace">
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
                 <CapabilityMetaText>
@@ -267,15 +268,15 @@ export function ReportFoundryPage({
                 </CapabilityMetaText>
               </CapabilitySectionHeader>
               <CompactSummaryGrid>
-                <CompactSummaryItem>
+                <CompactSummaryItem data-testid="report-agent-demo-title">
                   <strong>{demoScenario?.title ?? "Preparing scenario"}</strong>
                   <MetaText>{files.length} workspace file{files.length === 1 ? "" : "s"}</MetaText>
                 </CompactSummaryItem>
-                <CompactSummaryItem>
+                <CompactSummaryItem data-testid="report-agent-demo-derived-artifacts">
                   <strong>{files.filter((file) => !demoSeedIds.has(file.id)).length}</strong>
                   <MetaText>derived artifacts</MetaText>
                 </CompactSummaryItem>
-                <CompactSummaryItem>
+                <CompactSummaryItem data-testid="report-agent-demo-visible-effects">
                   <strong>{reportEffects.length}</strong>
                   <MetaText>visible effects</MetaText>
                 </CompactSummaryItem>
@@ -283,9 +284,20 @@ export function ReportFoundryPage({
             </CapabilityPanel>
 
             {reportEffects.length ? (
-              <ReportEffectsPanel>
+              <ReportEffectsPanel data-testid="report-agent-demo-effects">
                 {reportEffects.map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${index}`}>
+                  <ReportEffectCard
+                    key={`${effect.type}-${index}`}
+                    data-testid={
+                      isReportEffect(effect)
+                        ? "report-agent-demo-report-effect"
+                        : isChartEffect(effect)
+                          ? "report-agent-demo-chart-effect"
+                          : isPdfEffect(effect)
+                            ? "report-agent-demo-pdf-effect"
+                            : undefined
+                    }
+                  >
                     {isChartEffect(effect) ? <DatasetChart spec={effect.chart} rows={effect.rows} /> : null}
                     {isReportEffect(effect) ? (
                       <NarrativeCard
@@ -308,7 +320,9 @@ export function ReportFoundryPage({
               </ReportEffectsPanel>
             ) : null}
 
-            <ReportSummaryArtifacts files={files} />
+            <div data-testid="report-agent-demo-artifacts">
+              <ReportSummaryArtifacts files={files} />
+            </div>
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <CapabilityDemoPane

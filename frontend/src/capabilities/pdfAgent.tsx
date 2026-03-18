@@ -154,6 +154,7 @@ export function PdfAgentPage({
         {pdfAgentCapability.tabs.map((tab) => (
           <CapabilityTabButton
             key={tab.id}
+            data-testid={`pdf-agent-tab-${tab.id}`}
             $active={activeWorkspaceTab === tab.id}
             onClick={() => setActiveWorkspaceTab(tab.id as PdfAgentTab)}
             type="button"
@@ -212,22 +213,22 @@ export function PdfAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
+            <CapabilityPanel data-testid="pdf-agent-demo-workspace">
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
                 <CapabilityMetaText>
                   {demoLoading ? "Preparing the PDF demo." : demoError ?? status}
                 </CapabilityMetaText>
               </CapabilitySectionHeader>
-              <MetaText>
+              <MetaText data-testid="pdf-agent-demo-files">
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
               </MetaText>
-              <MetaText>Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
+              <MetaText data-testid="pdf-agent-demo-title">Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
             </CapabilityPanel>
             {reportEffects.filter(isPdfEffect).length ? (
-              <ReportEffectsPanel>
+              <ReportEffectsPanel data-testid="pdf-agent-demo-effects">
                 {reportEffects.filter(isPdfEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.archiveFileId}-${index}`}>
+                  <ReportEffectCard key={`${effect.type}-${effect.archiveFileId}-${index}`} data-testid="pdf-agent-demo-pdf-effect">
                     <h3>Smart split: {effect.sourceFileName}</h3>
                     <MetaText>{effect.markdown}</MetaText>
                     <MetaText>Archive ready: {effect.archiveFileName}</MetaText>

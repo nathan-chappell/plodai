@@ -160,8 +160,6 @@ class TraceGridPayload:
     probe_labels: list[str]
     probe_texts: list[str]
     cells: list[TraceCell]
-    mean: list[float]
-    basis: list[list[float]]
 
 
 @dataclass
@@ -584,9 +582,9 @@ class TinyTraceRNN(nn.Module):
     def __init__(
         self,
         *,
-        hidden_size: int = 8,
+        hidden_size: int = 4,
         num_layers: int = 1,
-        embedding_dim: int = 8,
+        embedding_dim: int = 4,
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
@@ -814,7 +812,7 @@ def run_rnn_experiment(
         lr_start=lr_start,
         lr_end=lr_end,
     )
-    model = TinyTraceRNN(hidden_size=8, num_layers=1).to(DEVICE)
+    model = TinyTraceRNN(hidden_size=4, num_layers=1).to(DEVICE)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr_start, momentum=0.9)
     criterion = nn.BCEWithLogitsLoss()
     evaluation_sets = build_evaluation_sets(test_samples=test_samples, seed=seed + 7_000)
@@ -850,7 +848,7 @@ def run_rnn_experiment(
     global_epoch = 0
     for phase_index, phase in enumerate(phases):
         log_progress(
-            f"{build_model_title(8, 1)}: starting {phase.label} "
+            f"{build_model_title(4, 1)}: starting {phase.label} "
             f"(epochs={phase.epochs}, samples={phase.train_samples}, batch={DEFAULT_BATCH_SIZE}, "
             f"lr={phase.lr_start:.3f}->{phase.lr_end:.3f})"
         )
@@ -903,11 +901,11 @@ def run_rnn_experiment(
                 "batch_size": DEFAULT_BATCH_SIZE,
             }
         )
-        log_progress(f"{build_model_title(8, 1)}: finished {phase.label} at epoch {global_epoch}")
+        log_progress(f"{build_model_title(4, 1)}: finished {phase.label} at epoch {global_epoch}")
 
     result = RNNExperimentResult(
-        model_key="rnn-1layer-8unit",
-        model_title=build_model_title(8, 1),
+        model_key="rnn-1layer-4unit",
+        model_title=build_model_title(4, 1),
         phase_spans=phase_spans,
         metrics=metrics,
         response_history=response_history,
@@ -919,13 +917,6 @@ def run_rnn_experiment(
     return result, checkpoints
 
 
-def fit_pca_basis(points: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    centered = points - points.mean(dim=0, keepdim=True)
-    _, _, vh = torch.linalg.svd(centered, full_matrices=False)
-    basis = vh[:2].transpose(0, 1)
-    return points.mean(dim=0), basis
-
-
 def build_trace_grid_payload(
     *,
     model_builder: callable,
@@ -935,11 +926,10 @@ def build_trace_grid_payload(
 ) -> TraceGridPayload:
     phase_epochs = [int(span["end_epoch"]) for span in phase_spans]
     phase_labels = [str(span["label"]) for span in phase_spans]
-    raw_by_epoch: dict[int, list[dict[str, object]]] = {}
-    all_state_points: list[list[float]] = []
     sequences = [probe.text for probe in trace_probes]
+    cells: list[TraceCell] = []
 
-    for epoch in phase_epochs:
+    for phase_index, epoch in enumerate(phase_epochs):
         model = model_builder().to(DEVICE)
         load_model_state(model, checkpoints[epoch])
         tokens, lengths = encode_sequences(sequences)
@@ -947,29 +937,10 @@ def build_trace_grid_payload(
         predictions = (logits.sigmoid() >= 0.5).detach().cpu().tolist()
         assert traces is not None
         layer_trace = traces[0]
-        payloads: list[dict[str, object]] = []
         for probe_index, probe in enumerate(trace_probes):
             steps = len(probe.text)
             states = layer_trace[probe_index, :steps, :]
-            all_state_points.extend(states.tolist())
-            payloads.append(
-                {
-                    "probe": probe,
-                    "states": states,
-                    "predicted_valid": bool(predictions[probe_index]),
-                }
-            )
-        raw_by_epoch[epoch] = payloads
-
-    mean, basis = fit_pca_basis(torch.tensor(all_state_points, dtype=torch.float32))
-    cells: list[TraceCell] = []
-    for phase_index, epoch in enumerate(phase_epochs):
-        for payload in raw_by_epoch[epoch]:
-            probe = payload["probe"]
-            states = payload["states"]
-            projected = (states - mean) @ basis
             actual_valid = is_balanced_parentheses(probe.text)
-            predicted_valid = bool(payload["predicted_valid"])
             cells.append(
                 TraceCell(
                     phase_label=phase_labels[phase_index],
@@ -978,9 +949,9 @@ def build_trace_grid_payload(
                     text=probe.text,
                     probe_kind=probe.probe_kind,
                     is_valid=actual_valid,
-                    predicted_valid=predicted_valid,
-                    correct=actual_valid == predicted_valid,
-                    points=projected.tolist(),
+                    predicted_valid=bool(predictions[probe_index]),
+                    correct=actual_valid == bool(predictions[probe_index]),
+                    points=states.tolist(),
                 )
             )
     return TraceGridPayload(
@@ -989,8 +960,6 @@ def build_trace_grid_payload(
         probe_labels=[probe.label for probe in trace_probes],
         probe_texts=[probe.text for probe in trace_probes],
         cells=cells,
-        mean=mean.tolist(),
-        basis=basis.tolist(),
     )
 
 
@@ -1384,7 +1353,12 @@ def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
     return figure
 
 
-def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
+def build_trace_figure(
+    payload: TraceGridPayload,
+    *,
+    pair_indices: tuple[int, int],
+    pair_label: str,
+) -> go.Figure:
     cols = len(payload.probe_labels)
     rows = len(payload.phase_labels)
     subplot_titles = [
@@ -1399,8 +1373,9 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
         horizontal_spacing=0.04,
     )
 
-    all_x = [point[0] for cell in payload.cells for point in cell.points]
-    all_y = [point[1] for cell in payload.cells for point in cell.points]
+    x_index, y_index = pair_indices
+    all_x = [point[x_index] for cell in payload.cells for point in cell.points]
+    all_y = [point[y_index] for cell in payload.cells for point in cell.points]
     x_pad = 0.08 * max(1e-6, max(all_x) - min(all_x))
     y_pad = 0.08 * max(1e-6, max(all_y) - min(all_y))
     x_range = [min(all_x) - x_pad, max(all_x) + x_pad]
@@ -1415,8 +1390,8 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
             style = PROBE_STATUS_STYLES[status]
             showlegend = status not in legend_seen
             legend_seen.add(status)
-            xs = [point[0] for point in cell.points]
-            ys = [point[1] for point in cell.points]
+            xs = [point[x_index] for point in cell.points]
+            ys = [point[y_index] for point in cell.points]
             figure.add_trace(
                 go.Scatter(
                     x=xs,
@@ -1429,7 +1404,7 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                         f"{cell.probe_label}<br>"
                         f"{cell.text}<br>"
                         f"phase={cell.phase_label}<br>"
-                        "pc1=%{x:.3f}<br>pc2=%{y:.3f}<extra></extra>"
+                        f"h{x_index + 1}=%{{x:.3f}}<br>h{y_index + 1}=%{{y:.3f}}<extra></extra>"
                     ),
                 ),
                 row=row_index,
@@ -1461,8 +1436,8 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                 row=row_index,
                 col=col_index,
             )
-            figure.update_xaxes(range=x_range, title_text="PC1", row=row_index, col=col_index)
-            figure.update_yaxes(range=y_range, title_text="PC2", row=row_index, col=col_index)
+            figure.update_xaxes(range=x_range, title_text=f"h{x_index + 1}", row=row_index, col=col_index)
+            figure.update_yaxes(range=y_range, title_text=f"h{y_index + 1}", row=row_index, col=col_index)
         figure.add_annotation(
             x=-0.07,
             y=1 - (row_index - 0.5) / rows,
@@ -1475,7 +1450,7 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
         )
 
     figure.update_layout(
-        title="Hidden-state traces projected with one shared PCA basis",
+        title=f"Hidden-state traces in direct coordinates ({pair_label})",
         width=max(1800, 360 * cols),
         height=1050,
         margin={"t": 110, "l": 85, "r": 30, "b": 50},
@@ -1553,7 +1528,7 @@ def render_rnn_assets(
         lr_end=lr_end,
     )
     trace_payload = build_trace_grid_payload(
-        model_builder=lambda: TinyTraceRNN(hidden_size=8, num_layers=1),
+        model_builder=lambda: TinyTraceRNN(hidden_size=4, num_layers=1),
         checkpoints=checkpoints,
         phase_spans=result.phase_spans,
         trace_probes=TRACE_PROBES,
@@ -1578,9 +1553,17 @@ def render_rnn_assets(
     if write_trace_images:
         shared_files.extend(
             write_figure(
-                build_trace_figure(trace_payload),
+                build_trace_figure(trace_payload, pair_indices=(0, 1), pair_label="h1, h2"),
                 output_dir=output_dir,
-                stem="rnn-phase-traces",
+                stem="rnn-phase-traces-pair-a",
+                write_html=write_html,
+            )
+        )
+        shared_files.extend(
+            write_figure(
+                build_trace_figure(trace_payload, pair_indices=(2, 3), pair_label="h3, h4"),
+                output_dir=output_dir,
+                stem="rnn-phase-traces-pair-b",
                 write_html=write_html,
             )
         )
