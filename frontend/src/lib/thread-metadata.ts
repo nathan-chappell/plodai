@@ -17,6 +17,8 @@ export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThre
     surface_key: metadata.surface_key,
     capability_bundle: metadata.capability_bundle,
     workspace_context: metadata.workspace_context,
+    workspace_bootstrap: metadata.workspace_bootstrap,
+    workspace_contract_version: metadata.workspace_contract_version,
     openai_conversation_id: metadata.openai_conversation_id,
     openai_previous_response_id: metadata.openai_previous_response_id,
     execution_mode: metadata.execution_mode,

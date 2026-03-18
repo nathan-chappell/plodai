@@ -309,6 +309,38 @@ export const smartSplitPdfToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+export const listReportsToolSchema: JsonSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+export function buildGetReportToolSchema(reportIds: readonly string[]): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      report_id: { enum: [...reportIds] },
+    },
+    required: ["report_id"],
+    additionalProperties: false,
+  };
+}
+
+export function buildAppendReportSectionToolSchema(
+  reportIds: readonly string[],
+): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      report_id: { enum: [...reportIds] },
+      title: { type: "string" },
+      markdown: { type: "string" },
+    },
+    required: ["report_id", "title", "markdown"],
+    additionalProperties: false,
+  };
+}
+
 function buildRowExprSchema(depth: number): JsonSchema {
   if (depth <= 0) {
     return {

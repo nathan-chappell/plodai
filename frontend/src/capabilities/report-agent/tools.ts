@@ -9,9 +9,22 @@ import type {
 import { buildChartAgentClientToolCatalog } from "../chart-agent/tools";
 import { buildCsvAgentClientToolCatalog } from "../csv-agent/tools";
 import { buildPdfAgentClientToolCatalog } from "../pdf-agent/tools";
+import {
+  buildAppendReportSectionToolDefinition,
+  buildGetReportToolDefinition,
+  createAppendReportSectionTool,
+  createGetReportTool,
+  createListReportsTool,
+  listReportsToolDefinition,
+} from "../shared/client-tools";
 
-export function buildReportAgentClientToolCatalog(): FunctionToolDefinition[] {
+export function buildReportAgentClientToolCatalog(
+  reportIds: readonly string[] = ["report-1"],
+): FunctionToolDefinition[] {
   return buildUniqueDefinitions([
+    listReportsToolDefinition,
+    buildGetReportToolDefinition(reportIds),
+    buildAppendReportSectionToolDefinition(reportIds),
     ...buildCsvAgentClientToolCatalog(),
     ...buildChartAgentClientToolCatalog(),
     ...buildPdfAgentClientToolCatalog(),
@@ -22,6 +35,9 @@ export function createReportAgentClientTools(
   workspace: CapabilityWorkspaceContext,
 ): CapabilityClientTool[] {
   return buildUniqueTools([
+    createListReportsTool(workspace),
+    createGetReportTool(workspace),
+    createAppendReportSectionTool(workspace),
     ...createCsvAgentClientTools(workspace),
     ...createChartAgentClientTools(workspace),
     ...createPdfAgentClientTools(workspace),

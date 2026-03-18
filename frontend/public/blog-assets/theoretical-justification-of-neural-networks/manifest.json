@@ -1,7 +1,7 @@
 {
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
   "seed": 7,
-  "output_dir": "/home/uphill/programming/openai/form/ai-portfolio/frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "output_dir": "frontend/public/blog-assets/theoretical-justification-of-neural-networks",
   "mlp": {
     "files": [
       "mlp-sine-story.png",
@@ -31,15 +31,18 @@
       20,
       30
     ],
-    "batch_size": 8,
-    "phase_epochs": 5,
-    "cohort_size": 40,
-    "retained_support_size": 120,
+    "batch_size": 16,
+    "optimizer": "adam",
+    "learning_rate": 0.001,
+    "phase_epochs": 10,
+    "cohort_size": 48,
+    "retained_support_size": 192,
     "test_samples": 128,
     "support_cohorts": {
-      "support-random": 40,
-      "support-off-by-one": 40,
-      "support-balanced-invalid": 40
+      "support-random": 48,
+      "support-off-by-one": 48,
+      "support-balanced-invalid": 48,
+      "support-valid-prefix": 48
     },
     "phase_weighting_schedule": [
       {
@@ -47,8 +50,13 @@
         "cohort_weights": [
           1.0,
           0.0,
+          0.0,
           0.0
         ],
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
         "active_cohorts": [
           "support-random"
         ]
@@ -58,8 +66,13 @@
         "cohort_weights": [
           1.0,
           1.0,
+          0.0,
           0.0
         ],
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
         "active_cohorts": [
           "support-random",
           "support-off-by-one"
@@ -70,12 +83,36 @@
         "cohort_weights": [
           1.0,
           1.0,
-          1.0
+          1.0,
+          0.0
         ],
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
         "active_cohorts": [
           "support-random",
           "support-off-by-one",
           "support-balanced-invalid"
+        ]
+      },
+      {
+        "label": "Phase 4: add valid-prefix",
+        "cohort_weights": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
+        "active_cohorts": [
+          "support-random",
+          "support-off-by-one",
+          "support-balanced-invalid",
+          "support-valid-prefix"
         ]
       }
     ],
@@ -84,52 +121,84 @@
         "name": "phase-1-random",
         "label": "Phase 1: random",
         "start_epoch": 1,
-        "end_epoch": 5,
-        "epochs": 5,
-        "support_size": 40,
-        "cohort_size": 40,
+        "end_epoch": 10,
+        "epochs": 10,
+        "support_size": 48,
+        "cohort_size": 48,
         "cohort_weights": [
           1.0,
+          0.0,
           0.0,
           0.0
         ],
         "active_cohorts": [
           "support-random"
         ],
-        "lr_start": 0.08,
-        "lr_end": 0.02,
-        "batch_size": 8
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
+        "batch_size": 16
       },
       {
         "name": "phase-2-off-by-one",
         "label": "Phase 2: add off-by-one",
-        "start_epoch": 6,
-        "end_epoch": 10,
-        "epochs": 5,
-        "support_size": 80,
-        "cohort_size": 40,
+        "start_epoch": 11,
+        "end_epoch": 20,
+        "epochs": 10,
+        "support_size": 96,
+        "cohort_size": 48,
         "cohort_weights": [
           1.0,
           1.0,
+          0.0,
           0.0
         ],
         "active_cohorts": [
           "support-random",
           "support-off-by-one"
         ],
-        "lr_start": 0.08,
-        "lr_end": 0.02,
-        "batch_size": 8
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
+        "batch_size": 16
       },
       {
         "name": "phase-3-balanced-invalid",
         "label": "Phase 3: add balanced-invalid",
-        "start_epoch": 11,
-        "end_epoch": 15,
-        "epochs": 5,
-        "support_size": 120,
-        "cohort_size": 40,
+        "start_epoch": 21,
+        "end_epoch": 30,
+        "epochs": 10,
+        "support_size": 144,
+        "cohort_size": 48,
         "cohort_weights": [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ],
+        "active_cohorts": [
+          "support-random",
+          "support-off-by-one",
+          "support-balanced-invalid"
+        ],
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
+        "batch_size": 16
+      },
+      {
+        "name": "phase-4-valid-prefix",
+        "label": "Phase 4: add valid-prefix",
+        "start_epoch": 31,
+        "end_epoch": 40,
+        "epochs": 10,
+        "support_size": 192,
+        "cohort_size": 48,
+        "cohort_weights": [
+          1.0,
           1.0,
           1.0,
           1.0
@@ -137,16 +206,19 @@
         "active_cohorts": [
           "support-random",
           "support-off-by-one",
-          "support-balanced-invalid"
+          "support-balanced-invalid",
+          "support-valid-prefix"
         ],
-        "lr_start": 0.08,
-        "lr_end": 0.02,
-        "batch_size": 8
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "lr_start": 0.001,
+        "lr_end": 0.001,
+        "batch_size": 16
       }
     ],
     "probes": [
       {
-        "label": "10 valid A",
+        "label": "10 valid 1",
         "text": "()(())(())",
         "probe_kind": "valid",
         "length": 10,
@@ -154,317 +226,970 @@
         "highlight": true
       },
       {
-        "label": "10 valid B",
-        "text": "()()()()()",
+        "label": "10 valid 2",
+        "text": "(())()(())",
         "probe_kind": "valid",
         "length": 10,
         "short_label": "10V2",
         "highlight": false
       },
       {
-        "label": "10 random invalid A",
-        "text": ")((())(()(",
+        "label": "10 valid 3",
+        "text": "(())()()()",
+        "probe_kind": "valid",
+        "length": 10,
+        "short_label": "10V3",
+        "highlight": false
+      },
+      {
+        "label": "10 valid 4",
+        "text": "(())((()))",
+        "probe_kind": "valid",
+        "length": 10,
+        "short_label": "10V4",
+        "highlight": false
+      },
+      {
+        "label": "10 random invalid 1",
+        "text": ")(()(()))(",
         "probe_kind": "random",
         "length": 10,
         "short_label": "10R1",
         "highlight": true
       },
       {
-        "label": "10 random invalid B",
-        "text": ")(()(()))(",
+        "label": "10 random invalid 2",
+        "text": "())()()()(",
         "probe_kind": "random",
         "length": 10,
         "short_label": "10R2",
         "highlight": false
       },
       {
-        "label": "10 off-by-one A",
-        "text": "()()()()))",
+        "label": "10 random invalid 3",
+        "text": "))()())(()",
+        "probe_kind": "random",
+        "length": 10,
+        "short_label": "10R3",
+        "highlight": false
+      },
+      {
+        "label": "10 random invalid 4",
+        "text": "(()()))))(",
+        "probe_kind": "random",
+        "length": 10,
+        "short_label": "10R4",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 1",
+        "text": "(())))(())",
         "probe_kind": "off_by_one",
         "length": 10,
         "short_label": "10O1",
         "highlight": true
       },
       {
-        "label": "10 off-by-one B",
-        "text": "()(()))())",
+        "label": "10 off-by-one 2",
+        "text": "()()))(())",
         "probe_kind": "off_by_one",
         "length": 10,
         "short_label": "10O2",
         "highlight": false
       },
       {
-        "label": "10 balanced-invalid A",
-        "text": "((()())))(",
+        "label": "10 off-by-one 3",
+        "text": ")(()))(())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O3",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 4",
+        "text": "())())(())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O4",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 5",
+        "text": "()))()(())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O5",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 6",
+        "text": "))()()(())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O6",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 7",
+        "text": "))(())(())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O7",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 8",
+        "text": ")(())()())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O8",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 9",
+        "text": "))()((()))",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O9",
+        "highlight": false
+      },
+      {
+        "label": "10 off-by-one 10",
+        "text": "()())()())",
+        "probe_kind": "off_by_one",
+        "length": 10,
+        "short_label": "10O10",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 1",
+        "text": "(()))))(((",
         "probe_kind": "balanced_invalid",
         "length": 10,
         "short_label": "10B1",
         "highlight": true
       },
       {
-        "label": "10 balanced-invalid B",
-        "text": ")()(()())(",
+        "label": "10 balanced-invalid 2",
+        "text": "()())))(((",
         "probe_kind": "balanced_invalid",
         "length": 10,
         "short_label": "10B2",
         "highlight": false
       },
       {
-        "label": "20 valid A",
-        "text": "()((((())(()()()))))",
+        "label": "10 balanced-invalid 3",
+        "text": "()))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B3",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 4",
+        "text": "))))(()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B4",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 5",
+        "text": ")()))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B5",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 6",
+        "text": ")(()))))(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B6",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 7",
+        "text": ")()()))(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B7",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 8",
+        "text": ")))(())(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B8",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 9",
+        "text": ")))()()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B9",
+        "highlight": false
+      },
+      {
+        "label": "10 balanced-invalid 10",
+        "text": "))(()))(((",
+        "probe_kind": "balanced_invalid",
+        "length": 10,
+        "short_label": "10B10",
+        "highlight": false
+      },
+      {
+        "label": "10 valid-prefix 1",
+        "text": "()(()())((",
+        "probe_kind": "valid_prefix",
+        "length": 10,
+        "short_label": "10P1",
+        "highlight": true
+      },
+      {
+        "label": "10 valid-prefix 2",
+        "text": "(()()())((",
+        "probe_kind": "valid_prefix",
+        "length": 10,
+        "short_label": "10P2",
+        "highlight": false
+      },
+      {
+        "label": "10 valid-prefix 3",
+        "text": "()()(())((",
+        "probe_kind": "valid_prefix",
+        "length": 10,
+        "short_label": "10P3",
+        "highlight": false
+      },
+      {
+        "label": "10 valid-prefix 4",
+        "text": "((())())((",
+        "probe_kind": "valid_prefix",
+        "length": 10,
+        "short_label": "10P4",
+        "highlight": false
+      },
+      {
+        "label": "20 valid 1",
+        "text": "()()()()((((()))()))",
         "probe_kind": "valid",
         "length": 20,
         "short_label": "20V1",
         "highlight": true
       },
       {
-        "label": "20 valid B",
-        "text": "()()()()((((()))()))",
+        "label": "20 valid 2",
+        "text": "()(())()()((((()))))",
         "probe_kind": "valid",
         "length": 20,
         "short_label": "20V2",
         "highlight": false
       },
       {
-        "label": "20 random invalid A",
-        "text": "()())(())(()))()(())",
+        "label": "20 valid 3",
+        "text": "()()()(())(((()())))",
+        "probe_kind": "valid",
+        "length": 20,
+        "short_label": "20V3",
+        "highlight": false
+      },
+      {
+        "label": "20 valid 4",
+        "text": "()(()((())))()()()()",
+        "probe_kind": "valid",
+        "length": 20,
+        "short_label": "20V4",
+        "highlight": false
+      },
+      {
+        "label": "20 random invalid 1",
+        "text": "())()()))())())())))",
         "probe_kind": "random",
         "length": 20,
         "short_label": "20R1",
         "highlight": true
       },
       {
-        "label": "20 random invalid B",
-        "text": "())()()))())())())))",
+        "label": "20 random invalid 2",
+        "text": ")))())()))()()))()))",
         "probe_kind": "random",
         "length": 20,
         "short_label": "20R2",
         "highlight": false
       },
       {
-        "label": "20 off-by-one A",
-        "text": "(())((())(()()()((()",
+        "label": "20 random invalid 3",
+        "text": "()()((()(()(()())(((",
+        "probe_kind": "random",
+        "length": 20,
+        "short_label": "20R3",
+        "highlight": false
+      },
+      {
+        "label": "20 random invalid 4",
+        "text": ")(()()((())))))((())",
+        "probe_kind": "random",
+        "length": 20,
+        "short_label": "20R4",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 1",
+        "text": "))))((()()(())))(())",
         "probe_kind": "off_by_one",
         "length": 20,
         "short_label": "20O1",
         "highlight": true
       },
       {
-        "label": "20 off-by-one B",
-        "text": "()(())))()))()()(())",
+        "label": "20 off-by-one 2",
+        "text": "()()()()(())))))(())",
         "probe_kind": "off_by_one",
         "length": 20,
         "short_label": "20O2",
         "highlight": false
       },
       {
-        "label": "20 balanced-invalid A",
-        "text": "()((()))()())())(()(",
+        "label": "20 off-by-one 3",
+        "text": "(())()())(()))))(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O3",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 4",
+        "text": "(((()())))()))))(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O4",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 5",
+        "text": "(()()))(())))())(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O5",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 6",
+        "text": "))((()))))(()())(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O6",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 7",
+        "text": "()()))()))(())()(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O7",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 8",
+        "text": "()()(()())))))()(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O8",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 9",
+        "text": ")))((((())))))()(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O9",
+        "highlight": false
+      },
+      {
+        "label": "20 off-by-one 10",
+        "text": "))()((()))()))()(())",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O10",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 1",
+        "text": "()(((()))(())))))(((",
         "probe_kind": "balanced_invalid",
         "length": 20,
         "short_label": "20B1",
         "highlight": true
       },
       {
-        "label": "20 balanced-invalid B",
-        "text": ")()()()()()(()()()()",
+        "label": "20 balanced-invalid 2",
+        "text": "((()(()()))))))()(((",
         "probe_kind": "balanced_invalid",
         "length": 20,
         "short_label": "20B2",
         "highlight": false
       },
       {
-        "label": "30 valid A",
-        "text": "()()()()()()(((())()))(())()()",
+        "label": "20 balanced-invalid 3",
+        "text": "(()()(()())))))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B3",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 4",
+        "text": "()((())())))())()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B4",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 5",
+        "text": ")(()))((()))))(()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B5",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 6",
+        "text": ")(())()()(())()))(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B6",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 7",
+        "text": "))((()))((())))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B7",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 8",
+        "text": ")(()()())()(())))(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B8",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 9",
+        "text": "()(()))))(())()()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B9",
+        "highlight": false
+      },
+      {
+        "label": "20 balanced-invalid 10",
+        "text": ")())(())())())(()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B10",
+        "highlight": false
+      },
+      {
+        "label": "20 valid-prefix 1",
+        "text": "((((((()))))))(())((",
+        "probe_kind": "valid_prefix",
+        "length": 20,
+        "short_label": "20P1",
+        "highlight": true
+      },
+      {
+        "label": "20 valid-prefix 2",
+        "text": "()((()(())))(()())((",
+        "probe_kind": "valid_prefix",
+        "length": 20,
+        "short_label": "20P2",
+        "highlight": false
+      },
+      {
+        "label": "20 valid-prefix 3",
+        "text": "(())((()()))(()())((",
+        "probe_kind": "valid_prefix",
+        "length": 20,
+        "short_label": "20P3",
+        "highlight": false
+      },
+      {
+        "label": "20 valid-prefix 4",
+        "text": "((((())()()))()())((",
+        "probe_kind": "valid_prefix",
+        "length": 20,
+        "short_label": "20P4",
+        "highlight": false
+      },
+      {
+        "label": "30 valid 1",
+        "text": "(((()))(()))((()))()((((()))))",
         "probe_kind": "valid",
         "length": 30,
         "short_label": "30V1",
         "highlight": true
       },
       {
-        "label": "30 valid B",
-        "text": "(((()))(()))((()))()((((()))))",
+        "label": "30 valid 2",
+        "text": "((())())(((((()()()(())())))))",
         "probe_kind": "valid",
         "length": 30,
         "short_label": "30V2",
         "highlight": false
       },
       {
-        "label": "30 random invalid A",
-        "text": "()(())((()())())((()))))(()()(",
+        "label": "30 valid 3",
+        "text": "()(())(((()))())()()(())((()))",
+        "probe_kind": "valid",
+        "length": 30,
+        "short_label": "30V3",
+        "highlight": false
+      },
+      {
+        "label": "30 valid 4",
+        "text": "(()((()((()((())()())()))())))",
+        "probe_kind": "valid",
+        "length": 30,
+        "short_label": "30V4",
+        "highlight": false
+      },
+      {
+        "label": "30 random invalid 1",
+        "text": ")()()())((())))))))))))((())((",
         "probe_kind": "random",
         "length": 30,
         "short_label": "30R1",
         "highlight": true
       },
       {
-        "label": "30 random invalid B",
-        "text": ")()()())((())))))))))))((())((",
+        "label": "30 random invalid 2",
+        "text": ")(())(())(())(()(())(()()))))(",
         "probe_kind": "random",
         "length": 30,
         "short_label": "30R2",
         "highlight": false
       },
       {
-        "label": "30 off-by-one A",
-        "text": "(())()(((()()((()()()())()())(",
+        "label": "30 random invalid 3",
+        "text": "(()()(())(())))(())())(())()((",
+        "probe_kind": "random",
+        "length": 30,
+        "short_label": "30R3",
+        "highlight": false
+      },
+      {
+        "label": "30 random invalid 4",
+        "text": ")())))()()(())()())())))(())()",
+        "probe_kind": "random",
+        "length": 30,
+        "short_label": "30R4",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 1",
+        "text": "())())()()((()))()()()()))(())",
         "probe_kind": "off_by_one",
         "length": 30,
         "short_label": "30O1",
         "highlight": true
       },
       {
-        "label": "30 off-by-one B",
-        "text": "(((((((())((())(()()))()))(())",
+        "label": "30 off-by-one 2",
+        "text": "(())))()(())()(())()()()))(())",
         "probe_kind": "off_by_one",
         "length": 30,
         "short_label": "30O2",
         "highlight": false
       },
       {
-        "label": "30 balanced-invalid A",
-        "text": "))(()))()((((()(())()()()))()(",
+        "label": "30 off-by-one 3",
+        "text": "(())()))(()(()())(())())))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O3",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 4",
+        "text": "(()()(()(())))(())())())))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O4",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 5",
+        "text": "((())(())())()(()()))())))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O5",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 6",
+        "text": ")()()(())()()))(()(())()))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O6",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 7",
+        "text": "(()()()()(())(((()))))))))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O7",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 8",
+        "text": "()()()(()((()())))(())))))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O8",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 9",
+        "text": "(((())))())))((()()))()())(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O9",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 10",
+        "text": "()()(())(()))(()()())))())(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O10",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 1",
+        "text": ")((())())(())((()))(((())))(()",
         "probe_kind": "balanced_invalid",
         "length": 30,
         "short_label": "30B1",
         "highlight": true
       },
       {
-        "label": "30 balanced-invalid B",
-        "text": "(((()()))))((()))()(()())()()(",
+        "label": "30 balanced-invalid 2",
+        "text": ")(()((((())))))(((()())()))(()",
         "probe_kind": "balanced_invalid",
         "length": 30,
         "short_label": "30B2",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 3",
+        "text": "()))))((())()(()(((()))))))(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B3",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 4",
+        "text": ")((()((((((()()))))))))))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B4",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 5",
+        "text": ")))(()((()(()(()(()))))))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B5",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 6",
+        "text": ")(((()(()))()((()))))))(())(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B6",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 7",
+        "text": "()))()())(())((())(())())()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B7",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 8",
+        "text": ")()())((())()()))(((())))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B8",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 9",
+        "text": "()(((()))))))))((((()))()()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B9",
+        "highlight": false
+      },
+      {
+        "label": "30 balanced-invalid 10",
+        "text": "()))))()()((()))()(()(()))()(((",
+        "probe_kind": "balanced_invalid",
+        "length": 30,
+        "short_label": "30B10",
+        "highlight": false
+      },
+      {
+        "label": "30 valid-prefix 1",
+        "text": "(()((()()())((()))()))(()())((",
+        "probe_kind": "valid_prefix",
+        "length": 30,
+        "short_label": "30P1",
+        "highlight": true
+      },
+      {
+        "label": "30 valid-prefix 2",
+        "text": "((())((()(((())))))())(()())((",
+        "probe_kind": "valid_prefix",
+        "length": 30,
+        "short_label": "30P2",
+        "highlight": false
+      },
+      {
+        "label": "30 valid-prefix 3",
+        "text": "()()(())((()))(()(()))(()())((",
+        "probe_kind": "valid_prefix",
+        "length": 30,
+        "short_label": "30P3",
+        "highlight": false
+      },
+      {
+        "label": "30 valid-prefix 4",
+        "text": "()(())()((()()()((())))()())((",
+        "probe_kind": "valid_prefix",
+        "length": 30,
+        "short_label": "30P4",
         "highlight": false
       }
     ],
     "highlighted_probe_flips": [
       {
         "probe": {
-          "label": "20 off-by-one A",
-          "text": "(())((())(()()()((()",
-          "probe_kind": "off_by_one",
-          "length": 20,
-          "short_label": "20O1",
-          "highlight": true
+          "label": "10 random invalid 3",
+          "text": "))()())(()",
+          "probe_kind": "random",
+          "length": 10,
+          "short_label": "10R3",
+          "highlight": false
         },
-        "from_epoch": 10,
-        "to_epoch": 15,
+        "from_epoch": 20,
+        "to_epoch": 30,
         "from_phase_label": "phase 2: add off-by-one",
         "to_phase_label": "phase 3: add balanced-invalid",
         "kind": "wrong_to_right",
-        "from_probability": 0.5742858648300171,
-        "to_probability": 0.11297135800123215
+        "from_probability": 0.5318196415901184,
+        "to_probability": 0.489986389875412
       },
       {
         "probe": {
-          "label": "10 balanced-invalid A",
-          "text": "((()())))(",
+          "label": "30 balanced-invalid 1",
+          "text": ")((())())(())((()))(((())))(()",
           "probe_kind": "balanced_invalid",
-          "length": 10,
-          "short_label": "10B1",
+          "length": 30,
+          "short_label": "30B1",
           "highlight": true
         },
-        "from_epoch": 5,
-        "to_epoch": 10,
-        "from_phase_label": "phase 1: random",
-        "to_phase_label": "phase 2: add off-by-one",
+        "from_epoch": 30,
+        "to_epoch": 40,
+        "from_phase_label": "phase 3: add balanced-invalid",
+        "to_phase_label": "phase 4: add valid-prefix",
         "kind": "wrong_to_right",
-        "from_probability": 0.5217902660369873,
-        "to_probability": 0.1044434905052185
+        "from_probability": 0.5024670958518982,
+        "to_probability": 0.46277961134910583
       },
       {
         "probe": {
-          "label": "30 off-by-one A",
-          "text": "(())()(((()()((()()()())()())(",
-          "probe_kind": "off_by_one",
+          "label": "30 balanced-invalid 2",
+          "text": ")(()((((())))))(((()())()))(()",
+          "probe_kind": "balanced_invalid",
           "length": 30,
-          "short_label": "30O1",
+          "short_label": "30B2",
+          "highlight": false
+        },
+        "from_epoch": 30,
+        "to_epoch": 40,
+        "from_phase_label": "phase 3: add balanced-invalid",
+        "to_phase_label": "phase 4: add valid-prefix",
+        "kind": "wrong_to_right",
+        "from_probability": 0.5013175010681152,
+        "to_probability": 0.4597974419593811
+      }
+    ],
+    "highlighted_probe_trajectories": [
+      {
+        "probe": {
+          "label": "30 balanced-invalid 2",
+          "text": ")(()((((())))))(((()())()))(()",
+          "probe_kind": "balanced_invalid",
+          "length": 30,
+          "short_label": "30B2",
+          "highlight": false
+        },
+        "turn_pattern": [
+          false,
+          true,
+          false,
+          true,
+          false,
+          true
+        ],
+        "turn_label": "I -> C -> I -> C -> I -> C",
+        "flip_epochs": [
+          29,
+          30,
+          31,
+          32,
+          33
+        ]
+      },
+      {
+        "probe": {
+          "label": "30 balanced-invalid 1",
+          "text": ")((())())(())((()))(((())))(()",
+          "probe_kind": "balanced_invalid",
+          "length": 30,
+          "short_label": "30B1",
           "highlight": true
         },
-        "from_epoch": 5,
-        "to_epoch": 10,
-        "from_phase_label": "phase 1: random",
-        "to_phase_label": "phase 2: add off-by-one",
-        "kind": "wrong_to_right",
-        "from_probability": 0.513992428779602,
-        "to_probability": 0.1116902306675911
+        "turn_pattern": [
+          false,
+          true,
+          false,
+          true,
+          false,
+          true
+        ],
+        "turn_label": "I -> C -> I -> C -> I -> C",
+        "flip_epochs": [
+          29,
+          30,
+          31,
+          32,
+          33
+        ]
+      },
+      {
+        "probe": {
+          "label": "10 random invalid 3",
+          "text": "))()())(()",
+          "probe_kind": "random",
+          "length": 10,
+          "short_label": "10R3",
+          "highlight": false
+        },
+        "turn_pattern": [
+          false,
+          true,
+          false,
+          true
+        ],
+        "turn_label": "I -> C -> I -> C",
+        "flip_epochs": [
+          29,
+          32,
+          33
+        ]
       }
     ],
     "trace_strings": [
       {
-        "label": "20 off-by-one A",
-        "text": "(())((())(()()()((()",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O1",
-        "highlight": true
-      },
-      {
-        "label": "20 valid A",
-        "text": "()((((())(()()()))))",
-        "probe_kind": "valid",
-        "length": 20,
-        "short_label": "20V1",
-        "highlight": true
-      },
-      {
-        "label": "20 balanced-invalid A",
-        "text": "()((()))()())())(()(",
+        "label": "30 balanced-invalid 2",
+        "text": ")(()((((())))))(((()())()))(()",
         "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B1",
-        "highlight": true
+        "length": 30,
+        "short_label": "30B2",
+        "highlight": false
+      },
+      {
+        "label": "30 valid 2",
+        "text": "((())())(((((()()()(())())))))",
+        "probe_kind": "valid",
+        "length": 30,
+        "short_label": "30V2",
+        "highlight": false
+      },
+      {
+        "label": "30 off-by-one 2",
+        "text": "(())))()(())()(())()()()))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O2",
+        "highlight": false
       }
     ],
     "trace_phase_epochs": [
-      5,
       10,
-      15
+      20,
+      30,
+      40
     ],
     "trace_projection_mode": "pca_top_layer",
     "trace_axis_labels": [
-      "PC1 (66% var)",
-      "PC2 (29% var)"
+      "PC1 (78% var)",
+      "PC2 (12% var)"
     ],
     "trace_explained_variance": [
-      0.6621214084688745,
-      0.29028474232327744
+      0.7825686595932936,
+      0.11631388312391437
     ],
     "focus_trace": {
-      "label": "20 off-by-one A",
-      "text": "(())((())(()()()((()",
-      "probe_kind": "off_by_one",
-      "length": 20,
-      "short_label": "20O1",
-      "highlight": true
+      "label": "30 balanced-invalid 2",
+      "text": ")(()((((())))))(((()())()))(()",
+      "probe_kind": "balanced_invalid",
+      "length": 30,
+      "short_label": "30B2",
+      "highlight": false
     },
     "companion_traces": [
       {
-        "label": "20 valid A",
-        "text": "()((((())(()()()))))",
+        "label": "30 valid 2",
+        "text": "((())())(((((()()()(())())))))",
         "probe_kind": "valid",
-        "length": 20,
-        "short_label": "20V1",
-        "highlight": true
+        "length": 30,
+        "short_label": "30V2",
+        "highlight": false
       },
       {
-        "label": "20 balanced-invalid A",
-        "text": "()((()))()())())(()(",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B1",
-        "highlight": true
+        "label": "30 off-by-one 2",
+        "text": "(())))()(())()(())()()()))(())",
+        "probe_kind": "off_by_one",
+        "length": 30,
+        "short_label": "30O2",
+        "highlight": false
       }
     ],
     "final_metrics": {
-      "epoch": 15,
-      "phase": "phase-3-balanced-invalid",
-      "train_loss": 0.43814799189567566,
-      "train_acc": 0.7749999761581421,
-      "eval_10_acc": 0.7734375,
-      "eval_20_acc": 0.796875,
-      "eval_30_acc": 0.765625
+      "epoch": 40,
+      "phase": "phase-4-valid-prefix",
+      "train_loss": 0.4475257098674774,
+      "train_acc": 0.8177083134651184,
+      "eval_10_acc": 0.828125,
+      "eval_20_acc": 0.8125,
+      "eval_30_acc": 0.796875
     }
   }
 }

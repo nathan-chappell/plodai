@@ -99,8 +99,13 @@ export function PdfAgentPage({
     changeDirectory,
     workspaceContext,
     getState,
+    updateFilesystem,
+    syncToolCatalog,
+    appendReportEffects,
+    workspaceBootstrapMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: pdfAgentCapability.id,
+    capabilityTitle: pdfAgentCapability.title,
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
@@ -108,8 +113,8 @@ export function PdfAgentPage({
   });
   const capabilityBundle = useMemo(() => buildPdfAgentBundle(), []);
   const clientTools = useMemo(
-    () => createPdfAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, workspaceContext],
+    () => createPdfAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
+    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
   );
   const {
     scenario: demoScenario,
@@ -139,6 +144,10 @@ export function PdfAgentPage({
       onRemoveEntry: handleRemoveEntry,
     });
   }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+
+  useEffect(() => {
+    syncToolCatalog(clientTools.map((tool) => tool.name));
+  }, [clientTools, syncToolCatalog]);
 
   return (
     <>
@@ -208,11 +217,12 @@ export function PdfAgentPage({
               enabled
               files={files}
               workspaceContext={workspaceContext}
+              workspaceBootstrap={workspaceBootstrapMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
-              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
             />
           </ReportChatColumn>
@@ -256,10 +266,11 @@ export function PdfAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
+              workspaceBootstrap={workspaceBootstrapMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
-              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
             />
           </ReportChatColumn>

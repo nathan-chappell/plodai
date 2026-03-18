@@ -1,3 +1,4 @@
+import { executeToolWithBroker } from "../../lib/client-tool-broker";
 import { executeQueryPlanInWorker } from "../../lib/analysis-worker-client";
 import { renderChartToDataUrl } from "../../lib/chart";
 import { parseCsvText } from "../../lib/csv";
@@ -10,6 +11,8 @@ import {
 } from "../../lib/pdf";
 import {
   changeWorkspaceDirectoryToolSchema,
+  buildAppendReportSectionToolSchema,
+  buildGetReportToolSchema,
   createCsvFileToolSchema,
   createJsonFileToolSchema,
   createWorkspaceDirectoryToolSchema,
@@ -18,10 +21,12 @@ import {
   includeSamplesSchema,
   inspectChartableFileSchemaToolSchema,
   inspectPdfFileToolSchema,
+  listReportsToolSchema,
   renderChartFromFileToolSchema,
   runAggregateQueryToolSchema,
   smartSplitPdfToolSchema,
 } from "../../lib/tool-schemas";
+import { readWorkspaceReportIndex } from "../../lib/workspace-contract";
 import {
   findWorkspaceFile,
   getChartableFiles,
@@ -54,6 +59,11 @@ import type {
   RunLocalQueryToolArgs,
   SmartSplitEntry,
   SmartSplitPdfToolArgs,
+  ListReportsToolArgs,
+  GetReportToolArgs,
+  AppendReportSectionToolArgs,
+  ClientToolArgsMap,
+  ClientToolName,
 } from "../../types/analysis";
 import type {
   LocalChartableFile,
@@ -623,88 +633,122 @@ export const smartSplitPdfToolDefinition = buildToolDefinition(
   smartSplitPdfToolSchema,
 );
 
+export const listReportsToolDefinition = buildToolDefinition(
+  "list_reports",
+  "List structured reports stored in the workspace VFS.",
+  listReportsToolSchema,
+);
+
+export function buildGetReportToolDefinition(
+  reportIds: readonly string[],
+): FunctionToolDefinition {
+  return buildToolDefinition(
+    "get_report",
+    "Read a structured report document from the workspace VFS.",
+    buildGetReportToolSchema(reportIds),
+  );
+}
+
+export function buildAppendReportSectionToolDefinition(
+  reportIds: readonly string[],
+): FunctionToolDefinition {
+  return buildToolDefinition(
+    "append_report_section",
+    "Append a narrative section to a structured report stored in the workspace VFS.",
+    buildAppendReportSectionToolSchema(reportIds),
+  );
+}
+
+function reportIdsForWorkspace(workspace: CapabilityWorkspaceContext): string[] {
+  const index = readWorkspaceReportIndex(readWorkspaceState(workspace).filesystem);
+  if (!index?.report_ids.length) {
+    return ["report-1"];
+  }
+  return index.report_ids;
+}
+
+async function invokeBrokeredTool<Name extends ClientToolName>(
+  workspace: CapabilityWorkspaceContext,
+  toolName: Name,
+  args: ClientToolArgsMap[Name],
+  context: { emitEffects: (effects: ClientEffect[]) => void },
+): Promise<Record<string, unknown>> {
+  const result = await executeToolWithBroker(workspace, toolName, args);
+  if (result.effects.length) {
+    context.emitEffects(result.effects);
+  }
+  return result.payload;
+}
+
 export function createGetWorkspaceContextTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...getWorkspaceContextToolDefinition,
-    handler: (args) => getWorkspaceContextTool(args as GetWorkspaceContextToolArgs, workspace),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "get_workspace_context", args as GetWorkspaceContextToolArgs, context),
   };
 }
 
 export function createCreateWorkspaceDirectoryTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...createWorkspaceDirectoryToolDefinition,
-    handler: (args) => createWorkspaceDirectoryTool(args as CreateWorkspaceDirectoryToolArgs, workspace),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "create_workspace_directory", args as CreateWorkspaceDirectoryToolArgs, context),
   };
 }
 
 export function createChangeWorkspaceDirectoryTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...changeWorkspaceDirectoryToolDefinition,
-    handler: (args) => changeWorkspaceDirectoryTool(args as ChangeWorkspaceDirectoryToolArgs, workspace),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "change_workspace_directory", args as ChangeWorkspaceDirectoryToolArgs, context),
   };
 }
 
 export function createListWorkspaceFilesTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...listWorkspaceFilesToolDefinition,
-    handler: (args) => listWorkspaceFilesTool(args as ListWorkspaceFilesToolArgs, workspace),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "list_workspace_files", args as ListWorkspaceFilesToolArgs, context),
   };
 }
 
 export function createListAttachedCsvFilesTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...listAttachedCsvFilesToolDefinition,
-    handler: (args) => listAttachedCsvFilesTool(args as ListLoadedDatasetsToolArgs, workspace),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "list_attached_csv_files", args as ListLoadedDatasetsToolArgs, context),
   };
 }
 
 export function createRunAggregateQueryTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...runAggregateQueryToolDefinition,
-    handler: (args) => runAggregateQueryTool(args as RunLocalQueryToolArgs, readWorkspaceState(workspace).files),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "run_aggregate_query", args as RunLocalQueryToolArgs, context),
   };
 }
 
 export function createCreateCsvFileTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...createCsvFileToolDefinition,
-    handler: async (args, context) => {
-      const baseFile = await createCsvFileTool(args as CreateCsvFileToolArgs, readWorkspaceState(workspace).files);
-      const [storedFile] = context.appendFiles([baseFile]);
-      const storedNode = currentDirectoryFileNodes(workspace).find((entry) => entry.file.id === storedFile.id);
-      return {
-        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
-        created_file: storedNode
-          ? summarizeWorkspaceFileNode(storedNode, { includeSamples: true })
-          : summarizeWorkspaceFiles([storedFile], { includeSamples: true })[0],
-        row_count: baseFile.row_count,
-      };
-    },
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "create_csv_file", args as CreateCsvFileToolArgs, context),
   };
 }
 
 export function createCreateJsonFileTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...createJsonFileToolDefinition,
-    handler: async (args, context) => {
-      const baseFile = await createJsonFileTool(args as CreateJsonFileToolArgs, readWorkspaceState(workspace).files);
-      const [storedFile] = context.appendFiles([baseFile]);
-      const storedNode = currentDirectoryFileNodes(workspace).find((entry) => entry.file.id === storedFile.id);
-      return {
-        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
-        created_file: storedNode
-          ? summarizeWorkspaceFileNode(storedNode, { includeSamples: true })
-          : summarizeWorkspaceFiles([storedFile], { includeSamples: true })[0],
-        row_count: baseFile.row_count,
-      };
-    },
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "create_json_file", args as CreateJsonFileToolArgs, context),
   };
 }
 
 export function createListChartableFilesTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...listChartableFilesToolDefinition,
-    handler: (args) => listChartableFilesTool(args as ListWorkspaceFilesToolArgs, workspace),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "list_chartable_files", args as ListWorkspaceFilesToolArgs, context),
   };
 }
 
@@ -713,10 +757,12 @@ export function createInspectChartableFileSchemaTool(
 ): CapabilityClientTool {
   return {
     ...inspectChartableFileSchemaToolDefinition,
-    handler: (args) =>
-      inspectChartableFileSchemaTool(
+    handler: (args, context) =>
+      invokeBrokeredTool(
+        workspace,
+        "inspect_chartable_file_schema",
         args as InspectChartableFileSchemaToolArgs,
-        readWorkspaceState(workspace).files,
+        context,
       ),
   };
 }
@@ -724,82 +770,55 @@ export function createInspectChartableFileSchemaTool(
 export function createRenderChartFromFileTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...renderChartFromFileToolDefinition,
-    handler: async (args, context) => {
-      const result = await renderChartFromFileTool(
-        args as RenderChartFromFileToolArgs,
-        readWorkspaceState(workspace).files,
-      );
-      context.emitEffect(result.effect);
-      return {
-        ...result.payload,
-        cwd_path: readWorkspaceState(workspace).cwdPath,
-        workspace_context: readWorkspaceState(workspace).workspaceContext,
-      };
-    },
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "render_chart_from_file", args as RenderChartFromFileToolArgs, context),
   };
 }
 
 export function createInspectPdfFileTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...inspectPdfFileToolDefinition,
-    handler: (args) => inspectPdfFileTool(args as InspectPdfFileToolArgs, readWorkspaceState(workspace).files),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "inspect_pdf_file", args as InspectPdfFileToolArgs, context),
   };
 }
 
 export function createGetPdfPageRangeTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...getPdfPageRangeToolDefinition,
-    handler: async (args, context) => {
-      const result = await getPdfPageRangeTool(args as GetPdfPageRangeToolArgs, readWorkspaceState(workspace).files);
-      const [storedFile] = context.appendFiles([result.file]);
-      const storedNode = currentDirectoryFileNodes(workspace).find((entry) => entry.file.id === storedFile.id);
-      return {
-        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
-        created_file: storedNode
-          ? summarizeWorkspaceFileNode(storedNode, { includeSamples: true })
-          : summarizeWorkspaceFiles([storedFile], { includeSamples: true })[0],
-        ...result.payload,
-      };
-    },
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "get_pdf_page_range", args as GetPdfPageRangeToolArgs, context),
   };
 }
 
 export function createSmartSplitPdfTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...smartSplitPdfToolDefinition,
-    handler: async (args, context) => {
-      const result = await smartSplitPdfTool(args as SmartSplitPdfToolArgs, readWorkspaceState(workspace).files);
-      const storedFiles = context.appendFiles(result.files);
-      const fileNodes = currentDirectoryFileNodes(workspace).filter((entry) =>
-        storedFiles.some((storedFile) => storedFile.id === entry.file.id),
-      );
-      context.emitEffect(result.effect);
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "smart_split_pdf", args as SmartSplitPdfToolArgs, context),
+  };
+}
 
-      const archiveNode = fileNodes.find((entry) => entry.file.id === result.effect.archiveFileId);
-      const indexNode = fileNodes.find((entry) => entry.file.id === result.effect.indexFileId);
+export function createListReportsTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
+  return {
+    ...listReportsToolDefinition,
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "list_reports", args as ListReportsToolArgs, context),
+  };
+}
 
-      return {
-        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
-        created_files: fileNodes.length
-          ? fileNodes.map((fileNode) => summarizeWorkspaceFileNode(fileNode, { includeSamples: true }))
-          : summarizeWorkspaceFiles(storedFiles, { includeSamples: true }),
-        smart_split: {
-          entries: result.effect.entries.map((entry) => ({
-            title: entry.title,
-            start_page: entry.startPage,
-            end_page: entry.endPage,
-            page_count: entry.pageCount,
-            file_id: entry.fileId,
-            file_name: entry.name,
-          })),
-          archive_file: archiveNode
-            ? summarizeWorkspaceFileNode(archiveNode, { includeSamples: true })
-            : null,
-          index_file: indexNode
-            ? summarizeWorkspaceFileNode(indexNode, { includeSamples: true })
-            : null,
-        },
-      };
-    },
+export function createGetReportTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
+  return {
+    ...buildGetReportToolDefinition(reportIdsForWorkspace(workspace)),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "get_report", args as GetReportToolArgs, context),
+  };
+}
+
+export function createAppendReportSectionTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
+  return {
+    ...buildAppendReportSectionToolDefinition(reportIdsForWorkspace(workspace)),
+    handler: (args, context) =>
+      invokeBrokeredTool(workspace, "append_report_section", args as AppendReportSectionToolArgs, context),
   };
 }

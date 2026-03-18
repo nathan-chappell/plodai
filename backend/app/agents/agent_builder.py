@@ -34,7 +34,7 @@ CAPABILITY_POLICY: dict[str, dict[str, bool]] = {
     "csv-agent": {"append_report_section": False},
     "chart-agent": {"append_report_section": False},
     "pdf-agent": {"append_report_section": False},
-    "report-agent": {"append_report_section": True},
+    "report-agent": {"append_report_section": False},
     "workspace-agent": {"append_report_section": False},
     "feedback-agent": {"append_report_section": False},
 }
@@ -45,9 +45,25 @@ def _build_agent_instructions(
     *,
     instructions: str,
 ) -> str:
+    workspace_bootstrap = context.thread_metadata.get("workspace_bootstrap") or {}
+    agents_file = workspace_bootstrap.get("agents_file") if isinstance(
+        workspace_bootstrap, dict
+    ) else None
+    agents_markdown = (
+        agents_file.get("text")
+        if isinstance(agents_file, dict)
+        and isinstance(agents_file.get("text"), str)
+        and agents_file.get("text").strip()
+        else None
+    )
     investigation_brief = context.thread_metadata.get("investigation_brief")
     brief_section = ""
-    if investigation_brief:
+    if agents_markdown:
+        brief_section = (
+            "\nCurrent workspace guidance from /AGENTS.md:\n"
+            f"{agents_markdown.strip()}\n"
+        )
+    elif investigation_brief:
         brief_section = (
             "\nCurrent investigation brief from the user:\n"
             f"- {investigation_brief}\n"

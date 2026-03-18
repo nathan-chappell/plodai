@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from itertools import product
 from pathlib import Path
 import json
 import math
@@ -33,41 +34,50 @@ PAD_INDEX = 2
 
 TRAIN_LENGTH = 20
 EVAL_LENGTHS: tuple[int, ...] = (10, 20, 30)
+STORY_PROBE_LENGTH = 10
 TRACE_LENGTH = 64
-DEFAULT_PHASE_EPOCHS = 5
-DEFAULT_TRAIN_SAMPLES = 40
+DEFAULT_PHASE_EPOCHS = 10
+DEFAULT_TRAIN_SAMPLES = 48
 DEFAULT_TEST_SAMPLES = 128
-DEFAULT_BATCH_SIZE = 8
-DEFAULT_RNN_LR_START = 0.08
-DEFAULT_RNN_LR_END = 0.02
-RNN_HIDDEN_SIZE = 4
+DEFAULT_BATCH_SIZE = 16
+DEFAULT_RNN_LR_START = 0.001
+DEFAULT_RNN_LR_END = 0.001
+DEFAULT_RNN_LR = 0.001
+RNN_OPTIMIZER_NAME = "adam"
+RNN_HIDDEN_SIZE = 8
 RNN_NUM_LAYERS = 2
 MLP_DEFAULT_SHAPE = (32,)
 
 PHASE_KIND_RANDOM = "random"
 PHASE_KIND_OFF_BY_ONE = "off_by_one"
 PHASE_KIND_BALANCED = "balanced_invalid"
+PHASE_KIND_VALID_PREFIX = "valid_prefix"
 PHASE_KIND_ORDER: tuple[str, ...] = (
     PHASE_KIND_RANDOM,
     PHASE_KIND_OFF_BY_ONE,
     PHASE_KIND_BALANCED,
+    PHASE_KIND_VALID_PREFIX,
 )
 
 INVALID_KIND_RANDOM = "random_invalid"
 INVALID_KIND_CORRUPTION = "corruption_invalid"
 INVALID_KIND_BALANCED = "balanced_invalid"
+INVALID_KIND_VALID_PREFIX = "valid_prefix_invalid"
 INVALID_KIND_ORDER: tuple[str, ...] = (
     INVALID_KIND_RANDOM,
     INVALID_KIND_CORRUPTION,
     INVALID_KIND_BALANCED,
+    INVALID_KIND_VALID_PREFIX,
 )
 SUPPORT_COHORT_RANDOM = "support-random"
 SUPPORT_COHORT_OFF_BY_ONE = "support-off-by-one"
 SUPPORT_COHORT_BALANCED = "support-balanced-invalid"
+SUPPORT_COHORT_VALID_PREFIX = "support-valid-prefix"
 SUPPORT_COHORT_ORDER: tuple[str, ...] = (
     SUPPORT_COHORT_RANDOM,
     SUPPORT_COHORT_OFF_BY_ONE,
     SUPPORT_COHORT_BALANCED,
+    SUPPORT_COHORT_VALID_PREFIX,
 )
 
 FIGURE_STYLE = {
@@ -79,11 +89,13 @@ PHASE_COLORS = {
     PHASE_KIND_RANDOM: "#f3e8d3",
     PHASE_KIND_OFF_BY_ONE: "#efe4f8",
     PHASE_KIND_BALANCED: "#e6f3ea",
+    PHASE_KIND_VALID_PREFIX: "#e0f2f1",
 }
 INVALID_COLORS = {
     INVALID_KIND_RANDOM: "#18a9c5",
     INVALID_KIND_CORRUPTION: "#f06292",
     INVALID_KIND_BALANCED: "#9ad65d",
+    INVALID_KIND_VALID_PREFIX: "#0f766e",
 }
 EVAL_COLORS = {
     10: "#c2410c",
@@ -95,12 +107,18 @@ PROBE_CLASS_COLORS = {
     PHASE_KIND_RANDOM: "#64748b",
     PHASE_KIND_OFF_BY_ONE: "#d97706",
     PHASE_KIND_BALANCED: "#dc2626",
+    PHASE_KIND_VALID_PREFIX: "#0f766e",
 }
 PROBE_STATUS_STYLES = {
-    "valid / correct": {"color": "#2a9d55", "dash": "solid"},
-    "invalid / correct": {"color": "#2d6cdf", "dash": "dot"},
-    "invalid / wrong": {"color": "#e23b3b", "dash": "dash"},
-    "valid / wrong": {"color": "#d98a00", "dash": "solid"},
+    "valid / correct": {"color": "#2a9d55", "dash": "dot"},
+    "invalid / correct": {"color": "#ca8a04", "dash": "dot"},
+    "invalid / wrong": {"color": "#dc2626", "dash": "dot"},
+    "valid / wrong": {"color": "#dc2626", "dash": "dot"},
+}
+STORY_STATUS_COLORS = {
+    "valid / stable": "#2a9d55",
+    "invalid / stable": "#ca8a04",
+    "ever wrong": "#dc2626",
 }
 TRACE_COLORS = ("#7f1d1d", "#1d4ed8", "#166534", "#9333ea", "#db2777")
 
@@ -122,7 +140,7 @@ class SequenceExample:
 class TrainingPhase:
     name: str
     label: str
-    cohort_weights: tuple[float, float, float]
+    cohort_weights: tuple[float, ...]
     epochs: int
     cohort_size: int
     lr_start: float
@@ -174,6 +192,16 @@ class TraceBackground:
 
 
 @dataclass
+class TraceLandmark:
+    phase_label: str
+    epoch: int
+    label: str
+    text: str
+    probability: float
+    projected_point: list[float]
+
+
+@dataclass
 class TraceGridPayload:
     phase_epochs: list[int]
     phase_labels: list[str]
@@ -181,6 +209,7 @@ class TraceGridPayload:
     probe_texts: list[str]
     cells: list[TraceCell]
     backgrounds: list[TraceBackground]
+    landmarks: list[TraceLandmark]
     projection_mode: str
     axis_labels: tuple[str, str]
     explained_variance: tuple[float, float]
@@ -211,6 +240,33 @@ class ProbeFlip:
 
 
 @dataclass(frozen=True)
+class ProbeTrajectory:
+    probe: ProbeSpec
+    actual_valid: bool
+    epochs: tuple[int, ...]
+    probabilities: tuple[float, ...]
+    correctness: tuple[bool, ...]
+    turn_pattern: tuple[bool, ...]
+    flip_epochs: tuple[int, ...]
+
+    @property
+    def turn_count(self) -> int:
+        return max(0, len(self.turn_pattern) - 1)
+
+    @property
+    def ever_wrong(self) -> bool:
+        return any(not is_correct for is_correct in self.correctness)
+
+    @property
+    def turn_label(self) -> str:
+        return format_correctness_turn_label(self.turn_pattern)
+
+    @property
+    def compact_turn_label(self) -> str:
+        return format_correctness_turn_label(self.turn_pattern, separator="-")
+
+
+@dataclass(frozen=True)
 class MLPTrainingRun:
     hidden_layers: tuple[int, ...]
     loss_history: list[float]
@@ -230,6 +286,8 @@ class RNNExperimentResult:
     phase_spans: list[dict[str, object]]
     metrics: list[MetricRow]
     response_history: list[list[float]]
+    story_response_history: list[list[float]]
+    story_probes: tuple[ProbeSpec, ...]
     evaluation_sets: dict[int, list[SequenceExample]]
     representative_examples: list[SequenceExample]
     trace_payload: TraceGridPayload | None
@@ -292,6 +350,28 @@ def is_balanced_invalid(text: str) -> bool:
     return bool(text) and terminal_balance(text) == 0 and min_prefix_balance(text) < 0
 
 
+def is_corruption_invalid(text: str) -> bool:
+    return (
+        bool(text)
+        and not is_balanced_parentheses(text)
+        and not is_balanced_invalid(text)
+        and not is_valid_prefix_invalid(text)
+    )
+
+
+def is_valid_prefix_invalid(text: str) -> bool:
+    if not text:
+        return False
+    balance = 0
+    for char in text:
+        if char not in "()":
+            return False
+        balance += 1 if char == "(" else -1
+        if balance < 0:
+            return False
+    return balance > 0
+
+
 def sample_valid_sequence_of_length(rng: random.Random, length: int) -> str:
     if length < 2 or length % 2 != 0:
         raise ValueError("Valid balanced-parentheses strings require an even length >= 2.")
@@ -332,7 +412,7 @@ def sample_corruption_invalid_sequence(rng: random.Random, length: int) -> str:
         for position in rng.sample(range(length), k=edits):
             chars[position] = ")" if chars[position] == "(" else "("
         candidate = "".join(chars)
-        if not is_balanced_parentheses(candidate):
+        if is_corruption_invalid(candidate):
             return candidate
 
 
@@ -352,6 +432,18 @@ def sample_balanced_invalid_sequence(rng: random.Random, length: int) -> str:
             return candidate
 
 
+def sample_valid_prefix_invalid_sequence(rng: random.Random, length: int) -> str:
+    if length <= 0:
+        raise ValueError("Valid-prefix invalid strings require a positive length.")
+    target_balance = 1 if length % 2 else 2
+    prefix_length = length - target_balance
+    prefix = sample_valid_sequence_of_length(rng, prefix_length) if prefix_length > 0 else ""
+    candidate = prefix + "(" * target_balance
+    if not is_valid_prefix_invalid(candidate):
+        raise ValueError(f"Failed to build valid-prefix invalid sequence for length {length}.")
+    return candidate
+
+
 def sample_invalid_sequence(
     rng: random.Random,
     length: int,
@@ -364,6 +456,8 @@ def sample_invalid_sequence(
         text = sample_corruption_invalid_sequence(rng, length)
     elif kind == INVALID_KIND_BALANCED:
         text = sample_balanced_invalid_sequence(rng, length)
+    elif kind == INVALID_KIND_VALID_PREFIX:
+        text = sample_valid_prefix_invalid_sequence(rng, length)
     else:
         raise ValueError(f"Unknown invalid kind: {kind}")
     return SequenceExample(text=text, label=0, kind=kind)
@@ -481,7 +575,7 @@ def build_training_phases(
         TrainingPhase(
             name="phase-1-random",
             label="Phase 1: random",
-            cohort_weights=(1.0, 0.0, 0.0),
+            cohort_weights=(1.0, 0.0, 0.0, 0.0),
             epochs=phase_epochs,
             cohort_size=train_samples,
             lr_start=lr_start,
@@ -490,7 +584,7 @@ def build_training_phases(
         TrainingPhase(
             name="phase-2-off-by-one",
             label="Phase 2: add off-by-one",
-            cohort_weights=(1.0, 1.0, 0.0),
+            cohort_weights=(1.0, 1.0, 0.0, 0.0),
             epochs=phase_epochs,
             cohort_size=train_samples,
             lr_start=lr_start,
@@ -499,7 +593,16 @@ def build_training_phases(
         TrainingPhase(
             name="phase-3-balanced-invalid",
             label="Phase 3: add balanced-invalid",
-            cohort_weights=(1.0, 1.0, 1.0),
+            cohort_weights=(1.0, 1.0, 1.0, 0.0),
+            epochs=phase_epochs,
+            cohort_size=train_samples,
+            lr_start=lr_start,
+            lr_end=lr_end,
+        ),
+        TrainingPhase(
+            name="phase-4-valid-prefix",
+            label="Phase 4: add valid-prefix",
+            cohort_weights=(1.0, 1.0, 1.0, 1.0),
             epochs=phase_epochs,
             cohort_size=train_samples,
             lr_start=lr_start,
@@ -517,8 +620,13 @@ def build_evaluation_sets(
         length: sample_exact_length_examples(
             total_examples=test_samples,
             length=length,
-            invalid_weights=(1.0, 1.0, 1.0),
-            invalid_kinds=(INVALID_KIND_RANDOM, INVALID_KIND_CORRUPTION, INVALID_KIND_BALANCED),
+            invalid_weights=(1.0, 1.0, 1.0, 1.0),
+            invalid_kinds=(
+                INVALID_KIND_RANDOM,
+                INVALID_KIND_CORRUPTION,
+                INVALID_KIND_BALANCED,
+                INVALID_KIND_VALID_PREFIX,
+            ),
             seed=seed + length * 97,
             family=f"eval-{length}",
         )
@@ -556,6 +664,14 @@ def build_retained_support(
             seed=seed + 303,
             family=SUPPORT_COHORT_BALANCED,
         ),
+        SUPPORT_COHORT_VALID_PREFIX: sample_exact_length_examples(
+            total_examples=cohort_size,
+            length=TRAIN_LENGTH,
+            invalid_weights=(1.0,),
+            invalid_kinds=(INVALID_KIND_VALID_PREFIX,),
+            seed=seed + 404,
+            family=SUPPORT_COHORT_VALID_PREFIX,
+        ),
     }
 
 
@@ -579,77 +695,246 @@ def deterministic_invalid(length: int, kind: str, seed: int) -> str:
     return sample_invalid_sequence(random.Random(seed), length, kind=kind).text
 
 
+PROBE_FAMILY_COUNTS = {
+    "V": 4,
+    "R": 4,
+    "O": 10,
+    "B": 10,
+    "P": 4,
+}
+CURATED_PROBE_TEXTS: dict[int, dict[str, tuple[str, ...]]] = {
+    10: {
+        "O": (
+            "(())))(())",
+            "()()))(())",
+            ")(()))(())",
+            "())())(())",
+            "()))()(())",
+            "))()()(())",
+            "))(())(())",
+            ")(())()())",
+            "))()((()))",
+            "()())()())",
+        ),
+        "B": (
+            "(()))))(((",
+            "()())))(((",
+            "()))()(((",
+            "))))(()(((",
+            ")()))()(((",
+            ")(()))))(((",
+            ")()()))(((",
+            ")))(())(((",
+            ")))()()(((",
+            "))(()))(((",
+        ),
+        "P": (
+            "()(()())((",
+            "(()()())((",
+            "()()(())((",
+            "((())())((",
+        ),
+    },
+    20: {
+        "O": (
+            "))))((()()(())))(())",
+            "()()()()(())))))(())",
+            "(())()())(()))))(())",
+            "(((()())))()))))(())",
+            "(()()))(())))())(())",
+            "))((()))))(()())(())",
+            "()()))()))(())()(())",
+            "()()(()())))))()(())",
+            ")))((((())))))()(())",
+            "))()((()))()))()(())",
+        ),
+        "B": (
+            "()(((()))(())))))(((",
+            "((()(()()))))))()(((",
+            "(()()(()())))))()(((",
+            "()((())())))())()(((",
+            ")(()))((()))))(()(((",
+            ")(())()()(())()))(((",
+            "))((()))((())))()(((",
+            ")(()()())()(())))(((",
+            "()(()))))(())()()(((",
+            ")())(())())())(()(((",
+        ),
+        "P": (
+            "((((((()))))))(())((",
+            "()((()(())))(()())((",
+            "(())((()()))(()())((",
+            "((((())()()))()())((",
+        ),
+    },
+    30: {
+        "O": (
+            "())())()()((()))()()()()))(())",
+            "(())))()(())()(())()()()))(())",
+            "(())()))(()(()())(())())))(())",
+            "(()()(()(())))(())())())))(())",
+            "((())(())())()(()()))())))(())",
+            ")()()(())()()))(()(())()))(())",
+            "(()()()()(())(((()))))))))(())",
+            "()()()(()((()())))(())))))(())",
+            "(((())))())))((()()))()())(())",
+            "()()(())(()))(()()())))())(())",
+        ),
+        "B": (
+            ")((())())(())((()))(((())))(()",
+            ")(()((((())))))(((()())()))(()",
+            "()))))((())()(()(((()))))))(((",
+            ")((()((((((()()))))))))))()(((",
+            ")))(()((()(()(()(()))))))()(((",
+            ")(((()(()))()((()))))))(())(((",
+            "()))()())(())((())(())())()(((",
+            ")()())((())()()))(((())))()(((",
+            "()(((()))))))))((((()))()()(((",
+            "()))))()()((()))()(()(()))()(((",
+        ),
+        "P": (
+            "(()((()()())((()))()))(()())((",
+            "((())((()(((())))))())(()())((",
+            "()()(())((()))(()(()))(()())((",
+            "()(())()((()()()((())))()())((",
+        ),
+    },
+}
+
+
+def build_probe_candidate_pool(
+    *,
+    length: int,
+    probe_kind: str,
+    pool_size: int = 240,
+) -> tuple[str, ...]:
+    base_seed = 100_000 + length * 1_000
+    if probe_kind == PHASE_KIND_OFF_BY_ONE:
+        texts = [
+            deterministic_invalid(length, INVALID_KIND_CORRUPTION, base_seed + index)
+            for index in range(1, pool_size + 1)
+        ]
+        for index in range(1, max(8, pool_size // 8) + 1):
+            valid_text = deterministic_valid(length, base_seed + 10_000 + index)
+            for tail in range(1, min(4, length)):
+                mutated = valid_text[:-tail] + ")" * tail
+                if is_corruption_invalid(mutated):
+                    texts.append(mutated)
+    elif probe_kind == PHASE_KIND_BALANCED:
+        texts = [
+            deterministic_invalid(length, INVALID_KIND_BALANCED, base_seed + index)
+            for index in range(1, pool_size + 1)
+        ]
+        for index in range(1, max(8, pool_size // 8) + 1):
+            valid_text = deterministic_valid(length, base_seed + 20_000 + index)
+            for offset in range(1, length):
+                rotated = valid_text[offset:] + valid_text[:offset]
+                if is_balanced_invalid(rotated):
+                    texts.append(rotated)
+    elif probe_kind == PHASE_KIND_VALID_PREFIX:
+        texts = [
+            deterministic_invalid(length, INVALID_KIND_VALID_PREFIX, base_seed + index)
+            for index in range(1, pool_size + 1)
+        ]
+        for index in range(1, max(8, pool_size // 8) + 1):
+            valid_text = deterministic_valid(length, base_seed + 30_000 + index)
+            for suffix in range(1, min(4, length) + 1):
+                prefix = valid_text[: length - suffix]
+                candidate = prefix + "(" * suffix
+                if is_valid_prefix_invalid(candidate):
+                    texts.append(candidate)
+    else:
+        raise ValueError(f"Unsupported probe kind for mining: {probe_kind}")
+    return tuple(dict.fromkeys(texts))
+
+
+def score_probe_probability_trajectory(
+    probabilities: list[float],
+    *,
+    actual_valid: bool,
+    checkpoint_epochs: list[int],
+) -> tuple[int, int, float, float, int]:
+    correct = [(probability >= 0.5) == actual_valid for probability in probabilities]
+    flips = [
+        (
+            checkpoint_epochs[index],
+            checkpoint_epochs[index + 1],
+            correct[index],
+            correct[index + 1],
+        )
+        for index in range(len(checkpoint_epochs) - 1)
+        if correct[index] != correct[index + 1]
+    ]
+    late_recovery = any(
+        (not start_correct) and end_correct and end_epoch == checkpoint_epochs[-1]
+        for _, end_epoch, start_correct, end_correct in flips
+    )
+    any_recovery = any((not start_correct) and end_correct for _, _, start_correct, end_correct in flips)
+    max_swing = max(abs(before - after) for before, after in zip(probabilities[:-1], probabilities[1:], strict=True))
+    min_margin = min(abs(probability - 0.5) for probability in probabilities)
+    wrong_steps = sum(1 for is_correct in correct if not is_correct)
+    return (int(late_recovery), int(any_recovery), max_swing, -min_margin, wrong_steps)
+
+
 def build_response_probes() -> tuple[ProbeSpec, ...]:
     probes: list[ProbeSpec] = []
     for length, base_seed in zip(EVAL_LENGTHS, (1_000, 2_000, 3_000), strict=True):
-        valid_a = "()(())(())" if length == 10 else deterministic_valid(length, base_seed + 1)
-        probes.extend(
-            [
-                ProbeSpec(
-                    f"{length} valid A",
-                    valid_a,
-                    "valid",
-                    length,
-                    f"{length}V1",
-                    True,
-                ),
-                ProbeSpec(
-                    f"{length} valid B",
-                    deterministic_valid(length, base_seed + 11),
-                    "valid",
-                    length,
-                    f"{length}V2",
-                    False,
-                ),
-                ProbeSpec(
-                    f"{length} random invalid A",
-                    deterministic_invalid(length, INVALID_KIND_RANDOM, base_seed + 2),
-                    PHASE_KIND_RANDOM,
-                    length,
-                    f"{length}R1",
-                    True,
-                ),
-                ProbeSpec(
-                    f"{length} random invalid B",
-                    deterministic_invalid(length, INVALID_KIND_RANDOM, base_seed + 12),
-                    PHASE_KIND_RANDOM,
-                    length,
-                    f"{length}R2",
-                    False,
-                ),
-                ProbeSpec(
-                    f"{length} off-by-one A",
-                    deterministic_invalid(length, INVALID_KIND_CORRUPTION, base_seed + 3),
-                    PHASE_KIND_OFF_BY_ONE,
-                    length,
-                    f"{length}O1",
-                    True,
-                ),
-                ProbeSpec(
-                    f"{length} off-by-one B",
-                    deterministic_invalid(length, INVALID_KIND_CORRUPTION, base_seed + 13),
-                    PHASE_KIND_OFF_BY_ONE,
-                    length,
-                    f"{length}O2",
-                    False,
-                ),
-                ProbeSpec(
-                    f"{length} balanced-invalid A",
-                    deterministic_invalid(length, INVALID_KIND_BALANCED, base_seed + 4),
-                    PHASE_KIND_BALANCED,
-                    length,
-                    f"{length}B1",
-                    True,
-                ),
-                ProbeSpec(
-                    f"{length} balanced-invalid B",
-                    deterministic_invalid(length, INVALID_KIND_BALANCED, base_seed + 14),
-                    PHASE_KIND_BALANCED,
-                    length,
-                    f"{length}B2",
-                    False,
-                ),
-            ]
+        valid_texts = tuple(
+            "()(())(())" if length == 10 and index == 1 else deterministic_valid(length, base_seed + index * 10 + 1)
+            for index in range(1, PROBE_FAMILY_COUNTS["V"] + 1)
+        )
+        random_invalid_texts = tuple(
+            deterministic_invalid(length, INVALID_KIND_RANDOM, base_seed + index * 10 + 2)
+            for index in range(1, PROBE_FAMILY_COUNTS["R"] + 1)
+        )
+        family_specs = (
+            ("V", "valid", "valid", valid_texts),
+            ("R", "random invalid", PHASE_KIND_RANDOM, random_invalid_texts),
+            ("O", "off-by-one", PHASE_KIND_OFF_BY_ONE, CURATED_PROBE_TEXTS[length]["O"]),
+            ("B", "balanced-invalid", PHASE_KIND_BALANCED, CURATED_PROBE_TEXTS[length]["B"]),
+            ("P", "valid-prefix", PHASE_KIND_VALID_PREFIX, CURATED_PROBE_TEXTS[length]["P"]),
+        )
+        for family_code, family_label, probe_kind, texts in family_specs:
+            for index, text in enumerate(texts, start=1):
+                probes.append(
+                    ProbeSpec(
+                        f"{length} {family_label} {index}",
+                        text,
+                        probe_kind,
+                        length,
+                        f"{length}{family_code}{index}",
+                        index == 1,
+                    )
+                )
+    return tuple(probes)
+
+
+def infer_probe_kind(text: str) -> str:
+    if is_balanced_parentheses(text):
+        return "valid"
+    if is_balanced_invalid(text):
+        return PHASE_KIND_BALANCED
+    if is_valid_prefix_invalid(text):
+        return PHASE_KIND_VALID_PREFIX
+    if is_corruption_invalid(text):
+        return PHASE_KIND_OFF_BY_ONE
+    return PHASE_KIND_RANDOM
+
+
+def build_story_probes(length: int = STORY_PROBE_LENGTH) -> tuple[ProbeSpec, ...]:
+    probes: list[ProbeSpec] = []
+    for index, chars in enumerate(product("()", repeat=length)):
+        text = "".join(chars)
+        binary = text.replace("(", "0").replace(")", "1")
+        probes.append(
+            ProbeSpec(
+                label=f"{length} full-space {binary}",
+                text=text,
+                probe_kind=infer_probe_kind(text),
+                length=length,
+                short_label=f"{length}A{index:04d}",
+                highlight=False,
+            )
         )
     return tuple(probes)
 
@@ -666,6 +951,7 @@ def build_trace_probes() -> tuple[ProbeSpec, ...]:
 
 
 RESPONSE_PROBES = build_response_probes()
+STORY_PROBES = build_story_probes()
 TRACE_PROBES = build_trace_probes()
 
 
@@ -736,7 +1022,7 @@ class TinyTraceRNN(nn.Module):
     def __init__(
         self,
         *,
-        hidden_size: int = 4,
+        hidden_size: int = RNN_HIDDEN_SIZE,
         num_layers: int = 1,
         embedding_dim: int = 4,
     ) -> None:
@@ -910,6 +1196,12 @@ def probe_status_label(actual_valid: bool, predicted_valid: bool) -> str:
     return "invalid / correct"
 
 
+def probe_story_status(actual_valid: bool, predicted_values: list[bool]) -> str:
+    if any(predicted_valid != actual_valid for predicted_valid in predicted_values):
+        return "ever wrong"
+    return "valid / stable" if actual_valid else "invalid / stable"
+
+
 def probe_line_dash(probe_kind: str) -> str:
     if probe_kind == "valid":
         return "solid"
@@ -919,6 +1211,8 @@ def probe_line_dash(probe_kind: str) -> str:
         return "dash"
     if probe_kind == PHASE_KIND_BALANCED:
         return "longdash"
+    if probe_kind == PHASE_KIND_VALID_PREFIX:
+        return "longdashdot"
     return "solid"
 
 
@@ -930,17 +1224,6 @@ def probe_end_label_position(index: int) -> str:
     positions = ("middle right", "top right", "bottom right", "top left", "bottom left")
     return positions[index % len(positions)]
 
-
-def probe_length_dash(length: int) -> str:
-    if length == 10:
-        return "solid"
-    if length == 20:
-        return "dash"
-    if length == 30:
-        return "dot"
-    return "solid"
-
-
 def probe_class_color(probe_kind: str) -> str:
     return PROBE_CLASS_COLORS.get(probe_kind, "#6b7280")
 
@@ -951,6 +1234,7 @@ def probe_kind_label(probe_kind: str) -> str:
         PHASE_KIND_RANDOM: "random invalid",
         PHASE_KIND_OFF_BY_ONE: "off-by-one",
         PHASE_KIND_BALANCED: "balanced-invalid",
+        PHASE_KIND_VALID_PREFIX: "valid-prefix",
     }
     return mapping.get(probe_kind, probe_kind)
 
@@ -967,6 +1251,64 @@ def find_probe(short_label: str) -> ProbeSpec:
     raise KeyError(short_label)
 
 
+def probe_variant_index(probe: ProbeSpec) -> int:
+    digits = []
+    for char in reversed(probe.short_label):
+        if not char.isdigit():
+            break
+        digits.append(char)
+    return int("".join(reversed(digits))) if digits else 1
+
+
+def canonical_alternating_valid(length: int) -> str:
+    if length < 2 or length % 2 != 0:
+        raise ValueError("Alternating valid strings require an even length >= 2.")
+    return "()" * (length // 2)
+
+
+def canonical_nested_valid(length: int) -> str:
+    if length < 2 or length % 2 != 0:
+        raise ValueError("Nested valid strings require an even length >= 2.")
+    return "(" * (length // 2) + ")" * (length // 2)
+
+
+def canonical_valid_prefix_invalid(length: int) -> str:
+    if length <= 0:
+        raise ValueError("Valid-prefix invalid strings require a positive length.")
+    target_balance = 1 if length % 2 else 2
+    prefix_length = length - target_balance
+    prefix = canonical_alternating_valid(prefix_length) if prefix_length > 0 else ""
+    return prefix + "(" * target_balance
+
+
+def preferred_probe_labels(length: int, family_code: str, preferred_index: int) -> list[str]:
+    max_index = {
+        "V": PROBE_FAMILY_COUNTS["V"],
+        "R": PROBE_FAMILY_COUNTS["R"],
+        "O": PROBE_FAMILY_COUNTS["O"],
+        "B": PROBE_FAMILY_COUNTS["B"],
+        "P": PROBE_FAMILY_COUNTS["P"],
+    }[family_code]
+    ordered_indices: list[int] = []
+    if 1 <= preferred_index <= max_index:
+        ordered_indices.append(preferred_index)
+    for index in range(1, max_index + 1):
+        if index not in ordered_indices:
+            ordered_indices.append(index)
+    return [f"{length}{family_code}{index}" for index in ordered_indices]
+
+
+def find_probe_from_candidates(candidates: list[str], *, exclude: str | None = None) -> ProbeSpec:
+    for short_label in candidates:
+        if short_label == exclude:
+            continue
+        try:
+            return find_probe(short_label)
+        except KeyError:
+            continue
+    raise KeyError(f"No matching probe for candidates: {candidates}")
+
+
 def probe_checkpoint_epochs(result: RNNExperimentResult) -> list[int]:
     return [0] + [int(span["end_epoch"]) for span in result.phase_spans]
 
@@ -980,14 +1322,72 @@ def probe_checkpoint_label(epoch: int, result: RNNExperimentResult) -> str:
     return f"epoch {epoch}"
 
 
-def build_probe_flips(result: RNNExperimentResult) -> list[ProbeFlip]:
+def compress_boolean_runs(values: list[bool]) -> tuple[bool, ...]:
+    if not values:
+        return ()
+    compressed = [values[0]]
+    for value in values[1:]:
+        if value != compressed[-1]:
+            compressed.append(value)
+    return tuple(compressed)
+
+
+def format_correctness_turn_label(
+    turn_pattern: tuple[bool, ...],
+    *,
+    separator: str = " -> ",
+) -> str:
+    return separator.join("C" if value else "I" for value in turn_pattern)
+
+
+def build_probe_trajectories(
+    result: RNNExperimentResult,
+    *,
+    probes: tuple[ProbeSpec, ...] | None = None,
+    response_history: list[list[float]] | None = None,
+) -> list[ProbeTrajectory]:
+    probes = probes or RESPONSE_PROBES
+    response_history = response_history or result.response_history
+    epochs = tuple(metric.epoch for metric in result.metrics)
+    trajectories: list[ProbeTrajectory] = []
+    for probe_index, probe in enumerate(probes):
+        actual_valid = is_balanced_parentheses(probe.text)
+        probabilities = tuple(float(row[probe_index]) for row in response_history)
+        correctness = tuple((probability >= 0.5) == actual_valid for probability in probabilities)
+        flip_epochs = tuple(
+            epochs[index + 1]
+            for index in range(len(epochs) - 1)
+            if correctness[index] != correctness[index + 1]
+        )
+        trajectories.append(
+            ProbeTrajectory(
+                probe=probe,
+                actual_valid=actual_valid,
+                epochs=epochs,
+                probabilities=probabilities,
+                correctness=correctness,
+                turn_pattern=compress_boolean_runs(list(correctness)),
+                flip_epochs=flip_epochs,
+            )
+        )
+    return trajectories
+
+
+def build_probe_flips(
+    result: RNNExperimentResult,
+    *,
+    probes: tuple[ProbeSpec, ...] | None = None,
+    response_history: list[list[float]] | None = None,
+) -> list[ProbeFlip]:
+    probes = probes or RESPONSE_PROBES
+    response_history = response_history or result.response_history
     epoch_to_index = {metric.epoch: index for index, metric in enumerate(result.metrics)}
     checkpoints = probe_checkpoint_epochs(result)
     flips: list[ProbeFlip] = []
-    for probe_index, probe in enumerate(RESPONSE_PROBES):
+    for probe_index, probe in enumerate(probes):
         actual_valid = is_balanced_parentheses(probe.text)
         checkpoint_probabilities = [
-            result.response_history[epoch_to_index[epoch]][probe_index]
+            response_history[epoch_to_index[epoch]][probe_index]
             for epoch in checkpoints
         ]
         checkpoint_correct = [
@@ -1021,53 +1421,69 @@ def build_probe_flips(result: RNNExperimentResult) -> list[ProbeFlip]:
     return flips
 
 
-def select_highlighted_probe_flips(
+def probe_trajectory_priority(trajectory: ProbeTrajectory) -> tuple[int, int, int, int, int, float, float, int]:
+    max_swing = max(
+        abs(after - before)
+        for before, after in zip(trajectory.probabilities[:-1], trajectory.probabilities[1:], strict=True)
+    )
+    min_margin = min(abs(probability - 0.5) for probability in trajectory.probabilities)
+    same_start_end = int(
+        len(trajectory.turn_pattern) >= 3 and trajectory.turn_pattern[0] == trajectory.turn_pattern[-1]
+    )
+    final_epoch_turn = int(bool(trajectory.flip_epochs) and trajectory.flip_epochs[-1] == trajectory.epochs[-1])
+    late_turn_epoch = trajectory.flip_epochs[-1] if trajectory.flip_epochs else -1
+    wrong_steps = sum(1 for is_correct in trajectory.correctness if not is_correct)
+    return (
+        int(trajectory.turn_count >= 2),
+        same_start_end,
+        final_epoch_turn,
+        trajectory.turn_count,
+        late_turn_epoch,
+        max_swing,
+        -min_margin,
+        wrong_steps,
+    )
+
+
+def select_highlighted_probe_trajectories(
+    trajectories: list[ProbeTrajectory],
+    *,
+    limit: int = 4,
+) -> list[ProbeTrajectory]:
+    candidates = [trajectory for trajectory in trajectories if trajectory.turn_count >= 2]
+    if not candidates:
+        candidates = [trajectory for trajectory in trajectories if trajectory.turn_count >= 1 and trajectory.ever_wrong]
+    return sorted(
+        candidates,
+        key=probe_trajectory_priority,
+        reverse=True,
+    )[:limit]
+
+
+def select_trace_story_probes(
+    result: RNNExperimentResult,
     flips: list[ProbeFlip],
     *,
-    confusion_to_epoch: int,
-) -> list[ProbeFlip]:
-    wrong_to_right = sorted(
-        (flip for flip in flips if flip.kind == "wrong_to_right"),
-        key=lambda flip: (abs(flip.to_probability - flip.from_probability), flip.probe.probe_kind == "valid"),
-        reverse=True,
-    )
-    right_to_wrong = sorted(
-        (
-            flip
-            for flip in flips
-            if flip.kind == "right_to_wrong" and flip.to_epoch == confusion_to_epoch
-        ),
-        key=lambda flip: abs(flip.to_probability - flip.from_probability),
-        reverse=True,
-    )
-    selected = wrong_to_right[:3] + right_to_wrong[:1]
-    seen: set[tuple[str, int, int]] = set()
-    unique_selected: list[ProbeFlip] = []
-    for flip in selected:
-        key = (flip.probe.short_label, flip.from_epoch, flip.to_epoch)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_selected.append(flip)
-    return unique_selected
-
-
-def select_trace_story_probes(result: RNNExperimentResult, flips: list[ProbeFlip]) -> TraceStorySelection:
+    highlighted_trajectories: list[ProbeTrajectory] | None = None,
+) -> TraceStorySelection:
+    highlighted_trajectories = highlighted_trajectories or []
     checkpoints = probe_checkpoint_epochs(result)
     target_fix = [
         flip for flip in flips
-        if flip.kind == "wrong_to_right" and flip.from_epoch == checkpoints[2] and flip.to_epoch == checkpoints[3]
+        if flip.kind == "wrong_to_right" and flip.from_epoch == checkpoints[-2] and flip.to_epoch == checkpoints[-1]
     ]
     any_fix = [flip for flip in flips if flip.kind == "wrong_to_right"]
-    if target_fix:
+    if highlighted_trajectories:
+        focus_probe = highlighted_trajectories[0].probe
+    elif target_fix:
         focus_probe = max(
             target_fix,
-            key=lambda flip: abs(flip.to_probability - flip.from_probability) + (2.0 if flip.probe.probe_kind == "valid" else 0.0),
+            key=lambda flip: abs(flip.to_probability - flip.from_probability),
         ).probe
     elif any_fix:
         focus_probe = max(
             any_fix,
-            key=lambda flip: abs(flip.to_probability - flip.from_probability) + (2.0 if flip.probe.probe_kind == "valid" else 0.0),
+            key=lambda flip: abs(flip.to_probability - flip.from_probability),
         ).probe
     else:
         probe_index_by_label = {
@@ -1083,23 +1499,40 @@ def select_trace_story_probes(result: RNNExperimentResult, flips: list[ProbeFlip
             RESPONSE_PROBES,
             key=probe_max_swing,
         )
-    example_index = focus_probe.short_label[-1]
     length = focus_probe.length
+    preferred_index = (
+        probe_variant_index(focus_probe)
+        if any(probe.short_label == focus_probe.short_label for probe in RESPONSE_PROBES)
+        else 1
+    )
     if focus_probe.probe_kind == "valid":
-        companion_probes = (
-            find_probe(f"{length}O{example_index}"),
-            find_probe(f"{length}B{example_index}"),
+        valid_companion = find_probe_from_candidates(
+            preferred_probe_labels(length, "V", preferred_index),
+            exclude=focus_probe.short_label,
         )
-    elif focus_probe.probe_kind == PHASE_KIND_OFF_BY_ONE:
-        companion_probes = (
-            find_probe(f"{length}V{example_index}"),
-            find_probe(f"{length}B{example_index}"),
+        contrasting_companion = find_probe_from_candidates(
+            preferred_probe_labels(length, "B", preferred_index)
         )
     else:
-        companion_probes = (
-            find_probe(f"{length}V{example_index}"),
-            find_probe(f"{length}O{example_index}"),
+        valid_index = ((preferred_index - 1) % PROBE_FAMILY_COUNTS["V"]) + 1
+        valid_companion = find_probe_from_candidates(
+            preferred_probe_labels(length, "V", valid_index)
         )
+        contrast_family = {
+            PHASE_KIND_OFF_BY_ONE: "B",
+            PHASE_KIND_BALANCED: "O",
+            PHASE_KIND_VALID_PREFIX: "O",
+            PHASE_KIND_RANDOM: "O",
+        }.get(focus_probe.probe_kind, "B")
+        contrasting_companion = find_probe_from_candidates(
+            preferred_probe_labels(
+                length,
+                contrast_family,
+                min(preferred_index, PROBE_FAMILY_COUNTS[contrast_family]),
+            ),
+            exclude=focus_probe.short_label,
+        )
+    companion_probes = (valid_companion, contrasting_companion)
     return TraceStorySelection(focus_probe=focus_probe, companion_probes=companion_probes)
 
 
@@ -1120,15 +1553,17 @@ def run_rnn_experiment(
         lr_end=lr_end,
     )
     model = TinyTraceRNN(hidden_size=RNN_HIDDEN_SIZE, num_layers=RNN_NUM_LAYERS).to(DEVICE)
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr_start, momentum=0.9)
+    optimizer = torch.optim.Adam(model.parameters(), lr=DEFAULT_RNN_LR)
     criterion = nn.BCEWithLogitsLoss()
     evaluation_sets = build_evaluation_sets(test_samples=test_samples, seed=seed + 7_000)
     retained_support = build_retained_support(cohort_size=train_samples, seed=seed + 17_000)
     response_sequences = [probe.text for probe in RESPONSE_PROBES]
+    story_sequences = [probe.text for probe in STORY_PROBES]
     rng = random.Random(seed + 99)
 
     metrics: list[MetricRow] = []
     response_history: list[list[float]] = []
+    story_response_history: list[list[float]] = []
     checkpoints: dict[int, dict[str, torch.Tensor]] = {}
     phase_spans: list[dict[str, object]] = []
     representative_examples: list[SequenceExample] = []
@@ -1145,6 +1580,7 @@ def run_rnn_experiment(
         )
     )
     response_history.append(evaluate_probabilities(model, response_sequences))
+    story_response_history.append(evaluate_probabilities(model, story_sequences))
 
     global_epoch = 0
     for phase_index, phase in enumerate(phases):
@@ -1152,13 +1588,11 @@ def run_rnn_experiment(
         log_progress(
             f"{build_model_title(RNN_HIDDEN_SIZE, RNN_NUM_LAYERS)}: starting {phase.label} "
             f"(epochs={phase.epochs}, support={len(phase_examples)}, batch={DEFAULT_BATCH_SIZE}, "
-            f"lr={phase.lr_start:.3f}->{phase.lr_end:.3f})"
+            f"optimizer={RNN_OPTIMIZER_NAME}, lr={DEFAULT_RNN_LR:.3f})"
         )
         start_epoch = global_epoch + 1
         for local_epoch in range(1, phase.epochs + 1):
             global_epoch += 1
-            lr = phase_epoch_lr(phase, local_epoch)
-            set_optimizer_lr(optimizer, lr)
             train_rnn_epoch(
                 model,
                 phase_examples,
@@ -1179,6 +1613,7 @@ def run_rnn_experiment(
                 )
             )
             response_history.append(evaluate_probabilities(model, response_sequences))
+            story_response_history.append(evaluate_probabilities(model, story_sequences))
         checkpoints[global_epoch] = clone_model_state(model)
         phase_spans.append(
             {
@@ -1195,8 +1630,10 @@ def run_rnn_experiment(
                     for cohort_name, weight in zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True)
                     if weight > 0
                 ],
-                "lr_start": phase.lr_start,
-                "lr_end": phase.lr_end,
+                "optimizer": RNN_OPTIMIZER_NAME,
+                "learning_rate": DEFAULT_RNN_LR,
+                "lr_start": DEFAULT_RNN_LR,
+                "lr_end": DEFAULT_RNN_LR,
                 "batch_size": DEFAULT_BATCH_SIZE,
             }
         )
@@ -1210,6 +1647,8 @@ def run_rnn_experiment(
         phase_spans=phase_spans,
         metrics=metrics,
         response_history=response_history,
+        story_response_history=story_response_history,
+        story_probes=STORY_PROBES,
         evaluation_sets=evaluation_sets,
         representative_examples=representative_examples,
         trace_payload=None,
@@ -1230,6 +1669,13 @@ def build_trace_grid_payload(
     cells: list[TraceCell] = []
     raw_projection_points: list[list[float]] = []
     backgrounds_raw: list[tuple[str, int, list[list[float]], list[float]]] = []
+    landmark_points_raw: list[tuple[str, int, str, str, list[float], float]] = []
+    focus_length = trace_probes[0].length if trace_probes else TRAIN_LENGTH
+    landmark_sequences = (
+        ("alt", canonical_alternating_valid(focus_length)),
+        ("nest", canonical_nested_valid(focus_length)),
+        ("prefix", canonical_valid_prefix_invalid(focus_length)),
+    )
 
     for phase_index, epoch in enumerate(phase_epochs):
         model = model_builder().to(DEVICE)
@@ -1247,6 +1693,21 @@ def build_trace_grid_payload(
         backgrounds_raw.append(
             (phase_labels[phase_index], epoch, phase_background_states, phase_background_probabilities)
         )
+        for landmark_label, landmark_text in landmark_sequences:
+            tokens, lengths = encode_sequences([landmark_text])
+            logits, traces = model(tokens, lengths, capture_traces=True)
+            assert traces is not None
+            endpoint = traces[-1][0, len(landmark_text) - 1, :].tolist()
+            landmark_points_raw.append(
+                (
+                    phase_labels[phase_index],
+                    epoch,
+                    landmark_label,
+                    landmark_text,
+                    endpoint,
+                    float(logits.sigmoid().detach().cpu().item()),
+                )
+            )
         for probe in trace_probes:
             tokens, lengths = encode_sequences([probe.text])
             logits, traces = model(tokens, lengths, capture_traces=True)
@@ -1309,6 +1770,17 @@ def build_trace_grid_payload(
         )
         for phase_label, epoch, points, probabilities in backgrounds_raw
     ]
+    landmarks = [
+        TraceLandmark(
+            phase_label=phase_label,
+            epoch=epoch,
+            label=label,
+            text=text,
+            probability=probability,
+            projected_point=project_with_pca([point], mean=mean, components=components)[0],
+        )
+        for phase_label, epoch, label, text, point, probability in landmark_points_raw
+    ]
     return TraceGridPayload(
         phase_epochs=phase_epochs,
         phase_labels=phase_labels,
@@ -1316,6 +1788,7 @@ def build_trace_grid_payload(
         probe_texts=[probe.text for probe in trace_probes],
         cells=projected_cells,
         backgrounds=backgrounds,
+        landmarks=landmarks,
         projection_mode="pca_top_layer",
         axis_labels=(
             projection_axis_label(1, explained_variance[0]),
@@ -1413,6 +1886,13 @@ def run_mlp_training(
 
 def wrap_sequence(text: str, chunk: int = 20) -> str:
     return "<br>".join(text[index : index + chunk] for index in range(0, len(text), chunk))
+
+
+def compact_trace_phase_label(phase_label: str) -> str:
+    if phase_label.startswith("After phase "):
+        phase_number = phase_label.removeprefix("After phase ").split(":", maxsplit=1)[0]
+        return f"After P{phase_number}"
+    return phase_label
 
 
 def write_figure(
@@ -1545,11 +2025,19 @@ def build_dataset_figure(
         (INVALID_KIND_RANDOM, "random invalid"),
         (INVALID_KIND_CORRUPTION, "off-by-one"),
         (INVALID_KIND_BALANCED, "balanced-invalid"),
+        (INVALID_KIND_VALID_PREFIX, "valid-prefix"),
     ):
         values = []
         for phase in phases:
-            mapping = dict(zip(phase.invalid_kinds, phase.invalid_weights, strict=True))
-            values.append(mapping.get(kind, 0.0))
+            cohort_mapping = dict(zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True))
+            values.append(
+                {
+                    INVALID_KIND_RANDOM: cohort_mapping.get(SUPPORT_COHORT_RANDOM, 0.0),
+                    INVALID_KIND_CORRUPTION: cohort_mapping.get(SUPPORT_COHORT_OFF_BY_ONE, 0.0),
+                    INVALID_KIND_BALANCED: cohort_mapping.get(SUPPORT_COHORT_BALANCED, 0.0),
+                    INVALID_KIND_VALID_PREFIX: cohort_mapping.get(SUPPORT_COHORT_VALID_PREFIX, 0.0),
+                }.get(kind, 0.0)
+            )
         figure.add_trace(
             go.Bar(
                 x=phase_labels,
@@ -1586,39 +2074,63 @@ def build_dataset_figure(
     return figure
 
 
-def add_phase_bands(figure: go.Figure, phase_spans: list[dict[str, object]], row: int) -> None:
-    for span in phase_spans:
-        start_epoch = int(span["start_epoch"])
-        end_epoch = int(span["end_epoch"])
+def phase_plot_bounds(phase_spans: list[dict[str, object]]) -> list[dict[str, float | str]]:
+    bounds: list[dict[str, float | str]] = []
+    for index, span in enumerate(phase_spans):
+        start_epoch = float(span["start_epoch"])
+        end_epoch = float(span["end_epoch"])
+        next_start = (
+            float(phase_spans[index + 1]["start_epoch"])
+            if index + 1 < len(phase_spans)
+            else end_epoch + 1.0
+        )
         phase_kind = str(span["name"]).split("-")[-1]
         if phase_kind == "one":
             phase_kind = PHASE_KIND_OFF_BY_ONE
         if phase_kind == "invalid":
             phase_kind = PHASE_KIND_BALANCED
+        if phase_kind == "prefix":
+            phase_kind = PHASE_KIND_VALID_PREFIX
+        bounds.append(
+            {
+                "phase_kind": phase_kind,
+                "x0": start_epoch - 1.0,
+                "x1": next_start,
+                "boundary_x": start_epoch,
+                "label_x": (start_epoch - 1.0 + next_start) / 2,
+                "label": str(span["label"]).replace("Phase ", "P").replace(": ", " · "),
+            }
+        )
+    return bounds
+
+
+def add_phase_bands(figure: go.Figure, phase_spans: list[dict[str, object]], row: int) -> None:
+    for index, bound in enumerate(phase_plot_bounds(phase_spans)):
         figure.add_vrect(
-            x0=start_epoch - 0.5,
-            x1=end_epoch + 0.5,
-            fillcolor=PHASE_COLORS.get(phase_kind, "#eef2ff"),
-            opacity=0.28,
+            x0=float(bound["x0"]),
+            x1=float(bound["x1"]),
+            fillcolor=PHASE_COLORS.get(str(bound["phase_kind"]), "#eef2ff"),
+            opacity=0.25,
             line_width=0,
             row=row,
             col=1,
         )
-        figure.add_vline(
-            x=end_epoch + 0.5,
-            line={"color": "#8b5e3c", "dash": "dash", "width": 2},
-            row=row,
-            col=1,
-        )
+        if index > 0:
+            figure.add_vline(
+                x=float(bound["boundary_x"]),
+                line={"color": "#8b5e3c", "dash": "dash", "width": 2},
+                row=row,
+                col=1,
+            )
         figure.add_annotation(
-            x=(start_epoch + end_epoch) / 2,
-            y=0.02 if row == 1 else 0.95,
+            x=float(bound["label_x"]),
+            y=0.06 if row == 1 else 0.94,
             xref=f"x{'' if row == 1 else 2}",
             yref=f"y{'' if row == 1 else 2} domain",
-            text=str(span["label"]).replace("Phase ", "P"),
+            text=f"<b>{bound['label']}</b>",
             showarrow=False,
-            font={"size": 11, "color": "#6b7280"},
-            bgcolor="rgba(255,255,255,0.85)",
+            font={"size": 13, "color": "#4b5563"},
+            bgcolor="rgba(255,255,255,0.9)",
             bordercolor="#d1d5db",
             borderwidth=1,
         )
@@ -1628,9 +2140,20 @@ def build_rnn_story_figure(
     result: RNNExperimentResult,
     *,
     focus_short_label: str | None = None,
-    highlighted_flips: list[ProbeFlip] | None = None,
+    highlighted_trajectories: list[ProbeTrajectory] | None = None,
 ) -> go.Figure:
-    highlighted_flips = highlighted_flips or []
+    probe_trajectories = build_probe_trajectories(result)
+    trajectory_by_label = {
+        trajectory.probe.short_label: trajectory for trajectory in probe_trajectories
+    }
+    highlighted_trajectories = highlighted_trajectories or select_highlighted_probe_trajectories(probe_trajectories)
+    interesting_labels = {
+        trajectory.probe.short_label for trajectory in probe_trajectories if trajectory.turn_count >= 2
+    }
+    highlighted_labels = {trajectory.probe.short_label for trajectory in highlighted_trajectories}
+    highlight_index_by_label = {
+        trajectory.probe.short_label: index for index, trajectory in enumerate(highlighted_trajectories)
+    }
     figure = make_subplots(
         rows=2,
         cols=1,
@@ -1668,12 +2191,26 @@ def build_rnn_story_figure(
 
     for probe_index, probe in enumerate(RESPONSE_PROBES):
         values = [responses[probe_index] for responses in result.response_history]
-        final_predicted = values[-1] >= 0.5
         actual_valid = is_balanced_parentheses(probe.text)
-        status = probe_status_label(actual_valid, final_predicted)
-        line_color = probe_class_color(probe.probe_kind)
-        dash = probe_length_dash(probe.length)
+        predicted_values = [value >= 0.5 for value in values]
+        status = probe_story_status(actual_valid, predicted_values)
+        trajectory = trajectory_by_label[probe.short_label]
+        line_color = STORY_STATUS_COLORS[status]
         is_focus_probe = probe.short_label == focus_short_label
+        is_interesting = probe.short_label in interesting_labels
+        is_highlighted = probe.short_label in highlighted_labels
+        if is_focus_probe:
+            line_width = 3.2
+            line_opacity = 1.0
+        elif is_highlighted:
+            line_width = 2.5
+            line_opacity = 0.94
+        elif is_interesting:
+            line_width = 1.85
+            line_opacity = 0.78
+        else:
+            line_width = 1.05 if status == "ever wrong" else 0.9
+            line_opacity = 0.34 if status == "ever wrong" else 0.18
         figure.add_trace(
             go.Scatter(
                 x=epochs,
@@ -1683,12 +2220,14 @@ def build_rnn_story_figure(
                 showlegend=False,
                 line={
                     "color": line_color,
-                    "width": 3.8 if is_focus_probe else (2.4 if probe.highlight else 1.9),
-                    "dash": dash,
+                    "width": line_width,
+                    "dash": "dash" if (is_focus_probe or is_interesting) else "solid",
                 },
-                opacity=1.0 if is_focus_probe else (0.92 if probe.highlight else 0.78),
+                opacity=line_opacity,
                 hovertemplate=(
                     f"{probe.short_label} · {probe.label}<br>"
+                    f"status={status}<br>"
+                    f"turns={trajectory.turn_label}<br>"
                     f"type={probe.probe_kind}<br>"
                     f"length={probe.length}<br>"
                     f"text={probe.text}<br>"
@@ -1698,59 +2237,34 @@ def build_rnn_story_figure(
             row=2,
             col=1,
         )
-        figure.add_trace(
-            go.Scatter(
-                x=[epochs[-1]],
-                y=[values[-1]],
-                mode="markers",
-                name=status,
-                showlegend=False,
-                marker={
-                    "color": line_color,
-                    "size": 12 if is_focus_probe else 8,
-                    "symbol": probe_end_symbol(status),
-                    "line": {"color": "#111111", "width": 1.6 if is_focus_probe else 1.3},
-                },
-                hovertemplate=(
-                    f"{probe.short_label} final<br>"
-                    f"status={status}<br>"
-                    "epoch=%{x}<br>p(valid)=%{y:.3f}<extra></extra>"
+        if is_focus_probe or is_highlighted:
+            label_index = highlight_index_by_label.get(probe.short_label, len(highlight_index_by_label))
+            figure.add_trace(
+                go.Scatter(
+                    x=[epochs[-1]],
+                    y=[values[-1]],
+                    mode="markers+text",
+                    text=[f"{probe.short_label} {trajectory.compact_turn_label}"],
+                    textposition=probe_end_label_position(label_index),
+                    textfont={"size": 10, "color": line_color},
+                    name=status,
+                    showlegend=False,
+                    marker={
+                        "color": line_color,
+                        "size": 11 if is_focus_probe else 9,
+                        "symbol": "diamond",
+                        "line": {"color": "#111111", "width": 1.5 if is_focus_probe else 1.1},
+                    },
+                    hovertemplate=(
+                        f"{probe.short_label} final<br>"
+                        f"status={status}<br>"
+                        f"turns={trajectory.turn_label}<br>"
+                        "epoch=%{x}<br>p(valid)=%{y:.3f}<extra></extra>"
+                    ),
                 ),
-            ),
-            row=2,
-            col=1,
-        )
-
-    for flip_index, flip in enumerate(highlighted_flips):
-        probe_index = next(
-            index for index, probe in enumerate(RESPONSE_PROBES) if probe.short_label == flip.probe.short_label
-        )
-        y_value = result.response_history[flip.to_epoch][probe_index]
-        figure.add_trace(
-            go.Scatter(
-                x=[flip.to_epoch],
-                y=[y_value],
-                mode="markers+text",
-                text=[f"{flip.probe.short_label} {'recovery' if flip.kind == 'wrong_to_right' else 'confusion'}"],
-                textposition=probe_end_label_position(flip_index),
-                textfont={"size": 10, "color": probe_class_color(flip.probe.probe_kind)},
-                marker={
-                    "color": probe_class_color(flip.probe.probe_kind),
-                    "size": 12,
-                    "symbol": "diamond" if flip.kind == "wrong_to_right" else "diamond-open",
-                    "line": {"color": "#111111", "width": 1.4},
-                },
-                showlegend=False,
-                hovertemplate=(
-                    f"{flip.probe.short_label} · {probe_kind_label(flip.probe.probe_kind)} · len {flip.probe.length}<br>"
-                    f"text={flip.probe.text}<br>"
-                    f"transition={flip.from_phase_label} -> {flip.to_phase_label}<br>"
-                    f"p(valid): {flip.from_probability:.3f} -> {flip.to_probability:.3f}<extra></extra>"
-                ),
-            ),
-            row=2,
-            col=1,
-        )
+                row=2,
+                col=1,
+            )
     accuracy_values = [metric.train_acc for metric in result.metrics]
     for length in EVAL_LENGTHS:
         accuracy_values.extend(getattr(metric, f"eval_{length}_acc") for metric in result.metrics)
@@ -1761,28 +2275,30 @@ def build_rnn_story_figure(
     figure.update_yaxes(title_text="accuracy", range=[lower_bound, upper_bound], row=1, col=1)
     figure.update_yaxes(title_text="p(valid)", range=[0, 1.02], row=2, col=1)
     figure.update_layout(
-        title=result.model_title + ": training phases and probe splitting",
-        width=1500,
-        height=950,
-        margin={"t": 85, "l": 60, "r": 260, "b": 60},
+        title=result.model_title + ": training phases and Pollack-style probe bifurcations",
+        width=1580,
+        height=980,
+        margin={"t": 95, "l": 60, "r": 340, "b": 60},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0.0},
         **FIGURE_STYLE,
     )
     highlight_lines = [
         (
-            f"{flip.probe.short_label} · {probe_kind_label(flip.probe.probe_kind)} · len {flip.probe.length}"
-            f"<br><span style='font-size:10px'>{flip.probe.text[:18]}{'...' if len(flip.probe.text) > 18 else ''}</span>"
+            f"{trajectory.probe.short_label} · {trajectory.turn_label} · "
+            f"{probe_kind_label(trajectory.probe.probe_kind)} · len {trajectory.probe.length}"
+            f"<br><span style='font-size:10px'>{trajectory.probe.text[:18]}{'...' if len(trajectory.probe.text) > 18 else ''}</span>"
         )
-        for flip in highlighted_flips
+        for trajectory in highlighted_trajectories
     ]
     figure.add_annotation(
-        x=0.995,
+        x=1.18,
         y=0.43,
         xref="paper",
         yref="paper",
         text=(
-            "Probe key: color = class, dash = length, circle/x = final correctness,"
-            "<br>diamond = recovery, open diamond = confusion"
+            "Probe key: green = always-correct valid, yellow = always-correct invalid, red = ever wrong"
+            "<br>dashed = multi-turn correctness path, solid = everything else"
+            "<br>C = correct, I = incorrect"
             + (
                 "<br><br><b>Highlighted flips</b><br>" + "<br>".join(highlight_lines)
                 if highlight_lines
@@ -1830,6 +2346,9 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
 
     cell_lookup = {(cell.phase_label, cell.probe_label): cell for cell in payload.cells}
     background_lookup = {background.phase_label: background for background in payload.backgrounds}
+    landmark_lookup: dict[str, list[TraceLandmark]] = {}
+    for landmark in payload.landmarks:
+        landmark_lookup.setdefault(landmark.phase_label, []).append(landmark)
     legend_seen: set[str] = set()
     for row_index, phase_label in enumerate(payload.phase_labels, start=1):
         background = background_lookup[phase_label]
@@ -1847,14 +2366,15 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                     y=[point[1] for point in background.projected_points],
                     mode="markers",
                     marker={
-                        "size": 6,
-                        "opacity": 0.18,
+                        "size": 20,
+                        "opacity": 0.62,
                         "color": background.probabilities,
                         "colorscale": [
                             [0.0, "#2563eb"],
                             [0.5, "#d1d5db"],
                             [1.0, "#16a34a"],
                         ],
+                        "line": {"color": "rgba(255,255,255,0.55)", "width": 0.8},
                         "cmin": 0,
                         "cmax": 1,
                         "showscale": row_index == 1 and col_index == cols,
@@ -1871,17 +2391,48 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                 row=row_index,
                 col=col_index,
             )
+            if col_index == 1:
+                landmarks = landmark_lookup.get(phase_label, [])
+                figure.add_trace(
+                    go.Scatter(
+                        x=[landmark.projected_point[0] for landmark in landmarks],
+                        y=[landmark.projected_point[1] for landmark in landmarks],
+                        mode="markers",
+                        marker={
+                            "size": 10,
+                            "color": [landmark.probability for landmark in landmarks],
+                            "colorscale": [
+                                [0.0, "#2563eb"],
+                                [0.5, "#d1d5db"],
+                                [1.0, "#16a34a"],
+                            ],
+                            "cmin": 0,
+                            "cmax": 1,
+                            "line": {"color": "#111111", "width": 1.2},
+                        },
+                        showlegend=False,
+                        hovertemplate=(
+                            "%{text}<br>"
+                            "text=%{customdata}<br>"
+                            "p(valid)=%{marker.color:.3f}<extra></extra>"
+                        ),
+                        text=[landmark.label for landmark in landmarks],
+                        customdata=[landmark.text for landmark in landmarks],
+                    ),
+                    row=row_index,
+                    col=col_index,
+                )
             figure.add_trace(
                 go.Scatter(
                     x=xs,
                     y=ys,
                     mode="lines+markers",
                     line={
-                        "color": probe_class_color(cell.probe_kind),
-                        "width": 2.6,
+                        "color": style["color"],
+                        "width": 1.8,
                         "dash": style["dash"],
                     },
-                    marker={"color": probe_class_color(cell.probe_kind), "size": 4, "opacity": 0.82},
+                    marker={"color": style["color"], "size": 7, "opacity": 0.95},
                     name=status,
                     showlegend=showlegend,
                     hovertemplate=(
@@ -1890,7 +2441,7 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                         f"phase={cell.phase_label}<br>"
                         f"status={status}<br>"
                         f"p(valid)={cell.probability:.3f}<br>"
-                        f"{payload.axis_labels[0]}=%{{x:.3f}}<br>{payload.axis_labels[1]}=%{{y:.3f}}<extra></extra>"
+                        "PC1=%{x:.3f}<br>PC2=%{y:.3f}<extra></extra>"
                     ),
                 ),
                 row=row_index,
@@ -1929,19 +2480,21 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
             )
             figure.update_xaxes(
                 range=x_range,
-                title_text=payload.axis_labels[0],
+                showticklabels=row_index == rows,
                 row=row_index,
                 col=col_index,
             )
             figure.update_yaxes(
                 range=y_range,
-                title_text=payload.axis_labels[1],
+                showticklabels=col_index == 1,
                 row=row_index,
                 col=col_index,
             )
             axis_number = (row_index - 1) * cols + col_index
             xref = "x domain" if axis_number == 1 else f"x{axis_number} domain"
             yref = "y domain" if axis_number == 1 else f"y{axis_number} domain"
+            xaxis_ref = "x" if axis_number == 1 else f"x{axis_number}"
+            yaxis_ref = "y" if axis_number == 1 else f"y{axis_number}"
             figure.add_annotation(
                 x=0.03,
                 y=0.97,
@@ -1956,25 +2509,74 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
                 bordercolor=style["color"],
                 borderwidth=1,
             )
+            if col_index == 1:
+                for landmark_index, landmark in enumerate(landmark_lookup.get(phase_label, [])):
+                    label_text, ax_offset, ay_offset = {
+                        "alt": ("alt valid", 54, -18),
+                        "nest": ("nested valid", 86, -48),
+                        "prefix": ("open prefix", 78, 28),
+                    }.get(
+                        landmark.label,
+                        (landmark.label, 54, -18 - landmark_index * 14),
+                    )
+                    figure.add_annotation(
+                        x=landmark.projected_point[0],
+                        y=landmark.projected_point[1],
+                        xref=xaxis_ref,
+                        yref=yaxis_ref,
+                        text=label_text,
+                        showarrow=True,
+                        arrowhead=0,
+                        arrowsize=1,
+                        arrowwidth=1,
+                        arrowcolor="#4b5563",
+                        ax=ax_offset,
+                        ay=ay_offset,
+                        font={"size": 9.5, "color": "#374151"},
+                        bgcolor="rgba(255,255,255,0.92)",
+                        bordercolor="#d1d5db",
+                        borderwidth=1,
+                    )
         if rows > 1:
             figure.add_annotation(
                 x=-0.07,
                 y=1 - (row_index - 0.5) / rows,
                 xref="paper",
                 yref="paper",
-                text=phase_label,
+                text=compact_trace_phase_label(phase_label),
                 showarrow=False,
                 textangle=-90,
                 font={"size": 12, "color": "#4b5563"},
             )
 
     figure.update_layout(
-        title="Probe traces in a PCA view of the learned state space",
-        width=max(1500, 450 * cols),
-        height=870,
-        margin={"t": 135, "l": 85, "r": 90, "b": 95},
+        title={
+            "text": "Probe traces in a PCA view of the learned state space",
+            "y": 0.99,
+        },
+        width=max(1380, 400 * cols),
+        height=max(820, 220 * rows + 110),
+        margin={"t": 152, "l": 78, "r": 92, "b": 88},
         legend={"orientation": "h", "yanchor": "top", "y": -0.08, "x": 0.0},
         **FIGURE_STYLE,
+    )
+    figure.add_annotation(
+        x=0.995,
+        y=1.08,
+        xref="paper",
+        yref="paper",
+        text=(
+            "Shared PCA axes: "
+            f"PC1 {payload.explained_variance[0] * 100:.0f}% var, "
+            f"PC2 {payload.explained_variance[1] * 100:.0f}% var"
+        ),
+        showarrow=False,
+        xanchor="right",
+        yanchor="bottom",
+        font={"size": 11, "color": "#4b5563"},
+        bgcolor="rgba(255,255,255,0.88)",
+        bordercolor="#d1d5db",
+        borderwidth=1,
     )
     return figure
 
@@ -2034,8 +2636,9 @@ def render_rnn_assets(
 ) -> dict[str, object]:
     log_progress(
         "training simplified RNN "
-        f"(phases=3, phase_epochs={phase_epochs}, samples={train_samples}, "
-        f"test_samples={test_samples}, batch={DEFAULT_BATCH_SIZE}, lr={lr_start:.3f}->{lr_end:.3f})"
+        f"(phases=4, phase_epochs={phase_epochs}, samples={train_samples}, "
+        f"test_samples={test_samples}, batch={DEFAULT_BATCH_SIZE}, "
+        f"optimizer={RNN_OPTIMIZER_NAME}, lr={DEFAULT_RNN_LR:.3f})"
     )
     result, checkpoints = run_rnn_experiment(
         seed=seed,
@@ -2046,10 +2649,12 @@ def render_rnn_assets(
         lr_end=lr_end,
     )
     probe_flips = build_probe_flips(result)
-    highlighted_flips = select_highlighted_probe_flips(
-        probe_flips,
-        confusion_to_epoch=probe_checkpoint_epochs(result)[2],
-    )
+    probe_trajectories = build_probe_trajectories(result)
+    highlighted_trajectories = select_highlighted_probe_trajectories(probe_trajectories)
+    highlighted_short_labels = {trajectory.probe.short_label for trajectory in highlighted_trajectories}
+    highlighted_flips = [
+        flip for flip in probe_flips if flip.probe.short_label in highlighted_short_labels
+    ]
     trace_selection = select_trace_story_probes(result, probe_flips)
     trace_payload = build_trace_grid_payload(
         model_builder=lambda: TinyTraceRNN(hidden_size=RNN_HIDDEN_SIZE, num_layers=RNN_NUM_LAYERS),
@@ -2069,7 +2674,7 @@ def render_rnn_assets(
     story_figure = build_rnn_story_figure(
         result,
         focus_short_label=trace_selection.focus_probe.short_label,
-        highlighted_flips=highlighted_flips,
+        highlighted_trajectories=highlighted_trajectories,
     )
     story_files = write_figure(
         story_figure,
@@ -2099,6 +2704,8 @@ def render_rnn_assets(
         "train_length": TRAIN_LENGTH,
         "eval_lengths": list(EVAL_LENGTHS),
         "batch_size": DEFAULT_BATCH_SIZE,
+        "optimizer": RNN_OPTIMIZER_NAME,
+        "learning_rate": DEFAULT_RNN_LR,
         "phase_epochs": phase_epochs,
         "cohort_size": train_samples,
         "retained_support_size": train_samples * len(SUPPORT_COHORT_ORDER),
@@ -2107,11 +2714,16 @@ def render_rnn_assets(
             SUPPORT_COHORT_RANDOM: train_samples,
             SUPPORT_COHORT_OFF_BY_ONE: train_samples,
             SUPPORT_COHORT_BALANCED: train_samples,
+            SUPPORT_COHORT_VALID_PREFIX: train_samples,
         },
         "phase_weighting_schedule": [
             {
                 "label": phase.label,
                 "cohort_weights": list(phase.cohort_weights),
+                "optimizer": RNN_OPTIMIZER_NAME,
+                "learning_rate": DEFAULT_RNN_LR,
+                "lr_start": DEFAULT_RNN_LR,
+                "lr_end": DEFAULT_RNN_LR,
                 "active_cohorts": [
                     cohort_name
                     for cohort_name, weight in zip(SUPPORT_COHORT_ORDER, phase.cohort_weights, strict=True)
@@ -2134,6 +2746,15 @@ def render_rnn_assets(
                 "to_probability": flip.to_probability,
             }
             for flip in highlighted_flips
+        ],
+        "highlighted_probe_trajectories": [
+            {
+                "probe": asdict(trajectory.probe),
+                "turn_pattern": list(trajectory.turn_pattern),
+                "turn_label": trajectory.turn_label,
+                "flip_epochs": list(trajectory.flip_epochs),
+            }
+            for trajectory in highlighted_trajectories
         ],
         "trace_strings": [asdict(probe) for probe in trace_selection.selected_probes],
         "trace_phase_epochs": trace_payload.phase_epochs,
@@ -2165,7 +2786,7 @@ def generate(
     ),
     rnn_phase_epochs: int = typer.Option(
         DEFAULT_PHASE_EPOCHS,
-        help="Epochs to run for each of the three RNN phases.",
+        help="Epochs to run for each of the four RNN phases.",
     ),
     rnn_train_samples: int = typer.Option(
         DEFAULT_TRAIN_SAMPLES,

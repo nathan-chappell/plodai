@@ -100,8 +100,13 @@ export function ChartAgentPage({
     changeDirectory,
     workspaceContext,
     getState,
+    updateFilesystem,
+    syncToolCatalog,
+    appendReportEffects,
+    workspaceBootstrapMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: chartAgentCapability.id,
+    capabilityTitle: chartAgentCapability.title,
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "agent",
@@ -109,8 +114,8 @@ export function ChartAgentPage({
   });
   const capabilityBundle = useMemo(() => buildChartAgentBundle(), []);
   const clientTools = useMemo(
-    () => createChartAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, workspaceContext],
+    () => createChartAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
+    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
   );
   const {
     scenario: demoScenario,
@@ -140,6 +145,10 @@ export function ChartAgentPage({
       onRemoveEntry: handleRemoveEntry,
     });
   }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+
+  useEffect(() => {
+    syncToolCatalog(clientTools.map((tool) => tool.name));
+  }, [clientTools, syncToolCatalog]);
 
   return (
     <>
@@ -203,11 +212,12 @@ export function ChartAgentPage({
               enabled
               files={files}
               workspaceContext={workspaceContext}
+              workspaceBootstrap={workspaceBootstrapMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
-              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
             />
           </ReportChatColumn>
@@ -247,10 +257,11 @@ export function ChartAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
+              workspaceBootstrap={workspaceBootstrapMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
-              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
             />
           </ReportChatColumn>

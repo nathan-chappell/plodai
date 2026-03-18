@@ -51,6 +51,7 @@ This repo is primarily a demo of frontend capabilities being exposed to agents i
 - In the body, include multiple conventional-commit-style sections when the work spans multiple themes.
 - Include emojis in the title and section headers when writing commit messages for this repo.
 - Offer commit message suggestions from time to time after a meaningful stretch of work, but usually not after every small change.
+- NOTE: when the user asks for a commit, just output the well formatted message into a `codebox` they can easily copy/paste.
 
 ## Maintenance note
 - Keep this file short, current, and high-level.

@@ -2,15 +2,15 @@ import { useEffect, useState } from "react";
 
 import { useAppState } from "../app/context";
 import { useWorkspaceSurface } from "../app/workspace";
-import {
-  loadCapabilityWorkspace,
-  saveCapabilityWorkspace,
-} from "../lib/workspace-store";
+import { loadCapabilityWorkspace, type CapabilityWorkspaceSnapshot } from "../lib/workspace-store";
 import type { ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
+import { useWorkspaceContract } from "./shared/useWorkspaceContract";
+import { syncWorkspaceToolCatalog } from "../lib/workspace-contract";
 
 export function useCapabilityFileWorkspace(options: {
   capabilityId: string;
+  capabilityTitle: string;
   defaultStatus: string;
   defaultBrief: string;
   defaultTab: string;
@@ -24,13 +24,7 @@ export function useCapabilityFileWorkspace(options: {
   });
   const allowedTabsKey = options.allowedTabs.join("|");
   const [status, setStatus] = useState(options.defaultStatus);
-  const [investigationBrief, setInvestigationBrief] = useState(options.defaultBrief);
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState(options.defaultTab);
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>(
-    options.defaultExecutionMode ?? "interactive",
-  );
-  const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [legacySnapshot, setLegacySnapshot] = useState<CapabilityWorkspaceSnapshot | null>(null);
 
   function normalizeTab(tab: string): string {
     return options.allowedTabs.includes(tab) ? tab : options.defaultTab;
@@ -39,11 +33,7 @@ export function useCapabilityFileWorkspace(options: {
   useEffect(() => {
     if (!user) {
       setStatus(options.defaultStatus);
-      setInvestigationBrief(options.defaultBrief);
-      setActiveWorkspaceTab(options.defaultTab);
-      setExecutionMode(options.defaultExecutionMode ?? "interactive");
-      setReportEffects([]);
-      setHydrated(false);
+      setLegacySnapshot(null);
       return;
     }
 
@@ -57,18 +47,11 @@ export function useCapabilityFileWorkspace(options: {
 
       if (snapshot) {
         setStatus(snapshot.status);
-        setInvestigationBrief(snapshot.investigationBrief);
-        setActiveWorkspaceTab(normalizeTab(snapshot.activeWorkspaceTab));
-        setExecutionMode(snapshot.executionMode ?? options.defaultExecutionMode ?? "interactive");
-        setReportEffects(snapshot.reportEffects);
-      } else {
-        setStatus(options.defaultStatus);
-        setInvestigationBrief(options.defaultBrief);
-        setActiveWorkspaceTab(options.defaultTab);
-        setExecutionMode(options.defaultExecutionMode ?? "interactive");
-        setReportEffects([]);
+        setLegacySnapshot({
+          ...snapshot,
+          activeWorkspaceTab: normalizeTab(snapshot.activeWorkspaceTab),
+        });
       }
-      setHydrated(true);
     })();
 
     return () => {
@@ -83,35 +66,24 @@ export function useCapabilityFileWorkspace(options: {
     options.defaultTab,
     user,
   ]);
-
-  useEffect(() => {
-    if (!user || !hydrated) {
-      return;
-    }
-
-    const snapshot = {
-      status,
-      investigationBrief,
-      activeWorkspaceTab,
-      executionMode,
-      reportEffects,
-    } as const;
-
-    const timeoutId = window.setTimeout(() => {
-      void saveCapabilityWorkspace(user.id, options.capabilityId, snapshot);
-    }, 180);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [
-    activeWorkspaceTab,
-    executionMode,
-    hydrated,
-    investigationBrief,
-    options.capabilityId,
-    reportEffects,
-    status,
-    user,
-  ]);
+  const contract = useWorkspaceContract({
+    workspace: {
+      cwdPath: workspace.cwdPath,
+      files: workspace.files,
+      entries: workspace.entries,
+      workspaceContext: workspace.workspaceContext,
+      createDirectory: workspace.createDirectory,
+      changeDirectory: workspace.changeDirectory,
+      updateFilesystem: workspace.updateFilesystem,
+      getState: workspace.getState,
+    },
+    capabilityId: options.capabilityId,
+    capabilityTitle: options.capabilityTitle,
+    defaultGoal: options.defaultBrief,
+    defaultTab: options.defaultTab,
+    defaultExecutionMode: options.defaultExecutionMode ?? "interactive",
+    legacySnapshot,
+  });
 
   async function handleFiles(nextFiles: FileList | null) {
     if (!nextFiles?.length) {
@@ -145,8 +117,14 @@ export function useCapabilityFileWorkspace(options: {
 
   function handleRemoveEntry(entryId: string) {
     workspace.handleRemoveEntry(entryId);
-    setReportEffects([]);
+    contract.setReportEffects([]);
     setStatus("Removed the selected workspace entry.");
+  }
+
+  function syncToolCatalog(toolNames: string[]) {
+    workspace.updateFilesystem((filesystem) =>
+      syncWorkspaceToolCatalog(filesystem, options.capabilityId, toolNames),
+    );
   }
 
   return {
@@ -160,17 +138,24 @@ export function useCapabilityFileWorkspace(options: {
     appendFiles,
     status,
     setStatus,
-    investigationBrief,
-    setInvestigationBrief,
-    activeWorkspaceTab,
-    setActiveWorkspaceTab,
-    executionMode,
-    setExecutionMode,
-    reportEffects,
-    setReportEffects,
+    investigationBrief: contract.investigationBrief,
+    setInvestigationBrief: contract.setInvestigationBrief,
+    activeWorkspaceTab: contract.activeWorkspaceTab,
+    setActiveWorkspaceTab: contract.setActiveWorkspaceTab,
+    executionMode: contract.executionMode,
+    setExecutionMode: contract.setExecutionMode,
+    reportEffects: contract.reportEffects,
+    setReportEffects: contract.setReportEffects,
+    appendReportEffects: contract.appendReportEffects,
+    currentReportId: contract.currentReportId,
+    reportIds: contract.reportIds,
+    currentReport: contract.currentReport,
+    workspaceBootstrapMetadata: contract.bootstrapMetadata,
+    syncToolCatalog,
     handleFiles,
     handleRemoveEntry,
     createDirectory: workspace.createDirectory,
     changeDirectory: workspace.changeDirectory,
+    updateFilesystem: workspace.updateFilesystem,
   };
 }

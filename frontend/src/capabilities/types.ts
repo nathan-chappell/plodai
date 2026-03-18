@@ -3,7 +3,12 @@ import type { ClientEffect } from "../types/analysis";
 import type { ExecutionMode } from "../types/analysis";
 import type { JsonSchema } from "../types/json-schema";
 import type { LocalWorkspaceFile } from "../types/report";
-import type { WorkspaceBreadcrumb, WorkspaceContext, WorkspaceItem } from "../types/workspace";
+import type {
+  WorkspaceBreadcrumb,
+  WorkspaceContext,
+  WorkspaceFilesystem,
+  WorkspaceItem,
+} from "../types/workspace";
 
 export type FunctionToolDefinition = {
   type: "function";
@@ -85,10 +90,14 @@ export type CapabilityWorkspaceContext = {
   workspaceContext: WorkspaceContext;
   createDirectory: (path: string) => string;
   changeDirectory: (path: string) => string;
+  updateFilesystem: (
+    updater: (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem,
+  ) => void;
   getState: () => {
     cwdPath: string;
     files: LocalWorkspaceFile[];
     entries: WorkspaceItem[];
+    filesystem: WorkspaceFilesystem;
     workspaceContext: WorkspaceContext;
   };
 };

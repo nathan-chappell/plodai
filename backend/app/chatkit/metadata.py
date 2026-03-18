@@ -63,6 +63,20 @@ class WorkspaceContext(TypedDict):
     referenced_item_ids: list[str]
 
 
+class AgentsFileSummary(TypedDict):
+    path: str
+    present: bool
+    text: NotRequired[str | None]
+
+
+class WorkspaceBootstrapMetadata(TypedDict):
+    contract_version: Literal["v1"]
+    agents_file: AgentsFileSummary
+    current_goal: NotRequired[str | None]
+    current_report_id: NotRequired[str | None]
+    report_ids: list[str]
+
+
 class ThreadMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
@@ -75,6 +89,8 @@ class ThreadMetadataPatch(TypedDict, total=False):
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
     workspace_context: WorkspaceContext
+    workspace_bootstrap: WorkspaceBootstrapMetadata
+    workspace_contract_version: Literal["v1"]
     execution_mode: ExecutionMode
     origin: FeedbackOrigin
 
@@ -91,6 +107,8 @@ class AppThreadMetadata(TypedDict, total=False):
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
     workspace_context: WorkspaceContext
+    workspace_bootstrap: WorkspaceBootstrapMetadata
+    workspace_contract_version: Literal["v1"]
     execution_mode: ExecutionMode
     origin: FeedbackOrigin
 
@@ -338,6 +356,52 @@ def _normalize_workspace_context(raw_context: object) -> WorkspaceContext | None
     }
 
 
+def _normalize_workspace_bootstrap(
+    raw_bootstrap: object,
+) -> WorkspaceBootstrapMetadata | None:
+    if not isinstance(raw_bootstrap, dict):
+        return None
+
+    agents_file = raw_bootstrap.get("agents_file")
+    report_ids = raw_bootstrap.get("report_ids")
+    if (
+        raw_bootstrap.get("contract_version") != "v1"
+        or not isinstance(agents_file, dict)
+        or not isinstance(report_ids, list)
+    ):
+        return None
+
+    path = agents_file.get("path")
+    present = agents_file.get("present")
+    if not isinstance(path, str) or not isinstance(present, bool):
+        return None
+
+    metadata: WorkspaceBootstrapMetadata = {
+        "contract_version": "v1",
+        "agents_file": {
+            "path": path.strip(),
+            "present": present,
+        },
+        "report_ids": [
+            item.strip() for item in report_ids if isinstance(item, str) and item.strip()
+        ],
+    }
+
+    text = agents_file.get("text")
+    if isinstance(text, str):
+        metadata["agents_file"]["text"] = text
+
+    current_goal = raw_bootstrap.get("current_goal")
+    if isinstance(current_goal, str):
+        metadata["current_goal"] = current_goal.strip()
+
+    current_report_id = raw_bootstrap.get("current_report_id")
+    if isinstance(current_report_id, str):
+        metadata["current_report_id"] = current_report_id.strip()
+
+    return metadata
+
+
 def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if not isinstance(raw_metadata, dict):
         return {}
@@ -391,6 +455,15 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     workspace_context = _normalize_workspace_context(raw_metadata.get("workspace_context"))
     if workspace_context is not None:
         metadata["workspace_context"] = workspace_context
+
+    workspace_bootstrap = _normalize_workspace_bootstrap(
+        raw_metadata.get("workspace_bootstrap")
+    )
+    if workspace_bootstrap is not None:
+        metadata["workspace_bootstrap"] = workspace_bootstrap
+
+    if raw_metadata.get("workspace_contract_version") == "v1":
+        metadata["workspace_contract_version"] = "v1"
 
     execution_mode = _normalize_execution_mode(raw_metadata.get("execution_mode"))
     if execution_mode is not None:

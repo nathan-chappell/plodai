@@ -1,7 +1,7 @@
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
 import { ChatKitPaneMeta } from "./styles";
 import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
-import type { ClientEffect, ExecutionMode } from "../types/analysis";
+import type { AppThreadMetadata, ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 
 export function CapabilityDemoPane({
@@ -10,6 +10,7 @@ export function CapabilityDemoPane({
   error,
   capabilityBundle,
   files,
+  workspaceBootstrap,
   executionMode,
   onExecutionModeChange,
   clientTools,
@@ -21,6 +22,7 @@ export function CapabilityDemoPane({
   error: string | null;
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
+  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
   executionMode: ExecutionMode;
   onExecutionModeChange: (mode: ExecutionMode) => void;
   clientTools: CapabilityClientTool[];
@@ -64,6 +66,7 @@ export function CapabilityDemoPane({
         capabilityBundle={capabilityBundle}
         enabled={Boolean(scenario && files.length)}
         files={files}
+        workspaceBootstrap={workspaceBootstrap}
         investigationBrief={scenario?.summary ?? ""}
         clientTools={clientTools}
         executionMode={executionMode}

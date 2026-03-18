@@ -1176,6 +1176,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         request_surface_key = request_metadata.get("surface_key")
         request_bundle = request_metadata.get("capability_bundle")
         request_workspace_context = request_metadata.get("workspace_context")
+        request_workspace_bootstrap = request_metadata.get("workspace_bootstrap")
+        request_workspace_contract_version = request_metadata.get("workspace_contract_version")
         request_execution_mode = request_metadata.get("execution_mode")
         request_origin = request_metadata.get("origin")
         if request_surface_key and current_metadata.get("surface_key") != request_surface_key:
@@ -1189,6 +1191,17 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             and current_metadata.get("workspace_context") != request_workspace_context
         ):
             patch["workspace_context"] = request_workspace_context
+        if (
+            request_workspace_bootstrap is not None
+            and current_metadata.get("workspace_bootstrap") != request_workspace_bootstrap
+        ):
+            patch["workspace_bootstrap"] = request_workspace_bootstrap
+        if (
+            request_workspace_contract_version == "v1"
+            and current_metadata.get("workspace_contract_version")
+            != request_workspace_contract_version
+        ):
+            patch["workspace_contract_version"] = request_workspace_contract_version
         if (
             request_execution_mode in {"interactive", "batch"}
             and current_metadata.get("execution_mode") != request_execution_mode

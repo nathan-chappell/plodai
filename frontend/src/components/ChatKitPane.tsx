@@ -143,6 +143,7 @@ const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
 export function buildChatKitRequestMetadata(options: {
   capabilityBundle: CapabilityBundle;
   workspaceContext?: WorkspaceThreadContext;
+  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
   threadOrigin: FeedbackOrigin;
   executionMode: ExecutionMode;
 }): AppThreadMetadata {
@@ -153,6 +154,8 @@ export function buildChatKitRequestMetadata(options: {
         : options.capabilityBundle.root_capability_id,
     capability_bundle: options.capabilityBundle,
     workspace_context: options.workspaceContext,
+    workspace_bootstrap: options.workspaceBootstrap,
+    workspace_contract_version: options.workspaceBootstrap ? "v1" : undefined,
     execution_mode: options.executionMode,
     origin: options.threadOrigin,
   };
@@ -162,6 +165,7 @@ export function ChatKitHarness({
   capabilityBundle,
   files,
   workspaceContext,
+  workspaceBootstrap,
   executionMode,
   investigationBrief,
   onEffects,
@@ -180,6 +184,7 @@ export function ChatKitHarness({
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
   workspaceContext?: WorkspaceThreadContext;
+  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
   executionMode: ExecutionMode;
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
@@ -231,6 +236,7 @@ export function ChatKitHarness({
       buildChatKitRequestMetadata({
         capabilityBundle,
         workspaceContext,
+        workspaceBootstrap,
         threadOrigin,
         executionMode,
       }),
@@ -238,7 +244,7 @@ export function ChatKitHarness({
     return () => {
       setChatKitMetadataGetter(null);
     };
-  }, [capabilityBundle, executionMode, threadOrigin, workspaceContext]);
+  }, [capabilityBundle, executionMode, threadOrigin, workspaceBootstrap, workspaceContext]);
 
   useEffect(() => {
     const previousMode = lastExecutionModeRef.current;
@@ -606,6 +612,7 @@ export function ChatKitPane({
   enabled,
   files,
   workspaceContext,
+  workspaceBootstrap,
   executionMode,
   onExecutionModeChange,
   investigationBrief,
@@ -632,6 +639,7 @@ export function ChatKitPane({
   enabled: boolean;
   files: LocalWorkspaceFile[];
   workspaceContext?: WorkspaceThreadContext;
+  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
   executionMode: ExecutionMode;
   onExecutionModeChange: (mode: ExecutionMode) => void;
   investigationBrief: string;
@@ -694,6 +702,7 @@ export function ChatKitPane({
           capabilityBundle={capabilityBundle}
           files={files}
           workspaceContext={workspaceContext}
+          workspaceBootstrap={workspaceBootstrap}
           executionMode={executionMode}
           investigationBrief={investigationBrief}
           clientTools={clientTools}

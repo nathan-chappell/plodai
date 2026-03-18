@@ -151,17 +151,23 @@ export function ReportFoundryPage({
     changeDirectory,
     workspaceContext,
     getState,
+    updateFilesystem,
+    syncToolCatalog,
+    appendReportEffects,
+    reportIds,
+    workspaceBootstrapMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: reportAgentCapability.id,
+    capabilityTitle: reportAgentCapability.title,
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "report",
     allowedTabs: ["report", "demo"],
   });
-  const capabilityBundle = useMemo(() => buildReportAgentBundle(), []);
+  const capabilityBundle = useMemo(() => buildReportAgentBundle(reportIds), [reportIds]);
   const clientTools = useMemo<CapabilityClientTool[]>(
-    () => createReportFoundryClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, workspaceContext],
+    () => createReportFoundryClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
+    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
   );
   const {
     scenario: demoScenario,
@@ -192,6 +198,10 @@ export function ReportFoundryPage({
       onRemoveEntry: handleRemoveEntry,
     });
   }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+
+  useEffect(() => {
+    syncToolCatalog(clientTools.map((tool) => tool.name));
+  }, [clientTools, syncToolCatalog]);
 
   return (
     <>
@@ -270,11 +280,12 @@ export function ReportFoundryPage({
               enabled
               files={files}
               workspaceContext={workspaceContext}
+              workspaceBootstrap={workspaceBootstrapMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
-              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
             />
           </ReportChatColumn>
@@ -359,10 +370,11 @@ export function ReportFoundryPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
+              workspaceBootstrap={workspaceBootstrapMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
-              onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
+              onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
             />
           </ReportChatColumn>

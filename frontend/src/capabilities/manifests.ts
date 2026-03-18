@@ -164,12 +164,12 @@ export function buildWorkspaceAgentSpec(): CapabilityAgentSpec {
   };
 }
 
-export function buildReportAgentSpec(): CapabilityAgentSpec {
+export function buildReportAgentSpec(reportIds: readonly string[] = ["report-1"]): CapabilityAgentSpec {
   return {
     capability_id: "report-agent",
     agent_name: "Report Agent",
     instructions: REPORT_AGENT_INSTRUCTIONS,
-    client_tools: buildReportAgentClientToolCatalog(),
+    client_tools: buildReportAgentClientToolCatalog(reportIds),
     handoff_targets: [
       WORKSPACE_HANDOFF,
       {
@@ -228,11 +228,11 @@ export function buildPdfAgentBundle(): CapabilityBundle {
   };
 }
 
-export function buildReportAgentBundle(): CapabilityBundle {
+export function buildReportAgentBundle(reportIds: readonly string[] = ["report-1"]): CapabilityBundle {
   return {
     root_capability_id: "report-agent",
     capabilities: [
-      buildReportAgentSpec(),
+      buildReportAgentSpec(reportIds),
       buildCsvAgentSpec(),
       buildChartAgentSpec(),
       buildPdfAgentSpec(),

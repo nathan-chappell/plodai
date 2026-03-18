@@ -1,3 +1,5 @@
+import type { WorkspaceBootstrapMetadata } from "./workspace-contract";
+
 export type PrimitiveValue = string | number | boolean | null;
 export type DataRow = Record<string, PrimitiveValue>;
 
@@ -161,6 +163,8 @@ export type AppThreadMetadata = {
   surface_key?: string;
   capability_bundle?: CapabilityBundleMetadata;
   workspace_context?: WorkspaceThreadContext;
+  workspace_bootstrap?: WorkspaceBootstrapMetadata;
+  workspace_contract_version?: "v1";
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
   execution_mode?: ExecutionMode;
@@ -230,6 +234,18 @@ export type SmartSplitPdfToolArgs = {
   goal?: string;
 };
 
+export type ListReportsToolArgs = Record<string, never>;
+
+export type GetReportToolArgs = {
+  report_id: string;
+};
+
+export type AppendReportSectionToolArgs = {
+  report_id: string;
+  title: string;
+  markdown: string;
+};
+
 export type ClientToolArgsMap = {
   get_workspace_context: GetWorkspaceContextToolArgs;
   create_workspace_directory: CreateWorkspaceDirectoryToolArgs;
@@ -245,6 +261,9 @@ export type ClientToolArgsMap = {
   inspect_pdf_file: InspectPdfFileToolArgs;
   get_pdf_page_range: GetPdfPageRangeToolArgs;
   smart_split_pdf: SmartSplitPdfToolArgs;
+  list_reports: ListReportsToolArgs;
+  get_report: GetReportToolArgs;
+  append_report_section: AppendReportSectionToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;

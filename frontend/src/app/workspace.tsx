@@ -109,6 +109,7 @@ export function useWorkspaceSurface(options: {
     cwdPath: options.defaultCwdPath,
     files: [] as LocalWorkspaceFile[],
     entries: [] as WorkspaceItem[],
+    filesystem: createWorkspaceFilesystem(),
     workspaceContext: {
       cwd_path: options.defaultCwdPath,
       referenced_item_ids: [] as string[],
@@ -187,9 +188,10 @@ export function useWorkspaceSurface(options: {
       cwdPath: safeCwdPath,
       files,
       entries,
+      filesystem: resolvedFilesystem,
       workspaceContext,
     };
-  }, [entries, files, safeCwdPath, workspaceContext]);
+  }, [entries, files, resolvedFilesystem, safeCwdPath, workspaceContext]);
 
   function syncState(nextFilesystem: WorkspaceFilesystem, nextCwdPath: string) {
     let resolvedCwdPath = nextCwdPath;
@@ -202,6 +204,7 @@ export function useWorkspaceSurface(options: {
       cwdPath: resolvedCwdPath,
       files: listDirectoryFiles(nextFilesystem, resolvedCwdPath),
       entries: listDirectoryEntries(nextFilesystem, resolvedCwdPath),
+      filesystem: nextFilesystem,
       workspaceContext: getWorkspaceContext(nextFilesystem, resolvedCwdPath),
     };
   }
@@ -257,10 +260,19 @@ export function useWorkspaceSurface(options: {
     setCwdPath(resolveWorkspacePath(nextPath, safeCwdPath));
   }
 
+  function updateFilesystem(
+    updater: (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem,
+  ) {
+    const nextFilesystem = updater(resolvedFilesystem);
+    syncState(nextFilesystem, safeCwdPath);
+    setFilesystem(nextFilesystem);
+  }
+
   return {
     cwdPath: safeCwdPath,
     files,
     entries,
+    filesystem: resolvedFilesystem,
     breadcrumbs,
     workspaceContext,
     hydrated,
@@ -271,6 +283,7 @@ export function useWorkspaceSurface(options: {
     createDirectory,
     changeDirectory,
     setCwdPath: setCwdPathDirect,
+    updateFilesystem,
     getState: () => stateRef.current,
   };
 }
