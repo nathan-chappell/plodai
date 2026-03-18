@@ -3,24 +3,35 @@ import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-rea
 
 import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
 import {
-  recordFireTestClientToolCall,
-  recordFireTestEffectEvent,
-  recordFireTestFilesAppended,
-  recordFireTestStatus,
-  recordFireTestThreadId,
-} from "../lib/fire-test";
+  buildFeedbackSummaryMessage,
+  buildProvideFeedbackPrompt,
+  type FeedbackActionPayload,
+  type FeedbackOrigin,
+} from "../lib/chatkit-feedback";
+import { buildThreadMetadataUpdateAction } from "../lib/thread-metadata";
+import { devLogger } from "../lib/dev-logging";
+import { findChatKitScrollTarget, isNearScrollBottom } from "../lib/chatkit-autoscroll";
 import type { CapabilityBundle, CapabilityClientTool } from "../capabilities/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
   ChatKitPaneHarnessMeta,
   ChatKitPaneMeta,
+  ChatKitPaneModeButton,
+  ChatKitPaneModeRow,
   ChatKitPanePill,
   ChatKitPaneSurface,
   ChatKitPaneToolbar,
   ChatKitPaneToolbarButton,
 } from "./styles";
-import type { ClientEffect, ClientToolCall, ClientToolName } from "../types/analysis";
+import type {
+  AppThreadMetadata,
+  ClientEffect,
+  ClientToolCall,
+  ClientToolName,
+  ExecutionMode,
+  WorkspaceThreadContext,
+} from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 
 type ChatKitStarterPrompt = {
@@ -62,8 +73,19 @@ function slugifyLabel(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function scrollElementToBottom(element: HTMLElement): void {
+  element.scrollTop = element.scrollHeight;
+}
+
 function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
   switch (tool) {
+    case "get_workspace_context":
+    case "create_workspace_directory":
+    case "change_workspace_directory":
     case "list_workspace_files":
     case "list_attached_csv_files":
     case "list_chartable_files":
@@ -80,6 +102,7 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
     case "smart_split_pdf":
       return "document";
   }
+  return "cube";
 }
 
 function buildStarterPrompts(investigationBrief: string): readonly ChatKitStarterPrompt[] {
@@ -112,9 +135,34 @@ export type ChatKitQuickAction = {
   model?: string;
 };
 
+const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
+  interactive: "Interactive",
+  batch: "Batch",
+};
+
+export function buildChatKitRequestMetadata(options: {
+  capabilityBundle: CapabilityBundle;
+  workspaceContext?: WorkspaceThreadContext;
+  threadOrigin: FeedbackOrigin;
+  executionMode: ExecutionMode;
+}): AppThreadMetadata {
+  return {
+    surface_key:
+      typeof window !== "undefined"
+        ? window.location.pathname
+        : options.capabilityBundle.root_capability_id,
+    capability_bundle: options.capabilityBundle,
+    workspace_context: options.workspaceContext,
+    execution_mode: options.executionMode,
+    origin: options.threadOrigin,
+  };
+}
+
 export function ChatKitHarness({
   capabilityBundle,
   files,
+  workspaceContext,
+  executionMode,
   investigationBrief,
   onEffects,
   onFilesAdded,
@@ -124,21 +172,25 @@ export function ChatKitHarness({
   prompts,
   composerPlaceholder,
   quickActions,
+  threadOrigin = "interactive",
   colorScheme = "dark",
   showDictation = true,
   surfaceMinHeight,
 }: {
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
+  workspaceContext?: WorkspaceThreadContext;
+  executionMode: ExecutionMode;
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
-  onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
+  onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
   clientTools: CapabilityClientTool[];
   headerTitle?: string;
   greeting?: string;
   prompts?: readonly ChatKitStarterPrompt[];
   composerPlaceholder?: string;
   quickActions?: ChatKitQuickAction[];
+  threadOrigin?: FeedbackOrigin;
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
   surfaceMinHeight?: number;
@@ -150,6 +202,13 @@ export function ChatKitHarness({
   const onFilesAddedRef = useRef(onFilesAdded);
   const clientToolsRef = useRef(clientTools);
   const threadIdRef = useRef<string | null>(null);
+  const chatKitRef = useRef<ReturnType<typeof useChatKit> | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollEnabledRef = useRef(true);
+  const scrollTargetRef = useRef<HTMLElement | null>(null);
+  const cleanupScrollListenerRef = useRef<(() => void) | null>(null);
+  const pendingScrollFrameRef = useRef<number | null>(null);
+  const lastExecutionModeRef = useRef<ExecutionMode | null>(null);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -168,17 +227,79 @@ export function ChatKitHarness({
   }, [threadId]);
 
   useEffect(() => {
-    setChatKitMetadataGetter(() => ({
-      surface_key:
-        typeof window !== "undefined"
-          ? window.location.pathname
-          : capabilityBundle.root_capability_id,
-      capability_bundle: capabilityBundle,
-    }));
+    setChatKitMetadataGetter(() =>
+      buildChatKitRequestMetadata({
+        capabilityBundle,
+        workspaceContext,
+        threadOrigin,
+        executionMode,
+      }),
+    );
     return () => {
       setChatKitMetadataGetter(null);
     };
-  }, [capabilityBundle]);
+  }, [capabilityBundle, executionMode, threadOrigin, workspaceContext]);
+
+  useEffect(() => {
+    const previousMode = lastExecutionModeRef.current;
+    lastExecutionModeRef.current = executionMode;
+    if (!threadIdRef.current || previousMode === null || previousMode === executionMode) {
+      return;
+    }
+    void chatKitRef.current?.sendCustomAction(
+      buildThreadMetadataUpdateAction({
+        execution_mode: executionMode,
+      }),
+    );
+  }, [executionMode]);
+
+  function resolveScrollTarget(): HTMLElement | null {
+    const chatKitElement = chatKitRef.current?.ref.current;
+    const fallback = surfaceRef.current;
+    const nextTarget = chatKitElement ? findChatKitScrollTarget(chatKitElement, fallback) : fallback;
+    if (scrollTargetRef.current === nextTarget) {
+      return nextTarget;
+    }
+
+    cleanupScrollListenerRef.current?.();
+    scrollTargetRef.current = nextTarget ?? null;
+
+    if (!nextTarget) {
+      cleanupScrollListenerRef.current = null;
+      return null;
+    }
+
+    const handleScroll = () => {
+      autoScrollEnabledRef.current = isNearScrollBottom(nextTarget);
+    };
+
+    nextTarget.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    cleanupScrollListenerRef.current = () => {
+      nextTarget.removeEventListener("scroll", handleScroll);
+    };
+    return nextTarget;
+  }
+
+  function scheduleScrollToBottom(force = false): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (pendingScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingScrollFrameRef.current);
+    }
+    pendingScrollFrameRef.current = window.requestAnimationFrame(() => {
+      pendingScrollFrameRef.current = null;
+      const target = resolveScrollTarget();
+      if (!target) {
+        return;
+      }
+      if (!force && !autoScrollEnabledRef.current) {
+        return;
+      }
+      scrollElementToBottom(target);
+    });
+  }
 
   const rootCapability = useMemo(
     () =>
@@ -212,6 +333,9 @@ export function ChatKitHarness({
         showDelete: false,
         showRename: true,
       },
+      threadItemActions: {
+        feedback: false,
+      },
       header: {
         title: {
           enabled: true,
@@ -223,14 +347,25 @@ export function ChatKitHarness({
           greeting ??
           (files.length
             ? `Investigate ${files.length} attached file${files.length === 1 ? "" : "s"}.`
-            : "Add local files to start the investigation."),
+            : "Manage the workspace or add local files to start the investigation."),
         prompts: starterPrompts.map((prompt) => ({
           label: prompt.label,
           prompt: prompt.prompt,
           icon: prompt.icon,
         })),
       },
-      widgets: {},
+      widgets: {
+        onAction: async (action, widgetItem) => {
+          await chatKitRef.current?.sendCustomAction(action, widgetItem.id);
+          if (action.type !== "submit_feedback_details") {
+            return;
+          }
+          await chatKitRef.current?.sendUserMessage({
+            text: buildFeedbackSummaryMessage(action.payload as FeedbackActionPayload),
+            newThread: false,
+          });
+        },
+      },
       composer: {
         placeholder:
           composerPlaceholder ??
@@ -253,42 +388,105 @@ export function ChatKitHarness({
       },
       onReady: () => {
         setStatus("ChatKit ready.");
-        recordFireTestStatus("ChatKit ready.");
+        resolveScrollTarget();
+        scheduleScrollToBottom(true);
       },
       onResponseStart: () => {
         setRunning(true);
         setStatus("Agent run in progress.");
-        recordFireTestStatus("Agent run in progress.");
+        devLogger.responseStart({
+          capabilityId: capabilityBundle.root_capability_id,
+          fileCount: files.length,
+          running: true,
+          threadId: threadIdRef.current,
+        });
       },
       onResponseEnd: () => {
         setRunning(false);
         setStatus("Agent run finished.");
-        recordFireTestStatus("Agent run finished.");
+        scheduleScrollToBottom();
+        devLogger.responseEnd({
+          capabilityId: capabilityBundle.root_capability_id,
+          fileCount: files.length,
+          running: false,
+          threadId: threadIdRef.current,
+        });
       },
       onThreadChange: ({ threadId: nextThreadId }) => {
         setThreadId(nextThreadId);
-        recordFireTestThreadId(nextThreadId);
+        autoScrollEnabledRef.current = true;
+        resolveScrollTarget();
+        scheduleScrollToBottom(true);
+      },
+      onThreadLoadEnd: () => {
+        resolveScrollTarget();
+        scheduleScrollToBottom(true);
       },
       onClientTool: async ({ name, params }) => {
-        recordFireTestClientToolCall(name, (params as Record<string, unknown>) ?? {});
         const tool = clientToolsRef.current.find((candidate) => candidate.name === name);
         if (!tool) {
           throw new Error(`Unknown client tool: ${name}`);
         }
-        return tool.handler(params as ClientToolCall<ClientToolName>["arguments"], {
-          emitEffect: (effect) => onEffectsRef.current([effect]),
-          emitEffects: (effects) => {
-            if (effects.length) {
-              onEffectsRef.current(effects);
-            }
-          },
-          appendFiles: (nextFiles) => {
-            if (nextFiles.length) {
-              recordFireTestFilesAppended(nextFiles);
-              onFilesAddedRef.current?.(nextFiles);
-            }
-          },
+        const startedAt = nowMs();
+        let effectCount = 0;
+        let appendedFileCount = 0;
+        devLogger.clientToolStart({
+          capabilityId: capabilityBundle.root_capability_id,
+          fileCount: files.length,
+          threadId: threadIdRef.current,
+          toolName: name,
+          args: params,
         });
+        try {
+          const result = await tool.handler(params as ClientToolCall<ClientToolName>["arguments"], {
+            emitEffect: (effect) => {
+              effectCount += 1;
+              onEffectsRef.current([effect]);
+            },
+            emitEffects: (effects) => {
+              effectCount += effects.length;
+              if (effects.length) {
+                onEffectsRef.current(effects);
+              }
+            },
+            appendFiles: (nextFiles): LocalWorkspaceFile[] => {
+              appendedFileCount += nextFiles.length;
+              if (nextFiles.length) {
+                return onFilesAddedRef.current?.(nextFiles) ?? nextFiles;
+              }
+              return nextFiles;
+            },
+          });
+          const nextWorkspaceContext = extractWorkspaceContext(result);
+          if (nextWorkspaceContext && threadIdRef.current) {
+            await chatKitRef.current?.sendCustomAction(
+              buildThreadMetadataUpdateAction({
+                workspace_context: nextWorkspaceContext,
+              }),
+            );
+          }
+          devLogger.clientToolSuccess({
+            capabilityId: capabilityBundle.root_capability_id,
+            fileCount: files.length,
+            threadId: threadIdRef.current,
+            toolName: name,
+            durationMs: Math.round(nowMs() - startedAt),
+            effectCount,
+            appendedFileCount,
+            result,
+          });
+          return result;
+        } catch (error) {
+          devLogger.clientToolError({
+            capabilityId: capabilityBundle.root_capability_id,
+            fileCount: files.length,
+            threadId: threadIdRef.current,
+            toolName: name,
+            durationMs: Math.round(nowMs() - startedAt),
+            error,
+          });
+          throw error;
+        }
       },
       onEffect: (event) => {
         if (!event.data) {
@@ -301,7 +499,6 @@ export function ChatKitHarness({
         ) {
           return;
         }
-        recordFireTestEffectEvent(event.name, event.data as ClientEffect);
         onEffectsRef.current([event.data as ClientEffect]);
       },
     }),
@@ -309,21 +506,41 @@ export function ChatKitHarness({
       chatKitTools,
       colorScheme,
       composerPlaceholder,
+      capabilityBundle.root_capability_id,
+      executionMode,
       files.length,
       greeting,
       headerTitle,
       investigationBrief,
       showDictation,
       starterPrompts,
+      threadOrigin,
     ],
   );
 
   const chatKit = useChatKit(options);
 
+  useEffect(() => {
+    chatKitRef.current = chatKit;
+  }, [chatKit]);
+
+  useEffect(() => {
+    resolveScrollTarget();
+
+    return () => {
+      cleanupScrollListenerRef.current?.();
+      cleanupScrollListenerRef.current = null;
+      scrollTargetRef.current = null;
+      if (pendingScrollFrameRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(pendingScrollFrameRef.current);
+        pendingScrollFrameRef.current = null;
+      }
+    };
+  }, [chatKit]);
+
   async function handleQuickAction(action: ChatKitQuickAction) {
     const needsNewThread = !threadIdRef.current;
     setStatus(`Starting ${action.label.toLowerCase()}.`);
-    recordFireTestStatus(`Starting ${action.label.toLowerCase()}.`);
     await chatKit.sendUserMessage({
       text: action.prompt,
       model: action.model ?? CHATKIT_DEFAULT_MODEL_ID,
@@ -331,11 +548,22 @@ export function ChatKitHarness({
     });
   }
 
+  async function handleProvideFeedback() {
+    if (!threadIdRef.current) {
+      return;
+    }
+    setStatus("Starting feedback flow.");
+    await chatKit.sendUserMessage({
+      text: buildProvideFeedbackPrompt(),
+      newThread: false,
+    });
+  }
+
   return (
     <>
-      {quickActions?.length ? (
+      {quickActions?.length || threadId ? (
         <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
-          {quickActions.map((action) => (
+          {(quickActions ?? []).map((action) => (
             <ChatKitPaneToolbarButton
               key={action.label}
               data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
@@ -346,6 +574,14 @@ export function ChatKitHarness({
               {action.label}
             </ChatKitPaneToolbarButton>
           ))}
+          <ChatKitPaneToolbarButton
+            data-testid="chatkit-provide-feedback"
+            type="button"
+            onClick={() => void handleProvideFeedback()}
+            disabled={running || !threadId}
+          >
+            Provide feedback
+          </ChatKitPaneToolbarButton>
         </ChatKitPaneToolbar>
       ) : null}
       {status ? (
@@ -353,7 +589,12 @@ export function ChatKitHarness({
           {status}
         </ChatKitPaneHarnessMeta>
       ) : null}
-      <ChatKitPaneSurface $light={colorScheme === "light"} $minHeight={surfaceMinHeight} data-testid="chatkit-surface">
+      <ChatKitPaneSurface
+        ref={surfaceRef}
+        $light={colorScheme === "light"}
+        $minHeight={surfaceMinHeight}
+        data-testid="chatkit-surface"
+      >
         <ChatKit control={chatKit.control} />
       </ChatKitPaneSurface>
     </>
@@ -364,6 +605,9 @@ export function ChatKitPane({
   capabilityBundle,
   enabled,
   files,
+  workspaceContext,
+  executionMode,
+  onExecutionModeChange,
   investigationBrief,
   clientTools,
   onEffects,
@@ -373,6 +617,7 @@ export function ChatKitPane({
   prompts,
   composerPlaceholder,
   quickActions,
+  threadOrigin,
   colorScheme,
   showDictation,
   panePill,
@@ -386,15 +631,19 @@ export function ChatKitPane({
   capabilityBundle: CapabilityBundle;
   enabled: boolean;
   files: LocalWorkspaceFile[];
+  workspaceContext?: WorkspaceThreadContext;
+  executionMode: ExecutionMode;
+  onExecutionModeChange: (mode: ExecutionMode) => void;
   investigationBrief: string;
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
-  onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
+  onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
   headerTitle?: string;
   greeting?: string;
   prompts?: readonly ChatKitStarterPrompt[];
   composerPlaceholder?: string;
   quickActions?: ChatKitQuickAction[];
+  threadOrigin?: FeedbackOrigin;
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
   panePill?: string;
@@ -405,7 +654,7 @@ export function ChatKitPane({
   showDefaultModelMeta?: boolean;
   surfaceMinHeight?: number;
 }) {
-  const canInvestigate = enabled && files.length > 0;
+  const canInvestigate = enabled && (files.length > 0 || clientTools.length > 0);
   const resolvedMeta =
     paneMeta ??
     (canInvestigate
@@ -426,10 +675,26 @@ export function ChatKitPane({
       {showDefaultModelMeta ? (
         <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
       ) : null}
+      <ChatKitPaneModeRow>
+        <ChatKitPaneMeta>Run mode</ChatKitPaneMeta>
+        {(["interactive", "batch"] as const).map((mode) => (
+          <ChatKitPaneModeButton
+            key={mode}
+            type="button"
+            $active={executionMode === mode}
+            onClick={() => onExecutionModeChange(mode)}
+            data-testid={`chatkit-execution-mode-${mode}`}
+          >
+            {EXECUTION_MODE_LABELS[mode]}
+          </ChatKitPaneModeButton>
+        ))}
+      </ChatKitPaneModeRow>
       {canInvestigate ? (
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
           files={files}
+          workspaceContext={workspaceContext}
+          executionMode={executionMode}
           investigationBrief={investigationBrief}
           clientTools={clientTools}
           onEffects={onEffects}
@@ -439,6 +704,7 @@ export function ChatKitPane({
           prompts={prompts}
           composerPlaceholder={composerPlaceholder}
           quickActions={quickActions}
+          threadOrigin={threadOrigin}
           colorScheme={colorScheme}
           showDictation={showDictation}
           surfaceMinHeight={surfaceMinHeight}
@@ -452,4 +718,28 @@ export function ChatKitPane({
       )}
     </ChatKitPaneCard>
   );
+}
+
+function extractWorkspaceContext(result: unknown): WorkspaceThreadContext | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return null;
+  }
+
+  const rawWorkspaceContext = (result as { workspace_context?: unknown }).workspace_context;
+  if (!rawWorkspaceContext || typeof rawWorkspaceContext !== "object" || Array.isArray(rawWorkspaceContext)) {
+    return null;
+  }
+
+  const cwdPath = (rawWorkspaceContext as { cwd_path?: unknown }).cwd_path;
+  const referencedItemIds = (rawWorkspaceContext as { referenced_item_ids?: unknown }).referenced_item_ids;
+  if (typeof cwdPath !== "string" || !Array.isArray(referencedItemIds)) {
+    return null;
+  }
+
+  return {
+    cwd_path: cwdPath,
+    referenced_item_ids: referencedItemIds.filter(
+      (value): value is string => typeof value === "string" && Boolean(value),
+    ),
+  };
 }

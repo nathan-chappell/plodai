@@ -17,6 +17,7 @@ describe("capability demos", () => {
       expect(scenario.summary).toBeTruthy();
       expect(scenario.initialPrompt).toBeTruthy();
       expect(scenario.workspaceSeed.length).toBeGreaterThan(0);
+      expect(scenario.defaultExecutionMode).toBe("batch");
       expect(scenario.expectedOutcomes?.length ?? 0).toBeGreaterThan(0);
       expect(scenario.workspaceSeed.every((file) => file.id && file.name && file.kind)).toBe(true);
       expect(capabilityId).toBeTruthy();

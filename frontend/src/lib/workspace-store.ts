@@ -1,4 +1,5 @@
 import type { ClientEffect } from "../types/analysis";
+import type { ExecutionMode } from "../types/analysis";
 import type { LocalDataset, LocalWorkspaceFile } from "../types/report";
 import { readStoredValue, removeStoredValue, writeStoredValue } from "./kv-store";
 
@@ -11,10 +12,11 @@ export type ReportFoundryWorkspaceSnapshot = {
 };
 
 export type CapabilityWorkspaceSnapshot = {
-  files: LocalWorkspaceFile[];
+  files?: LocalWorkspaceFile[];
   status: string;
   investigationBrief: string;
   activeWorkspaceTab: string;
+  executionMode?: ExecutionMode;
   reportEffects: ClientEffect[];
 };
 

@@ -1,9 +1,12 @@
 import type {
+  ChangeWorkspaceDirectoryToolArgs,
   ClientEffect,
   ClientToolCall,
   ClientToolName,
+  CreateWorkspaceDirectoryToolArgs,
   CreateJsonFileToolArgs,
   DataRow,
+  GetWorkspaceContextToolArgs,
   ListLoadedDatasetsToolArgs,
   RenderChartFromFileToolArgs,
   RunLocalQueryToolArgs,
@@ -27,13 +30,60 @@ export async function executeClientTool<Name extends ClientToolName>(
   datasets: LoadedDataset[],
 ): Promise<ClientToolExecutionResult> {
   switch (toolCall.name) {
+    case "get_workspace_context": {
+      void (toolCall.arguments as GetWorkspaceContextToolArgs);
+      return {
+        payload: {
+          cwd_path: "/",
+          workspace_context: {
+            cwd_path: "/",
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
+        },
+        effects: [],
+      };
+    }
+    case "create_workspace_directory": {
+      const args = toolCall.arguments as CreateWorkspaceDirectoryToolArgs;
+      return {
+        payload: {
+          cwd_path: "/",
+          created_directory: { path: args.path },
+          workspace_context: {
+            cwd_path: "/",
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
+        },
+        effects: [],
+      };
+    }
+    case "change_workspace_directory": {
+      const args = toolCall.arguments as ChangeWorkspaceDirectoryToolArgs;
+      return {
+        payload: {
+          cwd_path: args.path,
+          changed_directory: { path: args.path },
+          workspace_context: {
+            cwd_path: args.path,
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
+        },
+        effects: [],
+      };
+    }
     case "list_workspace_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       return {
         payload: {
+          cwd_path: "/",
+          workspace_context: {
+            cwd_path: "/",
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
           files: datasets.map((dataset) => ({
             id: dataset.id,
             name: dataset.name,
+            path: `/${dataset.name}`,
             kind: "csv",
             extension: "csv",
             row_count: dataset.row_count,
@@ -44,6 +94,7 @@ export async function executeClientTool<Name extends ClientToolName>(
           csv_files: datasets.map((dataset) => ({
             id: dataset.id,
             name: dataset.name,
+            path: `/${dataset.name}`,
             row_count: dataset.row_count,
             columns: dataset.columns,
             numeric_columns: dataset.numeric_columns,
@@ -52,6 +103,7 @@ export async function executeClientTool<Name extends ClientToolName>(
           chartable_files: datasets.map((dataset) => ({
             id: dataset.id,
             name: dataset.name,
+            path: `/${dataset.name}`,
             kind: "csv",
             extension: "csv",
             row_count: dataset.row_count,
@@ -67,9 +119,15 @@ export async function executeClientTool<Name extends ClientToolName>(
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       return {
         payload: {
+          cwd_path: "/",
+          workspace_context: {
+            cwd_path: "/",
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
           csv_files: datasets.map((dataset) => ({
             id: dataset.id,
             name: dataset.name,
+            path: `/${dataset.name}`,
             row_count: dataset.row_count,
             columns: dataset.columns,
             numeric_columns: dataset.numeric_columns,
@@ -83,9 +141,15 @@ export async function executeClientTool<Name extends ClientToolName>(
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       return {
         payload: {
+          cwd_path: "/",
+          workspace_context: {
+            cwd_path: "/",
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
           chartable_files: datasets.map((dataset) => ({
             id: dataset.id,
             name: dataset.name,
+            path: `/${dataset.name}`,
             kind: "csv",
             extension: "csv",
             row_count: dataset.row_count,
@@ -117,9 +181,15 @@ export async function executeClientTool<Name extends ClientToolName>(
       const preview = parseJsonText(jsonText);
       return {
         payload: {
+          cwd_path: "/",
+          workspace_context: {
+            cwd_path: "/",
+            referenced_item_ids: datasets.map((dataset) => dataset.id),
+          },
           created_file: {
             id: "smoke-json",
             name: args.filename,
+            path: `/${args.filename}`,
             kind: "json",
             extension: "json",
             row_count: preview.rowCount,

@@ -1,9 +1,11 @@
 from typing import Literal, NotRequired, TypeAlias, TypeGuard, TypedDict
 
+from backend.app.chatkit.feedback_types import FeedbackOrigin
 from backend.app.chatkit.usage import ThreadUsageTotals, empty_usage_totals
 
 
 JsonSchemaPrimitive: TypeAlias = str | int | float | bool | None
+ExecutionMode: TypeAlias = Literal["interactive", "batch"]
 
 
 class JsonSchema(TypedDict, total=False):
@@ -56,6 +58,11 @@ class CapabilityBundle(TypedDict):
     capabilities: list[CapabilityAgentSpec]
 
 
+class WorkspaceContext(TypedDict):
+    cwd_path: str
+    referenced_item_ids: list[str]
+
+
 class ThreadMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
@@ -67,6 +74,9 @@ class ThreadMetadataPatch(TypedDict, total=False):
     openai_previous_response_id: str
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
+    workspace_context: WorkspaceContext
+    execution_mode: ExecutionMode
+    origin: FeedbackOrigin
 
 
 class AppThreadMetadata(TypedDict, total=False):
@@ -80,6 +90,9 @@ class AppThreadMetadata(TypedDict, total=False):
     openai_previous_response_id: str
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
+    workspace_context: WorkspaceContext
+    execution_mode: ExecutionMode
+    origin: FeedbackOrigin
 
 
 def _normalize_usage(raw_usage: object) -> ThreadUsageTotals | None:
@@ -298,6 +311,33 @@ def _normalize_capability_bundle(raw_bundle: object) -> CapabilityBundle | None:
     }
 
 
+def _normalize_execution_mode(raw_mode: object) -> ExecutionMode | None:
+    if raw_mode in {"interactive", "batch"}:
+        return raw_mode
+    return None
+
+
+def _normalize_workspace_context(raw_context: object) -> WorkspaceContext | None:
+    if not isinstance(raw_context, dict):
+        return None
+
+    cwd_path = raw_context.get("cwd_path")
+    referenced_item_ids = raw_context.get("referenced_item_ids")
+    if not isinstance(cwd_path, str) or not cwd_path.strip():
+        return None
+    if not isinstance(referenced_item_ids, list):
+        return None
+
+    return {
+        "cwd_path": cwd_path.strip(),
+        "referenced_item_ids": [
+            item.strip()
+            for item in referenced_item_ids
+            if isinstance(item, str) and item.strip()
+        ],
+    }
+
+
 def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if not isinstance(raw_metadata, dict):
         return {}
@@ -340,9 +380,21 @@ def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if isinstance(surface_key, str) and surface_key.strip():
         metadata["surface_key"] = surface_key.strip()
 
+    origin = raw_metadata.get("origin")
+    if origin in {"interactive", "ui_integration_test"}:
+        metadata["origin"] = origin
+
     capability_bundle = _normalize_capability_bundle(raw_metadata.get("capability_bundle"))
     if capability_bundle is not None:
         metadata["capability_bundle"] = capability_bundle
+
+    workspace_context = _normalize_workspace_context(raw_metadata.get("workspace_context"))
+    if workspace_context is not None:
+        metadata["workspace_context"] = workspace_context
+
+    execution_mode = _normalize_execution_mode(raw_metadata.get("execution_mode"))
+    if execution_mode is not None:
+        metadata["execution_mode"] = execution_mode
 
     usage = _normalize_usage(raw_metadata.get("usage"))
     if usage is not None:

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { adminUsersCapability } from "./definitions";
 import {
   CapabilityHeroRow,
   CapabilityHeader,
@@ -13,21 +14,10 @@ import {
   CapabilityTitle,
   CapabilityEyebrow,
 } from "./styles";
-import type { CapabilityDefinition } from "./types";
 import { AdminCreditsPanel } from "../components/AdminCreditsPanel";
 import { AuthPanel } from "../components/AuthPanel";
 
 type AdminUsersTab = "users";
-
-export const adminUsersCapability: CapabilityDefinition = {
-  id: "admin-users",
-  path: "/capabilities/admin-users",
-  navLabel: "Admin capabilities",
-  title: "User Management",
-  eyebrow: "Admin",
-  description: "Manage activation and credits.",
-  tabs: [{ id: "users", label: "Users", visible: ({ role }) => role === "admin" }],
-};
 
 export function AdminUsersPage() {
   const [activeTab, setActiveTab] = useState<AdminUsersTab>("users");

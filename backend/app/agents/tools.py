@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Sequence, cast
 from uuid import uuid4
@@ -11,18 +12,34 @@ from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import ChartPlan
 from backend.app.agents.widgets import (
+    build_feedback_capture_copy_text,
+    build_feedback_capture_widget,
     build_plan_copy_text,
     build_plan_widget,
     build_tool_trace_copy_text,
     build_tool_trace_widget,
 )
+from backend.app.chatkit.feedback_types import ChatItemFeedbackRecord, FeedbackOrigin
 from backend.app.chatkit.metadata import AgentPlan
-from backend.app.core.logging import get_logger, summarize_for_log
+from backend.app.core.logging import (
+    get_logger,
+    log_event,
+    summarize_mapping_keys_for_log,
+    summarize_sequence_for_log,
+)
+from backend.app.models.chatkit import ChatItemFeedback
 
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
-AgentRole = Literal["csv-agent", "chart-agent", "pdf-agent", "report-agent"]
+AgentRole = Literal[
+    "csv-agent",
+    "chart-agent",
+    "pdf-agent",
+    "report-agent",
+    "workspace-agent",
+    "feedback-agent",
+]
 
 
 def _log_tool_start(
@@ -30,11 +47,14 @@ def _log_tool_start(
     tool_name: str,
     **details: object,
 ) -> None:
-    detail_text = " ".join(
-        f"{key}={summarize_for_log(value)}" for key, value in details.items()
-    )
-    logger.info(
-        f"tool.start name={tool_name} report_id={context.report_id} user_id={context.user_id} {detail_text}"
+    log_event(
+        logger,
+        logging.INFO,
+        "tool.start",
+        report_id=context.report_id,
+        user_id=context.user_id,
+        tool_name=tool_name,
+        **details,
     )
 
 
@@ -43,11 +63,14 @@ def _log_tool_end(
     tool_name: str,
     **details: object,
 ) -> None:
-    detail_text = " ".join(
-        f"{key}={summarize_for_log(value)}" for key, value in details.items()
-    )
-    logger.info(
-        f"tool.end name={tool_name} report_id={context.report_id} user_id={context.user_id} {detail_text}"
+    log_event(
+        logger,
+        logging.INFO,
+        "tool.end",
+        report_id=context.report_id,
+        user_id=context.user_id,
+        tool_name=tool_name,
+        **details,
     )
 
 
@@ -74,6 +97,21 @@ def _summarize_client_tool_request(
     tool_name: str,
     arguments: Mapping[str, object],
 ) -> tuple[str, list[str]]:
+    if tool_name == "get_workspace_context":
+        return ("Queued a workspace context request.", ["Inspecting the current working directory."])
+
+    if tool_name == "create_workspace_directory":
+        return (
+            "Queued a workspace directory creation.",
+            [f"Path: {arguments.get('path') or 'unknown'}"],
+        )
+
+    if tool_name == "change_workspace_directory":
+        return (
+            "Queued a workspace directory change.",
+            [f"Path: {arguments.get('path') or 'unknown'}"],
+        )
+
     if tool_name in {"list_workspace_files", "list_attached_csv_files", "list_chartable_files"}:
         include_samples = arguments.get("includeSamples")
         return (
@@ -160,6 +198,27 @@ async def _stream_tool_trace_widget(
     )
 
 
+async def _latest_assistant_item_ids(ctx: ChatKitToolContext) -> list[str]:
+    page = await ctx.context.store.load_thread_items(
+        ctx.context.thread.id,
+        after=None,
+        limit=40,
+        order="desc",
+        context=ctx.context.request_context,
+    )
+    for item in page.data:
+        if item.type == "assistant_message":
+            return [item.id]
+    return []
+
+
+def _normalized_feedback_origin(context: ReportAgentContext) -> FeedbackOrigin:
+    origin = context.thread_metadata.get("origin")
+    if origin in {"interactive", "ui_integration_test"}:
+        return cast(FeedbackOrigin, origin)
+    return "interactive"
+
+
 def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool:
     tool_name = str(tool_definition.get("name", "")).strip()
     if not tool_name:
@@ -185,7 +244,12 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
             raise ValueError(
                 f"Client tool {tool_name} expects object arguments, got {type(arguments).__name__}."
             )
-        _log_tool_start(request_context, tool_name, mode="client_proxy")
+        _log_tool_start(
+            request_context,
+            tool_name,
+            mode="client_proxy",
+            argument_keys=summarize_mapping_keys_for_log(arguments) or "none",
+        )
         await ctx.context.stream(
             ProgressUpdateEvent(text=f"Requesting client tool {tool_name}.")
         )
@@ -236,7 +300,11 @@ def build_agent_tools(
         """Rename the current thread to a concise, descriptive title for the current investigation."""
         request_context = ctx.context.request_context
         cleaned_title = title.strip()
-        _log_tool_start(request_context, "name_current_thread", title=cleaned_title)
+        _log_tool_start(
+            request_context,
+            "name_current_thread",
+            title_chars=len(cleaned_title),
+        )
         request_context.thread_metadata["title"] = cleaned_title
         ctx.context.thread.title = cleaned_title
         ctx.context.thread.metadata = dict(request_context.thread_metadata)
@@ -253,7 +321,11 @@ def build_agent_tools(
             "thread_title": cleaned_title,
             "report_id": request_context.report_id,
         }
-        _log_tool_end(request_context, "name_current_thread", title=cleaned_title)
+        _log_tool_end(
+            request_context,
+            "name_current_thread",
+            title_chars=len(cleaned_title),
+        )
         return result
 
     @function_tool(name_override="make_plan")
@@ -277,10 +349,10 @@ def build_agent_tools(
         _log_tool_start(
             request_context,
             "make_plan",
-            focus=cleaned_focus,
+            focus_chars=len(cleaned_focus),
             planned_steps=len(cleaned_steps),
             success_criteria=len(cleaned_success_criteria),
-            follow_on_tool_hints=len(cleaned_follow_on_tool_hints),
+            follow_on_tool_hints=summarize_sequence_for_log(cleaned_follow_on_tool_hints),
         )
         plan: AgentPlan = {
             "id": f"plan_{uuid4().hex}",
@@ -330,7 +402,7 @@ def build_agent_tools(
             _log_tool_start(
                 request_context,
                 "append_report_section",
-                title=title,
+                title_chars=len(title.strip()),
                 markdown_chars=len(markdown),
             )
             await ctx.context.stream(
@@ -360,12 +432,86 @@ def build_agent_tools(
             _log_tool_end(
                 request_context,
                 "append_report_section",
-                title=title,
+                title_chars=len(title.strip()),
                 markdown_chars=len(markdown),
             )
             return result
 
         tools.append(append_report_section_tool)
+
+    if capability_id == "feedback-agent":
+
+        @function_tool(name_override="start_feedback_capture_for_latest_response")
+        async def start_feedback_capture_for_latest_response_tool(
+            ctx: ChatKitToolContext,
+            kind: Literal["positive", "negative"] | None = None,
+            label: Literal["ui", "tools", "behavior"] | None = None,
+            message: str | None = None,
+        ) -> dict[str, object]:
+            """Create a feedback draft for the latest assistant response and show a feedback widget in the thread."""
+            request_context = ctx.context.request_context
+            item_ids = await _latest_assistant_item_ids(ctx)
+            if not item_ids:
+                raise ValueError(
+                    "There is no assistant response in this thread yet to attach feedback to."
+                )
+            cleaned_message = message.strip() if isinstance(message, str) and message.strip() else None
+            feedback = ChatItemFeedback(
+                id=f"fb_{uuid4().hex}",
+                thread_id=ctx.context.thread.id,
+                item_ids_json=item_ids,
+                user_email=(
+                    request_context.user_email.strip().lower()
+                    if isinstance(request_context.user_email, str)
+                    and request_context.user_email.strip()
+                    else None
+                ),
+                kind=kind,
+                label=label,
+                message=cleaned_message,
+                origin=_normalized_feedback_origin(request_context),
+            )
+            request_context.db.add(feedback)
+            await request_context.db.commit()
+            record = ChatItemFeedbackRecord(
+                id=feedback.id,
+                thread_id=feedback.thread_id,
+                item_ids=list(feedback.item_ids_json),
+                user_email=feedback.user_email,
+                kind=feedback.kind,
+                label=feedback.label,
+                message=feedback.message,
+                origin=feedback.origin,
+            )
+            _log_tool_start(
+                request_context,
+                "start_feedback_capture_for_latest_response",
+                item_ids=summarize_sequence_for_log(item_ids),
+                kind=kind,
+                label=label,
+            )
+            await ctx.context.stream(
+                ProgressUpdateEvent(
+                    text="Opening a structured feedback form for the latest assistant response."
+                )
+            )
+            await ctx.context.stream_widget(
+                build_feedback_capture_widget(record),
+                copy_text=build_feedback_capture_copy_text(record),
+            )
+            _log_tool_end(
+                request_context,
+                "start_feedback_capture_for_latest_response",
+                feedback_id=feedback.id,
+                item_ids=summarize_sequence_for_log(item_ids),
+            )
+            return {
+                "feedback_id": feedback.id,
+                "thread_id": feedback.thread_id,
+                "item_ids": item_ids,
+            }
+
+        tools.append(start_feedback_capture_for_latest_response_tool)
 
     if context.available_datasets:
         dataset_ids = tuple(dataset.id for dataset in context.available_datasets)

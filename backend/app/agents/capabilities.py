@@ -6,4 +6,6 @@ AgentCapability: TypeAlias = Literal[
     "csv-agent",
     "chart-agent",
     "pdf-agent",
+    "workspace-agent",
+    "feedback-agent",
 ]

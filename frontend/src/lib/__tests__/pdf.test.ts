@@ -3,6 +3,7 @@ import { PDFDocument } from "pdf-lib";
 
 import {
   base64ToUint8Array,
+  buildSmartSplitPlan,
   buildSubPdfFilename,
   extractPdfPageRangeFromBytes,
   inspectPdfBytes,
@@ -59,5 +60,56 @@ describe("pdf helpers", () => {
     expect(split.extractedFiles.length).toBe(split.plan.length);
     expect(split.archiveName).toBe("deck__smart_split.zip");
     expect(split.archiveBase64.length).toBeGreaterThan(0);
+  });
+
+  it("prefers section boundaries when the PDF clearly exposes them", () => {
+    const plan = buildSmartSplitPlan({
+      pageCount: 3,
+      outline: ["Executive Summary", "Revenue Highlights", "Operations Notes"],
+      pageHints: [
+        {
+          pageNumber: 1,
+          titleCandidate: "Executive Summary",
+          summary: "Quarterly summary for leadership.",
+        },
+        {
+          pageNumber: 2,
+          titleCandidate: "Revenue Highlights",
+          summary: "West revenue accelerated sharply this quarter.",
+        },
+        {
+          pageNumber: 3,
+          titleCandidate: "Operations Notes",
+          summary: "Support volume increased in February before normalizing.",
+        },
+      ],
+    });
+
+    expect(plan).toEqual([
+      expect.objectContaining({ title: "Executive Summary", startPage: 1, endPage: 1 }),
+      expect.objectContaining({ title: "Revenue Highlights", startPage: 2, endPage: 2 }),
+      expect.objectContaining({ title: "Operations Notes", startPage: 3, endPage: 3 }),
+    ]);
+  });
+
+  it("falls back to chunking when structural signals are weak", () => {
+    const plan = buildSmartSplitPlan({
+      pageCount: 6,
+      outline: [],
+      pageHints: [
+        { pageNumber: 1, titleCandidate: "Section 1", summary: "" },
+        { pageNumber: 2, titleCandidate: "Section 2", summary: "" },
+        { pageNumber: 3, titleCandidate: "Section 3", summary: "" },
+        { pageNumber: 4, titleCandidate: "Section 4", summary: "" },
+        { pageNumber: 5, titleCandidate: "Section 5", summary: "" },
+        { pageNumber: 6, titleCandidate: "Section 6", summary: "" },
+      ],
+    });
+
+    expect(plan).toEqual([
+      expect.objectContaining({ startPage: 1, endPage: 2 }),
+      expect.objectContaining({ startPage: 3, endPage: 4 }),
+      expect.objectContaining({ startPage: 5, endPage: 6 }),
+    ]);
   });
 });

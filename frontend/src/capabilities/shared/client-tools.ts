@@ -9,9 +9,12 @@ import {
   smartSplitPdfBytes,
 } from "../../lib/pdf";
 import {
+  changeWorkspaceDirectoryToolSchema,
   createCsvFileToolSchema,
   createJsonFileToolSchema,
+  createWorkspaceDirectoryToolSchema,
   getPdfPageRangeToolSchema,
+  getWorkspaceContextToolSchema,
   includeSamplesSchema,
   inspectChartableFileSchemaToolSchema,
   inspectPdfFileToolSchema,
@@ -34,15 +37,19 @@ import type {
   FunctionToolDefinition,
 } from "../types";
 import type {
+  ChangeWorkspaceDirectoryToolArgs,
   ClientEffect,
   CreateCsvFileToolArgs,
   CreateJsonFileToolArgs,
+  CreateWorkspaceDirectoryToolArgs,
   DataRow,
   GetPdfPageRangeToolArgs,
+  GetWorkspaceContextToolArgs,
   InspectChartableFileSchemaToolArgs,
   InspectPdfFileToolArgs,
   ListLoadedDatasetsToolArgs,
   ListWorkspaceFilesToolArgs,
+  PdfSmartSplitEffect,
   RenderChartFromFileToolArgs,
   RunLocalQueryToolArgs,
   SmartSplitEntry,
@@ -56,6 +63,101 @@ import type {
   LocalPdfFile,
   LocalWorkspaceFile,
 } from "../../types/report";
+import type { WorkspaceDirectoryNode, WorkspaceFileNode, WorkspaceItem } from "../../types/workspace";
+
+function readWorkspaceState(workspace: CapabilityWorkspaceContext) {
+  return workspace.getState();
+}
+
+function currentDirectoryFileNodes(workspace: CapabilityWorkspaceContext): WorkspaceFileNode[] {
+  return readWorkspaceState(workspace).entries.filter((entry): entry is WorkspaceFileNode => entry.kind === "file");
+}
+
+function currentDirectoryNodes(workspace: CapabilityWorkspaceContext): WorkspaceItem[] {
+  return readWorkspaceState(workspace).entries;
+}
+
+function summarizeWorkspaceFileNode(
+  fileNode: WorkspaceFileNode,
+  options: { includeSamples?: boolean } = {},
+): Record<string, unknown> {
+  return {
+    ...summarizeWorkspaceFiles([fileNode.file], { includeSamples: options.includeSamples })[0],
+    path: fileNode.path,
+  };
+}
+
+function summarizeCsvFileNode(
+  fileNode: WorkspaceFileNode,
+  includeSamples: boolean,
+): Record<string, unknown> {
+  const file = fileNode.file;
+  if (file.kind !== "csv") {
+    throw new Error(`File ${file.name} is not a CSV dataset.`);
+  }
+  return {
+    id: file.id,
+    name: file.name,
+    path: fileNode.path,
+    row_count: file.row_count,
+    columns: file.columns,
+    numeric_columns: file.numeric_columns,
+    sample_rows: includeSamples ? file.sample_rows : [],
+  };
+}
+
+function summarizeChartableFileNode(
+  fileNode: WorkspaceFileNode,
+  includeSamples: boolean,
+): Record<string, unknown> {
+  const file = fileNode.file;
+  if (file.kind !== "csv" && file.kind !== "json") {
+    throw new Error(`File ${file.name} is not chartable.`);
+  }
+  return {
+    id: file.id,
+    name: file.name,
+    path: fileNode.path,
+    kind: file.kind,
+    extension: file.extension,
+    row_count: file.row_count,
+    columns: file.columns,
+    numeric_columns: file.numeric_columns,
+    sample_rows: includeSamples ? file.sample_rows : [],
+  };
+}
+
+function summarizeDirectory(directory: WorkspaceDirectoryNode): Record<string, unknown> {
+  return {
+    id: directory.id,
+    name: directory.name || "/",
+    kind: "directory",
+    path: directory.path,
+  };
+}
+
+function buildWorkspaceSnapshotPayload(
+  workspace: CapabilityWorkspaceContext,
+  options: { includeSamples?: boolean } = {},
+): Record<string, unknown> {
+  const state = readWorkspaceState(workspace);
+  const includeSamples = options.includeSamples ?? true;
+  const fileNodes = state.entries.filter((entry): entry is WorkspaceFileNode => entry.kind === "file");
+  const csvFileNodes = fileNodes.filter((entry) => entry.file.kind === "csv");
+  const chartableFileNodes = fileNodes.filter(
+    (entry) => entry.file.kind === "csv" || entry.file.kind === "json",
+  );
+  return {
+    cwd_path: state.cwdPath,
+    workspace_context: state.workspaceContext,
+    directories: state.entries
+      .filter((entry): entry is WorkspaceDirectoryNode => entry.kind === "directory")
+      .map(summarizeDirectory),
+    files: fileNodes.map((fileNode) => summarizeWorkspaceFileNode(fileNode, { includeSamples })),
+    csv_files: csvFileNodes.map((fileNode) => summarizeCsvFileNode(fileNode, includeSamples)),
+    chartable_files: chartableFileNodes.map((fileNode) => summarizeChartableFileNode(fileNode, includeSamples)),
+  };
+}
 
 function findDataset(files: LocalWorkspaceFile[], datasetId: string): LocalDataset {
   const file = findWorkspaceFile(files, datasetId);
@@ -83,69 +185,83 @@ function ensureJsonFilename(filename: string): string {
   return trimmed.toLowerCase().endsWith(".json") ? trimmed : `${trimmed}.json`;
 }
 
+async function getWorkspaceContextTool(
+  _args: GetWorkspaceContextToolArgs,
+  workspace: CapabilityWorkspaceContext,
+): Promise<Record<string, unknown>> {
+  return buildWorkspaceSnapshotPayload(workspace, { includeSamples: true });
+}
+
+async function createWorkspaceDirectoryTool(
+  args: CreateWorkspaceDirectoryToolArgs,
+  workspace: CapabilityWorkspaceContext,
+): Promise<Record<string, unknown>> {
+  const createdPath = workspace.createDirectory(args.path);
+  const state = readWorkspaceState(workspace);
+  const createdDirectory = currentDirectoryNodes(workspace).find(
+    (entry): entry is WorkspaceDirectoryNode => entry.kind === "directory" && entry.path === createdPath,
+  );
+  return {
+    ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: false }),
+    created_directory: createdDirectory ? summarizeDirectory(createdDirectory) : { path: createdPath },
+    workspace_operation: {
+      kind: "create_directory",
+      target_path: createdPath,
+      cwd_path: state.cwdPath,
+    },
+  };
+}
+
+async function changeWorkspaceDirectoryTool(
+  args: ChangeWorkspaceDirectoryToolArgs,
+  workspace: CapabilityWorkspaceContext,
+): Promise<Record<string, unknown>> {
+  const cwdPath = workspace.changeDirectory(args.path);
+  return {
+    ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
+    changed_directory: { path: cwdPath },
+    workspace_operation: {
+      kind: "change_directory",
+      target_path: cwdPath,
+      cwd_path: cwdPath,
+    },
+  };
+}
+
 async function listWorkspaceFilesTool(
   args: ListWorkspaceFilesToolArgs,
-  files: LocalWorkspaceFile[],
+  workspace: CapabilityWorkspaceContext,
 ): Promise<Record<string, unknown>> {
-  const csvFiles = getCsvFiles(files);
-  const chartableFiles = getChartableFiles(files);
-  return {
-    files: summarizeWorkspaceFiles(files, { includeSamples: args.includeSamples }),
-    csv_files: csvFiles.map((file) => ({
-      id: file.id,
-      name: file.name,
-      row_count: file.row_count,
-      columns: file.columns,
-      numeric_columns: file.numeric_columns,
-      sample_rows: args.includeSamples ? file.sample_rows : [],
-    })),
-    chartable_files: chartableFiles.map((file) => ({
-      id: file.id,
-      name: file.name,
-      kind: file.kind,
-      extension: file.extension,
-      row_count: file.row_count,
-      columns: file.columns,
-      numeric_columns: file.numeric_columns,
-      sample_rows: args.includeSamples ? file.sample_rows : [],
-    })),
-  };
+  return buildWorkspaceSnapshotPayload(workspace, { includeSamples: args.includeSamples });
 }
 
 async function listAttachedCsvFilesTool(
   args: ListLoadedDatasetsToolArgs,
-  files: LocalWorkspaceFile[],
+  workspace: CapabilityWorkspaceContext,
 ): Promise<Record<string, unknown>> {
-  const datasets = getCsvFiles(files);
+  const includeSamples = args.includeSamples ?? true;
+  const csvFiles = currentDirectoryFileNodes(workspace).filter((entry) => entry.file.kind === "csv");
   return {
-    csv_files: datasets.map((dataset) => ({
-      id: dataset.id,
-      name: dataset.name,
-      row_count: dataset.row_count,
-      columns: dataset.columns,
-      numeric_columns: dataset.numeric_columns,
-      sample_rows: args.includeSamples ? dataset.sample_rows : [],
-    })),
+    cwd_path: readWorkspaceState(workspace).cwdPath,
+    workspace_context: readWorkspaceState(workspace).workspaceContext,
+    csv_files: csvFiles.map((fileNode) => summarizeCsvFileNode(fileNode, includeSamples)),
+    files: csvFiles.map((fileNode) => summarizeWorkspaceFileNode(fileNode, { includeSamples })),
   };
 }
 
 async function listChartableFilesTool(
   args: ListWorkspaceFilesToolArgs,
-  files: LocalWorkspaceFile[],
+  workspace: CapabilityWorkspaceContext,
 ): Promise<Record<string, unknown>> {
-  const chartableFiles = getChartableFiles(files);
+  const includeSamples = args.includeSamples ?? true;
+  const fileNodes = currentDirectoryFileNodes(workspace).filter(
+    (entry) => entry.file.kind === "csv" || entry.file.kind === "json",
+  );
   return {
-    chartable_files: chartableFiles.map((file) => ({
-      id: file.id,
-      name: file.name,
-      kind: file.kind,
-      extension: file.extension,
-      row_count: file.row_count,
-      columns: file.columns,
-      numeric_columns: file.numeric_columns,
-      sample_rows: args.includeSamples ? file.sample_rows : [],
-    })),
-    files: summarizeWorkspaceFiles(chartableFiles, { includeSamples: args.includeSamples }),
+    cwd_path: readWorkspaceState(workspace).cwdPath,
+    workspace_context: readWorkspaceState(workspace).workspaceContext,
+    chartable_files: fileNodes.map((fileNode) => summarizeChartableFileNode(fileNode, includeSamples)),
+    files: fileNodes.map((fileNode) => summarizeWorkspaceFileNode(fileNode, { includeSamples })),
   };
 }
 
@@ -180,14 +296,14 @@ async function runAggregateQueryTool(
 async function createCsvFileTool(
   args: CreateCsvFileToolArgs,
   files: LocalWorkspaceFile[],
-): Promise<{ payload: Record<string, unknown>; file: LocalDataset }> {
+): Promise<LocalDataset> {
   const dataset = findDataset(files, args.query_plan.dataset_id);
   const rows = (dataset.rows as DataRow[]) ?? dataset.sample_rows;
   const resultRows = await executeQueryPlanInWorker(rows, args.query_plan);
   const csvText = rowsToCsv(resultRows);
   const preview = parseCsvText(csvText);
   const filename = ensureCsvFilename(args.filename);
-  const nextFile: LocalDataset = {
+  return {
     id: crypto.randomUUID(),
     name: filename,
     kind: "csv",
@@ -201,26 +317,19 @@ async function createCsvFileTool(
     rows: preview.rows,
     preview_rows: preview.previewRows,
   };
-  return {
-    payload: {
-      created_file: summarizeWorkspaceFiles([nextFile], { includeSamples: true })[0],
-      row_count: resultRows.length,
-    },
-    file: nextFile,
-  };
 }
 
 async function createJsonFileTool(
   args: CreateJsonFileToolArgs,
   files: LocalWorkspaceFile[],
-): Promise<{ payload: Record<string, unknown>; file: LocalJsonFile }> {
+): Promise<LocalJsonFile> {
   const dataset = findDataset(files, args.query_plan.dataset_id);
   const rows = (dataset.rows as DataRow[]) ?? dataset.sample_rows;
   const resultRows = await executeQueryPlanInWorker(rows, args.query_plan);
   const jsonText = rowsToJson(resultRows);
   const preview = parseJsonText(jsonText);
   const filename = ensureJsonFilename(args.filename);
-  const nextFile: LocalJsonFile = {
+  return {
     id: crypto.randomUUID(),
     name: filename,
     kind: "json",
@@ -234,13 +343,6 @@ async function createJsonFileTool(
     rows: preview.rows,
     preview_rows: preview.previewRows,
     json_text: preview.jsonText,
-  };
-  return {
-    payload: {
-      created_file: summarizeWorkspaceFiles([nextFile], { includeSamples: true })[0],
-      row_count: resultRows.length,
-    },
-    file: nextFile,
   };
 }
 
@@ -334,7 +436,6 @@ async function getPdfPageRangeTool(
 
   return {
     payload: {
-      created_file: summarizeWorkspaceFiles([nextFile])[0],
       page_range: {
         start_page: extracted.pageRange.startPage,
         end_page: extracted.pageRange.endPage,
@@ -353,7 +454,7 @@ async function getPdfPageRangeTool(
 async function smartSplitPdfTool(
   args: SmartSplitPdfToolArgs,
   files: LocalWorkspaceFile[],
-): Promise<{ payload: Record<string, unknown>; files: LocalWorkspaceFile[]; effect: ClientEffect }> {
+): Promise<{ files: LocalWorkspaceFile[]; effect: PdfSmartSplitEffect }> {
   const file = findWorkspaceFile(files, args.file_id);
   if (file.kind !== "pdf") {
     throw new Error(`File ${file.name} is not a PDF.`);
@@ -409,21 +510,6 @@ async function smartSplitPdfTool(
   createdFiles.push(indexFile, archiveFile);
 
   return {
-    payload: {
-      created_files: summarizeWorkspaceFiles(createdFiles),
-      smart_split: {
-        entries: entries.map((entry) => ({
-          title: entry.title,
-          start_page: entry.startPage,
-          end_page: entry.endPage,
-          page_count: entry.pageCount,
-          file_id: entry.fileId,
-          file_name: entry.name,
-        })),
-        archive_file: summarizeWorkspaceFiles([archiveFile])[0],
-        index_file: summarizeWorkspaceFiles([indexFile])[0],
-      },
-    },
     files: createdFiles,
     effect: {
       type: "pdf_smart_split_completed",
@@ -453,15 +539,33 @@ function buildToolDefinition(
   };
 }
 
+export const getWorkspaceContextToolDefinition = buildToolDefinition(
+  "get_workspace_context",
+  "Describe the current working directory, its entries, and the workspace references visible from the current surface.",
+  getWorkspaceContextToolSchema,
+);
+
+export const createWorkspaceDirectoryToolDefinition = buildToolDefinition(
+  "create_workspace_directory",
+  "Create a workspace directory using a relative or absolute path without changing the current directory.",
+  createWorkspaceDirectoryToolSchema,
+);
+
+export const changeWorkspaceDirectoryToolDefinition = buildToolDefinition(
+  "change_workspace_directory",
+  "Change the current working directory using a relative or absolute path.",
+  changeWorkspaceDirectoryToolSchema,
+);
+
 export const listWorkspaceFilesToolDefinition = buildToolDefinition(
   "list_workspace_files",
-  "List the workspace files currently available on the client, including lightweight metadata and tiny familiarization samples when requested.",
+  "List the current-directory workspace files available on the client, including lightweight metadata and tiny familiarization samples when requested.",
   includeSamplesSchema,
 );
 
 export const listAttachedCsvFilesToolDefinition = buildToolDefinition(
   "list_attached_csv_files",
-  "List the CSV files currently available on the client, including safe schema details, row counts, numeric columns, and tiny familiarization samples.",
+  "List the current-directory CSV files available on the client, including safe schema details, row counts, numeric columns, and tiny familiarization samples.",
   includeSamplesSchema,
 );
 
@@ -473,19 +577,19 @@ export const runAggregateQueryToolDefinition = buildToolDefinition(
 
 export const createCsvFileToolDefinition = buildToolDefinition(
   "create_csv_file",
-  "Run a validated query plan locally, materialize the result rows as a new CSV artifact, and add it to the workspace.",
+  "Run a validated query plan locally, materialize the result rows as a new CSV artifact, and add it to the current workspace directory.",
   createCsvFileToolSchema,
 );
 
 export const createJsonFileToolDefinition = buildToolDefinition(
   "create_json_file",
-  "Run a validated query plan locally, materialize the result rows as a JSON array-of-objects artifact, and add it to the workspace.",
+  "Run a validated query plan locally, materialize the result rows as a JSON array-of-objects artifact, and add it to the current workspace directory.",
   createJsonFileToolSchema,
 );
 
 export const listChartableFilesToolDefinition = buildToolDefinition(
   "list_chartable_files",
-  "List chartable CSV and JSON artifacts available on the client, including schema hints and tiny samples when requested.",
+  "List current-directory chartable CSV and JSON artifacts available on the client, including schema hints and tiny samples when requested.",
   includeSamplesSchema,
 );
 
@@ -509,34 +613,55 @@ export const inspectPdfFileToolDefinition = buildToolDefinition(
 
 export const getPdfPageRangeToolDefinition = buildToolDefinition(
   "get_pdf_page_range",
-  "Extract an inclusive page range from a PDF file, add the derived sub-PDF to the workspace, and return it as a file input payload.",
+  "Extract an inclusive page range from a PDF file, add the derived sub-PDF to the current workspace directory, and return it as a file input payload.",
   getPdfPageRangeToolSchema,
 );
 
 export const smartSplitPdfToolDefinition = buildToolDefinition(
   "smart_split_pdf",
-  "Inspect a PDF locally, propose a useful split, create titled sub-PDFs plus index.md, and add a ZIP archive to the workspace.",
+  "Inspect a PDF locally, propose a useful split, create titled sub-PDFs plus index.md, and add a ZIP archive to the current workspace directory.",
   smartSplitPdfToolSchema,
 );
+
+export function createGetWorkspaceContextTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
+  return {
+    ...getWorkspaceContextToolDefinition,
+    handler: (args) => getWorkspaceContextTool(args as GetWorkspaceContextToolArgs, workspace),
+  };
+}
+
+export function createCreateWorkspaceDirectoryTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
+  return {
+    ...createWorkspaceDirectoryToolDefinition,
+    handler: (args) => createWorkspaceDirectoryTool(args as CreateWorkspaceDirectoryToolArgs, workspace),
+  };
+}
+
+export function createChangeWorkspaceDirectoryTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
+  return {
+    ...changeWorkspaceDirectoryToolDefinition,
+    handler: (args) => changeWorkspaceDirectoryTool(args as ChangeWorkspaceDirectoryToolArgs, workspace),
+  };
+}
 
 export function createListWorkspaceFilesTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...listWorkspaceFilesToolDefinition,
-    handler: (args) => listWorkspaceFilesTool(args as ListWorkspaceFilesToolArgs, workspace.files),
+    handler: (args) => listWorkspaceFilesTool(args as ListWorkspaceFilesToolArgs, workspace),
   };
 }
 
 export function createListAttachedCsvFilesTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...listAttachedCsvFilesToolDefinition,
-    handler: (args) => listAttachedCsvFilesTool(args as ListLoadedDatasetsToolArgs, workspace.files),
+    handler: (args) => listAttachedCsvFilesTool(args as ListLoadedDatasetsToolArgs, workspace),
   };
 }
 
 export function createRunAggregateQueryTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...runAggregateQueryToolDefinition,
-    handler: (args) => runAggregateQueryTool(args as RunLocalQueryToolArgs, workspace.files),
+    handler: (args) => runAggregateQueryTool(args as RunLocalQueryToolArgs, readWorkspaceState(workspace).files),
   };
 }
 
@@ -544,9 +669,16 @@ export function createCreateCsvFileTool(workspace: CapabilityWorkspaceContext): 
   return {
     ...createCsvFileToolDefinition,
     handler: async (args, context) => {
-      const result = await createCsvFileTool(args as CreateCsvFileToolArgs, workspace.files);
-      context.appendFiles([result.file]);
-      return result.payload;
+      const baseFile = await createCsvFileTool(args as CreateCsvFileToolArgs, readWorkspaceState(workspace).files);
+      const [storedFile] = context.appendFiles([baseFile]);
+      const storedNode = currentDirectoryFileNodes(workspace).find((entry) => entry.file.id === storedFile.id);
+      return {
+        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
+        created_file: storedNode
+          ? summarizeWorkspaceFileNode(storedNode, { includeSamples: true })
+          : summarizeWorkspaceFiles([storedFile], { includeSamples: true })[0],
+        row_count: baseFile.row_count,
+      };
     },
   };
 }
@@ -555,9 +687,16 @@ export function createCreateJsonFileTool(workspace: CapabilityWorkspaceContext):
   return {
     ...createJsonFileToolDefinition,
     handler: async (args, context) => {
-      const result = await createJsonFileTool(args as CreateJsonFileToolArgs, workspace.files);
-      context.appendFiles([result.file]);
-      return result.payload;
+      const baseFile = await createJsonFileTool(args as CreateJsonFileToolArgs, readWorkspaceState(workspace).files);
+      const [storedFile] = context.appendFiles([baseFile]);
+      const storedNode = currentDirectoryFileNodes(workspace).find((entry) => entry.file.id === storedFile.id);
+      return {
+        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
+        created_file: storedNode
+          ? summarizeWorkspaceFileNode(storedNode, { includeSamples: true })
+          : summarizeWorkspaceFiles([storedFile], { includeSamples: true })[0],
+        row_count: baseFile.row_count,
+      };
     },
   };
 }
@@ -565,7 +704,7 @@ export function createCreateJsonFileTool(workspace: CapabilityWorkspaceContext):
 export function createListChartableFilesTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...listChartableFilesToolDefinition,
-    handler: (args) => listChartableFilesTool(args as ListWorkspaceFilesToolArgs, workspace.files),
+    handler: (args) => listChartableFilesTool(args as ListWorkspaceFilesToolArgs, workspace),
   };
 }
 
@@ -577,7 +716,7 @@ export function createInspectChartableFileSchemaTool(
     handler: (args) =>
       inspectChartableFileSchemaTool(
         args as InspectChartableFileSchemaToolArgs,
-        workspace.files,
+        readWorkspaceState(workspace).files,
       ),
   };
 }
@@ -588,10 +727,14 @@ export function createRenderChartFromFileTool(workspace: CapabilityWorkspaceCont
     handler: async (args, context) => {
       const result = await renderChartFromFileTool(
         args as RenderChartFromFileToolArgs,
-        workspace.files,
+        readWorkspaceState(workspace).files,
       );
       context.emitEffect(result.effect);
-      return result.payload;
+      return {
+        ...result.payload,
+        cwd_path: readWorkspaceState(workspace).cwdPath,
+        workspace_context: readWorkspaceState(workspace).workspaceContext,
+      };
     },
   };
 }
@@ -599,7 +742,7 @@ export function createRenderChartFromFileTool(workspace: CapabilityWorkspaceCont
 export function createInspectPdfFileTool(workspace: CapabilityWorkspaceContext): CapabilityClientTool {
   return {
     ...inspectPdfFileToolDefinition,
-    handler: (args) => inspectPdfFileTool(args as InspectPdfFileToolArgs, workspace.files),
+    handler: (args) => inspectPdfFileTool(args as InspectPdfFileToolArgs, readWorkspaceState(workspace).files),
   };
 }
 
@@ -607,9 +750,16 @@ export function createGetPdfPageRangeTool(workspace: CapabilityWorkspaceContext)
   return {
     ...getPdfPageRangeToolDefinition,
     handler: async (args, context) => {
-      const result = await getPdfPageRangeTool(args as GetPdfPageRangeToolArgs, workspace.files);
-      context.appendFiles([result.file]);
-      return result.payload;
+      const result = await getPdfPageRangeTool(args as GetPdfPageRangeToolArgs, readWorkspaceState(workspace).files);
+      const [storedFile] = context.appendFiles([result.file]);
+      const storedNode = currentDirectoryFileNodes(workspace).find((entry) => entry.file.id === storedFile.id);
+      return {
+        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
+        created_file: storedNode
+          ? summarizeWorkspaceFileNode(storedNode, { includeSamples: true })
+          : summarizeWorkspaceFiles([storedFile], { includeSamples: true })[0],
+        ...result.payload,
+      };
     },
   };
 }
@@ -618,10 +768,38 @@ export function createSmartSplitPdfTool(workspace: CapabilityWorkspaceContext): 
   return {
     ...smartSplitPdfToolDefinition,
     handler: async (args, context) => {
-      const result = await smartSplitPdfTool(args as SmartSplitPdfToolArgs, workspace.files);
-      context.appendFiles(result.files);
+      const result = await smartSplitPdfTool(args as SmartSplitPdfToolArgs, readWorkspaceState(workspace).files);
+      const storedFiles = context.appendFiles(result.files);
+      const fileNodes = currentDirectoryFileNodes(workspace).filter((entry) =>
+        storedFiles.some((storedFile) => storedFile.id === entry.file.id),
+      );
       context.emitEffect(result.effect);
-      return result.payload;
+
+      const archiveNode = fileNodes.find((entry) => entry.file.id === result.effect.archiveFileId);
+      const indexNode = fileNodes.find((entry) => entry.file.id === result.effect.indexFileId);
+
+      return {
+        ...buildWorkspaceSnapshotPayload(workspace, { includeSamples: true }),
+        created_files: fileNodes.length
+          ? fileNodes.map((fileNode) => summarizeWorkspaceFileNode(fileNode, { includeSamples: true }))
+          : summarizeWorkspaceFiles(storedFiles, { includeSamples: true }),
+        smart_split: {
+          entries: result.effect.entries.map((entry) => ({
+            title: entry.title,
+            start_page: entry.startPage,
+            end_page: entry.endPage,
+            page_count: entry.pageCount,
+            file_id: entry.fileId,
+            file_name: entry.name,
+          })),
+          archive_file: archiveNode
+            ? summarizeWorkspaceFileNode(archiveNode, { includeSamples: true })
+            : null,
+          index_file: indexNode
+            ? summarizeWorkspaceFileNode(indexNode, { includeSamples: true })
+            : null,
+        },
+      };
     },
   };
 }

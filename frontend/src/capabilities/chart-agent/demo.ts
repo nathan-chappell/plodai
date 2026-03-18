@@ -23,11 +23,13 @@ export async function buildChartAgentDemoScenario(): Promise<CapabilityDemoScena
       "This is the Chart Agent demo.",
       "List the chartable files and inspect the available artifact schema.",
       "Make a plan before rendering.",
+      "Treat this as a batch-style demo and keep moving without asking me follow-up questions unless you are genuinely blocked.",
       "Then create one beautiful chart that best explains the revenue pattern across the available dimensions, and briefly explain why that chart is the right choice.",
     ].join(" "),
     workspaceSeed: [
       buildJsonDemoFile("demo-chartable-revenue", "regional_revenue_demo.json", REVENUE_JSON),
     ],
+    defaultExecutionMode: "batch",
     model: "lightweight",
     expectedOutcomes: [
       "Inspects the chartable artifact before rendering",

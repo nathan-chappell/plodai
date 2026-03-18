@@ -18,8 +18,14 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
             },
             "chart_cache": {"chart-1": "data:image/png;base64,abc", 2: "bad"},
             "surface_key": "/capabilities/report-agent",
+            "workspace_context": {
+                "cwd_path": "/report-agent",
+                "referenced_item_ids": ["file-1", "dir-1"],
+            },
             "openai_conversation_id": "conv_123",
             "openai_previous_response_id": "resp_456",
+            "execution_mode": "batch",
+            "origin": "ui_integration_test",
             "usage": {
                 "input_tokens": 120,
                 "output_tokens": 30,
@@ -42,8 +48,14 @@ def test_normalize_thread_metadata_filters_expected_fields() -> None:
         },
         "chart_cache": {"chart-1": "data:image/png;base64,abc"},
         "surface_key": "/capabilities/report-agent",
+        "workspace_context": {
+            "cwd_path": "/report-agent",
+            "referenced_item_ids": ["file-1", "dir-1"],
+        },
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_456",
+        "execution_mode": "batch",
+        "origin": "ui_integration_test",
         "usage": {
             "input_tokens": 120,
             "output_tokens": 30,
@@ -59,12 +71,20 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
             "investigation_brief": "Look for margin pressure.",
             "surface_key": "/capabilities/csv-agent",
             "openai_conversation_id": "conv_123",
+            "execution_mode": "interactive",
+            "origin": "interactive",
         },
         {
             "title": "Updated",
             "investigation_brief": "Compare east and west performance.",
             "surface_key": "/capabilities/report-agent",
+            "workspace_context": {
+                "cwd_path": "/report-agent/charts",
+                "referenced_item_ids": ["chart-1"],
+            },
             "openai_previous_response_id": "resp_789",
+            "execution_mode": "batch",
+            "origin": "ui_integration_test",
         },
     )
 
@@ -72,6 +92,12 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
         "title": "Updated",
         "investigation_brief": "Compare east and west performance.",
         "surface_key": "/capabilities/report-agent",
+        "workspace_context": {
+            "cwd_path": "/report-agent/charts",
+            "referenced_item_ids": ["chart-1"],
+        },
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_789",
+        "execution_mode": "batch",
+        "origin": "ui_integration_test",
     }

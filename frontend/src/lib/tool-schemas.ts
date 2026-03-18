@@ -202,6 +202,30 @@ export const includeSamplesSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+export const getWorkspaceContextToolSchema: JsonSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+export const createWorkspaceDirectoryToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
+export const changeWorkspaceDirectoryToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
 export const inspectChartableFileSchemaToolSchema: JsonSchema = {
   type: "object",
   properties: {

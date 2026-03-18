@@ -3,6 +3,11 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from backend.app.chatkit.feedback_types import (
+    FeedbackKind,
+    FeedbackLabel,
+    FeedbackOrigin,
+)
 from backend.app.db.session import Base
 
 
@@ -60,4 +65,28 @@ class ChatAttachment(Base):
         DateTime(timezone=True),
         init=False,
         default_factory=lambda: datetime.now(UTC),
+    )
+
+
+class ChatItemFeedback(Base):
+    __tablename__ = "chat_item_feedback"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    item_ids_json: Mapped[list[str]] = mapped_column(JSON, default_factory=list)
+    user_email: Mapped[str | None] = mapped_column(Text, index=True, default=None)
+    kind: Mapped[FeedbackKind | None] = mapped_column(Text, default=None)
+    label: Mapped[FeedbackLabel | None] = mapped_column(Text, default=None)
+    message: Mapped[str | None] = mapped_column(Text, default=None)
+    origin: Mapped[FeedbackOrigin] = mapped_column(Text, default="interactive")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        init=False,
+        default_factory=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        init=False,
+        default_factory=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )

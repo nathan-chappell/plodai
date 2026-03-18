@@ -7,8 +7,8 @@
       "mlp-sine-story.png",
       "mlp-sine-story.html"
     ],
-    "shape": [
-      8
+    "published_shape": [
+      32
     ],
     "selected_epochs": [
       0,
@@ -16,16 +16,14 @@
       200,
       400
     ],
-    "final_loss": 0.3639656901359558
+    "final_loss": 0.12900468707084656
   },
   "rnn": {
     "files": [
       "rnn-training-story.png",
       "rnn-training-story.html",
-      "rnn-phase-traces-pair-a.png",
-      "rnn-phase-traces-pair-a.html",
-      "rnn-phase-traces-pair-b.png",
-      "rnn-phase-traces-pair-b.html"
+      "rnn-transition-traces.png",
+      "rnn-transition-traces.html"
     ],
     "train_length": 20,
     "eval_lengths": [
@@ -35,40 +33,49 @@
     ],
     "batch_size": 8,
     "phase_epochs": 5,
-    "train_samples": 512,
+    "cohort_size": 40,
+    "retained_support_size": 120,
     "test_samples": 128,
-    "phase_invalid_mix": [
+    "support_cohorts": {
+      "support-random": 40,
+      "support-off-by-one": 40,
+      "support-balanced-invalid": 40
+    },
+    "phase_weighting_schedule": [
       {
         "label": "Phase 1: random",
-        "invalid_kinds": [
-          "random_invalid"
+        "cohort_weights": [
+          1.0,
+          0.0,
+          0.0
         ],
-        "invalid_weights": [
-          1.0
+        "active_cohorts": [
+          "support-random"
         ]
       },
       {
         "label": "Phase 2: add off-by-one",
-        "invalid_kinds": [
-          "random_invalid",
-          "corruption_invalid"
-        ],
-        "invalid_weights": [
+        "cohort_weights": [
           1.0,
-          1.0
+          1.0,
+          0.0
+        ],
+        "active_cohorts": [
+          "support-random",
+          "support-off-by-one"
         ]
       },
       {
         "label": "Phase 3: add balanced-invalid",
-        "invalid_kinds": [
-          "random_invalid",
-          "corruption_invalid",
-          "balanced_invalid"
-        ],
-        "invalid_weights": [
+        "cohort_weights": [
           1.0,
           1.0,
           1.0
+        ],
+        "active_cohorts": [
+          "support-random",
+          "support-off-by-one",
+          "support-balanced-invalid"
         ]
       }
     ],
@@ -79,12 +86,15 @@
         "start_epoch": 1,
         "end_epoch": 5,
         "epochs": 5,
-        "train_samples": 512,
-        "invalid_kinds": [
-          "random_invalid"
+        "support_size": 40,
+        "cohort_size": 40,
+        "cohort_weights": [
+          1.0,
+          0.0,
+          0.0
         ],
-        "invalid_weights": [
-          1.0
+        "active_cohorts": [
+          "support-random"
         ],
         "lr_start": 0.08,
         "lr_end": 0.02,
@@ -96,14 +106,16 @@
         "start_epoch": 6,
         "end_epoch": 10,
         "epochs": 5,
-        "train_samples": 512,
-        "invalid_kinds": [
-          "random_invalid",
-          "corruption_invalid"
-        ],
-        "invalid_weights": [
+        "support_size": 80,
+        "cohort_size": 40,
+        "cohort_weights": [
           1.0,
-          1.0
+          1.0,
+          0.0
+        ],
+        "active_cohorts": [
+          "support-random",
+          "support-off-by-one"
         ],
         "lr_start": 0.08,
         "lr_end": 0.02,
@@ -115,16 +127,17 @@
         "start_epoch": 11,
         "end_epoch": 15,
         "epochs": 5,
-        "train_samples": 512,
-        "invalid_kinds": [
-          "random_invalid",
-          "corruption_invalid",
-          "balanced_invalid"
-        ],
-        "invalid_weights": [
+        "support_size": 120,
+        "cohort_size": 40,
+        "cohort_weights": [
           1.0,
           1.0,
           1.0
+        ],
+        "active_cohorts": [
+          "support-random",
+          "support-off-by-one",
+          "support-balanced-invalid"
         ],
         "lr_start": 0.08,
         "lr_end": 0.02,
@@ -134,7 +147,7 @@
     "probes": [
       {
         "label": "10 valid A",
-        "text": "((()()))()",
+        "text": "()(())(())",
         "probe_kind": "valid",
         "length": 10,
         "short_label": "10V1",
@@ -325,45 +338,82 @@
         "highlight": false
       }
     ],
+    "highlighted_probe_flips": [
+      {
+        "probe": {
+          "label": "20 off-by-one A",
+          "text": "(())((())(()()()((()",
+          "probe_kind": "off_by_one",
+          "length": 20,
+          "short_label": "20O1",
+          "highlight": true
+        },
+        "from_epoch": 10,
+        "to_epoch": 15,
+        "from_phase_label": "phase 2: add off-by-one",
+        "to_phase_label": "phase 3: add balanced-invalid",
+        "kind": "wrong_to_right",
+        "from_probability": 0.5742858648300171,
+        "to_probability": 0.11297135800123215
+      },
+      {
+        "probe": {
+          "label": "10 balanced-invalid A",
+          "text": "((()())))(",
+          "probe_kind": "balanced_invalid",
+          "length": 10,
+          "short_label": "10B1",
+          "highlight": true
+        },
+        "from_epoch": 5,
+        "to_epoch": 10,
+        "from_phase_label": "phase 1: random",
+        "to_phase_label": "phase 2: add off-by-one",
+        "kind": "wrong_to_right",
+        "from_probability": 0.5217902660369873,
+        "to_probability": 0.1044434905052185
+      },
+      {
+        "probe": {
+          "label": "30 off-by-one A",
+          "text": "(())()(((()()((()()()())()())(",
+          "probe_kind": "off_by_one",
+          "length": 30,
+          "short_label": "30O1",
+          "highlight": true
+        },
+        "from_epoch": 5,
+        "to_epoch": 10,
+        "from_phase_label": "phase 1: random",
+        "to_phase_label": "phase 2: add off-by-one",
+        "kind": "wrong_to_right",
+        "from_probability": 0.513992428779602,
+        "to_probability": 0.1116902306675911
+      }
+    ],
     "trace_strings": [
       {
-        "label": "A valid reference",
-        "text": "()(()())(()())(()()(()))()(()((())())())",
+        "label": "20 off-by-one A",
+        "text": "(())((())(()()()((()",
+        "probe_kind": "off_by_one",
+        "length": 20,
+        "short_label": "20O1",
+        "highlight": true
+      },
+      {
+        "label": "20 valid A",
+        "text": "()((((())(()()()))))",
         "probe_kind": "valid",
-        "length": 40,
-        "short_label": "A",
+        "length": 20,
+        "short_label": "20V1",
         "highlight": true
       },
       {
-        "label": "B immediate invalid",
-        "text": ")(((())(((()(()()))(())))((()))())())()(",
-        "probe_kind": "transition",
-        "length": 40,
-        "short_label": "B",
-        "highlight": true
-      },
-      {
-        "label": "C valid then bad ending",
-        "text": "()(()(()()(())()))()(())()()()(()())())(",
-        "probe_kind": "transition",
-        "length": 40,
-        "short_label": "C",
-        "highlight": true
-      },
-      {
-        "label": "D balanced-invalid",
-        "text": ")(()()())(())()(())(()(()((()((()))))))(",
+        "label": "20 balanced-invalid A",
+        "text": "()((()))()())())(()(",
         "probe_kind": "balanced_invalid",
-        "length": 40,
-        "short_label": "D",
-        "highlight": true
-      },
-      {
-        "label": "E oscillating prefix",
-        "text": "((()(()))))((()(())))(()(()(())()()(()))",
-        "probe_kind": "transition",
-        "length": 40,
-        "short_label": "E",
+        "length": 20,
+        "short_label": "20B1",
         "highlight": true
       }
     ],
@@ -372,14 +422,49 @@
       10,
       15
     ],
+    "trace_projection_mode": "pca_top_layer",
+    "trace_axis_labels": [
+      "PC1 (66% var)",
+      "PC2 (29% var)"
+    ],
+    "trace_explained_variance": [
+      0.6621214084688745,
+      0.29028474232327744
+    ],
+    "focus_trace": {
+      "label": "20 off-by-one A",
+      "text": "(())((())(()()()((()",
+      "probe_kind": "off_by_one",
+      "length": 20,
+      "short_label": "20O1",
+      "highlight": true
+    },
+    "companion_traces": [
+      {
+        "label": "20 valid A",
+        "text": "()((((())(()()()))))",
+        "probe_kind": "valid",
+        "length": 20,
+        "short_label": "20V1",
+        "highlight": true
+      },
+      {
+        "label": "20 balanced-invalid A",
+        "text": "()((()))()())())(()(",
+        "probe_kind": "balanced_invalid",
+        "length": 20,
+        "short_label": "20B1",
+        "highlight": true
+      }
+    ],
     "final_metrics": {
       "epoch": 15,
       "phase": "phase-3-balanced-invalid",
-      "train_loss": 0.43994298577308655,
-      "train_acc": 0.7890625,
-      "eval_10_acc": 0.71875,
-      "eval_20_acc": 0.8203125,
-      "eval_30_acc": 0.8125
+      "train_loss": 0.43814799189567566,
+      "train_acc": 0.7749999761581421,
+      "eval_10_acc": 0.7734375,
+      "eval_20_acc": 0.796875,
+      "eval_30_acc": 0.765625
     }
   }
 }

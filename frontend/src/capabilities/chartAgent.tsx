@@ -5,6 +5,7 @@ import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
+import { chartAgentCapability } from "./definitions";
 import { buildChartAgentDemoScenario } from "./chart-agent/demo";
 import { createChartAgentClientTools } from "./chart-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
@@ -12,7 +13,7 @@ import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { buildChartAgentBundle } from "./manifests";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import type { ClientEffect } from "../types/analysis";
-import type { CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
+import type { ShellWorkspaceRegistration } from "./types";
 import {
   CapabilityEyebrow,
   CapabilityHeader,
@@ -71,25 +72,15 @@ function GoalPanel({
   );
 }
 
-export const chartAgentCapability: CapabilityDefinition = {
-  id: "chart-agent",
-  path: "/capabilities/chart-agent",
-  navLabel: "Chart Agent",
-  title: "Chart Agent",
-  eyebrow: "Capability",
-  description: "Beautiful Chart.js rendering over explicit CSV and JSON artifacts.",
-  tabs: [
-    { id: "agent", label: "Agent" },
-    { id: "demo", label: "Demo" },
-  ],
-};
-
 export function ChartAgentPage({
   onRegisterWorkspace,
 }: {
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
+    cwdPath,
+    breadcrumbs,
+    entries,
     files,
     setFiles,
     appendFiles,
@@ -99,11 +90,16 @@ export function ChartAgentPage({
     setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
+    executionMode,
+    setExecutionMode,
     reportEffects,
     setReportEffects,
     handleFiles,
-    handleClearFiles,
-    handleRemoveFile,
+    handleRemoveEntry,
+    createDirectory,
+    changeDirectory,
+    workspaceContext,
+    getState,
   } = useCapabilityFileWorkspace({
     capabilityId: chartAgentCapability.id,
     defaultStatus: DEFAULT_STATUS,
@@ -112,7 +108,10 @@ export function ChartAgentPage({
     allowedTabs: ["agent", "demo"],
   });
   const capabilityBundle = useMemo(() => buildChartAgentBundle(), []);
-  const clientTools = useMemo(() => createChartAgentClientTools({ files }), [files]);
+  const clientTools = useMemo(
+    () => createChartAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, getState }),
+    [changeDirectory, createDirectory, cwdPath, entries, files, getState, workspaceContext],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -120,6 +119,7 @@ export function ChartAgentPage({
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildChartAgentDemoScenario,
+    setExecutionMode,
     setFiles,
     setStatus,
     setReportEffects,
@@ -130,13 +130,16 @@ export function ChartAgentPage({
       capabilityId: chartAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      files,
+      cwdPath,
+      breadcrumbs,
+      entries,
       accept: ".csv,.json",
       onSelectFiles: handleFiles,
-      onClearFiles: handleClearFiles,
-      onRemoveFile: handleRemoveFile,
+      onCreateDirectory: createDirectory,
+      onChangeDirectory: changeDirectory,
+      onRemoveEntry: handleRemoveEntry,
     });
-  }, [files, handleClearFiles, handleFiles, handleRemoveFile, onRegisterWorkspace]);
+  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   return (
     <>
@@ -174,6 +177,9 @@ export function ChartAgentPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>
+                CWD: {cwdPath}
+              </MetaText>
+              <MetaText>
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
               </MetaText>
               <MetaText>
@@ -196,6 +202,9 @@ export function ChartAgentPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
+              workspaceContext={workspaceContext}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
@@ -238,6 +247,8 @@ export function ChartAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}

@@ -17,6 +17,17 @@ Important operating rules:
 2. Treat the client-declared tool catalog as the source of truth for what local context is available.
 3. Prefer bounded, safe operations over raw data dumps or unconstrained exploration.
 4. If a required capability is not present in the registered tool catalog, say so plainly instead of inventing one.
+5. When the user's goal is clear enough to act on, continue decisively without asking for unnecessary confirmation.
+6. Ask clarifying questions only when missing information, permissions, or tool availability would materially change the result.
+""".strip()
+
+BATCH_MODE_INSTRUCTIONS = """
+Execution mode: batch.
+
+In batch mode, complete as much of the task as possible without engaging the user in back-and-forth.
+- Infer reasonable defaults when the next step is obvious from the request and current workspace context.
+- Prefer executing the strongest sensible next action over asking for confirmation.
+- Stop only when you are genuinely blocked by missing data, permissions, or unavailable capabilities.
 """.strip()
 
 CAPABILITY_POLICY: dict[str, dict[str, bool]] = {
@@ -24,6 +35,8 @@ CAPABILITY_POLICY: dict[str, dict[str, bool]] = {
     "chart-agent": {"append_report_section": False},
     "pdf-agent": {"append_report_section": False},
     "report-agent": {"append_report_section": True},
+    "workspace-agent": {"append_report_section": False},
+    "feedback-agent": {"append_report_section": False},
 }
 
 
@@ -40,8 +53,11 @@ def _build_agent_instructions(
             f"- {investigation_brief}\n"
             "Treat this as the primary objective for the conversation unless newer user messages clearly replace it.\n"
         )
+    mode_section = ""
+    if context.is_batch_mode:
+        mode_section = f"\n{BATCH_MODE_INSTRUCTIONS}\n"
     return prompt_with_handoff_instructions(
-        f"{BASE_AGENT_INSTRUCTIONS}\n\n{instructions}{brief_section}"
+        f"{BASE_AGENT_INSTRUCTIONS}\n\n{instructions}{brief_section}{mode_section}"
     )
 
 

@@ -6,6 +6,7 @@ This repo is primarily a demo of frontend capabilities being exposed to agents i
 ## Current architecture
 - Keep the frontend and shared tooling at the repo root.
 - Keep Python application code under `backend/`.
+- Even with separate frontend and backend subdirectories, treat the repository root as the working root for both toolchains, e.g. run `npm install` and `python -m venv .venv` from the repo root.
 - Treat the frontend capability-module structure as a core architectural feature of the project.
 - Define frontend capabilities in a conventional shape so they are easy to wire into agent specs, demo scenarios, and frontend-to-agent exposure.
 - Keep the backend straightforward: expose the frontend-provided capabilities to the agent runtime, handle the necessary plumbing, and do a small amount of bookkeeping.
@@ -38,6 +39,12 @@ This repo is primarily a demo of frontend capabilities being exposed to agents i
 - Watch for code duplication and repeated UI or tool-building patterns.
 - It is fine to pause and refactor before things get too messy.
 - Do not derail active feature delivery with opportunistic refactors while new functionality is still being established.
+
+## Logging discipline
+- Keep backend logs event-based, multiline, and summary-first so request flow and tool round trips are easy to scan at `INFO`.
+- Log tool calls and returned tool outputs with stable identifiers and compact counts/summaries, not raw payloads, rows, extracted text, base64 blobs, or auth material.
+- Keep frontend logging dev-only, privacy-conscious, and object-based so the browser console can inspect useful metadata without clutter.
+- Logging should stay cheap on hot paths and should not serialize large payloads just for observability.
 
 ## Commit message style
 - Prefer one big commit message with an umbrella conventional commit title.

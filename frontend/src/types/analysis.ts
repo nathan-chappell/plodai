@@ -149,6 +149,9 @@ export type CapabilityBundleMetadata = {
   capabilities: CapabilityAgentSpecMetadata[];
 };
 
+export type FeedbackOrigin = "interactive" | "ui_integration_test";
+export type ExecutionMode = "interactive" | "batch";
+
 export type AppThreadMetadata = {
   title?: string;
   investigation_brief?: string;
@@ -157,8 +160,11 @@ export type AppThreadMetadata = {
   chart_cache?: Record<string, string>;
   surface_key?: string;
   capability_bundle?: CapabilityBundleMetadata;
+  workspace_context?: WorkspaceThreadContext;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
+  execution_mode?: ExecutionMode;
+  origin?: FeedbackOrigin;
 };
 
 export type UpdateThreadMetadataPayload = Partial<AppThreadMetadata>;
@@ -181,6 +187,16 @@ export type GetPdfPageRangeToolArgs = {
   file_id: string;
   start_page: number;
   end_page: number;
+};
+
+export type GetWorkspaceContextToolArgs = Record<string, never>;
+
+export type CreateWorkspaceDirectoryToolArgs = {
+  path: string;
+};
+
+export type ChangeWorkspaceDirectoryToolArgs = {
+  path: string;
 };
 
 export type ListWorkspaceFilesToolArgs = {
@@ -215,6 +231,9 @@ export type SmartSplitPdfToolArgs = {
 };
 
 export type ClientToolArgsMap = {
+  get_workspace_context: GetWorkspaceContextToolArgs;
+  create_workspace_directory: CreateWorkspaceDirectoryToolArgs;
+  change_workspace_directory: ChangeWorkspaceDirectoryToolArgs;
   list_workspace_files: ListWorkspaceFilesToolArgs;
   list_attached_csv_files: ListLoadedDatasetsToolArgs;
   run_aggregate_query: RunLocalQueryToolArgs;
@@ -257,6 +276,11 @@ export type SmartSplitEntry = {
   startPage: number;
   endPage: number;
   pageCount: number;
+};
+
+export type WorkspaceThreadContext = {
+  cwd_path: string;
+  referenced_item_ids: string[];
 };
 
 export type PdfSmartSplitEffect = {

@@ -16,7 +16,10 @@ export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThre
     chart_cache: metadata.chart_cache,
     surface_key: metadata.surface_key,
     capability_bundle: metadata.capability_bundle,
+    workspace_context: metadata.workspace_context,
     openai_conversation_id: metadata.openai_conversation_id,
     openai_previous_response_id: metadata.openai_previous_response_id,
+    execution_mode: metadata.execution_mode,
+    origin: metadata.origin,
   };
 }

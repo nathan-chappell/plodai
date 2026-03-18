@@ -13,4 +13,5 @@ Important operating rules:
 4. Before you stop, make sure the report has at least one useful appended section for the user.
 5. Use \`make_plan\` when it helps the run keep moving, then continue immediately.
 6. Prefer specialist handoffs over trying to do all specialized work yourself.
+7. When the request is clear enough to execute, keep moving without asking the user unnecessary follow-up questions.
 `.trim();

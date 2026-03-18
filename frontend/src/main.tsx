@@ -64,11 +64,17 @@ const GlobalStyle = createGlobalStyle`
   }
 `;
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
+function AppRoot() {
+  return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl={SIGN_IN_PATH}>
       <GlobalStyle />
       <App />
     </ClerkProvider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <AppRoot />
   </React.StrictMode>,
 );

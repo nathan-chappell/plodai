@@ -46,6 +46,7 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
       "This is the Report Agent demo.",
       "Start by listing the workspace files.",
       "Investigate the sales CSV, create one useful chart through the right specialist flow, inspect the PDF packet if it helps, and append a short report section summarizing the key takeaway.",
+      "Treat this as a batch-style demo: infer reasonable defaults, continue without asking me follow-up questions, and show the completed result.",
       "Do not stop until you have used append_report_section to add a useful report update.",
       "Do not stop after one tool call.",
     ].join(" "),
@@ -53,6 +54,7 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
       buildCsvDemoFile("demo-report-sales", "board_sales_demo.csv", SALES_CSV),
       sourcePdf,
     ],
+    defaultExecutionMode: "batch",
     model: "lightweight",
     expectedOutcomes: [
       "Delegates specialized work instead of doing everything in one prompt",

@@ -1,75 +1,66 @@
 import { useMemo, useState } from "react";
+import styled from "styled-components";
 
 import {
   DatasetInventoryButton,
   DatasetInventoryCard,
-  DatasetInventoryCell,
   DatasetInventoryExpanded,
   DatasetInventoryHeader,
   DatasetInventoryList,
   DatasetInventoryMetaRow,
-  DatasetInventoryPageButton,
-  DatasetInventoryPager,
   DatasetInventoryPanel,
-  DatasetInventoryScroller,
-  DatasetInventoryTable,
-  DatasetInventoryTd,
-  DatasetInventoryTh,
   DatasetInventoryToggle,
   DatasetInventoryToolbar,
   DatasetInventoryUploadInput,
 } from "./styles";
 import { MetaText } from "../app/styles";
 import { downloadWorkspaceFile, openWorkspaceFileInNewTab } from "../lib/workspace-artifacts";
-import type { LocalWorkspaceFile } from "../types/report";
-
-const PAGE_SIZE = 10;
+import type { WorkspaceBreadcrumb, WorkspaceItem } from "../types/workspace";
 
 export function WorkspaceInventoryPane({
-  files,
+  cwdPath,
+  breadcrumbs,
+  entries,
   accept,
   onSelectFiles,
-  onClearFiles,
-  onRemoveFile,
+  onCreateDirectory,
+  onChangeDirectory,
+  onRemoveEntry,
 }: {
-  files: LocalWorkspaceFile[];
+  cwdPath: string;
+  breadcrumbs: WorkspaceBreadcrumb[];
+  entries: WorkspaceItem[];
   accept?: string;
   onSelectFiles: (files: FileList | null) => Promise<void>;
-  onClearFiles: () => void;
-  onRemoveFile?: (fileId: string) => void;
+  onCreateDirectory: (path: string) => void;
+  onChangeDirectory: (path: string) => void;
+  onRemoveEntry?: (entryId: string) => void;
 }) {
-  const [expandedFileId, setExpandedFileId] = useState<string | null>(null);
-  const [pageByFileId, setPageByFileId] = useState<Record<string, number>>({});
-
-  const expandedFile = useMemo(
-    () => files.find((file) => file.id === expandedFileId) ?? null,
-    [expandedFileId, files],
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+  const [directoryName, setDirectoryName] = useState("");
+  const expandedEntry = useMemo(
+    () => entries.find((entry) => entry.id === expandedEntryId) ?? null,
+    [entries, expandedEntryId],
   );
 
-  const currentPage = expandedFile ? pageByFileId[expandedFile.id] ?? 0 : 0;
-  const pageCount =
-    expandedFile?.kind === "csv" || expandedFile?.kind === "json"
-      ? Math.max(1, Math.ceil(expandedFile.preview_rows.length / PAGE_SIZE))
-      : 1;
-  const pagedRows =
-    expandedFile?.kind === "csv" || expandedFile?.kind === "json"
-      ? expandedFile.preview_rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
-      : [];
-
-  function toggleFile(fileId: string) {
-    setExpandedFileId((current) => (current === fileId ? null : fileId));
-    setPageByFileId((current) => ({ ...current, [fileId]: 0 }));
+  function toggleEntry(entryId: string) {
+    setExpandedEntryId((current) => (current === entryId ? null : entryId));
   }
 
-  function setFilePage(fileId: string, nextPage: number) {
-    setPageByFileId((current) => ({ ...current, [fileId]: nextPage }));
+  function handleCreateDirectory() {
+    const trimmed = directoryName.trim();
+    if (!trimmed) {
+      return;
+    }
+    onCreateDirectory(trimmed);
+    setDirectoryName("");
   }
 
   return (
     <DatasetInventoryPanel>
       <DatasetInventoryHeader>
         <h2>Workspace files</h2>
-        <MetaText>Select local files, inspect safe metadata, and let the agent derive new files into the same workspace.</MetaText>
+        <MetaText>Browse the current directory, create subdirectories, and upload files into the shared workspace.</MetaText>
       </DatasetInventoryHeader>
       <DatasetInventoryToolbar>
         <DatasetInventoryUploadInput
@@ -81,101 +72,95 @@ export function WorkspaceInventoryPane({
             event.currentTarget.value = "";
           }}
         />
-        <DatasetInventoryButton disabled={!files.length} onClick={onClearFiles} type="button">
-          Remove all files
+        <WorkspacePathBadge>Current directory: {cwdPath}</WorkspacePathBadge>
+      </DatasetInventoryToolbar>
+      <WorkspaceBreadcrumbRow aria-label="Workspace breadcrumbs">
+        {breadcrumbs.map((breadcrumb, index) => (
+          <WorkspaceBreadcrumbFragment key={breadcrumb.id}>
+            <WorkspaceBreadcrumbButton
+              type="button"
+              onClick={() => onChangeDirectory(breadcrumb.path)}
+              disabled={breadcrumb.path === cwdPath}
+            >
+              {breadcrumb.name}
+            </WorkspaceBreadcrumbButton>
+            {index < breadcrumbs.length - 1 ? <WorkspaceBreadcrumbSeparator>/</WorkspaceBreadcrumbSeparator> : null}
+          </WorkspaceBreadcrumbFragment>
+        ))}
+      </WorkspaceBreadcrumbRow>
+      <DatasetInventoryToolbar>
+        <WorkspacePathButton type="button" onClick={() => onChangeDirectory("..")} disabled={cwdPath === "/"}>
+          Up one level
+        </WorkspacePathButton>
+        <WorkspaceInput
+          type="text"
+          value={directoryName}
+          onChange={(event) => setDirectoryName(event.target.value)}
+          placeholder="Create directory"
+        />
+        <DatasetInventoryButton type="button" onClick={handleCreateDirectory} disabled={!directoryName.trim()}>
+          Create directory
         </DatasetInventoryButton>
       </DatasetInventoryToolbar>
-      {files.length ? (
+      {entries.length ? (
         <DatasetInventoryList>
-          {files.map((file) => {
-            const isExpanded = expandedFileId === file.id;
+          {entries.map((entry) => {
+            const isExpanded = expandedEntry?.id === entry.id;
+            const meta =
+              entry.kind === "directory"
+                ? "Directory"
+                : `${entry.file.kind.toUpperCase()}${entry.file.extension ? ` • ${entry.file.extension}` : ""}`;
             return (
-              <DatasetInventoryCard key={file.id}>
-                <DatasetInventoryToggle onClick={() => toggleFile(file.id)} type="button">
-                  <strong>{file.name}</strong>
+              <DatasetInventoryCard key={entry.id}>
+                <DatasetInventoryToggle onClick={() => toggleEntry(entry.id)} type="button">
+                  <strong>{entry.kind === "directory" ? entry.name || "/" : entry.file.name}</strong>
                   <DatasetInventoryMetaRow>
-                    <MetaText as="span">{file.kind.toUpperCase()}</MetaText>
-                    <MetaText as="span">{file.extension || "no extension"}</MetaText>
-                    {file.kind === "csv" || file.kind === "json" ? <MetaText as="span">{file.row_count} rows</MetaText> : null}
-                    {file.kind === "csv" || file.kind === "json" ? <MetaText as="span">{file.columns.length} columns</MetaText> : null}
-                    {file.kind === "pdf" ? <MetaText as="span">{file.page_count} pages</MetaText> : null}
+                    <MetaText as="span">{meta}</MetaText>
+                    <MetaText as="span">{entry.path}</MetaText>
+                    {entry.kind === "file" && (entry.file.kind === "csv" || entry.file.kind === "json") ? (
+                      <MetaText as="span">{entry.file.row_count} rows</MetaText>
+                    ) : null}
+                    {entry.kind === "file" && entry.file.kind === "pdf" ? (
+                      <MetaText as="span">{entry.file.page_count} pages</MetaText>
+                    ) : null}
                   </DatasetInventoryMetaRow>
                 </DatasetInventoryToggle>
                 {isExpanded ? (
                   <DatasetInventoryExpanded>
-                    {file.kind === "csv" || file.kind === "json" ? (
+                    {entry.kind === "directory" ? (
                       <>
-                        <MetaText>Columns: {file.columns.join(", ")}</MetaText>
-                        <DatasetInventoryScroller>
-                          <DatasetInventoryTable>
-                            <thead>
-                              <tr>
-                                {file.columns.map((column) => (
-                                  <DatasetInventoryTh key={column}>{column}</DatasetInventoryTh>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {pagedRows.map((row, rowIndex) => (
-                                <tr key={`${file.id}-${currentPage}-${rowIndex}`}>
-                                  {file.columns.map((column) => (
-                                    <DatasetInventoryTd key={`${file.id}-${rowIndex}-${column}`}>
-                                      <DatasetInventoryCell>{row[column] ?? ""}</DatasetInventoryCell>
-                                    </DatasetInventoryTd>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </DatasetInventoryTable>
-                        </DatasetInventoryScroller>
-                        <DatasetInventoryPager>
-                          <DatasetInventoryPageButton
-                            disabled={currentPage === 0}
-                            onClick={() => setFilePage(file.id, Math.max(0, currentPage - 1))}
-                            type="button"
-                          >
-                            Previous
-                          </DatasetInventoryPageButton>
-                          <MetaText>
-                            Page {currentPage + 1} of {pageCount}
-                          </MetaText>
-                          <DatasetInventoryPageButton
-                            disabled={currentPage >= pageCount - 1}
-                            onClick={() => setFilePage(file.id, Math.min(pageCount - 1, currentPage + 1))}
-                            type="button"
-                          >
-                            Next
-                          </DatasetInventoryPageButton>
-                        </DatasetInventoryPager>
+                        <MetaText>Navigate into this directory to inspect or upload files there.</MetaText>
+                        <DatasetInventoryToolbar>
+                          <DatasetInventoryButton type="button" onClick={() => onChangeDirectory(entry.path)}>
+                            Open directory
+                          </DatasetInventoryButton>
+                          {onRemoveEntry ? (
+                            <DatasetInventoryButton type="button" onClick={() => onRemoveEntry(entry.id)}>
+                              Remove directory
+                            </DatasetInventoryButton>
+                          ) : null}
+                        </DatasetInventoryToolbar>
                       </>
-                    ) : null}
-                    {file.kind === "pdf" ? (
-                      <MetaText>
-                        {file.page_count} pages available. Use the PDF tools to extract bounded page ranges into new workspace files.
-                      </MetaText>
-                    ) : null}
-                    {file.kind === "other" ? (
-                      <MetaText>
-                        {file.text_content
-                          ? "This derived file is available in the workspace."
-                          : "This file is listed for awareness, but there are no specialized tools for it yet."}
-                      </MetaText>
-                    ) : null}
-                    <DatasetInventoryToolbar>
-                      {file.kind === "pdf" || file.kind === "json" || (file.kind === "other" && file.text_content != null) ? (
-                        <DatasetInventoryButton onClick={() => openWorkspaceFileInNewTab(file)} type="button">
-                          Open file
-                        </DatasetInventoryButton>
-                      ) : null}
-                      <DatasetInventoryButton onClick={() => downloadWorkspaceFile(file)} type="button">
-                        Download file
-                      </DatasetInventoryButton>
-                      {onRemoveFile ? (
-                        <DatasetInventoryButton onClick={() => onRemoveFile(file.id)} type="button">
-                          Remove file
-                        </DatasetInventoryButton>
-                      ) : null}
-                    </DatasetInventoryToolbar>
+                    ) : (
+                      <>
+                        <MetaText>Path: {entry.path}</MetaText>
+                        <DatasetInventoryToolbar>
+                          {entry.file.kind === "pdf" || entry.file.kind === "json" || (entry.file.kind === "other" && entry.file.text_content != null) ? (
+                            <DatasetInventoryButton onClick={() => openWorkspaceFileInNewTab(entry.file)} type="button">
+                              Open file
+                            </DatasetInventoryButton>
+                          ) : null}
+                          <DatasetInventoryButton onClick={() => downloadWorkspaceFile(entry.file)} type="button">
+                            Download file
+                          </DatasetInventoryButton>
+                          {onRemoveEntry ? (
+                            <DatasetInventoryButton type="button" onClick={() => onRemoveEntry(entry.id)}>
+                              Remove file
+                            </DatasetInventoryButton>
+                          ) : null}
+                        </DatasetInventoryToolbar>
+                      </>
+                    )}
                   </DatasetInventoryExpanded>
                 ) : null}
               </DatasetInventoryCard>
@@ -183,8 +168,60 @@ export function WorkspaceInventoryPane({
           })}
         </DatasetInventoryList>
       ) : (
-        <MetaText>No workspace files yet.</MetaText>
+        <MetaText>No files or directories in this location yet.</MetaText>
       )}
     </DatasetInventoryPanel>
   );
 }
+
+const WorkspaceInput = styled.input`
+  min-width: 180px;
+  padding: 0.72rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--ink);
+`;
+
+const WorkspacePathBadge = styled.div`
+  padding: 0.72rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--ink);
+  font: inherit;
+`;
+
+const WorkspacePathButton = styled(DatasetInventoryButton)``;
+
+const WorkspaceBreadcrumbRow = styled.nav`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+const WorkspaceBreadcrumbFragment = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+const WorkspaceBreadcrumbButton = styled.button`
+  border: none;
+  background: transparent;
+  color: var(--accent-deep);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+
+  &:disabled {
+    color: var(--ink);
+    cursor: default;
+    font-weight: 600;
+  }
+`;
+
+const WorkspaceBreadcrumbSeparator = styled.span`
+  color: var(--muted);
+`;

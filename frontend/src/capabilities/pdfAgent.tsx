@@ -3,6 +3,7 @@ import { useEffect, useMemo } from "react";
 import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
+import { pdfAgentCapability } from "./definitions";
 import { buildPdfAgentDemoScenario } from "./pdf-agent/demo";
 import { createPdfAgentClientTools } from "./pdf-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
@@ -11,7 +12,7 @@ import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import { MetaText } from "../app/styles";
 import type { ClientEffect } from "../types/analysis";
-import type { CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
+import type { ShellWorkspaceRegistration } from "./types";
 import {
   CapabilityEyebrow,
   CapabilityHeader,
@@ -70,25 +71,15 @@ function GoalPanel({
   );
 }
 
-export const pdfAgentCapability: CapabilityDefinition = {
-  id: "pdf-agent",
-  path: "/capabilities/pdf-agent",
-  navLabel: "PDF Agent",
-  title: "PDF Agent",
-  eyebrow: "Capability",
-  description: "Bounded PDF extraction and decomposition workspace.",
-  tabs: [
-    { id: "agent", label: "Agent" },
-    { id: "demo", label: "Demo" },
-  ],
-};
-
 export function PdfAgentPage({
   onRegisterWorkspace,
 }: {
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
+    cwdPath,
+    breadcrumbs,
+    entries,
     files,
     setFiles,
     appendFiles,
@@ -98,11 +89,16 @@ export function PdfAgentPage({
     setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
+    executionMode,
+    setExecutionMode,
     reportEffects,
     setReportEffects,
     handleFiles,
-    handleClearFiles,
-    handleRemoveFile,
+    handleRemoveEntry,
+    createDirectory,
+    changeDirectory,
+    workspaceContext,
+    getState,
   } = useCapabilityFileWorkspace({
     capabilityId: pdfAgentCapability.id,
     defaultStatus: DEFAULT_STATUS,
@@ -111,7 +107,10 @@ export function PdfAgentPage({
     allowedTabs: ["agent", "demo"],
   });
   const capabilityBundle = useMemo(() => buildPdfAgentBundle(), []);
-  const clientTools = useMemo(() => createPdfAgentClientTools({ files }), [files]);
+  const clientTools = useMemo(
+    () => createPdfAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, getState }),
+    [changeDirectory, createDirectory, cwdPath, entries, files, getState, workspaceContext],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -119,6 +118,7 @@ export function PdfAgentPage({
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildPdfAgentDemoScenario,
+    setExecutionMode,
     setFiles,
     setStatus,
     setReportEffects,
@@ -129,13 +129,16 @@ export function PdfAgentPage({
       capabilityId: pdfAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      files,
+      cwdPath,
+      breadcrumbs,
+      entries,
       accept: ".pdf",
       onSelectFiles: handleFiles,
-      onClearFiles: handleClearFiles,
-      onRemoveFile: handleRemoveFile,
+      onCreateDirectory: createDirectory,
+      onChangeDirectory: changeDirectory,
+      onRemoveEntry: handleRemoveEntry,
     });
-  }, [files, handleClearFiles, handleFiles, handleRemoveFile, onRegisterWorkspace]);
+  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   return (
     <>
@@ -173,6 +176,9 @@ export function PdfAgentPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>
+                CWD: {cwdPath}
+              </MetaText>
+              <MetaText>
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
               </MetaText>
               <MetaText>
@@ -201,6 +207,9 @@ export function PdfAgentPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
+              workspaceContext={workspaceContext}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
@@ -247,6 +256,8 @@ export function PdfAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}

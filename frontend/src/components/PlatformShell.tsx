@@ -388,11 +388,14 @@ export function PlatformShell({
               </WorkspaceModalCloseButton>
             </WorkspaceModalHeader>
             <WorkspaceInventoryPane
-              files={workspaceRegistration.files}
+              cwdPath={workspaceRegistration.cwdPath}
+              breadcrumbs={workspaceRegistration.breadcrumbs}
+              entries={workspaceRegistration.entries}
               accept={workspaceRegistration.accept}
               onSelectFiles={workspaceRegistration.onSelectFiles}
-              onClearFiles={workspaceRegistration.onClearFiles}
-              onRemoveFile={workspaceRegistration.onRemoveFile}
+              onCreateDirectory={workspaceRegistration.onCreateDirectory}
+              onChangeDirectory={workspaceRegistration.onChangeDirectory}
+              onRemoveEntry={workspaceRegistration.onRemoveEntry}
             />
           </WorkspaceModalCard>
         </WorkspaceModalBackdrop>

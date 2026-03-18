@@ -937,7 +937,8 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
   max-width: 100%;
   min-height: ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.08)")};
   border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.1)" : "rgba(255, 255, 255, 0.12)")};
 
@@ -964,6 +965,25 @@ export const ChatKitPaneToolbarButton = styled.button`
   color: #1f2937;
   border-radius: 999px;
   padding: 0.65rem 0.95rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+export const ChatKitPaneModeRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+`;
+
+export const ChatKitPaneModeButton = styled.button<{ $active?: boolean }>`
+  border: 1px solid
+    ${({ $active }) => ($active ? "rgba(244, 196, 48, 0.62)" : "rgba(255, 255, 255, 0.2)")};
+  background: ${({ $active }) => ($active ? "rgba(244, 196, 48, 0.18)" : "rgba(255, 255, 255, 0.08)")};
+  color: #f8f6f2;
+  border-radius: 999px;
+  padding: 0.45rem 0.78rem;
   font: inherit;
   font-weight: 700;
   cursor: pointer;

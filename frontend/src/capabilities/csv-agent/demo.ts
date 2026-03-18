@@ -25,12 +25,14 @@ export async function buildCsvAgentDemoScenario(): Promise<CapabilityDemoScenari
       "This is the CSV Agent demo.",
       "Start by listing the workspace files and inspecting the available CSVs.",
       "Investigate the sales data, create one reusable chartable artifact from a safe grouped aggregate query, and if it helps the story, hand off to the Chart Agent for one polished chart.",
+      "Treat this as a batch-style demo and provide results without stopping for confirmation unless you are truly blocked.",
       "Explain the business takeaway briefly when you are done.",
     ].join(" "),
     workspaceSeed: [
       buildCsvDemoFile("demo-sales-fixture", "sales_demo.csv", SALES_CSV),
       buildCsvDemoFile("demo-support-fixture", "support_demo.csv", SUPPORT_CSV),
     ],
+    defaultExecutionMode: "batch",
     model: "lightweight",
     expectedOutcomes: [
       "Lists the bundled CSV files before analyzing them",

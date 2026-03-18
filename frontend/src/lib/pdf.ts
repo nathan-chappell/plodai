@@ -235,11 +235,58 @@ function inferTitleCandidate(text: string, pageNumber: number): string {
   return firstWords || `Section ${pageNumber}`;
 }
 
-function buildSmartSplitPlan(inspection: PdfInspection, goal?: string): SmartSplitPlanEntry[] {
+export function buildSmartSplitPlan(inspection: PdfInspection, goal?: string): SmartSplitPlanEntry[] {
+  const sectionPlan = buildSectionAwareSmartSplitPlan(inspection, goal);
+  if (sectionPlan.length >= 2) {
+    return sectionPlan;
+  }
+
+  return buildChunkedSmartSplitPlan(inspection, goal);
+}
+
+function buildSectionAwareSmartSplitPlan(
+  inspection: PdfInspection,
+  goal?: string,
+): SmartSplitPlanEntry[] {
+  const boundaryStarts = inspection.pageHints
+    .filter((pageHint) => isStrongSectionBoundary(pageHint, inspection.outline))
+    .map((pageHint) => pageHint.pageNumber);
+  const normalizedStarts = Array.from(new Set([1, ...boundaryStarts]))
+    .filter((pageNumber) => pageNumber >= 1 && pageNumber <= inspection.pageCount)
+    .sort((left, right) => left - right);
+
+  if (normalizedStarts.length < 2) {
+    return [];
+  }
+
+  const goalPrefix = goal?.trim() ? `${goal.trim()}: ` : "";
+  return normalizedStarts.map((startPage, index) => {
+    const endPage =
+      index < normalizedStarts.length - 1
+        ? normalizedStarts[index + 1] - 1
+        : inspection.pageCount;
+    const startHint =
+      inspection.pageHints.find((pageHint) => pageHint.pageNumber === startPage)?.titleCandidate ||
+      `Section ${index + 1}`;
+    return {
+      title: `${goalPrefix}${normalizeSectionTitle(startHint, startPage)}`.slice(0, 96),
+      startPage,
+      endPage,
+    };
+  });
+}
+
+function buildChunkedSmartSplitPlan(
+  inspection: PdfInspection,
+  goal?: string,
+): SmartSplitPlanEntry[] {
   const targetChunkSize = inspection.pageCount <= 6 ? 2 : inspection.pageCount <= 15 ? 4 : 6;
   const boundaryPages = new Set<number>();
   for (const pageHint of inspection.pageHints) {
-    if (pageHint.titleCandidate && pageHint.titleCandidate !== `Section ${pageHint.pageNumber}`) {
+    if (
+      pageHint.titleCandidate &&
+      normalizeSectionTitle(pageHint.titleCandidate, pageHint.pageNumber) !== `Section ${pageHint.pageNumber}`
+    ) {
       boundaryPages.add(pageHint.pageNumber);
     }
   }
@@ -259,13 +306,41 @@ function buildSmartSplitPlan(inspection: PdfInspection, goal?: string): SmartSpl
       `Section ${segments.length + 1}`;
     const goalPrefix = goal?.trim() ? `${goal.trim()}: ` : "";
     segments.push({
-      title: `${goalPrefix}${startHint}`.slice(0, 96),
+      title: `${goalPrefix}${normalizeSectionTitle(startHint, startPage)}`.slice(0, 96),
       startPage,
       endPage,
     });
     startPage = endPage + 1;
   }
   return segments;
+}
+
+function isStrongSectionBoundary(pageHint: PdfInspectionPage, outline: string[]): boolean {
+  const normalizedTitle = normalizeSectionTitle(pageHint.titleCandidate, pageHint.pageNumber);
+  if (normalizedTitle === `Section ${pageHint.pageNumber}`) {
+    return false;
+  }
+  const titleWords = normalizedTitle.split(/\s+/).filter(Boolean);
+  if (outline.some((item) => normalizeTitleForMatch(item) === normalizeTitleForMatch(normalizedTitle))) {
+    return true;
+  }
+  return titleWords.length <= 6 || normalizedTitle.length <= 42;
+}
+
+function normalizeSectionTitle(title: string, pageNumber: number): string {
+  const trimmed = title.trim();
+  if (!trimmed || trimmed === `Section ${pageNumber}`) {
+    return `Section ${pageNumber}`;
+  }
+  return trimmed.replace(/\s+/g, " ");
+}
+
+function normalizeTitleForMatch(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ");
 }
 
 function buildSmartSplitIndexMarkdown(

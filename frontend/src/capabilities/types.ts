@@ -1,7 +1,9 @@
 import type { ComponentType } from "react";
 import type { ClientEffect } from "../types/analysis";
+import type { ExecutionMode } from "../types/analysis";
 import type { JsonSchema } from "../types/json-schema";
 import type { LocalWorkspaceFile } from "../types/report";
+import type { WorkspaceBreadcrumb, WorkspaceContext, WorkspaceItem } from "../types/workspace";
 
 export type FunctionToolDefinition = {
   type: "function";
@@ -14,7 +16,7 @@ export type FunctionToolDefinition = {
 export type ClientToolHandlerContext = {
   emitEffect: (effect: ClientEffect) => void;
   emitEffects: (effects: ClientEffect[]) => void;
-  appendFiles: (files: LocalWorkspaceFile[]) => void;
+  appendFiles: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[];
 };
 
 export type ClientToolHandler<Args = Record<string, unknown>, Result = Record<string, unknown>> = (
@@ -66,15 +68,29 @@ export type ShellWorkspaceRegistration = {
   capabilityId: string;
   title: string;
   description: string;
-  files: LocalWorkspaceFile[];
+  cwdPath: string;
+  breadcrumbs: WorkspaceBreadcrumb[];
+  entries: WorkspaceItem[];
   accept?: string;
   onSelectFiles: (files: FileList | null) => Promise<void>;
-  onClearFiles: () => void;
-  onRemoveFile?: (fileId: string) => void;
+  onCreateDirectory: (path: string) => void;
+  onChangeDirectory: (path: string) => void;
+  onRemoveEntry?: (entryId: string) => void;
 };
 
 export type CapabilityWorkspaceContext = {
+  cwdPath: string;
   files: LocalWorkspaceFile[];
+  entries: WorkspaceItem[];
+  workspaceContext: WorkspaceContext;
+  createDirectory: (path: string) => string;
+  changeDirectory: (path: string) => string;
+  getState: () => {
+    cwdPath: string;
+    files: LocalWorkspaceFile[];
+    entries: WorkspaceItem[];
+    workspaceContext: WorkspaceContext;
+  };
 };
 
 export type CapabilityDemoScenario = {
@@ -83,6 +99,7 @@ export type CapabilityDemoScenario = {
   summary: string;
   initialPrompt: string;
   workspaceSeed: LocalWorkspaceFile[];
+  defaultExecutionMode?: ExecutionMode;
   model?: string;
   expectedOutcomes?: string[];
   notes?: string[];

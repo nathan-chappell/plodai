@@ -1,17 +1,23 @@
-import { ReportFoundryPage, reportFoundryCapability } from "../reportFoundry";
+import { reportAgentCapability } from "../definitions";
+import { ReportFoundryPage } from "../reportFoundry";
 import type { CapabilityModule } from "../types";
 import { buildReportAgentDemoScenario } from "./demo";
 import { REPORT_AGENT_INSTRUCTIONS } from "./instructions";
 import { buildReportAgentClientToolCatalog, createReportAgentClientTools } from "./tools";
 
 export const reportAgentModule: CapabilityModule = {
-  definition: reportFoundryCapability,
+  definition: reportAgentCapability,
   buildAgentSpec: () => ({
     capability_id: "report-agent",
     agent_name: "Report Agent",
     instructions: REPORT_AGENT_INSTRUCTIONS,
     client_tools: buildReportAgentClientToolCatalog(),
     handoff_targets: [
+      {
+        capability_id: "workspace-agent",
+        tool_name: "delegate_to_workspace_agent",
+        description: "Hand off to the Workspace Agent when the next step is inspecting the current working directory, creating directories, or changing directories.",
+      },
       {
         capability_id: "csv-agent",
         tool_name: "delegate_to_csv_agent",
@@ -26,6 +32,11 @@ export const reportAgentModule: CapabilityModule = {
         capability_id: "pdf-agent",
         tool_name: "delegate_to_pdf_agent",
         description: "Hand off to the PDF Agent for PDF inspection, page extraction, or smart splitting.",
+      },
+      {
+        capability_id: "feedback-agent",
+        tool_name: "delegate_to_feedback_agent",
+        description: "Hand off to the Feedback Agent when the user wants to provide structured feedback about this thread.",
       },
     ],
   }),

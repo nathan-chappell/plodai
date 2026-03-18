@@ -10,6 +10,7 @@ from backend.app.chatkit.metadata import (
     CapabilityAgentSpec,
     CapabilityBundle,
     ClientToolDefinition,
+    ExecutionMode,
 )
 
 
@@ -17,12 +18,14 @@ from backend.app.chatkit.metadata import (
 class ReportAgentContext:
     report_id: str
     user_id: str
+    user_email: str | None
     db: AsyncSession
     chart_cache: dict[str, str] = field(default_factory=dict)
     thread_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
     available_files: list[WorkspaceFileMetadata] = field(default_factory=list)
     query_plan_model: type[BaseModel] | None = None
     capability_bundle: CapabilityBundle | None = None
+    uploaded_file_ids: dict[str, str] = field(default_factory=dict)
 
     @property
     def available_datasets(self) -> list[DatasetMetadata]:
@@ -99,3 +102,12 @@ class ReportAgentContext:
             if capability_spec is not None
             else []
         )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        mode = self.thread_metadata.get("execution_mode")
+        return mode if mode in {"interactive", "batch"} else "interactive"
+
+    @property
+    def is_batch_mode(self) -> bool:
+        return self.execution_mode == "batch"

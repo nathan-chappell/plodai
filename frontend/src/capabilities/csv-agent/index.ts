@@ -1,4 +1,5 @@
-import { CsvAgentPage, csvAgentCapability } from "../csvAgent";
+import { csvAgentCapability } from "../definitions";
+import { CsvAgentPage } from "../csvAgent";
 import type { CapabilityModule } from "../types";
 import { buildCsvAgentDemoScenario } from "./demo";
 import { buildCsvAgentClientToolCatalog, createCsvAgentClientTools } from "./tools";
@@ -18,6 +19,7 @@ Important operating rules:
 3. Prefer grouped aggregates and summaries over raw row dumps.
 4. If a result set should be charted or reused, materialize it explicitly with \`create_csv_file\` or \`create_json_file\`.
 5. Use \`make_plan\` when it helps you stay organized, then continue immediately with more tool calls.
+6. When the next step is clear from the request and the available files, continue without unnecessary confirmation.
 `.trim();
 
 export const csvAgentModule: CapabilityModule = {
@@ -29,9 +31,19 @@ export const csvAgentModule: CapabilityModule = {
     client_tools: buildCsvAgentClientToolCatalog(),
     handoff_targets: [
       {
+        capability_id: "workspace-agent",
+        tool_name: "delegate_to_workspace_agent",
+        description: "Hand off to the Workspace Agent when the next step is inspecting the current working directory, creating directories, or changing directories.",
+      },
+      {
         capability_id: "chart-agent",
         tool_name: "delegate_to_chart_agent",
         description: "Hand off to the Chart Agent when the next step is chart planning or rendering from a chartable CSV or JSON artifact.",
+      },
+      {
+        capability_id: "feedback-agent",
+        tool_name: "delegate_to_feedback_agent",
+        description: "Hand off to the Feedback Agent when the user wants to provide structured feedback about this thread.",
       },
     ],
   }),

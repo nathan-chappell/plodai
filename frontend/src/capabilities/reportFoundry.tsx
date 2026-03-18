@@ -9,13 +9,14 @@ import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
 import { NarrativeCard } from "../components/NarrativeCard";
 import { WorkspaceArtifactInspector } from "../components/WorkspaceArtifactInspector";
+import { reportAgentCapability } from "./definitions";
 import { buildReportAgentDemoScenario } from "./report-agent/demo";
 import { createReportAgentClientTools } from "./report-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { buildReportAgentBundle } from "./manifests";
 import { useDemoScenario } from "./shared/useDemoScenario";
-import type { CapabilityClientTool, CapabilityDefinition, ShellWorkspaceRegistration } from "./types";
+import type { CapabilityClientTool, CapabilityWorkspaceContext, ShellWorkspaceRegistration } from "./types";
 import type { ClientEffect } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import {
@@ -56,6 +57,23 @@ function isPdfEffect(effect: ClientEffect): effect is Extract<ClientEffect, { ty
   return effect.type === "pdf_smart_split_completed";
 }
 
+export function resolveReportDemoWorkspaceMeta(options: {
+  loading: boolean;
+  error: string | null;
+  title: string | null;
+}): string {
+  if (options.loading) {
+    return "Preparing the report demo.";
+  }
+  if (options.error) {
+    return options.error;
+  }
+  if (options.title) {
+    return `Curated scenario loaded: ${options.title}.`;
+  }
+  return "Preparing scenario.";
+}
+
 function InvestigationBriefPanel({
   investigationBrief,
   setInvestigationBrief,
@@ -78,8 +96,8 @@ function InvestigationBriefPanel({
   );
 }
 
-export function createReportFoundryClientTools(files: LocalWorkspaceFile[]): CapabilityClientTool[] {
-  return createReportAgentClientTools({ files });
+export function createReportFoundryClientTools(workspace: CapabilityWorkspaceContext): CapabilityClientTool[] {
+  return createReportAgentClientTools(workspace);
 }
 
 function ReportSummaryArtifacts({ files }: { files: LocalWorkspaceFile[] }) {
@@ -100,19 +118,6 @@ function ReportSummaryArtifacts({ files }: { files: LocalWorkspaceFile[] }) {
   );
 }
 
-export const reportFoundryCapability: CapabilityDefinition = {
-  id: "report-agent",
-  path: "/capabilities/report-agent",
-  navLabel: "Report Agent",
-  title: "Report Agent",
-  eyebrow: "Capability",
-  description: "Narrative report assembly with CSV, chart, and PDF handoffs.",
-  tabs: [
-    { id: "report", label: "Report" },
-    { id: "demo", label: "Demo" },
-  ],
-};
-
 export function ReportFoundryPage({
   onRegisterWorkspace,
 }: {
@@ -124,6 +129,9 @@ export function ReportFoundryPage({
   }
 
   const {
+    cwdPath,
+    breadcrumbs,
+    entries,
     files,
     appendFiles,
     status,
@@ -132,21 +140,29 @@ export function ReportFoundryPage({
     setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
+    executionMode,
+    setExecutionMode,
     reportEffects,
     setReportEffects,
     handleFiles,
-    handleClearFiles,
-    handleRemoveFile,
+    handleRemoveEntry,
     setFiles,
+    createDirectory,
+    changeDirectory,
+    workspaceContext,
+    getState,
   } = useCapabilityFileWorkspace({
-    capabilityId: reportFoundryCapability.id,
+    capabilityId: reportAgentCapability.id,
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "report",
     allowedTabs: ["report", "demo"],
   });
   const capabilityBundle = useMemo(() => buildReportAgentBundle(), []);
-  const clientTools = useMemo<CapabilityClientTool[]>(() => createReportFoundryClientTools(files), [files]);
+  const clientTools = useMemo<CapabilityClientTool[]>(
+    () => createReportFoundryClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, getState }),
+    [changeDirectory, createDirectory, cwdPath, entries, files, getState, workspaceContext],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -154,6 +170,7 @@ export function ReportFoundryPage({
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     buildDemoScenario: buildReportAgentDemoScenario,
+    setExecutionMode,
     setFiles,
     setStatus,
     setReportEffects,
@@ -162,23 +179,26 @@ export function ReportFoundryPage({
 
   useEffect(() => {
     onRegisterWorkspace?.({
-      capabilityId: reportFoundryCapability.id,
+      capabilityId: reportAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      files,
+      cwdPath,
+      breadcrumbs,
+      entries,
       accept: ".csv,.json,.pdf",
       onSelectFiles: handleFiles,
-      onClearFiles: handleClearFiles,
-      onRemoveFile: handleRemoveFile,
+      onCreateDirectory: createDirectory,
+      onChangeDirectory: changeDirectory,
+      onRemoveEntry: handleRemoveEntry,
     });
-  }, [files, handleClearFiles, handleFiles, handleRemoveFile, onRegisterWorkspace]);
+  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   return (
     <>
       <CapabilityHeroRow>
         <CapabilityHeader>
-          <CapabilityEyebrow>{reportFoundryCapability.eyebrow}</CapabilityEyebrow>
-          <CapabilityTitle>{reportFoundryCapability.title}</CapabilityTitle>
+          <CapabilityEyebrow>{reportAgentCapability.eyebrow}</CapabilityEyebrow>
+          <CapabilityTitle>{reportAgentCapability.title}</CapabilityTitle>
           <CapabilitySubhead>
             Lead an investigation, hand off to specialists when needed, and assemble a narrative report over local files.
           </CapabilitySubhead>
@@ -187,7 +207,7 @@ export function ReportFoundryPage({
       </CapabilityHeroRow>
 
       <CapabilityTabBar>
-        {reportFoundryCapability.tabs.map((tab) => (
+        {reportAgentCapability.tabs.map((tab) => (
           <CapabilityTabButton
             key={tab.id}
             data-testid={`report-agent-tab-${tab.id}`}
@@ -209,6 +229,7 @@ export function ReportFoundryPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}</MetaText>
+              <MetaText>CWD: {cwdPath}</MetaText>
               <MetaText>
                 Current goal: {investigationBrief.trim() || "No goal set yet."}
               </MetaText>
@@ -248,6 +269,9 @@ export function ReportFoundryPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
+              workspaceContext={workspaceContext}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
@@ -264,7 +288,11 @@ export function ReportFoundryPage({
               <CapabilitySectionHeader>
                 <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
                 <CapabilityMetaText>
-                  {demoLoading ? "Preparing the report demo." : demoError ?? status}
+                  {resolveReportDemoWorkspaceMeta({
+                    loading: demoLoading,
+                    error: demoError,
+                    title: demoScenario?.title ?? null,
+                  })}
                 </CapabilityMetaText>
               </CapabilitySectionHeader>
               <CompactSummaryGrid>
@@ -331,6 +359,8 @@ export function ReportFoundryPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
               onEffects={(nextEffects) => setReportEffects((current) => [...nextEffects, ...current].slice(0, 8))}
               onFilesAdded={appendFiles}

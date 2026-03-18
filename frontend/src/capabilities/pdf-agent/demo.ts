@@ -46,9 +46,12 @@ export async function buildPdfAgentDemoScenario(): Promise<CapabilityDemoScenari
       "This is the PDF Agent demo.",
       "Start by listing the workspace files and inspecting the PDF.",
       "Then perform a smart split that creates useful sub-documents, an index, and an archive for download.",
+      "If the document clearly has section boundaries, split by section instead of relying on evenly sized chunks.",
+      "Treat this as a batch-style demo and keep moving without asking me follow-up questions unless you are genuinely blocked.",
       "Briefly explain how you chose the split.",
     ].join(" "),
     workspaceSeed: [sourcePdf],
+    defaultExecutionMode: "batch",
     model: "lightweight",
     expectedOutcomes: [
       "Inspects the PDF before attempting a split",

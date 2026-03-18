@@ -1,7 +1,7 @@
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
 import { ChatKitPaneMeta } from "./styles";
 import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
-import type { ClientEffect } from "../types/analysis";
+import type { ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 
 export function CapabilityDemoPane({
@@ -10,6 +10,8 @@ export function CapabilityDemoPane({
   error,
   capabilityBundle,
   files,
+  executionMode,
+  onExecutionModeChange,
   clientTools,
   onEffects,
   onFilesAdded,
@@ -19,6 +21,8 @@ export function CapabilityDemoPane({
   error: string | null;
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
+  executionMode: ExecutionMode;
+  onExecutionModeChange: (mode: ExecutionMode) => void;
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
@@ -62,12 +66,14 @@ export function CapabilityDemoPane({
         files={files}
         investigationBrief={scenario?.summary ?? ""}
         clientTools={clientTools}
+        executionMode={executionMode}
+        onExecutionModeChange={onExecutionModeChange}
         onEffects={onEffects}
         onFilesAdded={onFilesAdded}
         headerTitle={scenario?.title}
         greeting="Run the curated demo."
         prompts={prompts}
-        composerPlaceholder="Run the scripted demo or ask a follow-up question"
+        composerPlaceholder="Run the scripted demo or continue from the latest results"
         quickActions={quickActions}
         colorScheme="light"
         showDictation={false}

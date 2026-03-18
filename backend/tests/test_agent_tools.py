@@ -1,8 +1,13 @@
-from backend.app.agents.tools import _build_plan_widget, _build_tool_trace_widget
+from backend.app.agents.widgets import (
+    build_plan_widget,
+    build_tool_trace_widget,
+    build_workspace_context_copy_text,
+    build_workspace_context_widget,
+)
 
 
 def test_build_plan_widget_includes_plan_sections() -> None:
-    widget = _build_plan_widget(
+    widget = build_plan_widget(
         {
             "id": "plan_123",
             "focus": "Investigate west region revenue drop",
@@ -32,7 +37,7 @@ def test_build_plan_widget_includes_plan_sections() -> None:
 
 
 def test_build_tool_trace_widget_includes_summary_and_details() -> None:
-    widget = _build_tool_trace_widget(
+    widget = build_tool_trace_widget(
         "run_aggregate_query",
         "Validated a grouped aggregate query plan.",
         ["Dataset: revenue_csv", "Group by: 2", "Aggregates: 3"],
@@ -50,3 +55,32 @@ def test_build_tool_trace_widget_includes_summary_and_details() -> None:
     assert "Dataset: revenue_csv" in text_values
     assert "Group by: 2" in text_values
     assert "Aggregates: 3" in text_values
+
+
+def test_build_workspace_context_widget_and_copy_text_include_paths() -> None:
+    widget = build_workspace_context_widget(
+        action_label="Created directory",
+        cwd_path="/report-agent/reports",
+        target_path="/report-agent/reports/q1",
+    )
+    copy_text = build_workspace_context_copy_text(
+        action_label="Created directory",
+        cwd_path="/report-agent/reports",
+        target_path="/report-agent/reports/q1",
+    )
+
+    assert widget["type"] == "Card"
+    assert widget["status"] == {"text": "Workspace updated", "icon": "cube"}
+    text_values = [
+        child.get("value")
+        for child in widget["children"]
+        if isinstance(child, dict) and "value" in child
+    ]
+    assert "Created directory" in text_values
+    assert "Current directory: /report-agent/reports" in text_values
+    assert "Target: /report-agent/reports/q1" in text_values
+    assert copy_text == (
+        "Created directory\n"
+        "Current directory: /report-agent/reports\n"
+        "Target: /report-agent/reports/q1"
+    )

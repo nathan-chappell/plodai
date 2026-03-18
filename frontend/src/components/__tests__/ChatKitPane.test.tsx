@@ -1,0 +1,303 @@
+// @vitest-environment jsdom
+
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let latestHandlers: Record<string, (...args: any[]) => void> | null = null;
+let latestChatKitOptions: Record<string, unknown> | null = null;
+let latestHostElement: HTMLElement | null = null;
+let latestScrollTarget: HTMLElement | null = null;
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+
+vi.mock("@openai/chatkit-react", async () => {
+  const ReactModule = await import("react");
+
+  function splitOptions(options: Record<string, unknown>) {
+    const handlers: Record<string, unknown> = {};
+    const chatKitOptions: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(options)) {
+      if (/^on[A-Z]/.test(key) && key !== "onClientTool") {
+        handlers[key] = value;
+      } else {
+        chatKitOptions[key] = value;
+      }
+    }
+    return { handlers, chatKitOptions };
+  }
+
+  return {
+    useChatKit(options: Record<string, unknown>) {
+      const ref = ReactModule.useRef<HTMLElement | null>(null);
+      const { handlers, chatKitOptions } = ReactModule.useMemo(() => splitOptions(options), [options]);
+      const control = ReactModule.useMemo(
+        () => ({
+          setInstance(instance: HTMLElement | null) {
+            ref.current = instance;
+          },
+          options: chatKitOptions,
+          handlers,
+        }),
+        [chatKitOptions, handlers],
+      );
+      return ReactModule.useMemo(
+        () => ({
+          control,
+          ref,
+          fetchUpdates: vi.fn(async () => {}),
+          focusComposer: vi.fn(async () => {}),
+          hideHistory: vi.fn(async () => {}),
+          sendCustomAction: vi.fn(async () => {}),
+          sendUserMessage: vi.fn(async () => {}),
+          setComposerValue: vi.fn(async () => {}),
+          setThreadId: vi.fn(async () => {}),
+          showHistory: vi.fn(async () => {}),
+        }),
+        [control],
+      );
+    },
+    ChatKit: ReactModule.forwardRef(function MockChatKit(
+      { control }: { control: { setInstance: (instance: HTMLElement | null) => void; handlers: Record<string, any> } },
+      forwardedRef: React.ForwardedRef<HTMLElement>,
+    ) {
+      const localRef = ReactModule.useRef<HTMLElement | null>(null);
+
+      ReactModule.useLayoutEffect(() => {
+        latestHandlers = control.handlers;
+        latestChatKitOptions = control.options;
+        const host = localRef.current;
+        latestHostElement = host;
+        if (!host) {
+          return;
+        }
+        const shadowRoot = host.shadowRoot ?? host.attachShadow({ mode: "open" });
+        let scrollTarget = shadowRoot.querySelector("[data-testid='mock-chatkit-scroll-target']") as HTMLElement | null;
+        if (!scrollTarget) {
+          scrollTarget = document.createElement("div");
+          scrollTarget.dataset.testid = "mock-chatkit-scroll-target";
+          scrollTarget.style.overflowY = "auto";
+          shadowRoot.appendChild(scrollTarget);
+        }
+        latestScrollTarget = scrollTarget;
+
+        return () => {
+          latestHandlers = null;
+          latestChatKitOptions = null;
+          latestHostElement = null;
+          latestScrollTarget = null;
+        };
+      }, [control]);
+
+      return ReactModule.createElement("openai-chatkit", {
+        ref: (node: HTMLElement | null) => {
+          localRef.current = node;
+          control.setInstance(node);
+          if (typeof forwardedRef === "function") {
+            forwardedRef(node);
+          } else if (forwardedRef) {
+            forwardedRef.current = node;
+          }
+        },
+      });
+    }),
+  };
+});
+
+vi.mock("../../lib/dev-logging", () => ({
+  devLogger: {
+    clientToolError: vi.fn(),
+    clientToolStart: vi.fn(),
+    clientToolSuccess: vi.fn(),
+    responseEnd: vi.fn(),
+    responseStart: vi.fn(),
+  },
+}));
+
+import { ChatKitHarness, buildChatKitRequestMetadata } from "../ChatKitPane";
+import type { CapabilityBundle, CapabilityClientTool } from "../../capabilities/types";
+import type { ExecutionMode } from "../../types/analysis";
+import type { LocalWorkspaceFile } from "../../types/report";
+
+function setScrollMetrics(
+  element: HTMLElement,
+  metrics: { clientHeight: number; scrollHeight: number; scrollTop?: number },
+): void {
+  let scrollTop = metrics.scrollTop ?? 0;
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    get: () => metrics.clientHeight,
+  });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    get: () => metrics.scrollHeight,
+  });
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value: number) => {
+      scrollTop = value;
+    },
+  });
+}
+
+const capabilityBundle: CapabilityBundle = {
+  root_capability_id: "report-agent",
+  capabilities: [
+    {
+      capability_id: "report-agent",
+      agent_name: "Report Agent",
+      instructions: "Inspect files.",
+      client_tools: [],
+      handoff_targets: [],
+    },
+  ],
+};
+
+const files: LocalWorkspaceFile[] = [
+  {
+    id: "file_csv",
+    name: "sales.csv",
+    kind: "csv",
+    extension: "csv",
+    row_count: 1,
+    columns: ["region"],
+    numeric_columns: [],
+    sample_rows: [{ region: "West" }],
+    preview_rows: [{ region: "West" }],
+    rows: [{ region: "West" }],
+  },
+];
+
+const workspaceContext = {
+  cwd_path: "/report-agent",
+  referenced_item_ids: ["file_csv"],
+} as const;
+
+describe("ChatKitHarness auto-scroll", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+    latestHandlers = null;
+    latestChatKitOptions = null;
+    latestHostElement = null;
+    latestScrollTarget = null;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+    vi.restoreAllMocks();
+  });
+
+  async function renderHarness(
+    clientTools: CapabilityClientTool[] = [],
+    executionMode: ExecutionMode = "interactive",
+  ) {
+    await act(async () => {
+      root.render(
+        <ChatKitHarness
+          capabilityBundle={capabilityBundle}
+          files={files}
+          workspaceContext={workspaceContext}
+          executionMode={executionMode}
+          investigationBrief=""
+          clientTools={clientTools}
+          onEffects={() => {}}
+        />,
+      );
+    });
+  }
+
+  it("scrolls on response end only while auto-scroll is enabled", async () => {
+    await renderHarness();
+    expect(latestHandlers).not.toBeNull();
+    expect(latestScrollTarget).not.toBeNull();
+
+    setScrollMetrics(latestScrollTarget!, {
+      clientHeight: 200,
+      scrollHeight: 900,
+      scrollTop: 600,
+    });
+
+    await act(async () => {
+      latestHandlers?.onReady?.();
+    });
+    expect(latestScrollTarget!.scrollTop).toBe(900);
+
+    latestScrollTarget!.scrollTop = 120;
+    latestScrollTarget!.dispatchEvent(new Event("scroll"));
+
+    await act(async () => {
+      latestHandlers?.onResponseEnd?.();
+    });
+    expect(latestScrollTarget!.scrollTop).toBe(120);
+
+    latestScrollTarget!.scrollTop = 860;
+    latestScrollTarget!.dispatchEvent(new Event("scroll"));
+
+    await act(async () => {
+      latestHandlers?.onResponseEnd?.();
+    });
+    expect(latestScrollTarget!.scrollTop).toBe(900);
+  });
+
+  it("forces scroll and re-enables auto-scroll on thread changes", async () => {
+    await renderHarness();
+    expect(latestHandlers).not.toBeNull();
+    expect(latestScrollTarget).not.toBeNull();
+
+    setScrollMetrics(latestScrollTarget!, {
+      clientHeight: 220,
+      scrollHeight: 1000,
+      scrollTop: 150,
+    });
+    latestScrollTarget!.dispatchEvent(new Event("scroll"));
+
+    await act(async () => {
+      latestHandlers?.onThreadChange?.({ threadId: "thread_123" });
+    });
+    expect(latestScrollTarget!.scrollTop).toBe(1000);
+
+    latestScrollTarget!.scrollTop = 140;
+    latestScrollTarget!.dispatchEvent(new Event("scroll"));
+
+    await act(async () => {
+      latestHandlers?.onThreadLoadEnd?.({ threadId: "thread_123" });
+    });
+    expect(latestScrollTarget!.scrollTop).toBe(1000);
+  });
+
+  it("disables built-in feedback actions and includes execution mode in metadata", async () => {
+    await renderHarness([], "batch");
+
+    expect(latestChatKitOptions?.threadItemActions).toEqual({ feedback: false });
+    expect(
+      buildChatKitRequestMetadata({
+        capabilityBundle,
+        workspaceContext,
+        threadOrigin: "interactive",
+        executionMode: "batch",
+      }),
+    ).toMatchObject({
+      capability_bundle: capabilityBundle,
+      workspace_context: workspaceContext,
+      execution_mode: "batch",
+      origin: "interactive",
+    });
+  });
+});

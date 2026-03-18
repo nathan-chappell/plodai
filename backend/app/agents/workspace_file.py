@@ -30,6 +30,7 @@ class WorkspaceFileMetadata:
     id: str
     name: str
     kind: WorkspaceFileKind
+    path: str = ""
     extension: str = ""
     mime_type: str | None = None
     byte_size: int | None = None

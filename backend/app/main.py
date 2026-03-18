@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,10 +13,10 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
 from backend.app.api.routes import router
-from backend.app.chatkit.server import ReportFoundryChatKitServer, build_chatkit_server
+from backend.app.chatkit.server import ClientWorkspaceChatKitServer, build_chatkit_server
 from backend.app.core.auth import AuthenticatedUser, require_paid_user
 from backend.app.core.config import get_settings
-from backend.app.core.logging import configure_logging, get_logger
+from backend.app.core.logging import configure_logging, get_logger, log_event
 from backend.app.db.session import Base, engine
 from backend.app.models.cost import CostEvent  # noqa: F401
 from backend.app.models.credit import UserCreditBalance  # noqa: F401
@@ -38,19 +39,33 @@ async def lifespan(_: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    logger.info(
-        f"startup.complete database_url={settings.database_url} openai_max_retries={settings.openai_max_retries}"
+    log_event(
+        logger,
+        logging.INFO,
+        "startup.complete",
+        database_url=settings.database_url,
+        openai_max_retries=settings.openai_max_retries,
     )
     yield
 
 
 configure_logging()
-print(f"ai-portfolio api version={_read_version()}")
-print(f"ai-portfolio api root={ROOT_DIR}")
 settings = get_settings()
 logger = get_logger("main")
+log_event(
+    logger,
+    logging.INFO,
+    "startup.bootstrap",
+    version=_read_version(),
+    root_dir=str(ROOT_DIR),
+)
 if not settings.CLERK_SECRET_KEY:
-    logger.warning("clerk.secret_key_missing auth routes will return 503 until CLERK_SECRET_KEY is configured")
+    log_event(
+        logger,
+        logging.WARNING,
+        "clerk.secret_key_missing",
+        detail="auth routes will return 503 until CLERK_SECRET_KEY is configured",
+    )
 if settings.OPENAI_API_KEY:
     os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
     default_openai_client = AsyncOpenAI(
@@ -58,8 +73,11 @@ if settings.OPENAI_API_KEY:
         max_retries=settings.openai_max_retries,
     )
     set_default_openai_client(default_openai_client)
-    logger.info(
-        f"openai.default_client_configured max_retries={settings.openai_max_retries}"
+    log_event(
+        logger,
+        logging.INFO,
+        "openai.default_client_configured",
+        max_retries=settings.openai_max_retries,
     )
 
 app = FastAPI(
@@ -97,11 +115,11 @@ async def healthcheck() -> dict[str, str]:
 async def chatkit_entrypoint(
     request: Request,
     user: AuthenticatedUser = Depends(require_paid_user),
-    chatkit_server: ReportFoundryChatKitServer = Depends(build_chatkit_server),
+    chatkit_server: ClientWorkspaceChatKitServer = Depends(build_chatkit_server),
 ):
     raw_request = await request.body()
     context = await chatkit_server.build_request_context(
-        raw_request, user_id=user.id
+        raw_request, user_id=user.id, user_email=user.email
     )
     result = await chatkit_server.process(raw_request, context)
     if isinstance(result, StreamingResult):
