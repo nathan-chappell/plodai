@@ -1,7 +1,7 @@
 import type { LocalWorkspaceFile } from "./report";
 
 export type WorkspaceContext = {
-  cwd_path: string;
+  path_prefix: string;
   referenced_item_ids: string[];
 };
 
@@ -19,27 +19,25 @@ export type WorkspaceFileNode = {
   kind: "file";
   name: string;
   path: string;
-  parent_id: string;
   created_at: string;
   source: "uploaded" | "derived" | "demo";
   file: LocalWorkspaceFile;
 };
 
-export type WorkspaceItem = WorkspaceDirectoryNode | WorkspaceFileNode;
+export type WorkspaceItem = WorkspaceFileNode;
 
 export type WorkspaceFilesystem = {
-  root_id: string;
-  items: WorkspaceItem[];
+  files_by_path: Record<string, WorkspaceFileNode>;
 };
 
 export type WorkspaceSurfaceState = {
   surface_key: string;
-  cwd_path: string;
+  active_prefix: string;
 };
 
 export type WorkspaceBreadcrumb = {
   id: string;
   name: string;
+  prefix: string;
   path: string;
 };
-

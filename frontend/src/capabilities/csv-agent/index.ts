@@ -14,7 +14,7 @@ Your responsibilities:
 - hand off to the Chart Agent when the work becomes chart design
 
 Important operating rules:
-1. Start with \`list_workspace_files\` or \`list_attached_csv_files\`.
+1. Start with \`list_csv_files\`.
 2. Inspect schema before writing or revising a query plan.
 3. Prefer grouped aggregates and summaries over raw row dumps.
 4. If a result set should be charted or reused, materialize it explicitly with \`create_csv_file\` or \`create_json_file\`.
@@ -22,19 +22,14 @@ Important operating rules:
 6. When the next step is clear from the request and the available files, continue without unnecessary confirmation.
 `.trim();
 
-export const csvAgentModule: CapabilityModule = {
+const csvAgentModule: CapabilityModule = {
   definition: csvAgentCapability,
-  buildAgentSpec: () => ({
+  buildAgentSpec: (workspace) => ({
     capability_id: "csv-agent",
     agent_name: "CSV Agent",
     instructions: CSV_AGENT_INSTRUCTIONS,
-    client_tools: buildCsvAgentClientToolCatalog(),
+    client_tools: buildCsvAgentClientToolCatalog(workspace),
     handoff_targets: [
-      {
-        capability_id: "workspace-agent",
-        tool_name: "delegate_to_workspace_agent",
-        description: "Hand off to the Workspace Agent when the next step is inspecting the current working directory, creating directories, or changing directories.",
-      },
       {
         capability_id: "chart-agent",
         tool_name: "delegate_to_chart_agent",
@@ -51,3 +46,5 @@ export const csvAgentModule: CapabilityModule = {
   bindClientTools: (workspace) => createCsvAgentClientTools(workspace),
   Page: CsvAgentPage,
 };
+
+export default csvAgentModule;

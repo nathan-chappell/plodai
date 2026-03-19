@@ -62,6 +62,25 @@ describe("pdf helpers", () => {
     expect(split.archiveBase64.length).toBeGreaterThan(0);
   });
 
+  it("keeps the original PDF bytes reusable after inspection", async () => {
+    const bytes = await buildPdf(6);
+
+    await expect(inspectPdfBytes(bytes)).resolves.toMatchObject({ pageCount: 6 });
+    await expect(
+      extractPdfPageRangeFromBytes(bytes, {
+        filename: "deck.pdf",
+        startPage: 1,
+        endPage: 2,
+      }),
+    ).resolves.toMatchObject({
+      pageRange: {
+        startPage: 1,
+        endPage: 2,
+        pageCount: 2,
+      },
+    });
+  });
+
   it("prefers section boundaries when the PDF clearly exposes them", () => {
     const plan = buildSmartSplitPlan({
       pageCount: 3,

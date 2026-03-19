@@ -1,4 +1,8 @@
-import type { ClientEffect } from "../types/analysis";
+import type {
+  ClientEffect,
+  WorkspaceState,
+  WorkspaceStateFileSummary,
+} from "../types/analysis";
 import type { LocalOtherFile, LocalWorkspaceFile } from "../types/report";
 import type {
   WorkspaceBootstrapMetadata,
@@ -17,6 +21,7 @@ import {
   buildDefaultWorkspaceReport,
   buildDefaultWorkspaceToolCatalog,
   buildReportPath,
+  normalizeReportId,
   RESERVED_WORKSPACE_DIRECTORIES,
   WORKSPACE_AGENTS_PATH,
   WORKSPACE_APP_STATE_PATH,
@@ -25,16 +30,23 @@ import {
   WORKSPACE_DATA_ARTIFACTS_DIR,
   WORKSPACE_INDEX_PATH,
   WORKSPACE_PDF_ARTIFACTS_DIR,
+  WORKSPACE_REPORTS_DIR,
   WORKSPACE_REPORT_INDEX_PATH,
+  WORKSPACE_SYSTEM_DIR,
   WORKSPACE_TOOL_CATALOG_PATH,
   type AgentsFileSummary,
 } from "../types/workspace-contract";
 import {
-  ensureDirectoryPath,
-  getDirectoryByPath,
+  addWorkspaceFilesAtPathsWithResult,
+  findWorkspaceFileNodeByPath,
+  getWorkspaceContext,
+  listAllWorkspaceFileNodes,
   normalizeAbsolutePath,
+  removeWorkspaceFileByPath,
+  removeWorkspacePrefix,
   resolveWorkspacePath,
 } from "./workspace-fs";
+import { summarizeWorkspaceFiles } from "./workspace-files";
 import type { WorkspaceFileNode, WorkspaceFilesystem } from "../types/workspace";
 
 type WorkspaceStructuredDoc =
@@ -65,17 +77,11 @@ function findFileNodeByPath(
   filesystem: WorkspaceFilesystem,
   path: string,
 ): WorkspaceFileNode | null {
-  const normalizedPath = normalizeAbsolutePath(path);
-  return (
-    filesystem.items.find(
-      (item): item is WorkspaceFileNode =>
-        item.kind === "file" && item.path === normalizedPath,
-    ) ?? null
-  );
+  return findWorkspaceFileNodeByPath(filesystem, path);
 }
 
 function listAllFileNodes(filesystem: WorkspaceFilesystem): WorkspaceFileNode[] {
-  return filesystem.items.filter((item): item is WorkspaceFileNode => item.kind === "file");
+  return listAllWorkspaceFileNodes(filesystem);
 }
 
 function upsertTextFile(
@@ -85,55 +91,39 @@ function upsertTextFile(
   source: WorkspaceFileNode["source"],
 ): WorkspaceFilesystem {
   const normalizedPath = normalizeAbsolutePath(path);
-  const parts = normalizedPath.split("/").filter(Boolean);
-  const filename = parts.at(-1) ?? "untitled";
-  const parentPath = parts.length > 1 ? `/${parts.slice(0, -1).join("/")}` : "/";
-  const withDirectory = ensureDirectoryPath(filesystem, parentPath).filesystem;
-  const parentDirectory = getDirectoryByPath(withDirectory, parentPath);
-  const existing = findFileNodeByPath(withDirectory, normalizedPath);
+  const filename = normalizedPath.split("/").filter(Boolean).at(-1) ?? "untitled";
+  const existing = findFileNodeByPath(filesystem, normalizedPath);
   if (
     existing?.file.kind === "other" &&
     existing.file.text_content === text &&
     existing.file.name === filename
   ) {
-    return withDirectory;
+    return filesystem;
   }
-  const nextItems = withDirectory.items.filter((item) => item.id !== existing?.id);
   const baseFile = buildTextFile(normalizedPath, text);
   const nextFile: LocalWorkspaceFile = {
     ...baseFile,
     id: existing?.file.id ?? baseFile.id,
     name: filename,
   };
-
-  nextItems.push({
-    id: existing?.id ?? nextFile.id,
-    kind: "file",
-    name: filename,
-    path: normalizedPath,
-    parent_id: parentDirectory.id,
-    created_at: existing?.created_at ?? nowIso(),
-    source: existing?.source ?? source,
-    file: nextFile,
-  });
-
-  return {
-    ...withDirectory,
-    items: nextItems,
-  };
+  return addWorkspaceFilesAtPathsWithResult(
+    filesystem,
+    [
+      {
+        path: normalizedPath,
+        file: nextFile,
+        source: existing?.source ?? source,
+        createdAt: existing?.created_at ?? nowIso(),
+      },
+    ],
+  ).filesystem;
 }
 
 function removeFileByPath(
   filesystem: WorkspaceFilesystem,
   path: string,
 ): WorkspaceFilesystem {
-  const normalizedPath = normalizeAbsolutePath(path);
-  return {
-    ...filesystem,
-    items: filesystem.items.filter(
-      (item) => !(item.kind === "file" && item.path === normalizedPath),
-    ),
-  };
+  return removeWorkspaceFileByPath(filesystem, path);
 }
 
 function readTextFile(filesystem: WorkspaceFilesystem, path: string): string | null {
@@ -277,6 +267,102 @@ export function writeWorkspaceReport(
   return writeJsonDocument(filesystem, buildReportPath(report.report_id), report, source);
 }
 
+function syncWorkspaceReportState(
+  filesystem: WorkspaceFilesystem,
+  reportIndex: WorkspaceReportIndexV1,
+): WorkspaceFilesystem {
+  let nextFilesystem = writeWorkspaceReportIndex(filesystem, reportIndex, "derived");
+  const appState = readWorkspaceAppState(nextFilesystem) ?? buildDefaultWorkspaceAppState();
+  nextFilesystem = writeWorkspaceAppState(
+    nextFilesystem,
+    {
+      ...appState,
+      version: WORKSPACE_CONTRACT_VERSION,
+      current_report_id: reportIndex.current_report_id,
+    },
+    "derived",
+  );
+  nextFilesystem = writeWorkspaceIndex(
+    nextFilesystem,
+    buildDefaultWorkspaceIndex({
+      report_ids: reportIndex.report_ids,
+      current_report_id: reportIndex.current_report_id,
+    }),
+    "derived",
+  );
+  return nextFilesystem;
+}
+
+function buildUniqueReportId(
+  reportIds: string[],
+  requestedReportId?: string,
+  title?: string,
+): string {
+  const usedIds = new Set(reportIds.map((reportId) => normalizeReportId(reportId)));
+  const baseId = normalizeReportId(requestedReportId ?? title ?? "report");
+  if (!usedIds.has(baseId)) {
+    return baseId;
+  }
+  let counter = 2;
+  while (usedIds.has(`${baseId}-${counter}`)) {
+    counter += 1;
+  }
+  return `${baseId}-${counter}`;
+}
+
+function ensureTrackedReport(
+  filesystem: WorkspaceFilesystem,
+  reportId: string,
+): WorkspaceFilesystem {
+  let nextFilesystem = filesystem;
+  const normalizedReportId = normalizeReportId(reportId);
+  const reportIndex = readWorkspaceReportIndex(nextFilesystem) ?? buildDefaultReportIndex();
+  const nextReportIndex: WorkspaceReportIndexV1 = {
+    ...reportIndex,
+    report_ids: reportIndex.report_ids.includes(normalizedReportId)
+      ? reportIndex.report_ids
+      : [...reportIndex.report_ids, normalizedReportId],
+    current_report_id: normalizedReportId,
+  };
+  if (!readWorkspaceReport(nextFilesystem, normalizedReportId)) {
+    nextFilesystem = writeWorkspaceReport(
+      nextFilesystem,
+      buildDefaultWorkspaceReport({ reportId: normalizedReportId }),
+      "derived",
+    );
+  }
+  return syncWorkspaceReportState(nextFilesystem, nextReportIndex);
+}
+
+export function createWorkspaceReport(
+  filesystem: WorkspaceFilesystem,
+  options: {
+    title: string;
+    reportId?: string;
+  },
+): { filesystem: WorkspaceFilesystem; report: WorkspaceReportV1 } {
+  const reportIndex = readWorkspaceReportIndex(filesystem) ?? buildDefaultReportIndex();
+  const nextReportId = buildUniqueReportId(
+    reportIndex.report_ids,
+    options.reportId,
+    options.title,
+  );
+  const report = buildDefaultWorkspaceReport({
+    reportId: nextReportId,
+    title: options.title.trim() || "Untitled report",
+  });
+  let nextFilesystem = writeWorkspaceReport(filesystem, report, "derived");
+  nextFilesystem = syncWorkspaceReportState(nextFilesystem, {
+    ...reportIndex,
+    report_ids: [...reportIndex.report_ids, nextReportId],
+    current_report_id: nextReportId,
+  });
+  return {
+    filesystem: nextFilesystem,
+    report,
+  };
+}
+
 export function writeAgentsFile(
   filesystem: WorkspaceFilesystem,
   markdown: string,
@@ -315,6 +401,71 @@ export function buildWorkspaceBootstrapMetadata(
   };
 }
 
+function isVisibleWorkspaceStatePath(path: string): boolean {
+  if (path === WORKSPACE_AGENTS_PATH) {
+    return false;
+  }
+  if (path.startsWith(`${WORKSPACE_SYSTEM_DIR}/`)) {
+    return false;
+  }
+  if (path.startsWith(`${WORKSPACE_REPORTS_DIR}/`)) {
+    return false;
+  }
+  return true;
+}
+
+export function buildWorkspaceStateMetadata(
+  filesystem: WorkspaceFilesystem,
+  pathPrefix: string,
+): WorkspaceState {
+  const appState = readWorkspaceAppState(filesystem);
+  const reportIndex = readWorkspaceReportIndex(filesystem);
+  const visibleFileNodes = listAllFileNodes(filesystem).filter((fileNode) =>
+    isVisibleWorkspaceStatePath(fileNode.path),
+  );
+
+  return {
+    version: WORKSPACE_CONTRACT_VERSION,
+    context: getWorkspaceContext(filesystem, pathPrefix),
+    files: visibleFileNodes.map((fileNode) => {
+      const summary = summarizeWorkspaceFiles([fileNode.file], { includeSamples: true })[0];
+      return {
+        id: String(summary.id),
+        name: String(summary.name),
+        path: fileNode.path,
+        kind: summary.kind as WorkspaceStateFileSummary["kind"],
+        extension: String(summary.extension),
+        mime_type:
+          typeof summary.mime_type === "string" ? summary.mime_type : undefined,
+        byte_size:
+          typeof summary.byte_size === "number" ? summary.byte_size : undefined,
+        row_count:
+          typeof summary.row_count === "number" ? summary.row_count : undefined,
+        columns: Array.isArray(summary.columns)
+          ? (summary.columns as string[])
+          : undefined,
+        numeric_columns: Array.isArray(summary.numeric_columns)
+          ? (summary.numeric_columns as string[])
+          : undefined,
+        sample_rows: Array.isArray(summary.sample_rows)
+          ? (summary.sample_rows as WorkspaceStateFileSummary["sample_rows"])
+          : undefined,
+        page_count:
+          typeof summary.page_count === "number" ? summary.page_count : undefined,
+      } satisfies WorkspaceStateFileSummary;
+    }),
+    reports: listWorkspaceReports(filesystem).map((report) => ({
+      report_id: report.report_id,
+      title: report.title,
+      item_count: report.items.length,
+      updated_at: report.updated_at ?? null,
+    })),
+    current_report_id:
+      appState?.current_report_id ?? reportIndex?.current_report_id ?? null,
+    current_goal: appState?.current_goal ?? null,
+  };
+}
+
 export function ensureWorkspaceContractFilesystem(
   filesystem: WorkspaceFilesystem,
   options: {
@@ -324,14 +475,10 @@ export function ensureWorkspaceContractFilesystem(
     activeWorkspaceTab: string;
     executionMode: "interactive" | "batch";
     toolNames?: string[];
-    cwdPathBySurface?: Record<string, string>;
+    prefixBySurface?: Record<string, string>;
   },
 ): WorkspaceFilesystem {
   let nextFilesystem = filesystem;
-
-  for (const directoryPath of RESERVED_WORKSPACE_DIRECTORIES) {
-    nextFilesystem = ensureDirectoryPath(nextFilesystem, directoryPath).filesystem;
-  }
 
   let appState =
     readWorkspaceAppState(nextFilesystem) ??
@@ -340,7 +487,7 @@ export function ensureWorkspaceContractFilesystem(
       active_workspace_tab: options.activeWorkspaceTab,
       execution_mode: options.executionMode,
       current_goal: options.defaultGoal,
-      current_cwd_by_surface: options.cwdPathBySurface ?? {},
+      current_prefix_by_surface: options.prefixBySurface ?? {},
     });
 
   let reportIndex = readWorkspaceReportIndex(nextFilesystem) ?? buildDefaultReportIndex();
@@ -378,9 +525,9 @@ export function ensureWorkspaceContractFilesystem(
     execution_mode: appState.execution_mode ?? options.executionMode,
     current_goal: appState.current_goal ?? options.defaultGoal,
     current_report_id: appState.current_report_id ?? reportIndex.current_report_id,
-    current_cwd_by_surface: {
-      ...(appState.current_cwd_by_surface ?? {}),
-      ...(options.cwdPathBySurface ?? {}),
+    current_prefix_by_surface: {
+      ...(appState.current_prefix_by_surface ?? {}),
+      ...(options.prefixBySurface ?? {}),
     },
   };
 
@@ -428,9 +575,9 @@ export function updateWorkspaceAppState(
       ...current,
       ...patch,
       version: WORKSPACE_CONTRACT_VERSION,
-      current_cwd_by_surface: {
-        ...current.current_cwd_by_surface,
-        ...(patch.current_cwd_by_surface ?? {}),
+      current_prefix_by_surface: {
+        ...current.current_prefix_by_surface,
+        ...(patch.current_prefix_by_surface ?? {}),
       },
     },
     "derived",
@@ -460,11 +607,13 @@ export function replaceWorkspaceReportItems(
   reportId: string,
   items: ReportItemV1[],
 ): WorkspaceFilesystem {
+  const normalizedReportId = normalizeReportId(reportId);
+  const trackedFilesystem = ensureTrackedReport(filesystem, normalizedReportId);
   const current =
-    readWorkspaceReport(filesystem, reportId) ??
-    buildDefaultWorkspaceReport({ reportId });
+    readWorkspaceReport(trackedFilesystem, normalizedReportId) ??
+    buildDefaultWorkspaceReport({ reportId: normalizedReportId });
   return writeWorkspaceReport(
-    filesystem,
+    trackedFilesystem,
     {
       ...current,
       items,
@@ -482,14 +631,37 @@ export function appendWorkspaceReportItems(
   if (!items.length) {
     return filesystem;
   }
+  const normalizedReportId = normalizeReportId(reportId);
+  const trackedFilesystem = ensureTrackedReport(filesystem, normalizedReportId);
   const current =
-    readWorkspaceReport(filesystem, reportId) ??
-    buildDefaultWorkspaceReport({ reportId });
+    readWorkspaceReport(trackedFilesystem, normalizedReportId) ??
+    buildDefaultWorkspaceReport({ reportId: normalizedReportId });
   return writeWorkspaceReport(
-    filesystem,
+    trackedFilesystem,
     {
       ...current,
       items: [...current.items, ...items],
+      updated_at: nowIso(),
+    },
+    "derived",
+  );
+}
+
+export function removeWorkspaceReportItem(
+  filesystem: WorkspaceFilesystem,
+  reportId: string,
+  itemId: string,
+): WorkspaceFilesystem {
+  const normalizedReportId = normalizeReportId(reportId);
+  const trackedFilesystem = ensureTrackedReport(filesystem, normalizedReportId);
+  const current =
+    readWorkspaceReport(trackedFilesystem, normalizedReportId) ??
+    buildDefaultWorkspaceReport({ reportId: normalizedReportId });
+  return writeWorkspaceReport(
+    trackedFilesystem,
+    {
+      ...current,
+      items: current.items.filter((item) => item.id !== itemId),
       updated_at: nowIso(),
     },
     "derived",
@@ -631,5 +803,10 @@ export function removeWorkspacePath(
   filesystem: WorkspaceFilesystem,
   path: string,
 ): WorkspaceFilesystem {
-  return removeFileByPath(filesystem, path);
+  const normalizedPath = normalizeAbsolutePath(path);
+  const hasExactFile = Boolean(findFileNodeByPath(filesystem, normalizedPath));
+  if (hasExactFile) {
+    return removeFileByPath(filesystem, normalizedPath);
+  }
+  return removeWorkspacePrefix(filesystem, `${normalizedPath}/`);
 }

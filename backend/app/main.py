@@ -66,6 +66,13 @@ if not settings.CLERK_SECRET_KEY:
         "clerk.secret_key_missing",
         detail="auth routes will return 503 until CLERK_SECRET_KEY is configured",
     )
+if settings.ENABLE_DEV_AUTH_BEARER:
+    log_event(
+        logger,
+        logging.WARNING,
+        "auth.dev_bearer_enabled",
+        detail="local bearer token auth bypass is active",
+    )
 if settings.OPENAI_API_KEY:
     os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
     default_openai_client = AsyncOpenAI(

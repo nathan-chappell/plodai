@@ -5,12 +5,15 @@ import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
+import {
+  bindClientToolsForBundle,
+  buildCapabilityBundleForRoot,
+  listCapabilityBundleToolNames,
+} from "./registry";
 import { chartAgentCapability } from "./definitions";
 import { buildChartAgentDemoScenario } from "./chart-agent/demo";
-import { createChartAgentClientTools } from "./chart-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
-import { buildChartAgentBundle } from "./manifests";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import type { ClientEffect } from "../types/analysis";
 import type { ShellWorkspaceRegistration } from "./types";
@@ -78,7 +81,9 @@ export function ChartAgentPage({
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
+    activePrefix,
     cwdPath,
+    filesystem,
     breadcrumbs,
     entries,
     files,
@@ -98,13 +103,14 @@ export function ChartAgentPage({
     handleRemoveEntry,
     createDirectory,
     changeDirectory,
+    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
     updateFilesystem,
     syncToolCatalog,
     appendReportEffects,
-    workspaceBootstrapMetadata,
+    workspaceStateMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: chartAgentCapability.id,
     capabilityTitle: chartAgentCapability.title,
@@ -113,12 +119,33 @@ export function ChartAgentPage({
     defaultTab: "agent",
     allowedTabs: ["agent", "demo"],
   });
-  const capabilityBundle = useMemo(() => buildChartAgentBundle(), []);
-  const clientTools = useMemo(
-    () => createChartAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
+  const capabilityWorkspace = useMemo(
+    () => ({
+      activePrefix,
+      cwdPath,
+      entries,
+      files,
+      workspaceContext,
+      setActivePrefix,
+      createDirectory,
+      changeDirectory,
+      updateFilesystem,
+      getState,
+    }),
+    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
   );
-  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
+  const capabilityBundle = useMemo(
+    () => buildCapabilityBundleForRoot(chartAgentCapability.id, capabilityWorkspace),
+    [capabilityWorkspace],
+  );
+  const clientTools = useMemo(
+    () => bindClientToolsForBundle(capabilityBundle, capabilityWorkspace),
+    [capabilityBundle, capabilityWorkspace],
+  );
+  const clientToolCatalogKey = useMemo(
+    () => listCapabilityBundleToolNames(capabilityBundle).join("|"),
+    [capabilityBundle],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -139,7 +166,9 @@ export function ChartAgentPage({
       capabilityId: chartAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      activePrefix,
       cwdPath,
+      filesystem,
       breadcrumbs,
       entries,
       accept: ".csv,.json",
@@ -148,7 +177,7 @@ export function ChartAgentPage({
       onChangeDirectory: changeDirectory,
       onRemoveEntry: handleRemoveEntry,
     });
-  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
@@ -190,7 +219,7 @@ export function ChartAgentPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>
-                CWD: {cwdPath}
+                Prefix: {activePrefix}
               </MetaText>
               <MetaText>
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
@@ -215,8 +244,7 @@ export function ChartAgentPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
-              workspaceContext={workspaceContext}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
@@ -261,7 +289,7 @@ export function ChartAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}

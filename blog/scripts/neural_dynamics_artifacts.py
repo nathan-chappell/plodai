@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from itertools import product
+from contextlib import contextmanager
 from pathlib import Path
 import json
 import math
 import random
 import shutil
 from statistics import NormalDist
-from typing import Callable, Literal
+import time
+from typing import Callable, Iterator, Literal
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import torch
 from torch import nn
+from torch.nn import functional as F
 import typer
 
 
@@ -24,99 +26,95 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 ARTICLE_SLUG = "15-03-2026-the-theoretical-justification-of-neural-networks"
-DEFAULT_OUTPUT_DIR = (
-    REPO_ROOT
-    / "frontend"
-    / "public"
-    / "blog-assets"
-    / "theoretical-justification-of-neural-networks"
-)
+
+try:
+    from blog.scripts.artifact_common import DEFAULT_OUTPUT_DIR, FIGURE_STYLE, clean_output_dir, ensure_dir, write_figure
+    from blog.scripts.mlp_story_artifacts import (
+        MLPTrainingRun,
+        MLP_DEFAULT_SHAPE,
+        build_mlp_dataset,
+        build_mlp_story_figure,
+        format_mlp_shape,
+        mlp_story_epochs,
+        parse_mlp_shape,
+        render_mlp_assets,
+        run_mlp_training,
+    )
+    from blog.scripts.precision_story_artifacts import (
+        PRECISION_DUST_DEPTH,
+        PRECISION_IMAGE_STEM,
+        PRECISION_INITIAL_LEFT_STACK,
+        PRECISION_INITIAL_RIGHT_STACK,
+        PRECISION_STORY_MODE,
+        PRECISION_ZOOM_DEPTHS,
+        build_precision_story_figure,
+        build_precision_story_payload,
+        cantor_stack_pop,
+        cantor_stack_push,
+        decode_binary_cantor_stack,
+        encode_binary_cantor_stack,
+        render_precision_assets,
+    )
+except ModuleNotFoundError:
+    from artifact_common import DEFAULT_OUTPUT_DIR, FIGURE_STYLE, clean_output_dir, ensure_dir, write_figure
+    from mlp_story_artifacts import (
+        MLPTrainingRun,
+        MLP_DEFAULT_SHAPE,
+        build_mlp_dataset,
+        build_mlp_story_figure,
+        format_mlp_shape,
+        mlp_story_epochs,
+        parse_mlp_shape,
+        render_mlp_assets,
+        run_mlp_training,
+    )
+    from precision_story_artifacts import (
+        PRECISION_DUST_DEPTH,
+        PRECISION_IMAGE_STEM,
+        PRECISION_INITIAL_LEFT_STACK,
+        PRECISION_INITIAL_RIGHT_STACK,
+        PRECISION_STORY_MODE,
+        PRECISION_ZOOM_DEPTHS,
+        build_precision_story_figure,
+        build_precision_story_payload,
+        cantor_stack_pop,
+        cantor_stack_push,
+        decode_binary_cantor_stack,
+        encode_binary_cantor_stack,
+        render_precision_assets,
+    )
+
 PAD_INDEX = 2
-
-TRAIN_LENGTH = 20
-EVAL_LENGTHS: tuple[int, ...] = (10, 20, 30)
 STORY_PROBE_LENGTH = 10
-TRACE_LENGTH = 64
-DEFAULT_RANDOM_PHASE_EPOCHS = 10
-DEFAULT_COUNTEREXAMPLE_PHASE_EPOCHS = 20
-DEFAULT_PHASE_EPOCHS = DEFAULT_RANDOM_PHASE_EPOCHS
-DEFAULT_COUNTEREXAMPLE_COHORT_SIZE = 64
-DEFAULT_RANDOM_COHORT_SIZE = 768
-DEFAULT_TRAIN_SAMPLES = DEFAULT_COUNTEREXAMPLE_COHORT_SIZE
-DEFAULT_TEST_SAMPLES = 128
-DEFAULT_BATCH_SIZE = 16
-DEFAULT_RNN_LR_START = 0.001
-DEFAULT_RNN_LR_END = 0.001
-DEFAULT_RNN_LR = 0.001
-RNN_OPTIMIZER_NAME = "adam"
-RNN_HIDDEN_SIZE = 8
-RNN_NUM_LAYERS = 2
-MLP_DEFAULT_SHAPE = (32,)
-RANDOM_BASELINE_MULTIPLIER = DEFAULT_RANDOM_COHORT_SIZE // DEFAULT_COUNTEREXAMPLE_COHORT_SIZE
-
-PHASE_KIND_RANDOM = "random"
-PHASE_KIND_COUNTEREXAMPLES = "counterexamples"
-PHASE_KIND_OFF_BY_ONE = "off_by_one"
-PHASE_KIND_BALANCED = "balanced_invalid"
-PHASE_KIND_VALID_PREFIX = "valid_prefix"
-PHASE_KIND_ORDER: tuple[str, ...] = (
-    PHASE_KIND_RANDOM,
-    PHASE_KIND_COUNTEREXAMPLES,
-    PHASE_KIND_OFF_BY_ONE,
-    PHASE_KIND_BALANCED,
-    PHASE_KIND_VALID_PREFIX,
-)
+ACCURACY_EVAL_LENGTHS: tuple[int, ...] = (10, 20, 30, 50)
+DEFAULT_PHASE_EPOCHS = 60
+DEFAULT_TRAIN_SAMPLES = 192
+DEFAULT_TEST_SAMPLES = 32
+DEFAULT_RNN_LR_START = 0.0015
+DEFAULT_RNN_LR_END = 0.00015
+TRAIN_LENGTHS: tuple[int, ...] = (10, 20, 30)
 
 INVALID_KIND_RANDOM = "random_invalid"
-INVALID_KIND_CORRUPTION = "corruption_invalid"
-INVALID_KIND_BALANCED = "balanced_invalid"
-INVALID_KIND_VALID_PREFIX = "valid_prefix_invalid"
-INVALID_KIND_ORDER: tuple[str, ...] = (
-    INVALID_KIND_RANDOM,
-    INVALID_KIND_CORRUPTION,
-    INVALID_KIND_BALANCED,
-    INVALID_KIND_VALID_PREFIX,
-)
-SUPPORT_COHORT_RANDOM = "support-random"
-SUPPORT_COHORT_OFF_BY_ONE = "support-off-by-one"
-SUPPORT_COHORT_BALANCED = "support-balanced-invalid"
-SUPPORT_COHORT_VALID_PREFIX = "support-valid-prefix"
-SUPPORT_COHORT_ORDER: tuple[str, ...] = (
-    SUPPORT_COHORT_RANDOM,
-    SUPPORT_COHORT_OFF_BY_ONE,
-    SUPPORT_COHORT_BALANCED,
-    SUPPORT_COHORT_VALID_PREFIX,
-)
+PHASE_KIND_RANDOM = "random"
+PHASE_KIND_OFF_BY_ONE = "off_by_one"
+PHASE_KIND_VALID_PREFIX = "valid_prefix"
+PHASE_KIND_BALANCED_INVALID = "balanced_invalid"
+PHASE_KIND_PRETRAIN = "phase_random"
+PHASE_KIND_SHOCK = "phase_off_by_one"
+PHASE_KIND_REINFORCE = "phase_valid_prefix_balanced"
 
-FIGURE_STYLE = {
-    "paper_bgcolor": "#f7f8fb",
-    "plot_bgcolor": "#ffffff",
-    "font": {"family": "Aptos, Segoe UI, Helvetica, Arial, sans-serif", "color": "#1f2937", "size": 14},
-}
-PHASE_COLORS = {
-    PHASE_KIND_RANDOM: "#f3e8d3",
-    PHASE_KIND_COUNTEREXAMPLES: "#e8eef9",
-    PHASE_KIND_OFF_BY_ONE: "#efe4f8",
-    PHASE_KIND_BALANCED: "#e6f3ea",
-    PHASE_KIND_VALID_PREFIX: "#e0f2f1",
-}
-INVALID_COLORS = {
-    INVALID_KIND_RANDOM: "#18a9c5",
-    INVALID_KIND_CORRUPTION: "#f06292",
-    INVALID_KIND_BALANCED: "#9ad65d",
-    INVALID_KIND_VALID_PREFIX: "#0f766e",
-}
 EVAL_COLORS = {
     10: "#c2410c",
     20: "#1d4ed8",
     30: "#15803d",
+    50: "#0f766e",
 }
 PROBE_CLASS_COLORS = {
     "valid": "#2a9d55",
-    PHASE_KIND_RANDOM: "#64748b",
-    PHASE_KIND_OFF_BY_ONE: "#d97706",
-    PHASE_KIND_BALANCED: "#dc2626",
+    INVALID_KIND_RANDOM: "#64748b",
+    PHASE_KIND_OFF_BY_ONE: "#ea580c",
     PHASE_KIND_VALID_PREFIX: "#0f766e",
+    PHASE_KIND_BALANCED_INVALID: "#7c3aed",
 }
 PROBE_STATUS_STYLES = {
     "valid / correct": {"color": "#2a9d55", "dash": "dot"},
@@ -125,21 +123,16 @@ PROBE_STATUS_STYLES = {
     "valid / wrong": {"color": "#dc2626", "dash": "dot"},
 }
 STORY_STATUS_COLORS = {
-    "valid / stable": "#2a9d55",
-    "invalid / stable": "#ca8a04",
-    "ever wrong": "#dc2626",
+    "valid / correct": "#2a9d55",
+    "invalid / correct": "#ca8a04",
+    "valid / wrong": "#dc2626",
+    "invalid / wrong": "#dc2626",
 }
-TRACE_COLORS = ("#7f1d1d", "#1d4ed8", "#166534", "#9333ea", "#db2777")
-SIGMA_CLIP_PROBABILITY = 1e-6
 TRACE_SIGMA_RANGE = 4.0
-TRACE_SIGMA_COLORSCALE = [
-    [0.0, "#991b1b"],
-    [0.2, "#ef4444"],
-    [0.5, "#c7d0c8"],
-    [0.8, "#4ade80"],
-    [1.0, "#166534"],
-]
+STORY_SIGMA_ZOOM = 0.9
 NORMAL_DIST = NormalDist()
+RUN_START_TIME = time.perf_counter()
+LAST_LOG_TIME = RUN_START_TIME
 
 
 @app.callback()
@@ -156,44 +149,13 @@ class SequenceExample:
 
 
 @dataclass(frozen=True)
-class TrainingPhase:
-    name: str
-    label: str
-    phase_kind: str
-    epochs: int
-    cohort_sizes: tuple[int, ...]
-    lr_start: float
-    lr_end: float
-
-    @property
-    def cohort_weights(self) -> tuple[float, ...]:
-        return tuple(1.0 if size > 0 else 0.0 for size in self.cohort_sizes)
-
-    @property
-    def cohort_size(self) -> int:
-        return max(self.cohort_sizes, default=0)
-
-    @property
-    def support_size(self) -> int:
-        return sum(self.cohort_sizes)
-
-    @property
-    def active_cohorts(self) -> list[str]:
-        return [
-            cohort_name
-            for cohort_name, size in zip(SUPPORT_COHORT_ORDER, self.cohort_sizes, strict=True)
-            if size > 0
-        ]
-
-
-@dataclass(frozen=True)
 class ProbeSpec:
     label: str
     text: str
     probe_kind: str
     length: int
     short_label: str
-    highlight: bool = True
+    highlight: bool = False
 
 
 @dataclass
@@ -205,6 +167,10 @@ class MetricRow:
     eval_10_acc: float
     eval_20_acc: float
     eval_30_acc: float
+    eval_50_acc: float
+    off_by_one_acc: float
+    valid_prefix_acc: float
+    balanced_invalid_acc: float
 
 
 @dataclass
@@ -220,24 +186,9 @@ class TraceCell:
     probability: float
     raw_points: list[list[float]]
     projected_points: list[list[float]]
-
-
-@dataclass
-class TraceBackground:
-    phase_label: str
-    epoch: int
-    projected_points: list[list[float]]
-    probabilities: list[float]
-
-
-@dataclass
-class TraceLandmark:
-    phase_label: str
-    epoch: int
-    label: str
-    text: str
-    probability: float
-    projected_point: list[float]
+    failure_texts: list[str]
+    failure_probabilities: list[float]
+    failure_projected_points: list[list[float]]
 
 
 @dataclass
@@ -246,36 +197,24 @@ class TraceGridPayload:
     phase_labels: list[str]
     probe_labels: list[str]
     probe_texts: list[str]
+    probe_role_labels: list[str]
     cells: list[TraceCell]
-    backgrounds: list[TraceBackground]
-    landmarks: list[TraceLandmark]
     projection_mode: str
     axis_labels: tuple[str, ...]
     explained_variance: tuple[float, ...]
+    acceptance_center: list[float]
+    acceptance_region: list[list[float]]
 
 
 @dataclass(frozen=True)
 class TraceStorySelection:
     focus_probe: ProbeSpec
     companion_probes: tuple[ProbeSpec, ...]
+    role_labels: tuple[str, ...]
 
     @property
     def selected_probes(self) -> tuple[ProbeSpec, ...]:
         return (self.focus_probe,) + self.companion_probes
-
-
-@dataclass(frozen=True)
-class ProbeFlip:
-    probe: ProbeSpec
-    from_epoch: int
-    to_epoch: int
-    from_phase_label: str
-    to_phase_label: str
-    from_probability: float
-    to_probability: float
-    from_correct: bool
-    to_correct: bool
-    kind: str
 
 
 @dataclass(frozen=True)
@@ -288,34 +227,14 @@ class ProbeTrajectory:
     turn_pattern: tuple[bool, ...]
     flip_epochs: tuple[int, ...]
 
-    @property
-    def turn_count(self) -> int:
-        return max(0, len(self.turn_pattern) - 1)
-
-    @property
-    def ever_wrong(self) -> bool:
-        return any(not is_correct for is_correct in self.correctness)
-
-    @property
-    def turn_label(self) -> str:
-        return format_correctness_turn_label(self.turn_pattern)
-
-    @property
-    def compact_turn_label(self) -> str:
-        return format_correctness_turn_label(self.turn_pattern, separator="-")
-
 
 @dataclass(frozen=True)
-class MLPTrainingRun:
-    hidden_layers: tuple[int, ...]
-    loss_history: list[float]
-    predictions_by_epoch: dict[int, torch.Tensor]
-    xs: torch.Tensor
-    ys: torch.Tensor
-
-    @property
-    def final_loss(self) -> float:
-        return self.loss_history[-1]
+class TrainingPhaseSpec:
+    phase_kind: str
+    label: str
+    epoch_multiplier: int
+    batch_size: int
+    family_mix: tuple[tuple[str, float], ...]
 
 
 @dataclass
@@ -327,10 +246,22 @@ class RNNExperimentResult:
     response_history: list[list[float]]
     story_response_history: list[list[float]]
     story_probes: tuple[ProbeSpec, ...]
-    evaluation_sets: dict[int, list[SequenceExample]]
+    evaluation_sets: dict[str | int, list[SequenceExample]]
     representative_examples: list[SequenceExample]
     trace_payload: TraceGridPayload | None
     files: list[str]
+    model_mode: str
+    language: str
+    accept_anchor: list[float]
+    accept_radius: float
+    state_dimension: int
+    checkpoint_labels: list[str]
+    checkpoint_epochs: list[int]
+    architecture: dict[str, object]
+    phase_epoch_schedule: list[int]
+    phase_batch_schedule: list[int]
+    phase_family_mix: list[dict[str, float]]
+    checkpoint_states: dict[int, dict[str, torch.Tensor]]
 
 
 def seed_everything(seed: int) -> None:
@@ -340,23 +271,35 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def ensure_dir(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def clean_output_dir(path: Path) -> None:
-    if not path.exists():
-        return
-    for child in path.iterdir():
-        if child.is_dir():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-
-
 def log_progress(message: str) -> None:
-    typer.echo(f"[artifacts] {message}")
+    global LAST_LOG_TIME
+    now = time.perf_counter()
+    total = now - RUN_START_TIME
+    delta = now - LAST_LOG_TIME
+    LAST_LOG_TIME = now
+    typer.echo(f"[artifacts +{total:7.2f}s | +{delta:6.2f}s] {message}")
+
+
+@contextmanager
+def log_timing(label: str) -> Iterator[None]:
+    start = time.perf_counter()
+    log_progress(f"{label} started")
+    try:
+        yield
+    finally:
+        log_progress(f"{label} finished in {time.perf_counter() - start:.2f}s")
+
+
+def allocate_counts(total: int, buckets: int) -> list[int]:
+    base = total // buckets
+    counts = [base] * buckets
+    for index in range(total - sum(counts)):
+        counts[index] += 1
+    return counts
+
+
+def terminal_balance(text: str) -> int:
+    return text.count("(") - text.count(")")
 
 
 def min_prefix_balance(text: str) -> int:
@@ -366,10 +309,6 @@ def min_prefix_balance(text: str) -> int:
         balance += 1 if char == "(" else -1
         trough = min(trough, balance)
     return trough
-
-
-def terminal_balance(text: str) -> int:
-    return text.count("(") - text.count(")")
 
 
 def is_balanced_parentheses(text: str) -> bool:
@@ -389,15 +328,6 @@ def is_balanced_invalid(text: str) -> bool:
     return bool(text) and terminal_balance(text) == 0 and min_prefix_balance(text) < 0
 
 
-def is_corruption_invalid(text: str) -> bool:
-    return (
-        bool(text)
-        and not is_balanced_parentheses(text)
-        and not is_balanced_invalid(text)
-        and not is_valid_prefix_invalid(text)
-    )
-
-
 def is_valid_prefix_invalid(text: str) -> bool:
     if not text:
         return False
@@ -411,11 +341,18 @@ def is_valid_prefix_invalid(text: str) -> bool:
     return balance > 0
 
 
-def sample_valid_sequence_of_length(rng: random.Random, length: int) -> str:
-    if length < 2 or length % 2 != 0:
-        raise ValueError("Valid balanced-parentheses strings require an even length >= 2.")
-    opens_remaining = length // 2
-    closes_remaining = length // 2
+def is_off_by_one_invalid(text: str) -> bool:
+    return (
+        bool(text)
+        and not is_balanced_parentheses(text)
+        and not is_balanced_invalid(text)
+        and not is_valid_prefix_invalid(text)
+    )
+
+
+def sample_balanced_sequence(rng: random.Random, pairs: int) -> str:
+    opens_remaining = pairs
+    closes_remaining = pairs
     balance = 0
     chars: list[str] = []
     while opens_remaining or closes_remaining:
@@ -435,40 +372,61 @@ def sample_valid_sequence_of_length(rng: random.Random, length: int) -> str:
     return "".join(chars)
 
 
+def sample_valid_sequence_of_length(rng: random.Random, length: int) -> str:
+    if length < 2 or length % 2 != 0:
+        raise ValueError("Valid balanced-parentheses strings require an even length >= 2.")
+    return sample_balanced_sequence(rng, length // 2)
+
+
 def sample_random_invalid_sequence(rng: random.Random, length: int) -> str:
-    while True:
-        text = "".join(rng.choice("()") for _ in range(length))
-        if not is_balanced_parentheses(text):
-            return text
+    candidate = "".join(rng.choice("()") for _ in range(length))
+    if not is_balanced_parentheses(candidate):
+        return candidate
+    chars = list(candidate)
+    position = rng.randrange(length)
+    chars[position] = ")" if chars[position] == "(" else "("
+    broken = "".join(chars)
+    if not is_balanced_parentheses(broken):
+        return broken
+    return ")" + candidate[1:]
 
 
-def sample_corruption_invalid_sequence(rng: random.Random, length: int) -> str:
+def sample_off_by_one_invalid_sequence(rng: random.Random, length: int) -> str:
     if length < 2 or length % 2 != 0:
         return sample_random_invalid_sequence(rng, length)
-    while True:
-        chars = list(sample_valid_sequence_of_length(rng, length))
-        edits = 1 if length < 12 else 2
-        for position in rng.sample(range(length), k=edits):
-            chars[position] = ")" if chars[position] == "(" else "("
+    base = sample_valid_sequence_of_length(rng, length)
+    positions = list(range(length))
+    rng.shuffle(positions)
+    for position in positions:
+        chars = list(base)
+        chars[position] = ")" if chars[position] == "(" else "("
         candidate = "".join(chars)
-        if is_corruption_invalid(candidate):
+        if is_off_by_one_invalid(candidate):
             return candidate
+    for left_index in positions:
+        for right_index in positions:
+            if left_index == right_index:
+                continue
+            chars = list(base)
+            for position in (left_index, right_index):
+                chars[position] = ")" if chars[position] == "(" else "("
+            candidate = "".join(chars)
+            if is_off_by_one_invalid(candidate):
+                return candidate
+    raise ValueError(f"Failed to construct an off-by-one invalid sequence for length {length}.")
 
 
 def sample_balanced_invalid_sequence(rng: random.Random, length: int) -> str:
     if length < 2 or length % 2 != 0:
         return sample_random_invalid_sequence(rng, length)
     base = sample_valid_sequence_of_length(rng, length)
-    for offset in rng.sample(range(1, length), k=length - 1):
+    offsets = list(range(1, length))
+    rng.shuffle(offsets)
+    for offset in offsets:
         candidate = base[offset:] + base[:offset]
         if is_balanced_invalid(candidate):
             return candidate
-    while True:
-        chars = ["("] * (length // 2) + [")"] * (length // 2)
-        rng.shuffle(chars)
-        candidate = "".join(chars)
-        if is_balanced_invalid(candidate):
-            return candidate
+    raise ValueError(f"Failed to construct a balanced-invalid sequence for length {length}.")
 
 
 def sample_valid_prefix_invalid_sequence(rng: random.Random, length: int) -> str:
@@ -483,248 +441,360 @@ def sample_valid_prefix_invalid_sequence(rng: random.Random, length: int) -> str
     return candidate
 
 
-def sample_invalid_sequence(
-    rng: random.Random,
-    length: int,
+def sample_examples_by_builder(
     *,
+    total_examples: int,
+    length: int,
+    builder: Callable[[random.Random, int], str],
+    label: int,
     kind: str,
-) -> SequenceExample:
-    if kind == INVALID_KIND_RANDOM:
-        text = sample_random_invalid_sequence(rng, length)
-    elif kind == INVALID_KIND_CORRUPTION:
-        text = sample_corruption_invalid_sequence(rng, length)
-    elif kind == INVALID_KIND_BALANCED:
-        text = sample_balanced_invalid_sequence(rng, length)
-    elif kind == INVALID_KIND_VALID_PREFIX:
-        text = sample_valid_prefix_invalid_sequence(rng, length)
-    else:
-        raise ValueError(f"Unknown invalid kind: {kind}")
-    return SequenceExample(text=text, label=0, kind=kind)
+    family: str,
+    seed: int,
+    exclude_texts: set[str] | None = None,
+    allow_repeats: bool = False,
+) -> list[SequenceExample]:
+    rng = random.Random(seed)
+    excluded = exclude_texts if exclude_texts is not None else set()
+    examples: list[SequenceExample] = []
+    seen = set(excluded)
+    attempts = 0
+    max_attempts = max(2_000, total_examples * 400)
+    while len(examples) < total_examples:
+        attempts += 1
+        if attempts > max_attempts:
+            raise RuntimeError(
+                f"Unable to build {total_examples} unique examples for family={family} kind={kind} length={length}."
+            )
+        text = builder(rng, length)
+        if not allow_repeats and text in seen:
+            continue
+        seen.add(text)
+        examples.append(SequenceExample(text=text, label=label, kind=kind, family=family))
+    return examples
 
 
-def parse_mlp_shape(shape: str) -> tuple[int, ...]:
-    hidden_layers = tuple(int(part.strip()) for part in shape.split(",") if part.strip())
-    if not hidden_layers or any(size <= 0 for size in hidden_layers):
-        raise ValueError("mlp_shape must contain one or more positive integers.")
-    return hidden_layers
+def encode_sequences(sequences: list[str]) -> tuple[torch.Tensor, torch.Tensor]:
+    lengths = torch.tensor([len(sequence) for sequence in sequences], dtype=torch.long, device=DEVICE)
+    max_length = int(lengths.max().item()) if sequences else 0
+    tokens = torch.full((len(sequences), max_length), PAD_INDEX, dtype=torch.long, device=DEVICE)
+    for row, sequence in enumerate(sequences):
+        for col, char in enumerate(sequence):
+            tokens[row, col] = 0 if char == "(" else 1
+    return tokens, lengths
 
 
-def format_mlp_shape(hidden_layers: tuple[int, ...]) -> str:
-    return "1→" + "→".join(str(size) for size in hidden_layers) + "→1"
+def clone_model_parameters(model: nn.Module) -> dict[str, torch.Tensor]:
+    return {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
 
 
-def allocate_counts(total: int, buckets: int) -> list[int]:
-    base = total // buckets
-    counts = [base] * buckets
-    for index in range(total - sum(counts)):
-        counts[index] += 1
-    return counts
+def load_model_parameters(model: nn.Module, parameters: dict[str, torch.Tensor]) -> None:
+    model.load_state_dict({name: tensor.detach().clone().to(device=DEVICE) for name, tensor in parameters.items()})
 
 
-def weighted_counts(total: int, weights: tuple[float, ...]) -> list[int]:
+def acceptance_distance(states: torch.Tensor) -> torch.Tensor:
+    anchor = RNN_ACCEPT_ANCHOR.to(device=states.device, dtype=states.dtype)
+    return torch.linalg.vector_norm(states - anchor.unsqueeze(0), dim=1)
+
+
+def acceptance_probability(states: torch.Tensor) -> torch.Tensor:
+    margin = RNN_ACCEPT_RADIUS - acceptance_distance(states)
+    return torch.sigmoid(10.0 * margin)
+
+
+def evaluate_examples(model: PhasedTorchRNN, examples: list[SequenceExample]) -> tuple[float, float]:
+    final_states, _ = model([example.text for example in examples], capture_traces=False)
+    probabilities = acceptance_probability(final_states)
+    labels = torch.tensor([float(example.label) for example in examples], dtype=torch.float64, device=DEVICE)
+    loss = float(weighted_bce(probabilities, labels).item())
+    predictions = (probabilities >= 0.5).to(torch.float64)
+    accuracy = float((predictions == labels).to(torch.float64).mean().item())
+    return loss, accuracy
+
+
+def build_metric_row(
+    *,
+    epoch: int,
+    phase_label: str,
+    model: PhasedTorchRNN,
+    train_examples: list[SequenceExample],
+    evaluation_sets: dict[int, list[SequenceExample]],
+    family_sets: dict[str, list[SequenceExample]],
+) -> MetricRow:
+    train_loss, train_acc = evaluate_examples(model, train_examples)
+    eval_10_loss, eval_10_acc = evaluate_examples(model, evaluation_sets[10])
+    eval_20_loss, eval_20_acc = evaluate_examples(model, evaluation_sets[20])
+    eval_30_loss, eval_30_acc = evaluate_examples(model, evaluation_sets[30])
+    eval_50_loss, eval_50_acc = evaluate_examples(model, evaluation_sets[50])
+    del eval_10_loss, eval_20_loss, eval_30_loss, eval_50_loss
+    _, off_by_one_acc = evaluate_examples(model, family_sets[PHASE_KIND_OFF_BY_ONE])
+    _, valid_prefix_acc = evaluate_examples(model, family_sets[PHASE_KIND_VALID_PREFIX])
+    _, balanced_invalid_acc = evaluate_examples(model, family_sets[PHASE_KIND_BALANCED_INVALID])
+    return MetricRow(
+        epoch=epoch,
+        phase=phase_label,
+        train_loss=train_loss,
+        train_acc=train_acc,
+        eval_10_acc=eval_10_acc,
+        eval_20_acc=eval_20_acc,
+        eval_30_acc=eval_30_acc,
+        eval_50_acc=eval_50_acc,
+        off_by_one_acc=off_by_one_acc,
+        valid_prefix_acc=valid_prefix_acc,
+        balanced_invalid_acc=balanced_invalid_acc,
+    )
+
+
+def build_story_response_row(model: PhasedTorchRNN, story_texts: list[str]) -> list[float]:
+    final_states, _ = model(story_texts, capture_traces=False)
+    return acceptance_probability(final_states).tolist()
+
+
+def fit_pca_projection(points: list[list[float]], *, num_components: int) -> tuple[torch.Tensor, torch.Tensor, tuple[float, ...]]:
+    point_tensor = torch.tensor(points, dtype=torch.float32)
+    mean = point_tensor.mean(dim=0)
+    centered = point_tensor - mean
+    _, singular_values, right_vectors = torch.linalg.svd(centered, full_matrices=False)
+    components = right_vectors[:num_components, :]
+    variance = singular_values.square()
+    explained = variance[:num_components] / variance.sum().clamp(min=1e-12)
+    return mean, components, tuple(float(value.item()) for value in explained)
+
+
+def oblique_projection_matrix() -> torch.Tensor:
+    return torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.28, 0.18],
+        ],
+        dtype=torch.float32,
+    )
+
+
+def project_with_oblique_pca(points: list[list[float]], *, mean: torch.Tensor, components: torch.Tensor) -> list[list[float]]:
+    if not points:
+        return []
+    point_tensor = torch.tensor(points, dtype=torch.float32)
+    centered = point_tensor - mean
+    basis = components.T @ oblique_projection_matrix()
+    return (centered @ basis).tolist()
+
+
+def projected_ball_ellipse(*, center: torch.Tensor, basis: torch.Tensor, radius: float, steps: int = 72) -> tuple[list[float], list[list[float]]]:
+    projected_center = (center.unsqueeze(0) @ basis).squeeze(0)
+    _, singular_values, right_vectors = torch.linalg.svd(basis, full_matrices=False)
+    ellipse_points: list[list[float]] = []
+    for step in range(steps + 1):
+        theta = (2.0 * math.pi * step) / steps
+        unit = torch.tensor([math.cos(theta), math.sin(theta)], dtype=torch.float32)
+        offset = radius * (unit * singular_values) @ right_vectors
+        ellipse_points.append((projected_center + offset).tolist())
+    return projected_center.tolist(), ellipse_points
+
+
+def add_phase_bands(figure: go.Figure, phase_spans: list[dict[str, object]], row: int) -> None:
+    for index, span in enumerate(phase_spans):
+        start_epoch = float(span["start_epoch"])
+        end_epoch = float(span["end_epoch"])
+        figure.add_vrect(
+            x0=start_epoch,
+            x1=end_epoch,
+            fillcolor=SEGMENT_COLORS[str(span["phase_kind"])],
+            opacity=0.22,
+            line_width=0,
+            row=row,
+            col=1,
+        )
+        if index > 0:
+            figure.add_vline(x=start_epoch, line={"color": "#8b5e3c", "dash": "dash", "width": 2}, row=row, col=1)
+        figure.add_annotation(
+            x=(start_epoch + end_epoch) / 2.0,
+            y=0.94 if row != 3 else 0.06,
+            xref=f"x{'' if row == 1 else row}",
+            yref=f"y{'' if row == 1 else row} domain",
+            text=f"<b>{span['label']}</b>",
+            showarrow=False,
+            font={"size": 15, "color": "#374151"},
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#d1d5db",
+            borderwidth=1,
+        )
+
+
+def probability_to_sigma(probability: float) -> float:
+    clamped = min(1.0 - 1e-6, max(1e-6, probability))
+    return float(NORMAL_DIST.inv_cdf(clamped))
+
+
+def boundary_zoom_sigma(value: float) -> float:
+    return math.asinh(value / STORY_SIGMA_ZOOM)
+
+
+def sigma_tick_text(value: int | float) -> str:
+    return "0s" if value == 0 else f"{value:+.0f}s"
+
+
+def probe_status_label(actual_valid: bool, predicted_valid: bool) -> str:
+    if actual_valid and predicted_valid:
+        return "valid / correct"
+    if (not actual_valid) and (not predicted_valid):
+        return "invalid / correct"
+    if actual_valid and (not predicted_valid):
+        return "valid / wrong"
+    return "invalid / wrong"
+
+
+def probe_epoch_statuses(actual_valid: bool, predicted: list[bool]) -> list[str]:
+    return [probe_status_label(actual_valid, prediction) for prediction in predicted]
+
+
+def story_status_segment_runs(statuses: list[str]) -> list[tuple[int, int, str]]:
+    if not statuses:
+        return []
+    runs: list[tuple[int, int, str]] = []
+    start = 0
+    current = statuses[0]
+    for index, status in enumerate(statuses[1:], start=1):
+        if status != current:
+            runs.append((start, index - 1, current))
+            start = index
+            current = status
+    runs.append((start, len(statuses) - 1, current))
+    return runs
+
+# RNN shock reset: balanced parentheses, resampled phase shocks, acceptance-ball geometry.
+
+RNN_HIDDEN_SIZE = 4
+RNN_NUM_LAYERS = 2
+RNN_ACCEPT_RADIUS = 0.85
+RNN_FAMILY_LENGTH = 20
+RNN_GEOMETRY_LOSS_WEIGHT = 0.08
+RNN_STORY_PROBE_LENGTH = 10
+RNN_STORY_PROBE_COUNT = 128
+PUBLICATION_CHECKPOINTS_PER_PHASE = 5
+TARGET_LANGUAGE = "balanced_parentheses"
+RNN_MODEL_MODE = "phased_torch_rnn"
+SEGMENT_COLORS = {
+    PHASE_KIND_PRETRAIN: "#eef2ff",
+    PHASE_KIND_SHOCK: "#fef3c7",
+    PHASE_KIND_REINFORCE: "#ecfdf5",
+}
+RNN_ACCEPT_ANCHOR = torch.zeros(RNN_HIDDEN_SIZE, dtype=torch.float64)
+RNN_ACCEPT_ANCHOR[0] = 1.0
+RNN_PHASE_SPECS: tuple[TrainingPhaseSpec, ...] = (
+    TrainingPhaseSpec(
+        phase_kind=PHASE_KIND_PRETRAIN,
+        label="Phase 1: random baseline",
+        epoch_multiplier=1,
+        batch_size=8,
+        family_mix=((PHASE_KIND_RANDOM, 1.0),),
+    ),
+    TrainingPhaseSpec(
+        phase_kind=PHASE_KIND_SHOCK,
+        label="Phase 2: add off-by-one",
+        epoch_multiplier=2,
+        batch_size=16,
+        family_mix=((PHASE_KIND_RANDOM, 0.5), (PHASE_KIND_OFF_BY_ONE, 0.5)),
+    ),
+    TrainingPhaseSpec(
+        phase_kind=PHASE_KIND_REINFORCE,
+        label="Phase 3: add valid-prefix + balanced-invalid",
+        epoch_multiplier=2,
+        batch_size=32,
+        family_mix=(
+            (PHASE_KIND_RANDOM, 0.25),
+            (PHASE_KIND_OFF_BY_ONE, 0.25),
+            (PHASE_KIND_VALID_PREFIX, 0.25),
+            (PHASE_KIND_BALANCED_INVALID, 0.25),
+        ),
+    ),
+)
+RNN_PHASE_LR_PEAK_FACTORS: tuple[float, ...] = (1.0, 0.8, 0.55)
+RNN_PHASE_LR_FLOOR_FACTORS: tuple[float, ...] = (0.6, 0.4, 0.0)
+
+
+class PhasedTorchRNN(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rnn = nn.RNN(
+            input_size=2,
+            hidden_size=RNN_HIDDEN_SIZE,
+            nonlinearity="tanh",
+            batch_first=True,
+            num_layers=RNN_NUM_LAYERS,
+            bias=True,
+        )
+        self.h0 = nn.Parameter(torch.zeros((RNN_NUM_LAYERS, RNN_HIDDEN_SIZE), dtype=torch.float64))
+        self.double()
+        self.to(DEVICE)
+
+    def forward(
+        self,
+        sequences: list[str],
+        *,
+        capture_traces: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if not sequences:
+            empty = torch.zeros((0, RNN_HIDDEN_SIZE), dtype=torch.float64, device=DEVICE)
+            return empty, None
+        tokens, lengths = encode_sequences(sequences)
+        inputs = F.one_hot(tokens, num_classes=3)[..., :2].to(torch.float64)
+        packed_inputs = nn.utils.rnn.pack_padded_sequence(
+            inputs,
+            lengths.cpu(),
+            batch_first=True,
+            enforce_sorted=False,
+        )
+        hidden0 = self.h0.unsqueeze(1).repeat(1, len(sequences), 1)
+        packed_outputs, hidden_n = self.rnn(packed_inputs, hidden0)
+        traces = None
+        if capture_traces:
+            outputs, _ = nn.utils.rnn.pad_packed_sequence(
+                packed_outputs,
+                batch_first=True,
+                total_length=inputs.shape[1],
+            )
+            traces = outputs[:, :, -RNN_HIDDEN_SIZE:]
+        return hidden_n[-1], traces
+
+
+def weighted_bce(probabilities: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    positive_count = float(labels.sum().item())
+    negative_count = float(len(labels) - positive_count)
+    positive_weight = 1.0 if positive_count == 0 else max(1.0, negative_count / max(1.0, positive_count))
+    weights = torch.where(labels > 0.5, positive_weight, 1.0).to(probabilities)
+    return F.binary_cross_entropy(probabilities, labels, weight=weights)
+
+
+def acceptance_geometry_loss(final_states: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    distances = acceptance_distance(final_states)
+    positive_pull = distances.square()
+    negative_push = F.relu((RNN_ACCEPT_RADIUS + 0.15) - distances).square()
+    return torch.where(labels > 0.5, positive_pull, negative_push).mean()
+
+
+def classification_loss(final_states: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    probabilities = acceptance_probability(final_states)
+    return weighted_bce(probabilities, labels) + (RNN_GEOMETRY_LOSS_WEIGHT * acceptance_geometry_loss(final_states, labels))
+
+
+def allocate_weighted_counts(total: int, family_mix: tuple[tuple[str, float], ...]) -> list[tuple[str, int]]:
     if total <= 0:
-        return [0 for _ in weights]
-    total_weight = sum(weights)
-    scaled = [total * weight / total_weight for weight in weights]
-    counts = [int(math.floor(value)) for value in scaled]
-    remainder = total - sum(counts)
-    order = sorted(
-        range(len(weights)),
-        key=lambda index: scaled[index] - counts[index],
+        return [(family, 0) for family, _weight in family_mix]
+    total_weight = sum(weight for _family, weight in family_mix)
+    if total_weight <= 0:
+        raise ValueError("family_mix must include positive weight")
+    raw = [(family, (weight / total_weight) * total) for family, weight in family_mix]
+    counts = [(family, int(value)) for family, value in raw]
+    assigned = sum(count for _family, count in counts)
+    remainders = sorted(
+        ((value - int(value), index) for index, (_family, value) in enumerate(raw)),
         reverse=True,
     )
-    for index in order[:remainder]:
-        counts[index] += 1
-    return counts
-
-
-def sample_exact_length_examples(
-    *,
-    total_examples: int,
-    length: int,
-    invalid_weights: tuple[float, ...],
-    invalid_kinds: tuple[str, ...],
-    seed: int,
-    family: str = "",
-) -> list[SequenceExample]:
-    rng = random.Random(seed)
-    examples: list[SequenceExample] = []
-    valid_count = total_examples // 2 if length % 2 == 0 else 0
-    invalid_count = total_examples - valid_count
-    for _ in range(valid_count):
-        examples.append(
-            SequenceExample(
-                text=sample_valid_sequence_of_length(rng, length),
-                label=1,
-                kind="valid",
-                family=family,
-            )
-        )
-    for kind, kind_count in zip(
-        invalid_kinds,
-        weighted_counts(invalid_count, invalid_weights),
-        strict=True,
-    ):
-        for _ in range(kind_count):
-            example = sample_invalid_sequence(rng, length, kind=kind)
-            examples.append(
-                SequenceExample(
-                    text=example.text,
-                    label=example.label,
-                    kind=example.kind,
-                    family=family,
-                )
-            )
-    rng.shuffle(examples)
-    return examples
-
-
-def sample_invalid_examples(
-    *,
-    total_examples: int,
-    length: int,
-    kind: str,
-    seed: int,
-    family: str = "",
-) -> list[SequenceExample]:
-    rng = random.Random(seed)
-    examples: list[SequenceExample] = []
-    for _ in range(total_examples):
-        example = sample_invalid_sequence(rng, length, kind=kind)
-        examples.append(
-            SequenceExample(
-                text=example.text,
-                label=example.label,
-                kind=example.kind,
-                family=family,
-            )
-        )
-    rng.shuffle(examples)
-    return examples
-
-
-def build_training_phases(
-    *,
-    random_phase_epochs: int,
-    counterexample_phase_epochs: int,
-    random_cohort_size: int,
-    counterexample_cohort_size: int,
-    lr_start: float,
-    lr_end: float,
-) -> list[TrainingPhase]:
-    return [
-        TrainingPhase(
-            name="phase-1-random-baseline",
-            label="Phase 1: random baseline",
-            phase_kind=PHASE_KIND_RANDOM,
-            epochs=random_phase_epochs,
-            cohort_sizes=(random_cohort_size, 0, 0, 0),
-            lr_start=lr_start,
-            lr_end=lr_end,
-        ),
-        TrainingPhase(
-            name="phase-2-counterexamples",
-            label="Phase 2: add counterexamples",
-            phase_kind=PHASE_KIND_COUNTEREXAMPLES,
-            epochs=counterexample_phase_epochs,
-            cohort_sizes=(
-                random_cohort_size,
-                counterexample_cohort_size,
-                counterexample_cohort_size,
-                counterexample_cohort_size,
-            ),
-            lr_start=lr_start,
-            lr_end=lr_end,
-        ),
-    ]
-
-
-def counterexample_phase_epochs(random_phase_epochs: int) -> int:
-    return max(
-        1,
-        random_phase_epochs * (DEFAULT_COUNTEREXAMPLE_PHASE_EPOCHS // DEFAULT_RANDOM_PHASE_EPOCHS),
-    )
-
-
-def random_baseline_cohort_size(counterexample_cohort_size: int) -> int:
-    return counterexample_cohort_size * RANDOM_BASELINE_MULTIPLIER
-
-
-def build_evaluation_sets(
-    *,
-    test_samples: int,
-    seed: int,
-) -> dict[int, list[SequenceExample]]:
-    return {
-        length: sample_exact_length_examples(
-            total_examples=test_samples,
-            length=length,
-            invalid_weights=(1.0, 1.0, 1.0, 1.0),
-            invalid_kinds=(
-                INVALID_KIND_RANDOM,
-                INVALID_KIND_CORRUPTION,
-                INVALID_KIND_BALANCED,
-                INVALID_KIND_VALID_PREFIX,
-            ),
-            seed=seed + length * 97,
-            family=f"eval-{length}",
-        )
-        for length in EVAL_LENGTHS
-    }
-
-
-def build_retained_support(
-    *,
-    random_cohort_size: int,
-    counterexample_cohort_size: int,
-    seed: int,
-) -> dict[str, list[SequenceExample]]:
-    return {
-        SUPPORT_COHORT_RANDOM: sample_exact_length_examples(
-            total_examples=random_cohort_size,
-            length=TRAIN_LENGTH,
-            invalid_weights=(1.0,),
-            invalid_kinds=(INVALID_KIND_RANDOM,),
-            seed=seed + 101,
-            family=SUPPORT_COHORT_RANDOM,
-        ),
-        SUPPORT_COHORT_OFF_BY_ONE: sample_exact_length_examples(
-            total_examples=counterexample_cohort_size,
-            length=TRAIN_LENGTH,
-            invalid_weights=(1.0,),
-            invalid_kinds=(INVALID_KIND_CORRUPTION,),
-            seed=seed + 202,
-            family=SUPPORT_COHORT_OFF_BY_ONE,
-        ),
-        SUPPORT_COHORT_BALANCED: sample_exact_length_examples(
-            total_examples=counterexample_cohort_size,
-            length=TRAIN_LENGTH,
-            invalid_weights=(1.0,),
-            invalid_kinds=(INVALID_KIND_BALANCED,),
-            seed=seed + 303,
-            family=SUPPORT_COHORT_BALANCED,
-        ),
-        SUPPORT_COHORT_VALID_PREFIX: sample_exact_length_examples(
-            total_examples=counterexample_cohort_size,
-            length=TRAIN_LENGTH,
-            invalid_weights=(1.0,),
-            invalid_kinds=(INVALID_KIND_VALID_PREFIX,),
-            seed=seed + 404,
-            family=SUPPORT_COHORT_VALID_PREFIX,
-        ),
-    }
-
-
-def materialize_phase_examples(
-    support: dict[str, list[SequenceExample]],
-    phase: TrainingPhase,
-) -> list[SequenceExample]:
-    examples: list[SequenceExample] = []
-    for cohort_name, size in zip(SUPPORT_COHORT_ORDER, phase.cohort_sizes, strict=True):
-        if size <= 0:
-            continue
-        examples.extend(support[cohort_name][:size])
-    return list(examples)
+    counts_list = [count for _family, count in counts]
+    for _remainder, index in remainders[: total - assigned]:
+        counts_list[index] += 1
+    return [(family_mix[index][0], counts_list[index]) for index in range(len(family_mix))]
 
 
 def deterministic_valid(length: int, seed: int) -> str:
@@ -732,984 +802,358 @@ def deterministic_valid(length: int, seed: int) -> str:
 
 
 def deterministic_invalid(length: int, kind: str, seed: int) -> str:
-    return sample_invalid_sequence(random.Random(seed), length, kind=kind).text
+    builder = {
+        INVALID_KIND_RANDOM: sample_random_invalid_sequence,
+        PHASE_KIND_OFF_BY_ONE: sample_off_by_one_invalid_sequence,
+        PHASE_KIND_VALID_PREFIX: sample_valid_prefix_invalid_sequence,
+        PHASE_KIND_BALANCED_INVALID: sample_balanced_invalid_sequence,
+    }[kind]
+    return builder(random.Random(seed), length)
 
 
-PROBE_FAMILY_COUNTS = {
-    "V": 4,
-    "R": 4,
-    "O": 10,
-    "B": 10,
-    "P": 4,
-}
-CURATED_PROBE_TEXTS: dict[int, dict[str, tuple[str, ...]]] = {
-    10: {
-        "O": (
-            "(())))(())",
-            "()()))(())",
-            ")(()))(())",
-            "())())(())",
-            "()))()(())",
-            "))()()(())",
-            "))(())(())",
-            ")(())()())",
-            "))()((()))",
-            "()())()())",
-        ),
-        "B": (
-            "(()))))(((",
-            "()())))(((",
-            "()))()(((",
-            "))))(()(((",
-            ")()))()(((",
-            ")(()))))(((",
-            ")()()))(((",
-            ")))(())(((",
-            ")))()()(((",
-            "))(()))(((",
-        ),
-        "P": (
-            "()(()())((",
-            "(()()())((",
-            "()()(())((",
-            "((())())((",
-        ),
-    },
-    20: {
-        "O": (
-            "))))((()()(())))(())",
-            "()()()()(())))))(())",
-            "(())()())(()))))(())",
-            "(((()())))()))))(())",
-            "(()()))(())))())(())",
-            "))((()))))(()())(())",
-            "()()))()))(())()(())",
-            "()()(()())))))()(())",
-            ")))((((())))))()(())",
-            "))()((()))()))()(())",
-        ),
-        "B": (
-            "()(((()))(())))))(((",
-            "((()(()()))))))()(((",
-            "(()()(()())))))()(((",
-            "()((())())))())()(((",
-            ")(()))((()))))(()(((",
-            ")(())()()(())()))(((",
-            "))((()))((())))()(((",
-            ")(()()())()(())))(((",
-            "()(()))))(())()()(((",
-            ")())(())())())(()(((",
-        ),
-        "P": (
-            "((((((()))))))(())((",
-            "()((()(())))(()())((",
-            "(())((()()))(()())((",
-            "((((())()()))()())((",
-        ),
-    },
-    30: {
-        "O": (
-            "())())()()((()))()()()()))(())",
-            "(())))()(())()(())()()()))(())",
-            "(())()))(()(()())(())())))(())",
-            "(()()(()(())))(())())())))(())",
-            "((())(())())()(()()))())))(())",
-            ")()()(())()()))(()(())()))(())",
-            "(()()()()(())(((()))))))))(())",
-            "()()()(()((()())))(())))))(())",
-            "(((())))())))((()()))()())(())",
-            "()()(())(()))(()()())))())(())",
-        ),
-        "B": (
-            ")((())())(())((()))(((())))(()",
-            ")(()((((())))))(((()())()))(()",
-            "()))))((())()(()(((()))))))(((",
-            ")((()((((((()()))))))))))()(((",
-            ")))(()((()(()(()(()))))))()(((",
-            ")(((()(()))()((()))))))(())(((",
-            "()))()())(())((())(())())()(((",
-            ")()())((())()()))(((())))()(((",
-            "()(((()))))))))((((()))()()(((",
-            "()))))()()((()))()(()(()))()(((",
-        ),
-        "P": (
-            "(()((()()())((()))()))(()())((",
-            "((())((()(((())))))())(()())((",
-            "()()(())((()))(()(()))(()())((",
-            "()(())()((()()()((())))()())((",
-        ),
-    },
-}
-
-
-def build_probe_candidate_pool(
+def sample_examples_for_family(
     *,
+    total_examples: int,
     length: int,
-    probe_kind: str,
-    pool_size: int = 240,
-) -> tuple[str, ...]:
-    base_seed = 100_000 + length * 1_000
-    if probe_kind == PHASE_KIND_OFF_BY_ONE:
-        texts = [
-            deterministic_invalid(length, INVALID_KIND_CORRUPTION, base_seed + index)
-            for index in range(1, pool_size + 1)
-        ]
-        for index in range(1, max(8, pool_size // 8) + 1):
-            valid_text = deterministic_valid(length, base_seed + 10_000 + index)
-            for tail in range(1, min(4, length)):
-                mutated = valid_text[:-tail] + ")" * tail
-                if is_corruption_invalid(mutated):
-                    texts.append(mutated)
-    elif probe_kind == PHASE_KIND_BALANCED:
-        texts = [
-            deterministic_invalid(length, INVALID_KIND_BALANCED, base_seed + index)
-            for index in range(1, pool_size + 1)
-        ]
-        for index in range(1, max(8, pool_size // 8) + 1):
-            valid_text = deterministic_valid(length, base_seed + 20_000 + index)
-            for offset in range(1, length):
-                rotated = valid_text[offset:] + valid_text[:offset]
-                if is_balanced_invalid(rotated):
-                    texts.append(rotated)
-    elif probe_kind == PHASE_KIND_VALID_PREFIX:
-        texts = [
-            deterministic_invalid(length, INVALID_KIND_VALID_PREFIX, base_seed + index)
-            for index in range(1, pool_size + 1)
-        ]
-        for index in range(1, max(8, pool_size // 8) + 1):
-            valid_text = deterministic_valid(length, base_seed + 30_000 + index)
-            for suffix in range(1, min(4, length) + 1):
-                prefix = valid_text[: length - suffix]
-                candidate = prefix + "(" * suffix
-                if is_valid_prefix_invalid(candidate):
-                    texts.append(candidate)
-    else:
-        raise ValueError(f"Unsupported probe kind for mining: {probe_kind}")
-    return tuple(dict.fromkeys(texts))
-
-
-def score_probe_probability_trajectory(
-    probabilities: list[float],
-    *,
-    actual_valid: bool,
-    checkpoint_epochs: list[int],
-) -> tuple[int, int, float, float, int]:
-    correct = [(probability >= 0.5) == actual_valid for probability in probabilities]
-    flips = [
-        (
-            checkpoint_epochs[index],
-            checkpoint_epochs[index + 1],
-            correct[index],
-            correct[index + 1],
+    family_kind: str,
+    seed: int,
+    family: str,
+    exclude_texts: set[str] | None = None,
+    allow_repeats: bool = False,
+) -> list[SequenceExample]:
+    if family_kind == PHASE_KIND_RANDOM:
+        valid_count, invalid_count = allocate_counts(total_examples, 2)
+        excluded = exclude_texts if exclude_texts is not None else set()
+        examples = sample_examples_by_builder(
+            total_examples=valid_count,
+            length=length,
+            builder=sample_valid_sequence_of_length,
+            label=1,
+            kind="valid",
+            family=family,
+            seed=seed,
+            exclude_texts=excluded,
+            allow_repeats=allow_repeats,
         )
-        for index in range(len(checkpoint_epochs) - 1)
-        if correct[index] != correct[index + 1]
-    ]
-    late_recovery = any(
-        (not start_correct) and end_correct and end_epoch == checkpoint_epochs[-1]
-        for _, end_epoch, start_correct, end_correct in flips
-    )
-    any_recovery = any((not start_correct) and end_correct for _, _, start_correct, end_correct in flips)
-    max_swing = max(abs(before - after) for before, after in zip(probabilities[:-1], probabilities[1:], strict=True))
-    min_margin = min(abs(probability - 0.5) for probability in probabilities)
-    wrong_steps = sum(1 for is_correct in correct if not is_correct)
-    return (int(late_recovery), int(any_recovery), max_swing, -min_margin, wrong_steps)
-
-
-def build_response_probes() -> tuple[ProbeSpec, ...]:
-    probes: list[ProbeSpec] = []
-    for length, base_seed in zip(EVAL_LENGTHS, (1_000, 2_000, 3_000), strict=True):
-        valid_texts = tuple(
-            "()(())(())" if length == 10 and index == 1 else deterministic_valid(length, base_seed + index * 10 + 1)
-            for index in range(1, PROBE_FAMILY_COUNTS["V"] + 1)
-        )
-        random_invalid_texts = tuple(
-            deterministic_invalid(length, INVALID_KIND_RANDOM, base_seed + index * 10 + 2)
-            for index in range(1, PROBE_FAMILY_COUNTS["R"] + 1)
-        )
-        family_specs = (
-            ("V", "valid", "valid", valid_texts),
-            ("R", "random invalid", PHASE_KIND_RANDOM, random_invalid_texts),
-            ("O", "off-by-one", PHASE_KIND_OFF_BY_ONE, CURATED_PROBE_TEXTS[length]["O"]),
-            ("B", "balanced-invalid", PHASE_KIND_BALANCED, CURATED_PROBE_TEXTS[length]["B"]),
-            ("P", "valid-prefix", PHASE_KIND_VALID_PREFIX, CURATED_PROBE_TEXTS[length]["P"]),
-        )
-        for family_code, family_label, probe_kind, texts in family_specs:
-            for index, text in enumerate(texts, start=1):
-                probes.append(
-                    ProbeSpec(
-                        f"{length} {family_label} {index}",
-                        text,
-                        probe_kind,
-                        length,
-                        f"{length}{family_code}{index}",
-                        index == 1,
-                    )
-                )
-    return tuple(probes)
-
-
-def infer_probe_kind(text: str) -> str:
-    if is_balanced_parentheses(text):
-        return "valid"
-    if is_balanced_invalid(text):
-        return PHASE_KIND_BALANCED
-    if is_valid_prefix_invalid(text):
-        return PHASE_KIND_VALID_PREFIX
-    if is_corruption_invalid(text):
-        return PHASE_KIND_OFF_BY_ONE
-    return PHASE_KIND_RANDOM
-
-
-def build_story_probes(length: int = STORY_PROBE_LENGTH) -> tuple[ProbeSpec, ...]:
-    probes: list[ProbeSpec] = []
-    for index, chars in enumerate(product("()", repeat=length)):
-        text = "".join(chars)
-        binary = text.replace("(", "0").replace(")", "1")
-        probes.append(
-            ProbeSpec(
-                label=f"{length} full-space {binary}",
-                text=text,
-                probe_kind=infer_probe_kind(text),
+        excluded.update(example.text for example in examples)
+        examples.extend(
+            sample_examples_by_builder(
+                total_examples=invalid_count,
                 length=length,
-                short_label=f"{length}A{index:04d}",
-                highlight=False,
+                builder=sample_random_invalid_sequence,
+                label=0,
+                kind=INVALID_KIND_RANDOM,
+                family=family,
+                seed=seed + 1,
+                exclude_texts=excluded,
+                allow_repeats=allow_repeats,
             )
         )
+        return examples
+    builder = {
+        INVALID_KIND_RANDOM: sample_random_invalid_sequence,
+        PHASE_KIND_OFF_BY_ONE: sample_off_by_one_invalid_sequence,
+        PHASE_KIND_VALID_PREFIX: sample_valid_prefix_invalid_sequence,
+        PHASE_KIND_BALANCED_INVALID: sample_balanced_invalid_sequence,
+    }[family_kind]
+    return sample_examples_by_builder(
+        total_examples=total_examples,
+        length=length,
+        builder=builder,
+        label=0,
+        kind=family_kind,
+        family=family,
+        seed=seed,
+        exclude_texts=exclude_texts,
+        allow_repeats=allow_repeats,
+    )
+
+
+def build_rnn_evaluation_sets(
+    *,
+    test_samples: int,
+    seed: int,
+) -> dict[int, list[SequenceExample]]:
+    suites: dict[int, list[SequenceExample]] = {}
+    invalid_families = (
+        INVALID_KIND_RANDOM,
+        PHASE_KIND_OFF_BY_ONE,
+        PHASE_KIND_VALID_PREFIX,
+        PHASE_KIND_BALANCED_INVALID,
+    )
+    for length in ACCURACY_EVAL_LENGTHS:
+        excluded: set[str] = set()
+        valid_count = test_samples // 2
+        invalid_count = test_samples - valid_count
+        valid = sample_examples_by_builder(
+            total_examples=valid_count,
+            length=length,
+            builder=sample_valid_sequence_of_length,
+            label=1,
+            kind="valid",
+            family=f"eval-{length}",
+            seed=seed + length * 11,
+            exclude_texts=excluded,
+        )
+        excluded.update(example.text for example in valid)
+        invalid_examples: list[SequenceExample] = []
+        for family_index, (family_kind, family_count) in enumerate(
+            allocate_weighted_counts(invalid_count, tuple((family_kind, 1.0) for family_kind in invalid_families)),
+            start=1,
+        ):
+            bucket = sample_examples_for_family(
+                total_examples=family_count,
+                length=length,
+                family_kind=family_kind,
+                seed=seed + length * 17 + family_index,
+                family=f"eval-{length}",
+                exclude_texts=excluded,
+                allow_repeats=False,
+            )
+            excluded.update(example.text for example in bucket)
+            invalid_examples.extend(bucket)
+        suites[length] = valid + invalid_examples
+    return suites
+
+
+def build_rnn_family_sets(
+    *,
+    test_samples: int,
+    seed: int,
+) -> dict[str, list[SequenceExample]]:
+    return {
+        PHASE_KIND_OFF_BY_ONE: sample_examples_by_builder(
+            total_examples=test_samples,
+            length=RNN_FAMILY_LENGTH,
+            builder=sample_off_by_one_invalid_sequence,
+            label=0,
+            kind=PHASE_KIND_OFF_BY_ONE,
+            family="off-by-one",
+            seed=seed + 101,
+        ),
+        PHASE_KIND_VALID_PREFIX: sample_examples_by_builder(
+            total_examples=test_samples,
+            length=RNN_FAMILY_LENGTH,
+            builder=sample_valid_prefix_invalid_sequence,
+            label=0,
+            kind=PHASE_KIND_VALID_PREFIX,
+            family="valid-prefix",
+            seed=seed + 102,
+        ),
+        PHASE_KIND_BALANCED_INVALID: sample_examples_by_builder(
+            total_examples=test_samples,
+            length=RNN_FAMILY_LENGTH,
+            builder=sample_balanced_invalid_sequence,
+            label=0,
+            kind=PHASE_KIND_BALANCED_INVALID,
+            family="balanced-invalid",
+            seed=seed + 103,
+        ),
+    }
+
+
+def build_story_probes() -> tuple[ProbeSpec, ...]:
+    per_family = RNN_STORY_PROBE_COUNT // 4
+    probes: list[ProbeSpec] = []
+    all_strings = [format(value, f"0{RNN_STORY_PROBE_LENGTH}b").replace("0", "(").replace("1", ")") for value in range(2**RNN_STORY_PROBE_LENGTH)]
+    family_buckets: list[tuple[str, str, list[str]]] = [
+        ("V", "valid", [text for text in all_strings if is_balanced_parentheses(text)]),
+        ("O", PHASE_KIND_OFF_BY_ONE, [text for text in all_strings if is_off_by_one_invalid(text)]),
+        ("P", PHASE_KIND_VALID_PREFIX, [text for text in all_strings if is_valid_prefix_invalid(text)]),
+        ("B", PHASE_KIND_BALANCED_INVALID, [text for text in all_strings if is_balanced_invalid(text)]),
+    ]
+    for prefix, kind, bucket in family_buckets:
+        if len(bucket) < per_family:
+            raise RuntimeError(
+                f"Story probe pool for {kind} only has {len(bucket)} unique strings at length {RNN_STORY_PROBE_LENGTH}."
+            )
+        for index, text in enumerate(bucket[:per_family], start=1):
+            probes.append(
+                ProbeSpec(
+                    label=f"{prefix}{index}",
+                    text=text,
+                    probe_kind=kind,
+                    length=len(text),
+                    short_label=f"{prefix}{index}",
+                )
+            )
     return tuple(probes)
 
 
-def build_trace_probes() -> tuple[ProbeSpec, ...]:
-    repeated_loop = "(((())))" * 4
-    repeated_loop_error = repeated_loop[:-1] + "("
-    repeated_balanced_invalid = ")((()))(" * 5
-    return (
-        ProbeSpec("Focus balanced-invalid", repeated_balanced_invalid, PHASE_KIND_BALANCED, len(repeated_balanced_invalid), "focus"),
-        ProbeSpec("Matched valid sibling", repeated_loop, "valid", len(repeated_loop), "valid"),
-        ProbeSpec("Off-by-one sibling", repeated_loop_error, PHASE_KIND_OFF_BY_ONE, len(repeated_loop_error), "off"),
-    )
-
-
-RESPONSE_PROBES = build_response_probes()
 STORY_PROBES = build_story_probes()
-TRACE_PROBES = build_trace_probes()
 
 
-def projection_axis_label(component_index: int, explained_variance: float) -> str:
-    return f"PC{component_index} ({explained_variance * 100:.0f}% var)"
+def phase_epoch_schedule(base_phase_epochs: int) -> list[int]:
+    if base_phase_epochs <= 0:
+        raise ValueError("phase_epochs must be positive")
+    return [base_phase_epochs * phase_spec.epoch_multiplier for phase_spec in RNN_PHASE_SPECS]
 
 
-def fit_pca_projection(
-    points: list[list[float]],
+def phase_learning_rate(
     *,
-    num_components: int = 3,
-) -> tuple[torch.Tensor, torch.Tensor, tuple[float, ...]]:
-    point_tensor = torch.tensor(points, dtype=torch.float32)
-    mean = point_tensor.mean(dim=0, keepdim=True)
-    centered = point_tensor - mean
-    if centered.shape[0] < 2:
-        components = torch.eye(centered.shape[1], dtype=torch.float32)
-        if components.shape[0] < num_components:
-            padding = torch.zeros((num_components - components.shape[0], centered.shape[1]), dtype=torch.float32)
-            components = torch.cat([components, padding], dim=0)
-        components = components[:num_components]
-        return mean.squeeze(0), components, tuple(0.0 for _ in range(num_components))
-    _, singular_values, right_vectors = torch.linalg.svd(centered, full_matrices=False)
-    components = right_vectors[:num_components]
-    if components.shape[0] < num_components:
-        padding = torch.eye(centered.shape[1], dtype=torch.float32)[: num_components - components.shape[0]]
-        components = torch.cat([components, padding], dim=0)
-    variance = singular_values.square()
-    total_variance = float(variance.sum().item()) if float(variance.sum().item()) > 0 else 1.0
-    explained: list[float] = []
-    for index in range(num_components):
-        if index < len(variance):
-            explained.append(float(variance[index].item() / total_variance))
-        else:
-            explained.append(0.0)
-    return mean.squeeze(0), components, tuple(explained)
+    phase_index: int,
+    epoch_in_phase: int,
+    epochs_in_phase: int,
+    lr_start: float,
+    lr_end: float,
+) -> float:
+    peak_lr = max(lr_end, lr_start * RNN_PHASE_LR_PEAK_FACTORS[phase_index])
+    floor_lr = lr_end if phase_index == len(RNN_PHASE_SPECS) - 1 else max(lr_end, lr_start * RNN_PHASE_LR_FLOOR_FACTORS[phase_index])
+    if epochs_in_phase <= 1:
+        return floor_lr
+    progress = (epoch_in_phase - 1) / (epochs_in_phase - 1)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return floor_lr + ((peak_lr - floor_lr) * cosine)
 
 
-def project_with_pca(
-    points: list[list[float]],
-    *,
-    mean: torch.Tensor,
-    components: torch.Tensor,
-) -> list[list[float]]:
-    if not points:
-        return []
-    point_tensor = torch.tensor(points, dtype=torch.float32)
-    centered = point_tensor - mean
-    projected = centered @ components.T
-    return projected.tolist()
+def phase_batch_schedule() -> list[int]:
+    return [phase_spec.batch_size for phase_spec in RNN_PHASE_SPECS]
 
 
-def probability_to_sigma(probability: float, *, clip: float = SIGMA_CLIP_PROBABILITY) -> float:
-    clipped = min(max(probability, clip), 1.0 - clip)
-    return float(NORMAL_DIST.inv_cdf(clipped))
+def phase_family_mix_manifest() -> list[dict[str, float]]:
+    return [{family: weight for family, weight in phase_spec.family_mix} for phase_spec in RNN_PHASE_SPECS]
 
 
-def sigma_tick_text(value: int) -> str:
-    return f"{value:+d}s" if value else "0s"
+def phase_epoch_boundaries(base_phase_epochs: int) -> list[int]:
+    boundaries = [0]
+    total = 0
+    for span in phase_epoch_schedule(base_phase_epochs):
+        total += span
+        boundaries.append(total)
+    return boundaries
 
 
-def trace_anchor_steps(length: int) -> list[int]:
-    if length <= 0:
-        return []
-    anchors: list[int] = []
-    for step in (1, math.ceil(length / 3), math.ceil(2 * length / 3), length):
-        if step not in anchors:
-            anchors.append(step)
-    return anchors
+def select_story_plot_probes(result: RNNExperimentResult) -> tuple[ProbeSpec, ...]:
+    return result.story_probes
 
 
-def trace_step_text(length: int) -> list[str]:
-    anchors = set(trace_anchor_steps(length))
-    return [str(step) if step in anchors else "" for step in range(1, length + 1)]
-
-
-def depth_scaled_marker_sizes(
-    points: list[list[float]],
-    *,
-    x_range: list[float],
-    y_range: list[float],
-    z_range: list[float],
-    camera_eye: dict[str, float],
-    base_size: float,
-    min_scale: float,
-    max_scale: float,
-) -> list[float]:
-    if not points:
-        return []
-    x_mid = (x_range[0] + x_range[1]) / 2
-    y_mid = (y_range[0] + y_range[1]) / 2
-    z_mid = (z_range[0] + z_range[1]) / 2
-    x_span = max(1e-6, x_range[1] - x_range[0])
-    y_span = max(1e-6, y_range[1] - y_range[0])
-    z_span = max(1e-6, z_range[1] - z_range[0])
-    eye = torch.tensor(
-        [camera_eye["x"], camera_eye["y"], camera_eye["z"]],
-        dtype=torch.float32,
-    )
-    eye = eye / torch.linalg.norm(eye)
-    normalized_points = torch.tensor(
-        [
-            [
-                (point[0] - x_mid) / x_span,
-                (point[1] - y_mid) / y_span,
-                (point[2] - z_mid) / z_span,
-            ]
-            for point in points
-        ],
-        dtype=torch.float32,
-    )
-    depth = normalized_points @ eye
-    if float(depth.max().item() - depth.min().item()) < 1e-6:
-        return [base_size for _ in points]
-    scaled = (depth - depth.min()) / (depth.max() - depth.min())
-    return [
-        float(base_size * (min_scale + (max_scale - min_scale) * value.item()))
-        for value in scaled
-    ]
-
-
-def build_trace_reference_axes(
-    *,
-    x_range: list[float],
-    y_range: list[float],
-    z_range: list[float],
-) -> list[dict[str, object]]:
-    x_span = max(1e-6, x_range[1] - x_range[0])
-    y_span = max(1e-6, y_range[1] - y_range[0])
-    z_span = max(1e-6, z_range[1] - z_range[0])
-    origin = (
-        x_range[0] + 0.08 * x_span,
-        y_range[0] + 0.1 * y_span,
-        z_range[0] + 0.06 * z_span,
-    )
-    return [
-        {
-            "label": "x",
-            "x": [origin[0], origin[0] + 0.34 * x_span],
-            "y": [origin[1], origin[1]],
-            "z": [origin[2], origin[2]],
-            "color": "rgba(239,68,68,0.96)",
-        },
-        {
-            "label": "y",
-            "x": [origin[0], origin[0]],
-            "y": [origin[1], origin[1] + 0.34 * y_span],
-            "z": [origin[2], origin[2]],
-            "color": "rgba(59,130,246,0.95)",
-        },
-        {
-            "label": "z",
-            "x": [origin[0], origin[0]],
-            "y": [origin[1], origin[1]],
-            "z": [origin[2], origin[2] + 0.36 * z_span],
-            "color": "rgba(34,197,94,0.95)",
-        },
-    ]
-
-
-def examples_to_tensors(
-    examples: list[SequenceExample],
-) -> tuple[list[str], torch.Tensor]:
-    texts = [example.text for example in examples]
-    labels = torch.tensor(
-        [float(example.label) for example in examples],
-        dtype=torch.float32,
-        device=DEVICE,
-    )
-    return texts, labels
-
-
-def encode_sequences(sequences: list[str]) -> tuple[torch.Tensor, torch.Tensor]:
-    lengths = torch.tensor([len(sequence) for sequence in sequences], dtype=torch.long)
-    max_length = int(lengths.max().item()) if len(sequences) else 0
-    tokens = torch.full((len(sequences), max_length), PAD_INDEX, dtype=torch.long)
-    for row, sequence in enumerate(sequences):
-        encoded = [0 if char == "(" else 1 for char in sequence]
-        tokens[row, : len(encoded)] = torch.tensor(encoded, dtype=torch.long)
-    return tokens.to(DEVICE), lengths.to(DEVICE)
-
-
-class TinyTraceRNN(nn.Module):
-    def __init__(
-        self,
-        *,
-        hidden_size: int = RNN_HIDDEN_SIZE,
-        num_layers: int = 1,
-        embedding_dim: int = 4,
-    ) -> None:
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.embedding = nn.Embedding(3, embedding_dim, padding_idx=PAD_INDEX)
-        self.cells = nn.ModuleList(
-            [
-                nn.RNNCell(
-                    input_size=embedding_dim if layer_index == 0 else hidden_size,
-                    hidden_size=hidden_size,
-                    nonlinearity="tanh",
-                )
-                for layer_index in range(num_layers)
-            ]
-        )
-        self.classifier = nn.Linear(hidden_size, 1)
-
-    def forward(
-        self,
-        tokens: torch.Tensor,
-        lengths: torch.Tensor,
-        *,
-        capture_traces: bool = False,
-    ) -> tuple[torch.Tensor, list[torch.Tensor] | None]:
-        batch_size, steps = tokens.shape
-        embedded = self.embedding(tokens)
-        states = [
-            embedded.new_zeros((batch_size, self.hidden_size))
-            for _ in range(self.num_layers)
+def build_publication_checkpoint_epochs(phase_epochs: int) -> list[int]:
+    checkpoints = [0]
+    elapsed = 0
+    for span in phase_epoch_schedule(phase_epochs):
+        phase_points = [
+            int(round(index * span / (PUBLICATION_CHECKPOINTS_PER_PHASE - 1)))
+            for index in range(PUBLICATION_CHECKPOINTS_PER_PHASE)
         ]
-        traces: list[list[torch.Tensor]] = [[] for _ in range(self.num_layers)]
-
-        for step_index in range(steps):
-            active_mask = (step_index < lengths).unsqueeze(1)
-            current = embedded[:, step_index, :]
-            for layer_index, cell in enumerate(self.cells):
-                next_state = cell(current, states[layer_index])
-                states[layer_index] = torch.where(active_mask, next_state, states[layer_index])
-                current = states[layer_index]
-                if capture_traces:
-                    traces[layer_index].append(states[layer_index].detach().cpu())
-
-        logits = self.classifier(states[-1]).squeeze(-1)
-        if not capture_traces:
-            return logits, None
-        return logits, [torch.stack(layer_trace, dim=1) for layer_trace in traces]
+        for offset in phase_points[1:]:
+            checkpoints.append(elapsed + offset)
+        elapsed += span
+    deduped: list[int] = []
+    for epoch in checkpoints:
+        if not deduped or deduped[-1] != epoch:
+            deduped.append(epoch)
+    return deduped
 
 
-class SineMLP(nn.Module):
-    def __init__(self, hidden_layers: tuple[int, ...]) -> None:
-        super().__init__()
-        layers: list[nn.Module] = []
-        input_size = 1
-        for hidden_size in hidden_layers:
-            layers.append(nn.Linear(input_size, hidden_size))
-            layers.append(nn.ReLU())
-            input_size = hidden_size
-        layers.append(nn.Linear(input_size, 1))
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, values: torch.Tensor) -> torch.Tensor:
-        return self.net(2 * values - 1)
-
-
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> float:
-    predictions = (logits.sigmoid() >= 0.5).float()
-    return float((predictions == labels).float().mean().item())
+def checkpoint_label(epoch: int, phase_epochs: int) -> str:
+    phase_1_end, phase_2_end, phase_3_end = phase_epoch_boundaries(phase_epochs)[1:]
+    if epoch == 0:
+        return "Random init"
+    if epoch == phase_1_end:
+        return "After phase 1"
+    if epoch == phase_2_end:
+        return "After phase 2"
+    if epoch == phase_3_end:
+        return "After phase 3"
+    if epoch < phase_1_end:
+        return f"P1 {epoch / phase_1_end:.2f}"
+    if epoch < phase_2_end:
+        return f"P2 {(epoch - phase_1_end) / (phase_2_end - phase_1_end):.2f}"
+    return f"P3 {(epoch - phase_2_end) / (phase_3_end - phase_2_end):.2f}"
 
 
-def evaluate_rnn(
-    model: TinyTraceRNN,
-    examples: list[SequenceExample],
-    criterion: nn.Module,
-) -> tuple[float, float]:
-    if not examples:
-        return 0.0, 0.0
-    model.eval()
-    texts, labels = examples_to_tensors(examples)
-    with torch.no_grad():
-        tokens, lengths = encode_sequences(texts)
-        logits, _ = model(tokens, lengths)
-        loss = float(criterion(logits, labels).item())
-        acc = accuracy_from_logits(logits, labels)
-    return loss, acc
+def phase_label_for_epoch(epoch: int, phase_epochs: int) -> str:
+    phase_1_end, phase_2_end, _phase_3_end = phase_epoch_boundaries(phase_epochs)[1:]
+    if epoch == 0:
+        return "Random init"
+    if epoch <= phase_1_end:
+        return RNN_PHASE_SPECS[0].label
+    if epoch <= phase_2_end:
+        return RNN_PHASE_SPECS[1].label
+    return RNN_PHASE_SPECS[2].label
 
 
-def evaluate_probabilities(model: TinyTraceRNN, sequences: list[str]) -> list[float]:
-    model.eval()
-    with torch.no_grad():
-        tokens, lengths = encode_sequences(sequences)
-        logits, _ = model(tokens, lengths)
-        return logits.sigmoid().detach().cpu().tolist()
+def phase_spans_for_schedule(phase_epochs: int) -> list[dict[str, object]]:
+    boundaries = phase_epoch_boundaries(phase_epochs)
+    spans: list[dict[str, object]] = []
+    for index, phase_spec in enumerate(RNN_PHASE_SPECS):
+        spans.append(
+            {
+                "label": phase_spec.label,
+                "phase_kind": phase_spec.phase_kind,
+                "start_epoch": boundaries[index],
+                "end_epoch": boundaries[index + 1],
+                "epochs": boundaries[index + 1] - boundaries[index],
+            }
+        )
+    return spans
 
 
-def set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
-    for group in optimizer.param_groups:
-        group["lr"] = lr
+def build_phase_epoch_examples(
+    *,
+    phase_spec: TrainingPhaseSpec,
+    epoch_index: int,
+    total_examples: int,
+    seed: int,
+) -> list[SequenceExample]:
+    length_allocations = allocate_counts(total_examples, len(TRAIN_LENGTHS))
+    examples: list[SequenceExample] = []
+    for length_index, (length, length_count) in enumerate(zip(TRAIN_LENGTHS, length_allocations, strict=True)):
+        excluded: set[str] = set()
+        family_counts = allocate_weighted_counts(length_count, phase_spec.family_mix)
+        for family_index, (family_kind, family_count) in enumerate(family_counts):
+            bucket = sample_examples_for_family(
+                total_examples=family_count,
+                length=length,
+                family_kind=family_kind,
+                seed=seed
+                + ((epoch_index + 1) * 10_000)
+                + (length_index * 1_000)
+                + (family_index * 97),
+                family=f"{phase_spec.phase_kind}-{length}",
+                exclude_texts=excluded,
+                allow_repeats=True,
+            )
+            excluded.update(example.text for example in bucket)
+            examples.extend(bucket)
+    random.Random(seed + epoch_index * 31 + len(examples)).shuffle(examples)
+    return examples
 
 
-def phase_epoch_lr(phase: TrainingPhase, local_epoch: int) -> float:
-    if phase.epochs <= 1:
-        return phase.lr_end
-    fraction = (local_epoch - 1) / (phase.epochs - 1)
-    return phase.lr_start + fraction * (phase.lr_end - phase.lr_start)
-
-
-def train_rnn_epoch(
-    model: TinyTraceRNN,
+def run_training_epoch(
+    model: PhasedTorchRNN,
+    *,
     examples: list[SequenceExample],
     optimizer: torch.optim.Optimizer,
-    criterion: nn.Module,
-    *,
     batch_size: int,
-    rng: random.Random,
-) -> None:
+) -> tuple[float, float]:
     model.train()
-    indices = list(range(len(examples)))
-    rng.shuffle(indices)
-    for start in range(0, len(indices), batch_size):
-        batch = [examples[index] for index in indices[start : start + batch_size]]
-        texts, labels = examples_to_tensors(batch)
-        tokens, lengths = encode_sequences(texts)
+    rng = random.Random(len(examples) + batch_size)
+    batch_order = list(range(len(examples)))
+    rng.shuffle(batch_order)
+    total_loss = 0.0
+    total_correct = 0
+    total_examples = 0
+    for start in range(0, len(batch_order), batch_size):
+        batch_ids = batch_order[start : start + batch_size]
+        batch_examples = [examples[index] for index in batch_ids]
         optimizer.zero_grad()
-        logits, _ = model(tokens, lengths)
-        loss = criterion(logits, labels)
+        final_states, _ = model([example.text for example in batch_examples], capture_traces=False)
+        labels = torch.tensor(
+            [float(example.label) for example in batch_examples],
+            dtype=torch.float64,
+            device=DEVICE,
+        )
+        probabilities = acceptance_probability(final_states)
+        loss = classification_loss(final_states, labels)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
         optimizer.step()
-
-
-def build_metric_row(
-    *,
-    epoch: int,
-    phase: str,
-    train_examples: list[SequenceExample],
-    evaluation_sets: dict[int, list[SequenceExample]],
-    model: TinyTraceRNN,
-    criterion: nn.Module,
-) -> MetricRow:
-    train_loss, train_acc = evaluate_rnn(model, train_examples, criterion)
-    eval_10_acc = evaluate_rnn(model, evaluation_sets[10], criterion)[1]
-    eval_20_acc = evaluate_rnn(model, evaluation_sets[20], criterion)[1]
-    eval_30_acc = evaluate_rnn(model, evaluation_sets[30], criterion)[1]
-    return MetricRow(
-        epoch=epoch,
-        phase=phase,
-        train_loss=train_loss,
-        train_acc=train_acc,
-        eval_10_acc=eval_10_acc,
-        eval_20_acc=eval_20_acc,
-        eval_30_acc=eval_30_acc,
-    )
-
-
-def clone_model_state(model: nn.Module) -> dict[str, torch.Tensor]:
-    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-
-
-def load_model_state(model: nn.Module, state: dict[str, torch.Tensor]) -> None:
-    model.load_state_dict(state)
-
-
-def probe_status_label(actual_valid: bool, predicted_valid: bool) -> str:
-    if actual_valid and predicted_valid:
-        return "valid / correct"
-    if actual_valid and not predicted_valid:
-        return "valid / wrong"
-    if not actual_valid and predicted_valid:
-        return "invalid / wrong"
-    return "invalid / correct"
-
-
-def probe_story_status(actual_valid: bool, predicted_values: list[bool]) -> str:
-    if any(predicted_valid != actual_valid for predicted_valid in predicted_values):
-        return "ever wrong"
-    return "valid / stable" if actual_valid else "invalid / stable"
-
-
-def probe_line_dash(probe_kind: str) -> str:
-    if probe_kind == "valid":
-        return "solid"
-    if probe_kind == PHASE_KIND_RANDOM:
-        return "dot"
-    if probe_kind == PHASE_KIND_OFF_BY_ONE:
-        return "dash"
-    if probe_kind == PHASE_KIND_BALANCED:
-        return "longdash"
-    if probe_kind == PHASE_KIND_VALID_PREFIX:
-        return "longdashdot"
-    return "solid"
-
-
-def probe_end_symbol(status: str) -> str:
-    return "circle" if "correct" in status else "x"
-
-
-def probe_end_label_position(index: int) -> str:
-    positions = ("middle right", "top right", "bottom right", "top left", "bottom left")
-    return positions[index % len(positions)]
-
-def probe_class_color(probe_kind: str) -> str:
-    return PROBE_CLASS_COLORS.get(probe_kind, "#6b7280")
-
-
-def probe_kind_label(probe_kind: str) -> str:
-    mapping = {
-        "valid": "valid",
-        PHASE_KIND_RANDOM: "random invalid",
-        PHASE_KIND_OFF_BY_ONE: "off-by-one",
-        PHASE_KIND_BALANCED: "balanced-invalid",
-        PHASE_KIND_VALID_PREFIX: "valid-prefix",
-    }
-    return mapping.get(probe_kind, probe_kind)
-
-
-def probe_display_label(probe: ProbeSpec) -> str:
-    if "full-space" in probe.label:
-        return probe.label.rsplit(" ", maxsplit=1)[-1]
-    return probe.short_label
-
-
-def build_model_title(hidden_size: int, num_layers: int) -> str:
-    layer_text = "layer" if num_layers == 1 else "layers"
-    return f"{hidden_size}-unit RNN ({num_layers} {layer_text})"
-
-
-def find_probe(short_label: str) -> ProbeSpec:
-    for probe in RESPONSE_PROBES:
-        if probe.short_label == short_label:
-            return probe
-    raise KeyError(short_label)
-
-
-def probe_variant_index(probe: ProbeSpec) -> int:
-    digits = []
-    for char in reversed(probe.short_label):
-        if not char.isdigit():
-            break
-        digits.append(char)
-    return int("".join(reversed(digits))) if digits else 1
-
-
-def canonical_alternating_valid(length: int) -> str:
-    if length < 2 or length % 2 != 0:
-        raise ValueError("Alternating valid strings require an even length >= 2.")
-    return "()" * (length // 2)
-
-
-def canonical_nested_valid(length: int) -> str:
-    if length < 2 or length % 2 != 0:
-        raise ValueError("Nested valid strings require an even length >= 2.")
-    return "(" * (length // 2) + ")" * (length // 2)
-
-
-def canonical_valid_prefix_invalid(length: int) -> str:
-    if length <= 0:
-        raise ValueError("Valid-prefix invalid strings require a positive length.")
-    target_balance = 1 if length % 2 else 2
-    prefix_length = length - target_balance
-    prefix = canonical_alternating_valid(prefix_length) if prefix_length > 0 else ""
-    return prefix + "(" * target_balance
-
-
-def preferred_probe_labels(length: int, family_code: str, preferred_index: int) -> list[str]:
-    max_index = {
-        "V": PROBE_FAMILY_COUNTS["V"],
-        "R": PROBE_FAMILY_COUNTS["R"],
-        "O": PROBE_FAMILY_COUNTS["O"],
-        "B": PROBE_FAMILY_COUNTS["B"],
-        "P": PROBE_FAMILY_COUNTS["P"],
-    }[family_code]
-    ordered_indices: list[int] = []
-    if 1 <= preferred_index <= max_index:
-        ordered_indices.append(preferred_index)
-    for index in range(1, max_index + 1):
-        if index not in ordered_indices:
-            ordered_indices.append(index)
-    return [f"{length}{family_code}{index}" for index in ordered_indices]
-
-
-def find_probe_from_candidates(candidates: list[str], *, exclude: str | None = None) -> ProbeSpec:
-    for short_label in candidates:
-        if short_label == exclude:
-            continue
-        try:
-            return find_probe(short_label)
-        except KeyError:
-            continue
-    raise KeyError(f"No matching probe for candidates: {candidates}")
-
-
-def probe_checkpoint_epochs(result: RNNExperimentResult) -> list[int]:
-    return [0] + [int(span["end_epoch"]) for span in result.phase_spans]
-
-
-def probe_checkpoint_label(epoch: int, result: RNNExperimentResult) -> str:
-    if epoch == 0:
-        return "start"
-    for span in result.phase_spans:
-        if int(span["end_epoch"]) == epoch:
-            return str(span["label"]).lower()
-    return f"epoch {epoch}"
-
-
-def compress_boolean_runs(values: list[bool]) -> tuple[bool, ...]:
-    if not values:
-        return ()
-    compressed = [values[0]]
-    for value in values[1:]:
-        if value != compressed[-1]:
-            compressed.append(value)
-    return tuple(compressed)
-
-
-def format_correctness_turn_label(
-    turn_pattern: tuple[bool, ...],
-    *,
-    separator: str = " -> ",
-) -> str:
-    return separator.join("C" if value else "I" for value in turn_pattern)
-
-
-def build_probe_trajectories(
-    result: RNNExperimentResult,
-    *,
-    probes: tuple[ProbeSpec, ...] | None = None,
-    response_history: list[list[float]] | None = None,
-) -> list[ProbeTrajectory]:
-    probes = probes or RESPONSE_PROBES
-    response_history = response_history or result.response_history
-    epochs = tuple(metric.epoch for metric in result.metrics)
-    trajectories: list[ProbeTrajectory] = []
-    for probe_index, probe in enumerate(probes):
-        actual_valid = is_balanced_parentheses(probe.text)
-        probabilities = tuple(float(row[probe_index]) for row in response_history)
-        correctness = tuple((probability >= 0.5) == actual_valid for probability in probabilities)
-        flip_epochs = tuple(
-            epochs[index + 1]
-            for index in range(len(epochs) - 1)
-            if correctness[index] != correctness[index + 1]
-        )
-        trajectories.append(
-            ProbeTrajectory(
-                probe=probe,
-                actual_valid=actual_valid,
-                epochs=epochs,
-                probabilities=probabilities,
-                correctness=correctness,
-                turn_pattern=compress_boolean_runs(list(correctness)),
-                flip_epochs=flip_epochs,
-            )
-        )
-    return trajectories
-
-
-def build_probe_flips(
-    result: RNNExperimentResult,
-    *,
-    probes: tuple[ProbeSpec, ...] | None = None,
-    response_history: list[list[float]] | None = None,
-) -> list[ProbeFlip]:
-    probes = probes or RESPONSE_PROBES
-    response_history = response_history or result.response_history
-    epoch_to_index = {metric.epoch: index for index, metric in enumerate(result.metrics)}
-    checkpoints = probe_checkpoint_epochs(result)
-    flips: list[ProbeFlip] = []
-    for probe_index, probe in enumerate(probes):
-        actual_valid = is_balanced_parentheses(probe.text)
-        checkpoint_probabilities = [
-            response_history[epoch_to_index[epoch]][probe_index]
-            for epoch in checkpoints
-        ]
-        checkpoint_correct = [
-            (probability >= 0.5) == actual_valid for probability in checkpoint_probabilities
-        ]
-        for start_epoch, end_epoch, start_probability, end_probability, start_correct, end_correct in zip(
-            checkpoints[:-1],
-            checkpoints[1:],
-            checkpoint_probabilities[:-1],
-            checkpoint_probabilities[1:],
-            checkpoint_correct[:-1],
-            checkpoint_correct[1:],
-            strict=True,
-        ):
-            if start_correct == end_correct:
-                continue
-            flips.append(
-                ProbeFlip(
-                    probe=probe,
-                    from_epoch=start_epoch,
-                    to_epoch=end_epoch,
-                    from_phase_label=probe_checkpoint_label(start_epoch, result),
-                    to_phase_label=probe_checkpoint_label(end_epoch, result),
-                    from_probability=float(start_probability),
-                    to_probability=float(end_probability),
-                    from_correct=bool(start_correct),
-                    to_correct=bool(end_correct),
-                    kind="wrong_to_right" if (not start_correct and end_correct) else "right_to_wrong",
-                )
-            )
-    return flips
-
-
-def probe_trajectory_priority(trajectory: ProbeTrajectory) -> tuple[int, int, int, int, int, float, float, int]:
-    max_swing = max(
-        abs(after - before)
-        for before, after in zip(trajectory.probabilities[:-1], trajectory.probabilities[1:], strict=True)
-    )
-    min_margin = min(abs(probability - 0.5) for probability in trajectory.probabilities)
-    same_start_end = int(
-        len(trajectory.turn_pattern) >= 3 and trajectory.turn_pattern[0] == trajectory.turn_pattern[-1]
-    )
-    final_epoch_turn = int(bool(trajectory.flip_epochs) and trajectory.flip_epochs[-1] == trajectory.epochs[-1])
-    late_turn_epoch = trajectory.flip_epochs[-1] if trajectory.flip_epochs else -1
-    wrong_steps = sum(1 for is_correct in trajectory.correctness if not is_correct)
-    return (
-        int(trajectory.turn_count >= 2),
-        same_start_end,
-        final_epoch_turn,
-        trajectory.turn_count,
-        late_turn_epoch,
-        max_swing,
-        -min_margin,
-        wrong_steps,
-    )
-
-
-def select_highlighted_probe_trajectories(
-    trajectories: list[ProbeTrajectory],
-    *,
-    limit: int = 4,
-) -> list[ProbeTrajectory]:
-    candidates = [trajectory for trajectory in trajectories if trajectory.turn_count >= 2]
-    if not candidates:
-        candidates = [trajectory for trajectory in trajectories if trajectory.turn_count >= 1 and trajectory.ever_wrong]
-    return sorted(
-        candidates,
-        key=probe_trajectory_priority,
-        reverse=True,
-    )[:limit]
-
-
-def select_trace_story_probes(
-    result: RNNExperimentResult,
-    flips: list[ProbeFlip],
-    *,
-    highlighted_trajectories: list[ProbeTrajectory] | None = None,
-) -> TraceStorySelection:
-    story_trajectories = build_probe_trajectories(
-        result,
-        probes=result.story_probes,
-        response_history=result.story_response_history,
-    )
-    if highlighted_trajectories is None:
-        highlighted_trajectories = select_highlighted_probe_trajectories(story_trajectories, limit=1)
-    checkpoints = probe_checkpoint_epochs(result)
-    target_fix = [
-        flip for flip in flips
-        if flip.kind == "wrong_to_right" and flip.from_epoch == checkpoints[-2] and flip.to_epoch == checkpoints[-1]
-    ]
-    any_fix = [flip for flip in flips if flip.kind == "wrong_to_right"]
-    phase_two_span = result.phase_spans[-1]
-    phase_two_reversals = [
-        trajectory
-        for trajectory in story_trajectories
-        if any(
-            int(phase_two_span["start_epoch"]) <= epoch <= int(phase_two_span["end_epoch"])
-            for epoch in trajectory.flip_epochs
-        )
-    ]
-    if highlighted_trajectories and any(trajectory.turn_count >= 2 for trajectory in highlighted_trajectories):
-        focus_probe = highlighted_trajectories[0].probe
-    elif phase_two_reversals:
-        focus_probe = max(
-            phase_two_reversals,
-            key=probe_trajectory_priority,
-        ).probe
-    elif highlighted_trajectories:
-        focus_probe = highlighted_trajectories[0].probe
-    elif target_fix:
-        focus_probe = max(
-            target_fix,
-            key=lambda flip: abs(flip.to_probability - flip.from_probability),
-        ).probe
-    elif any_fix:
-        focus_probe = max(
-            any_fix,
-            key=lambda flip: abs(flip.to_probability - flip.from_probability),
-        ).probe
-    else:
-        focus_probe = max(
-            story_trajectories,
-            key=probe_trajectory_priority,
-        )
-        focus_probe = focus_probe.probe
-    length = focus_probe.length
-    preferred_index = (
-        probe_variant_index(focus_probe)
-        if any(probe.short_label == focus_probe.short_label for probe in RESPONSE_PROBES)
-        else 1
-    )
-    if focus_probe.probe_kind == "valid":
-        valid_companion = find_probe_from_candidates(
-            preferred_probe_labels(length, "V", preferred_index),
-            exclude=focus_probe.short_label,
-        )
-        contrasting_companion = find_probe_from_candidates(
-            preferred_probe_labels(length, "B", preferred_index)
-        )
-    else:
-        valid_index = ((preferred_index - 1) % PROBE_FAMILY_COUNTS["V"]) + 1
-        valid_companion = find_probe_from_candidates(
-            preferred_probe_labels(length, "V", valid_index)
-        )
-        contrast_family = {
-            PHASE_KIND_OFF_BY_ONE: "B",
-            PHASE_KIND_BALANCED: "O",
-            PHASE_KIND_VALID_PREFIX: "O",
-            PHASE_KIND_RANDOM: "O",
-        }.get(focus_probe.probe_kind, "B")
-        contrasting_companion = find_probe_from_candidates(
-            preferred_probe_labels(
-                length,
-                contrast_family,
-                min(preferred_index, PROBE_FAMILY_COUNTS[contrast_family]),
-            ),
-            exclude=focus_probe.short_label,
-        )
-    companion_probes = (valid_companion, contrasting_companion)
-    return TraceStorySelection(focus_probe=focus_probe, companion_probes=companion_probes)
+        predictions = (probabilities >= 0.5).to(torch.float64)
+        total_loss += float(loss.item()) * len(batch_examples)
+        total_correct += int((predictions == labels).sum().item())
+        total_examples += len(batch_examples)
+    return total_loss / max(1, total_examples), total_correct / max(1, total_examples)
 
 
 def run_rnn_experiment(
@@ -1720,1200 +1164,353 @@ def run_rnn_experiment(
     test_samples: int,
     lr_start: float,
     lr_end: float,
-) -> tuple[RNNExperimentResult, dict[int, dict[str, torch.Tensor]]]:
+) -> RNNExperimentResult:
     seed_everything(seed)
-    random_phase_epoch_count = phase_epochs
-    counterexample_phase_epoch_count = counterexample_phase_epochs(phase_epochs)
-    counterexample_cohort_size = train_samples
-    random_cohort_size = random_baseline_cohort_size(train_samples)
-    phases = build_training_phases(
-        random_phase_epochs=random_phase_epoch_count,
-        counterexample_phase_epochs=counterexample_phase_epoch_count,
-        random_cohort_size=random_cohort_size,
-        counterexample_cohort_size=counterexample_cohort_size,
-        lr_start=lr_start,
-        lr_end=lr_end,
-    )
-    model = TinyTraceRNN(hidden_size=RNN_HIDDEN_SIZE, num_layers=RNN_NUM_LAYERS).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=DEFAULT_RNN_LR)
-    criterion = nn.BCEWithLogitsLoss()
-    evaluation_sets = build_evaluation_sets(test_samples=test_samples, seed=seed + 7_000)
-    retained_support = build_retained_support(
-        random_cohort_size=random_cohort_size,
-        counterexample_cohort_size=counterexample_cohort_size,
-        seed=seed + 17_000,
-    )
-    response_sequences = [probe.text for probe in RESPONSE_PROBES]
-    story_sequences = [probe.text for probe in STORY_PROBES]
-    rng = random.Random(seed + 99)
-
+    with log_timing(f"building phased tanh RNN evaluation sets (train_samples={train_samples}, test_samples={test_samples})"):
+        evaluation_sets = build_rnn_evaluation_sets(test_samples=test_samples, seed=seed)
+        family_sets = build_rnn_family_sets(test_samples=test_samples, seed=seed + 999)
+    story_texts = [probe.text for probe in STORY_PROBES]
+    checkpoint_epochs = build_publication_checkpoint_epochs(phase_epochs)
+    checkpoint_epoch_set = set(checkpoint_epochs)
+    phase_schedule = phase_epoch_schedule(phase_epochs)
+    phase_batch_sizes = phase_batch_schedule()
+    phase_family_mix = phase_family_mix_manifest()
+    phase_spans = phase_spans_for_schedule(phase_epochs)
+    model = PhasedTorchRNN()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr_start, weight_decay=1e-4)
     metrics: list[MetricRow] = []
-    response_history: list[list[float]] = []
     story_response_history: list[list[float]] = []
-    checkpoints: dict[int, dict[str, torch.Tensor]] = {}
-    phase_spans: list[dict[str, object]] = []
-    representative_examples: list[SequenceExample] = []
-    initial_examples = materialize_phase_examples(retained_support, phases[0])
-    checkpoints[0] = clone_model_state(model)
-    metrics.append(
-        build_metric_row(
-            epoch=0,
-            phase="initial",
-            train_examples=initial_examples,
-            evaluation_sets=evaluation_sets,
-            model=model,
-            criterion=criterion,
+    checkpoint_states: dict[int, dict[str, torch.Tensor]] = {}
+
+    def record_checkpoint(epoch: int, train_examples: list[SequenceExample]) -> None:
+        metrics.append(
+            build_metric_row(
+                epoch=epoch,
+                phase_label=phase_label_for_epoch(epoch, phase_epochs),
+                model=model,
+                train_examples=train_examples,
+                evaluation_sets=evaluation_sets,
+                family_sets=family_sets,
+            )
         )
+        story_response_history.append(build_story_response_row(model, story_texts))
+        checkpoint_states[epoch] = clone_model_parameters(model)
+
+    initial_examples = build_phase_epoch_examples(
+        phase_spec=RNN_PHASE_SPECS[0],
+        epoch_index=0,
+        total_examples=train_samples,
+        seed=seed + 2026,
     )
-    response_history.append(evaluate_probabilities(model, response_sequences))
-    story_response_history.append(evaluate_probabilities(model, story_sequences))
-
-    global_epoch = 0
-    for phase_index, phase in enumerate(phases):
-        phase_examples = materialize_phase_examples(retained_support, phase)
-        log_progress(
-            f"{build_model_title(RNN_HIDDEN_SIZE, RNN_NUM_LAYERS)}: starting {phase.label} "
-            f"(epochs={phase.epochs}, support={len(phase_examples)}, batch={DEFAULT_BATCH_SIZE}, "
-            f"optimizer={RNN_OPTIMIZER_NAME}, lr={DEFAULT_RNN_LR:.3f})"
-        )
-        start_epoch = global_epoch + 1
-        for local_epoch in range(1, phase.epochs + 1):
-            global_epoch += 1
-            train_rnn_epoch(
+    record_checkpoint(0, initial_examples)
+    elapsed = 0
+    for phase_index, phase_spec in enumerate(RNN_PHASE_SPECS, start=1):
+        epochs_in_phase = phase_schedule[phase_index - 1]
+        for offset in range(1, epochs_in_phase + 1):
+            epoch = elapsed + offset
+            current_lr = phase_learning_rate(
+                phase_index=phase_index - 1,
+                epoch_in_phase=offset,
+                epochs_in_phase=epochs_in_phase,
+                lr_start=lr_start,
+                lr_end=lr_end,
+            )
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = current_lr
+            train_examples = build_phase_epoch_examples(
+                phase_spec=phase_spec,
+                epoch_index=offset,
+                total_examples=train_samples,
+                seed=seed + (phase_index * 100_000),
+            )
+            train_loss, train_acc = run_training_epoch(
                 model,
-                phase_examples,
-                optimizer,
-                criterion,
-                batch_size=DEFAULT_BATCH_SIZE,
-                rng=rng,
+                examples=train_examples,
+                optimizer=optimizer,
+                batch_size=phase_spec.batch_size,
             )
-            representative_examples = phase_examples
-            metrics.append(
-                build_metric_row(
-                    epoch=global_epoch,
-                    phase=phase.name,
-                    train_examples=phase_examples,
-                    evaluation_sets=evaluation_sets,
-                    model=model,
-                    criterion=criterion,
+            if epoch in checkpoint_epoch_set:
+                record_checkpoint(epoch, train_examples)
+            if offset == 1 or offset == epochs_in_phase or offset % max(1, epochs_in_phase // 4) == 0:
+                log_progress(
+                    f"{phase_spec.label} epoch {offset}/{epochs_in_phase} loss={train_loss:.3f} acc={train_acc:.3f} batch={phase_spec.batch_size} lr={current_lr:.5f}"
                 )
-            )
-            response_history.append(evaluate_probabilities(model, response_sequences))
-            story_response_history.append(evaluate_probabilities(model, story_sequences))
-        checkpoints[global_epoch] = clone_model_state(model)
-        phase_spans.append(
-            {
-                "name": phase.name,
-                "label": phase.label,
-                "phase_kind": phase.phase_kind,
-                "start_epoch": start_epoch,
-                "end_epoch": global_epoch,
-                "epochs": phase.epochs,
-                "support_size": phase.support_size,
-                "cohort_size": phase.cohort_size,
-                "cohort_sizes": list(phase.cohort_sizes),
-                "cohort_weights": list(phase.cohort_weights),
-                "active_cohorts": phase.active_cohorts,
-                "optimizer": RNN_OPTIMIZER_NAME,
-                "learning_rate": DEFAULT_RNN_LR,
-                "lr_start": DEFAULT_RNN_LR,
-                "lr_end": DEFAULT_RNN_LR,
-                "batch_size": DEFAULT_BATCH_SIZE,
-            }
-        )
-        log_progress(
-            f"{build_model_title(RNN_HIDDEN_SIZE, RNN_NUM_LAYERS)}: finished {phase.label} at epoch {global_epoch}"
-        )
+        elapsed += epochs_in_phase
 
-    result = RNNExperimentResult(
-        model_key=f"rnn-{RNN_NUM_LAYERS}layer-{RNN_HIDDEN_SIZE}unit",
-        model_title=build_model_title(RNN_HIDDEN_SIZE, RNN_NUM_LAYERS),
+    return RNNExperimentResult(
+        model_key="phased-torch-rnn",
+        model_title="Phased torch.RNN for balanced parentheses",
         phase_spans=phase_spans,
         metrics=metrics,
-        response_history=response_history,
+        response_history=story_response_history,
         story_response_history=story_response_history,
         story_probes=STORY_PROBES,
-        evaluation_sets=evaluation_sets,
-        representative_examples=representative_examples,
+        evaluation_sets={**evaluation_sets, **family_sets},
+        representative_examples=[],
         trace_payload=None,
         files=[],
+        model_mode=RNN_MODEL_MODE,
+        language=TARGET_LANGUAGE,
+        accept_anchor=RNN_ACCEPT_ANCHOR.tolist(),
+        accept_radius=RNN_ACCEPT_RADIUS,
+        state_dimension=RNN_HIDDEN_SIZE,
+        checkpoint_labels=[checkpoint_label(epoch, phase_epochs) for epoch in checkpoint_epochs],
+        checkpoint_epochs=checkpoint_epochs,
+        architecture={"module": "torch.RNN", "nonlinearity": "tanh", "hidden_size": RNN_HIDDEN_SIZE, "num_layers": RNN_NUM_LAYERS},
+        phase_epoch_schedule=phase_schedule,
+        phase_batch_schedule=phase_batch_sizes,
+        phase_family_mix=phase_family_mix,
+        checkpoint_states=checkpoint_states,
     )
-    return result, checkpoints
+
+
+def probe_kind_label(kind: str) -> str:
+    return {
+        "valid": "balanced valid",
+        INVALID_KIND_RANDOM: "random invalid",
+        PHASE_KIND_OFF_BY_ONE: "off-by-one",
+        PHASE_KIND_VALID_PREFIX: "valid-prefix",
+        PHASE_KIND_BALANCED_INVALID: "balanced-invalid",
+    }.get(kind, kind)
+
+
+def select_trace_story_probes(result: RNNExperimentResult) -> TraceStorySelection:
+    valid = ProbeSpec(
+        label="valid_control",
+        text=deterministic_valid(10, 70_001),
+        probe_kind="valid",
+        length=10,
+        short_label="T1",
+    )
+    off_by_one = ProbeSpec(
+        label="off_by_one_shock",
+        text=deterministic_invalid(10, PHASE_KIND_OFF_BY_ONE, 70_101),
+        probe_kind=PHASE_KIND_OFF_BY_ONE,
+        length=10,
+        short_label="T2",
+    )
+    repair = ProbeSpec(
+        label="repair_shock",
+        text=deterministic_invalid(10, PHASE_KIND_VALID_PREFIX, 70_201),
+        probe_kind=PHASE_KIND_VALID_PREFIX,
+        length=10,
+        short_label="T3",
+    )
+    return TraceStorySelection(
+        focus_probe=valid,
+        companion_probes=(off_by_one, repair),
+        role_labels=("Valid control", "Off-by-one shock", "Valid-prefix repair"),
+    )
 
 
 def build_trace_grid_payload(
     *,
-    model_builder: Callable[[], TinyTraceRNN],
-    checkpoints: dict[int, dict[str, torch.Tensor]],
-    phase_spans: list[dict[str, object]],
-    trace_probes: tuple[ProbeSpec, ...],
+    result: RNNExperimentResult,
+    trace_selection: TraceStorySelection,
 ) -> TraceGridPayload:
-    phase_epochs = [int(span["end_epoch"]) for span in phase_spans]
-    phase_labels = [f"After {str(span['label']).lower()}" for span in phase_spans]
+    trace_probes = trace_selection.selected_probes
+    phase_epochs = [0, int(result.phase_spans[0]["end_epoch"]), int(result.phase_spans[1]["end_epoch"]), int(result.phase_spans[2]["end_epoch"])]
+    phase_labels = ["Random init", "After phase 1", "After phase 2", "After phase 3"]
     cells: list[TraceCell] = []
-    raw_projection_points: list[list[float]] = []
-    backgrounds_raw: list[tuple[str, int, list[list[float]], list[float]]] = []
-    landmark_points_raw: list[tuple[str, int, str, str, list[float], float]] = []
-    focus_length = trace_probes[0].length if trace_probes else TRAIN_LENGTH
-    landmark_sequences = (
-        ("alt", canonical_alternating_valid(focus_length)),
-        ("nest", canonical_nested_valid(focus_length)),
-        ("prefix", canonical_valid_prefix_invalid(focus_length)),
-    )
-
-    for phase_index, epoch in enumerate(phase_epochs):
-        model = model_builder().to(DEVICE)
-        load_model_state(model, checkpoints[epoch])
-        phase_background_states: list[list[float]] = []
-        phase_background_probabilities: list[float] = []
-        for probe in RESPONSE_PROBES:
-            tokens, lengths = encode_sequences([probe.text])
-            logits, traces = model(tokens, lengths, capture_traces=True)
-            assert traces is not None
-            states = traces[-1][0, : len(probe.text), :]
-            step_probabilities = model.classifier(states.to(DEVICE)).sigmoid().detach().cpu().squeeze(-1)
-            phase_background_states.extend(states.tolist())
-            phase_background_probabilities.extend(step_probabilities.tolist())
-        backgrounds_raw.append(
-            (phase_labels[phase_index], epoch, phase_background_states, phase_background_probabilities)
-        )
-        for landmark_label, landmark_text in landmark_sequences:
-            tokens, lengths = encode_sequences([landmark_text])
-            logits, traces = model(tokens, lengths, capture_traces=True)
-            assert traces is not None
-            endpoint = traces[-1][0, len(landmark_text) - 1, :].tolist()
-            landmark_points_raw.append(
-                (
-                    phase_labels[phase_index],
-                    epoch,
-                    landmark_label,
-                    landmark_text,
-                    endpoint,
-                    float(logits.sigmoid().detach().cpu().item()),
-                )
-            )
+    all_points: list[list[float]] = []
+    for phase_epoch, phase_label in zip(phase_epochs, phase_labels, strict=True):
+        phase_model = PhasedTorchRNN()
+        load_model_parameters(phase_model, result.checkpoint_states[phase_epoch])
+        phase_model.eval()
         for probe in trace_probes:
-            tokens, lengths = encode_sequences([probe.text])
-            logits, traces = model(tokens, lengths, capture_traces=True)
-            probabilities = logits.sigmoid().detach().cpu().tolist()
+            final_state, traces = phase_model([probe.text], capture_traces=True)
             assert traces is not None
-            layer_trace = traces[-1]
-            steps = len(probe.text)
-            states = layer_trace[0, :steps, :]
+            raw_points = traces[0, : len(probe.text), :].tolist()
+            probability = float(acceptance_probability(final_state).item())
             actual_valid = is_balanced_parentheses(probe.text)
-            predicted_valid = bool(probabilities[0] >= 0.5)
+            predicted_valid = probability >= 0.5
             cells.append(
                 TraceCell(
-                    phase_label=phase_labels[phase_index],
-                    epoch=epoch,
+                    phase_label=phase_label,
+                    epoch=phase_epoch,
                     probe_label=probe.label,
                     text=probe.text,
                     probe_kind=probe.probe_kind,
                     is_valid=actual_valid,
                     predicted_valid=predicted_valid,
                     correct=actual_valid == predicted_valid,
-                    probability=float(probabilities[0]),
-                    raw_points=states.tolist(),
+                    probability=probability,
+                    raw_points=raw_points,
                     projected_points=[],
+                    failure_texts=[],
+                    failure_probabilities=[],
+                    failure_projected_points=[],
                 )
             )
-            raw_projection_points.extend(states.tolist())
-
-    mean, components, explained_variance = fit_pca_projection(raw_projection_points, num_components=3)
-    projected_cells: list[TraceCell] = []
-    for cell in cells:
-        projected_cells.append(
-            TraceCell(
-                phase_label=cell.phase_label,
-                epoch=cell.epoch,
-                probe_label=cell.probe_label,
-                text=cell.text,
-                probe_kind=cell.probe_kind,
-                is_valid=cell.is_valid,
-                predicted_valid=cell.predicted_valid,
-                correct=cell.correct,
-                probability=cell.probability,
-                raw_points=cell.raw_points,
-                projected_points=project_with_pca(
-                    cell.raw_points,
-                    mean=mean,
-                    components=components,
-                ),
-            )
+            all_points.extend(raw_points)
+    mean, components, explained_variance = fit_pca_projection(all_points, num_components=3)
+    oblique_basis = components.T @ oblique_projection_matrix()
+    acceptance_center, acceptance_region = projected_ball_ellipse(
+        center=RNN_ACCEPT_ANCHOR.to(dtype=torch.float32) - mean,
+        basis=oblique_basis,
+        radius=RNN_ACCEPT_RADIUS,
+    )
+    projected_cells = [
+        TraceCell(
+            phase_label=cell.phase_label,
+            epoch=cell.epoch,
+            probe_label=cell.probe_label,
+            text=cell.text,
+            probe_kind=cell.probe_kind,
+            is_valid=cell.is_valid,
+            predicted_valid=cell.predicted_valid,
+            correct=cell.correct,
+            probability=cell.probability,
+            raw_points=cell.raw_points,
+            projected_points=project_with_oblique_pca(cell.raw_points, mean=mean, components=components),
+            failure_texts=[],
+            failure_probabilities=[],
+            failure_projected_points=[],
         )
-    backgrounds = [
-        TraceBackground(
-            phase_label=phase_label,
-            epoch=epoch,
-            projected_points=project_with_pca(
-                points,
-                mean=mean,
-                components=components,
-            ),
-            probabilities=probabilities,
-        )
-        for phase_label, epoch, points, probabilities in backgrounds_raw
-    ]
-    landmarks = [
-        TraceLandmark(
-            phase_label=phase_label,
-            epoch=epoch,
-            label=label,
-            text=text,
-            probability=probability,
-            projected_point=project_with_pca([point], mean=mean, components=components)[0],
-        )
-        for phase_label, epoch, label, text, point, probability in landmark_points_raw
+        for cell in cells
     ]
     return TraceGridPayload(
         phase_epochs=phase_epochs,
         phase_labels=phase_labels,
         probe_labels=[probe.label for probe in trace_probes],
         probe_texts=[probe.text for probe in trace_probes],
+        probe_role_labels=list(trace_selection.role_labels),
         cells=projected_cells,
-        backgrounds=backgrounds,
-        landmarks=landmarks,
-        projection_mode="pca_top_layer_3d",
-        axis_labels=tuple(
-            projection_axis_label(component_index + 1, explained_variance[component_index])
-            for component_index in range(3)
-        ),
+        projection_mode="oblique_pca_2d",
+        axis_labels=("PC1 + 0.28*PC3", "PC2 + 0.18*PC3"),
         explained_variance=explained_variance,
+        acceptance_center=acceptance_center,
+        acceptance_region=acceptance_region,
     )
 
 
-def mlp_story_epochs(total_epochs: int) -> list[int]:
-    if total_epochs <= 0:
-        return [0]
-    preferred = [0, min(total_epochs, 30), min(total_epochs, 200), total_epochs]
-    selected: list[int] = []
-    for epoch in preferred:
-        if epoch not in selected:
-            selected.append(epoch)
-    while len(selected) < 4:
-        fallback_epoch = max(1, int(round(total_epochs * (0.25 + 0.25 * (len(selected) - 1)))))
-        if fallback_epoch not in selected and fallback_epoch < total_epochs:
-            selected.insert(-1, fallback_epoch)
-        else:
-            break
-    return selected
-
-
-def build_mlp_dataset(points: int = 512) -> tuple[torch.Tensor, torch.Tensor]:
-    xs = torch.linspace(0.0, 1.0, steps=points, device=DEVICE).unsqueeze(1)
-    ys = torch.sin(8 * math.pi * xs)
-    return xs, ys
-
-
-def train_mlp(
-    *,
-    epochs: int,
-    batch_size: int,
-    lr_start: float,
-    lr_end: float,
-    seed: int,
-    hidden_layers: tuple[int, ...],
-) -> tuple[list[float], dict[int, torch.Tensor], torch.Tensor, torch.Tensor]:
-    seed_everything(seed)
-    model = SineMLP(hidden_layers).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr_start)
-    criterion = nn.MSELoss()
-    xs, ys = build_mlp_dataset()
-    predictions_by_epoch: dict[int, torch.Tensor] = {}
-    loss_history: list[float] = []
-
-    model.eval()
-    with torch.no_grad():
-        predictions_by_epoch[0] = model(xs).detach().cpu()
-
-    for epoch in range(1, epochs + 1):
-        permutation = torch.randperm(xs.shape[0], device=DEVICE)
-        model.train()
-        for start in range(0, xs.shape[0], batch_size):
-            batch_ids = permutation[start : start + batch_size]
-            optimizer.zero_grad()
-            predictions = model(xs[batch_ids])
-            loss = criterion(predictions, ys[batch_ids])
-            loss.backward()
-            optimizer.step()
-        model.eval()
-        with torch.no_grad():
-            full_predictions = model(xs)
-            predictions_by_epoch[epoch] = full_predictions.detach().cpu()
-            loss_history.append(float(criterion(full_predictions, ys).item()))
-    return loss_history, predictions_by_epoch, xs.detach().cpu(), ys.detach().cpu()
-
-
-def run_mlp_training(
-    *,
-    epochs: int,
-    batch_size: int,
-    seed: int,
-    hidden_layers: tuple[int, ...],
-) -> MLPTrainingRun:
-    loss_history, predictions_by_epoch, xs, ys = train_mlp(
-        epochs=epochs,
-        batch_size=batch_size,
-        lr_start=0.01,
-        lr_end=0.01,
-        seed=seed,
-        hidden_layers=hidden_layers,
-    )
-    return MLPTrainingRun(
-        hidden_layers=hidden_layers,
-        loss_history=loss_history,
-        predictions_by_epoch=predictions_by_epoch,
-        xs=xs,
-        ys=ys,
-    )
-
-
-def wrap_sequence(text: str, chunk: int = 20) -> str:
-    return "<br>".join(text[index : index + chunk] for index in range(0, len(text), chunk))
-
-
-def compact_trace_phase_label(phase_label: str) -> str:
-    if phase_label.startswith("After phase "):
-        phase_number = phase_label.removeprefix("After phase ").split(":", maxsplit=1)[0]
-        return f"After P{phase_number}"
-    return phase_label
-
-
-def trace_scene_name(row_index: int, col_index: int, cols: int) -> str:
-    scene_index = (row_index - 1) * cols + col_index
-    return "scene" if scene_index == 1 else f"scene{scene_index}"
-
-
-def write_figure(
-    figure: go.Figure,
-    *,
-    output_dir: Path,
-    stem: str,
-    write_html: bool,
-) -> list[str]:
-    ensure_dir(output_dir)
-    png_path = output_dir / f"{stem}.png"
-    log_progress(f"writing {png_path.name}")
-    width = figure.layout.width or 1400
-    height = figure.layout.height or 900
-    figure.write_image(png_path, width=width, height=height, scale=2)
-    written = [png_path.name]
-    if write_html:
-        html_path = output_dir / f"{stem}.html"
-        log_progress(f"writing {html_path.name}")
-        figure.write_html(html_path, include_plotlyjs="cdn", full_html=True)
-        written.append(html_path.name)
-    return written
-
-
-def build_mlp_story_figure(
-    *,
-    xs: torch.Tensor,
-    ys: torch.Tensor,
-    predictions_by_epoch: dict[int, torch.Tensor],
-    loss_history: list[float],
-    hidden_layers: tuple[int, ...],
-) -> tuple[go.Figure, list[int]]:
-    selected_epochs = mlp_story_epochs(len(loss_history))
+def build_rnn_story_figure(result: RNNExperimentResult) -> go.Figure:
     figure = make_subplots(
-        rows=2,
-        cols=4,
-        specs=[
-            [{}, {}, {}, {}],
-            [{"colspan": 4}, None, None, None],
-        ],
-        subplot_titles=[f"Epoch {epoch}" for epoch in selected_epochs] + [""],
-        vertical_spacing=0.16,
-    )
-    x_values = xs.squeeze(1).tolist()
-    target_values = ys.squeeze(1).tolist()
-    for index, epoch in enumerate(selected_epochs, start=1):
-        prediction_values = predictions_by_epoch[epoch].squeeze(1).tolist()
-        figure.add_trace(
-            go.Scatter(
-                x=x_values,
-                y=target_values,
-                mode="lines",
-                name="target" if index == 1 else None,
-                line={"color": "#c26b2d", "width": 3},
-                showlegend=index == 1,
-            ),
-            row=1,
-            col=index,
-        )
-        figure.add_trace(
-            go.Scatter(
-                x=x_values,
-                y=prediction_values,
-                mode="lines",
-                name="MLP" if index == 1 else None,
-                line={"color": "#1f5f7a", "width": 2.5},
-                showlegend=index == 1,
-            ),
-            row=1,
-            col=index,
-        )
-        figure.update_xaxes(title_text="x", row=1, col=index)
-        figure.update_yaxes(title_text="y", row=1, col=index)
-    epochs = list(range(1, len(loss_history) + 1))
-    figure.add_trace(
-        go.Scatter(
-            x=epochs,
-            y=loss_history,
-            mode="lines",
-            name="loss",
-            line={"color": "#62558c", "width": 3},
-            showlegend=False,
-        ),
-        row=2,
-        col=1,
-    )
-    marker_epochs = [epoch for epoch in selected_epochs if epoch > 0]
-    marker_values = [loss_history[epoch - 1] for epoch in marker_epochs]
-    figure.add_trace(
-        go.Scatter(
-            x=marker_epochs,
-            y=marker_values,
-            mode="markers+text",
-            text=[str(epoch) for epoch in marker_epochs],
-            textposition="top center",
-            marker={"color": "#b45309", "size": 11, "line": {"color": "#ffffff", "width": 1.5}},
-            name="selected epoch",
-            showlegend=False,
-        ),
-        row=2,
-        col=1,
-    )
-    figure.update_xaxes(title_text="epoch", row=2, col=1)
-    figure.update_yaxes(title_text="MSE", row=2, col=1)
-    figure.update_layout(
-        title=f"Approximating sin(8πx) with a {format_mlp_shape(hidden_layers)} ReLU MLP",
-        width=1600,
-        height=900,
-        margin={"t": 85, "l": 60, "r": 40, "b": 50},
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0.0},
-        **FIGURE_STYLE,
-    )
-    return figure, selected_epochs
-
-
-def build_dataset_figure(
-    phases: list[TrainingPhase],
-    evaluation_sets: dict[int, list[SequenceExample]],
-) -> go.Figure:
-    figure = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=(
-            "How the invalid training mix changes by phase",
-            "Fixed evaluation lengths",
-        ),
-    )
-    phase_labels = [phase.label.replace("Phase ", "P") for phase in phases]
-    for kind, name in (
-        (INVALID_KIND_RANDOM, "random invalid"),
-        (INVALID_KIND_CORRUPTION, "off-by-one"),
-        (INVALID_KIND_BALANCED, "balanced-invalid"),
-        (INVALID_KIND_VALID_PREFIX, "valid-prefix"),
-    ):
-        values = []
-        for phase in phases:
-            cohort_mapping = dict(zip(SUPPORT_COHORT_ORDER, phase.cohort_sizes, strict=True))
-            values.append(
-                {
-                    INVALID_KIND_RANDOM: cohort_mapping.get(SUPPORT_COHORT_RANDOM, 0.0) / 2,
-                    INVALID_KIND_CORRUPTION: cohort_mapping.get(SUPPORT_COHORT_OFF_BY_ONE, 0.0) / 2,
-                    INVALID_KIND_BALANCED: cohort_mapping.get(SUPPORT_COHORT_BALANCED, 0.0) / 2,
-                    INVALID_KIND_VALID_PREFIX: cohort_mapping.get(SUPPORT_COHORT_VALID_PREFIX, 0.0) / 2,
-                }.get(kind, 0.0)
-            )
-        figure.add_trace(
-            go.Bar(
-                x=phase_labels,
-                y=values,
-                name=name,
-                marker_color=INVALID_COLORS[kind],
-            ),
-            row=1,
-            col=1,
-        )
-    figure.add_trace(
-        go.Bar(
-            x=[str(length) for length in EVAL_LENGTHS],
-            y=[len(evaluation_sets[length]) for length in EVAL_LENGTHS],
-            marker_color=[EVAL_COLORS[length] for length in EVAL_LENGTHS],
-            showlegend=False,
-        ),
-        row=1,
-        col=2,
-    )
-    figure.update_yaxes(title_text="relative share", row=1, col=1)
-    figure.update_yaxes(title_text="examples", row=1, col=2)
-    figure.update_xaxes(title_text="phase", row=1, col=1)
-    figure.update_xaxes(title_text="sequence length", row=1, col=2)
-    figure.update_layout(
-        title="What changes across phases and what stays fixed",
-        barmode="stack",
-        width=1450,
-        height=650,
-        margin={"t": 80, "l": 60, "r": 30, "b": 50},
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0.0},
-        **FIGURE_STYLE,
-    )
-    return figure
-
-
-def phase_plot_bounds(phase_spans: list[dict[str, object]]) -> list[dict[str, float | str]]:
-    bounds: list[dict[str, float | str]] = []
-    for index, span in enumerate(phase_spans):
-        start_epoch = float(span["start_epoch"])
-        end_epoch = float(span["end_epoch"])
-        next_start = (
-            float(phase_spans[index + 1]["start_epoch"])
-            if index + 1 < len(phase_spans)
-            else end_epoch + 1.0
-        )
-        phase_kind = str(span.get("phase_kind", PHASE_KIND_RANDOM))
-        bounds.append(
-            {
-                "phase_kind": phase_kind,
-                "x0": start_epoch - 1.0,
-                "x1": next_start,
-                "boundary_x": start_epoch,
-                "label_x": (start_epoch - 1.0 + next_start) / 2,
-                "label": str(span["label"]).replace("Phase ", "P").replace(": ", " · "),
-            }
-        )
-    return bounds
-
-
-def add_phase_bands(figure: go.Figure, phase_spans: list[dict[str, object]], row: int) -> None:
-    for index, bound in enumerate(phase_plot_bounds(phase_spans)):
-        figure.add_vrect(
-            x0=float(bound["x0"]),
-            x1=float(bound["x1"]),
-            fillcolor=PHASE_COLORS.get(str(bound["phase_kind"]), "#eef2ff"),
-            opacity=0.25,
-            line_width=0,
-            row=row,
-            col=1,
-        )
-        if index > 0:
-            figure.add_vline(
-                x=float(bound["boundary_x"]),
-                line={"color": "#8b5e3c", "dash": "dash", "width": 2},
-                row=row,
-                col=1,
-            )
-        figure.add_annotation(
-            x=float(bound["label_x"]),
-            y=0.06 if row == 1 else 0.94,
-            xref=f"x{'' if row == 1 else 2}",
-            yref=f"y{'' if row == 1 else 2} domain",
-            text=f"<b>{bound['label']}</b>",
-            showarrow=False,
-            font={"size": 15, "color": "#374151"},
-            bgcolor="rgba(255,255,255,0.9)",
-            bordercolor="#d1d5db",
-            borderwidth=1,
-        )
-
-
-def build_rnn_story_figure(
-    result: RNNExperimentResult,
-    *,
-    focus_short_label: str | None = None,
-    highlighted_trajectories: list[ProbeTrajectory] | None = None,
-) -> go.Figure:
-    probe_trajectories = build_probe_trajectories(
-        result,
-        probes=result.story_probes,
-        response_history=result.story_response_history,
-    )
-    trajectory_by_label = {
-        trajectory.probe.short_label: trajectory for trajectory in probe_trajectories
-    }
-    highlighted_trajectories = highlighted_trajectories or select_highlighted_probe_trajectories(probe_trajectories)
-    interesting_labels = {
-        trajectory.probe.short_label for trajectory in probe_trajectories if trajectory.turn_count >= 2
-    }
-    highlighted_labels = {trajectory.probe.short_label for trajectory in highlighted_trajectories}
-    highlight_index_by_label = {
-        trajectory.probe.short_label: index for index, trajectory in enumerate(highlighted_trajectories)
-    }
-    random_support_size = int(result.phase_spans[0]["cohort_sizes"][0])
-    counterexample_support_size = int(result.phase_spans[-1]["cohort_sizes"][1])
-    dense_story = len(result.story_probes) > 256
-    figure = make_subplots(
-        rows=2,
+        rows=3,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.14,
-        subplot_titles=("Accuracy by epoch", "Probe responses across training"),
+        vertical_spacing=0.08,
+        row_heights=[0.26, 0.22, 0.52],
+        subplot_titles=(
+            "Held-out accuracy across the three-phase story",
+            "Failure-mode accuracy under the same checkpoints",
+            "Family-balanced probe field at length 10",
+        ),
     )
     epochs = [metric.epoch for metric in result.metrics]
-    figure.add_trace(
-        go.Scatter(
-            x=epochs,
-            y=[metric.train_acc for metric in result.metrics],
-            mode="lines",
-            name="train",
-            line={"color": "#111111", "width": 3},
-        ),
-        row=1,
-        col=1,
-    )
-    for length in EVAL_LENGTHS:
+    for length in ACCURACY_EVAL_LENGTHS:
         figure.add_trace(
             go.Scatter(
                 x=epochs,
                 y=[getattr(metric, f"eval_{length}_acc") for metric in result.metrics],
-                mode="lines",
+                mode="lines+markers",
                 name=f"eval {length}",
-                line={"color": EVAL_COLORS[length], "width": 2.5},
+                line={"color": EVAL_COLORS[length], "width": 1.7},
+                marker={"size": 4},
             ),
             row=1,
             col=1,
         )
-
-    add_phase_bands(figure, result.phase_spans, row=1)
-    add_phase_bands(figure, result.phase_spans, row=2)
-
-    for probe_index, probe in enumerate(result.story_probes):
-        probabilities = [responses[probe_index] for responses in result.story_response_history]
-        sigma_values = [probability_to_sigma(value) for value in probabilities]
-        actual_valid = is_balanced_parentheses(probe.text)
-        predicted_values = [value >= 0.5 for value in probabilities]
-        status = probe_story_status(actual_valid, predicted_values)
-        trajectory = trajectory_by_label[probe.short_label]
-        line_color = STORY_STATUS_COLORS[status]
-        is_focus_probe = probe.short_label == focus_short_label
-        is_interesting = probe.short_label in interesting_labels
-        is_highlighted = probe.short_label in highlighted_labels
-        if dense_story:
-            if is_focus_probe:
-                line_width = 3.0
-                line_opacity = 0.98
-            elif is_highlighted:
-                line_width = 2.2
-                line_opacity = 0.74
-            elif is_interesting:
-                line_width = 1.0
-                line_opacity = 0.16
-            else:
-                line_width = 0.65 if status == "ever wrong" else 0.5
-                line_opacity = 0.035 if status == "ever wrong" else 0.015
-        else:
-            if is_focus_probe:
-                line_width = 3.2
-                line_opacity = 1.0
-            elif is_highlighted:
-                line_width = 2.5
-                line_opacity = 0.94
-            elif is_interesting:
-                line_width = 1.85
-                line_opacity = 0.78
-            else:
-                line_width = 1.05 if status == "ever wrong" else 0.9
-                line_opacity = 0.34 if status == "ever wrong" else 0.18
+    for metric_key, label, color in (
+        ("off_by_one_acc", "off-by-one", PROBE_CLASS_COLORS[PHASE_KIND_OFF_BY_ONE]),
+        ("valid_prefix_acc", "valid-prefix", PROBE_CLASS_COLORS[PHASE_KIND_VALID_PREFIX]),
+        ("balanced_invalid_acc", "balanced-invalid", PROBE_CLASS_COLORS[PHASE_KIND_BALANCED_INVALID]),
+    ):
         figure.add_trace(
             go.Scatter(
                 x=epochs,
-                y=sigma_values,
-                mode="lines",
-                name=probe.short_label,
-                showlegend=False,
-                customdata=probabilities,
-                line={
-                    "color": line_color,
-                    "width": line_width,
-                    "dash": "dash" if (is_focus_probe or is_interesting) else "solid",
-                },
-                opacity=line_opacity,
-                hovertemplate=(
-                    f"{probe.short_label} · {probe.label}<br>"
-                    f"status={status}<br>"
-                    f"turns={trajectory.turn_label}<br>"
-                    f"type={probe_kind_label(probe.probe_kind)}<br>"
-                    f"length={probe.length}<br>"
-                    f"bits={probe.label.rsplit(' ', maxsplit=1)[-1]}<br>"
-                    f"text={probe.text}<br>"
-                    "epoch=%{x}<br>sigma(valid)=%{y:.2f}s<br>p(valid)=%{customdata:.3f}<extra></extra>"
-                ),
+                y=[getattr(metric, metric_key) for metric in result.metrics],
+                mode="lines+markers",
+                name=label,
+                line={"color": color, "width": 1.9, "dash": "dash"},
+                marker={"size": 4},
             ),
             row=2,
             col=1,
         )
-        if is_focus_probe or is_highlighted:
-            label_index = highlight_index_by_label.get(probe.short_label, len(highlight_index_by_label))
+    add_phase_bands(figure, result.phase_spans, row=1)
+    add_phase_bands(figure, result.phase_spans, row=2)
+    add_phase_bands(figure, result.phase_spans, row=3)
+    probe_index = {probe.short_label: index for index, probe in enumerate(result.story_probes)}
+    for probe in result.story_probes:
+        probabilities = [row[probe_index[probe.short_label]] for row in result.story_response_history]
+        sigma_values = [probability_to_sigma(value) for value in probabilities]
+        plotted_values = [boundary_zoom_sigma(value) for value in sigma_values]
+        actual_valid = is_balanced_parentheses(probe.text)
+        predicted = [value >= 0.5 for value in probabilities]
+        statuses = probe_epoch_statuses(actual_valid, predicted)
+        family_dash = {
+            "valid": "solid",
+            PHASE_KIND_OFF_BY_ONE: "dash",
+            PHASE_KIND_VALID_PREFIX: "dot",
+            PHASE_KIND_BALANCED_INVALID: "dashdot",
+        }.get(probe.probe_kind, "solid")
+        for start_index, end_index, status in story_status_segment_runs(statuses):
+            segment_slice = slice(start_index, end_index + 1)
             figure.add_trace(
                 go.Scatter(
-                    x=[epochs[-1]],
-                    y=[sigma_values[-1]],
-                    mode="markers+text",
-                    text=[f"{probe_display_label(probe)} {trajectory.compact_turn_label}"],
-                    textposition=probe_end_label_position(label_index),
-                    textfont={"size": 10, "color": line_color},
-                    name=status,
+                    x=epochs[segment_slice],
+                    y=plotted_values[segment_slice],
+                    mode="lines+markers",
+                    line={"color": STORY_STATUS_COLORS[status], "width": 1.65, "dash": family_dash},
+                    marker={"size": 4.2},
                     showlegend=False,
-                    customdata=[probabilities[-1]],
-                    marker={
-                        "color": line_color,
-                        "size": 11 if is_focus_probe else 9,
-                        "symbol": "diamond",
-                        "line": {"color": "#111111", "width": 1.5 if is_focus_probe else 1.1},
-                    },
+                    customdata=[
+                        [probabilities[index], statuses[index], probe_kind_label(probe.probe_kind), sigma_values[index]]
+                        for index in range(start_index, end_index + 1)
+                    ],
                     hovertemplate=(
-                        f"{probe.short_label} final<br>"
-                        f"status={status}<br>"
-                        f"turns={trajectory.turn_label}<br>"
-                        "epoch=%{x}<br>sigma(valid)=%{y:.2f}s<br>p(valid)=%{customdata:.3f}<extra></extra>"
+                        f"{probe.short_label} · {probe.text}<br>"
+                        "family=%{customdata[2]}<br>"
+                        "checkpoint=%{x}<br>"
+                        "status now=%{customdata[1]}<br>"
+                        "sigma(valid)=%{customdata[3]:.2f}s<br>"
+                        "p(valid)=%{customdata[0]:.3f}<extra></extra>"
                     ),
                 ),
-                row=2,
+                row=3,
                 col=1,
             )
-    accuracy_values = [metric.train_acc for metric in result.metrics]
-    for length in EVAL_LENGTHS:
-        accuracy_values.extend(getattr(metric, f"eval_{length}_acc") for metric in result.metrics)
-    lower_bound = max(0.45, min(accuracy_values) - 0.04)
+    for sigma in (-2, -1, 0, 1, 2):
+        figure.add_hline(
+            y=boundary_zoom_sigma(float(sigma)),
+            line={"color": "#475569" if sigma == 0 else "#cbd5e1", "width": 2.0 if sigma == 0 else 1.0, "dash": "solid" if sigma == 0 else "dot"},
+            row=3,
+            col=1,
+        )
+    accuracy_values = []
+    for metric in result.metrics:
+        accuracy_values.extend(
+            [
+                metric.eval_10_acc,
+                metric.eval_20_acc,
+                metric.eval_30_acc,
+                metric.eval_50_acc,
+                metric.off_by_one_acc,
+                metric.valid_prefix_acc,
+                metric.balanced_invalid_acc,
+            ]
+        )
+    lower_bound = max(0.0, min(accuracy_values) - 0.04)
     upper_bound = min(1.0, max(accuracy_values) + 0.02)
-
-    figure.update_xaxes(title_text="epoch", row=2, col=1)
+    figure.update_xaxes(title_text="checkpoint epoch", row=3, col=1)
     figure.update_yaxes(title_text="accuracy", range=[lower_bound, upper_bound], row=1, col=1)
+    figure.update_yaxes(title_text="family acc", range=[lower_bound, upper_bound], row=2, col=1)
+    sigma_ticks = [-4, -2, -1, 0, 1, 2, 4]
     figure.update_yaxes(
-        title_text="sigma(valid)",
-        range=[-TRACE_SIGMA_RANGE, TRACE_SIGMA_RANGE],
-        tickvals=list(range(-3, 4)),
-        ticktext=[sigma_tick_text(value) for value in range(-3, 4)],
-        row=2,
+        title_text="sigma(valid) · boundary zoom",
+        range=[boundary_zoom_sigma(-4.2), boundary_zoom_sigma(4.2)],
+        tickvals=[boundary_zoom_sigma(float(value)) for value in sigma_ticks],
+        ticktext=[sigma_tick_text(value) for value in sigma_ticks],
+        row=3,
         col=1,
     )
     figure.update_layout(
-        title=result.model_title + ": training phases and Pollack-style probe bifurcations",
-        width=1580,
-        height=980,
-        margin={"t": 95, "l": 60, "r": 340, "b": 60},
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0.0},
-        **FIGURE_STYLE,
-    )
-    highlight_lines = [
-        (
-            f"{probe_display_label(trajectory.probe)} · {trajectory.turn_label} · "
-            f"{probe_kind_label(trajectory.probe.probe_kind)} · len {trajectory.probe.length}"
-            f"<br><span style='font-size:10px'>{trajectory.probe.text[:18]}{'...' if len(trajectory.probe.text) > 18 else ''}</span>"
-        )
-        for trajectory in highlighted_trajectories
-    ]
-    figure.add_annotation(
-        x=1.18,
-        y=0.43,
-        xref="paper",
-        yref="paper",
-        text=(
-            f"Probe slice: all {len(result.story_probes)} binary strings of length {STORY_PROBE_LENGTH}"
-            f"<br>P1 = {random_support_size} random-only strings; "
-            f"P2 keeps P1 and adds {counterexample_support_size} from each counterexample family"
-            "<br>green = always-correct valid, yellow = always-correct invalid, red = ever wrong"
-            "<br>bottom axis uses signed sigma units, not raw probability"
-            "<br>dashed = multi-turn correctness path, solid = everything else"
-            "<br>C = correct, I = incorrect"
-            + (
-                "<br><br><b>Highlighted turn paths</b><br>" + "<br>".join(highlight_lines)
-                if highlight_lines
-                else ""
-            )
-        ),
-        showarrow=False,
-        xanchor="right",
-        yanchor="middle",
-        align="left",
-        font={"size": 11, "color": "#4b5563"},
-        bgcolor="rgba(255,255,255,0.85)",
-        bordercolor="#d1d5db",
-        borderwidth=1,
-    )
-    return figure
-
-
-def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
-    cols = len(payload.probe_labels)
-    rows = len(payload.phase_labels)
-    subplot_titles = [
-        (
-            f"{label.rsplit(' ', maxsplit=1)[-1] if 'full-space' in label else label}<br>"
-            f"{'valid' if is_balanced_parentheses(text) else 'invalid'}<br>"
-            f"<span style='font-size:10px'>{wrap_sequence(text)}</span>"
-        )
-        for label, text in zip(payload.probe_labels, payload.probe_texts, strict=True)
-    ]
-    figure = make_subplots(
-        rows=rows,
-        cols=cols,
-        specs=[[{"type": "scene"} for _ in range(cols)] for _ in range(rows)],
-        subplot_titles=subplot_titles,
-        vertical_spacing=0.07,
-        horizontal_spacing=0.035,
-    )
-    all_x = [point[0] for cell in payload.cells for point in cell.projected_points]
-    all_y = [point[1] for cell in payload.cells for point in cell.projected_points]
-    all_z = [point[2] for cell in payload.cells for point in cell.projected_points]
-    all_x.extend(point[0] for background in payload.backgrounds for point in background.projected_points)
-    all_y.extend(point[1] for background in payload.backgrounds for point in background.projected_points)
-    all_z.extend(point[2] for background in payload.backgrounds for point in background.projected_points)
-    x_pad = 0.08 * max(1e-6, max(all_x) - min(all_x))
-    y_pad = 0.08 * max(1e-6, max(all_y) - min(all_y))
-    z_pad = 0.08 * max(1e-6, max(all_z) - min(all_z))
-    x_range = [min(all_x) - x_pad * 0.45, max(all_x) + x_pad * 0.45]
-    y_range = [min(all_y) - y_pad * 0.45, max(all_y) + y_pad * 0.45]
-    z_range = [min(all_z) - z_pad * 0.45, max(all_z) + z_pad * 0.45]
-    scene_camera = {
-        "eye": {"x": 0.88, "y": 1.22, "z": 0.52},
-        "up": {"x": 0.0, "y": 0.0, "z": 1.0},
-        "center": {"x": 0.02, "y": -0.03, "z": 0.0},
-    }
-    reference_axes = build_trace_reference_axes(
-        x_range=x_range,
-        y_range=y_range,
-        z_range=z_range,
-    )
-
-    cell_lookup = {(cell.phase_label, cell.probe_label): cell for cell in payload.cells}
-    background_lookup = {background.phase_label: background for background in payload.backgrounds}
-    landmark_lookup: dict[str, list[TraceLandmark]] = {}
-    for landmark in payload.landmarks:
-        landmark_lookup.setdefault(landmark.phase_label, []).append(landmark)
-    legend_seen: set[str] = set()
-    for row_index, phase_label in enumerate(payload.phase_labels, start=1):
-        background = background_lookup[phase_label]
-        for col_index, probe_label in enumerate(payload.probe_labels, start=1):
-            scene_name = trace_scene_name(row_index, col_index, cols)
-            scene = getattr(figure.layout, scene_name)
-            cell = cell_lookup[(phase_label, probe_label)]
-            status = probe_status_label(cell.is_valid, cell.predicted_valid)
-            style = PROBE_STATUS_STYLES[status]
-            showlegend = status not in legend_seen
-            legend_seen.add(status)
-            for axis in reference_axes:
-                figure.add_trace(
-                    go.Scatter3d(
-                        x=axis["x"],
-                        y=axis["y"],
-                        z=axis["z"],
-                        mode="lines",
-                        line={"color": axis["color"], "width": 7},
-                        meta="frame-axis",
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ),
-                    row=row_index,
-                    col=col_index,
-                )
-            xs = [point[0] for point in cell.projected_points]
-            ys = [point[1] for point in cell.projected_points]
-            zs = [point[2] for point in cell.projected_points]
-            step_labels = trace_step_text(len(xs))
-            step_numbers = list(range(1, len(xs) + 1))
-            background_sigmas = [probability_to_sigma(probability) for probability in background.probabilities]
-            background_sizes = depth_scaled_marker_sizes(
-                background.projected_points,
-                x_range=x_range,
-                y_range=y_range,
-                z_range=z_range,
-                camera_eye=scene_camera["eye"],
-                base_size=4.8,
-                min_scale=0.58,
-                max_scale=2.05,
-            )
-            trace_points = cell.projected_points
-            trace_sizes = depth_scaled_marker_sizes(
-                trace_points,
-                x_range=x_range,
-                y_range=y_range,
-                z_range=z_range,
-                camera_eye=scene_camera["eye"],
-                base_size=8.4,
-                min_scale=0.72,
-                max_scale=1.55,
-            )
-            figure.add_trace(
-                go.Scatter3d(
-                    x=[point[0] for point in background.projected_points],
-                    y=[point[1] for point in background.projected_points],
-                    z=[point[2] for point in background.projected_points],
-                    mode="markers",
-                    customdata=background.probabilities,
-                    marker={
-                        "size": background_sizes,
-                        "opacity": 0.24,
-                        "color": background_sigmas,
-                        "colorscale": TRACE_SIGMA_COLORSCALE,
-                        "line": {"color": "rgba(255,255,255,0.14)", "width": 0.2},
-                        "cmin": -TRACE_SIGMA_RANGE,
-                        "cmax": TRACE_SIGMA_RANGE,
-                        "showscale": row_index == 1 and col_index == cols,
-                        "colorbar": {
-                            "title": "sigma(valid)",
-                            "x": 1.02,
-                            "y": 0.5,
-                            "len": 0.8,
-                            "tickvals": list(range(-3, 4)),
-                            "ticktext": [sigma_tick_text(value) for value in range(-3, 4)],
-                        },
-                    },
-                    showlegend=False,
-                    hovertemplate=(
-                        "map point<br>"
-                        "sigma(valid)=%{marker.color:.2f}s<br>"
-                        "p(valid)=%{customdata:.3f}<extra></extra>"
-                    ),
-                ),
-                row=row_index,
-                col=col_index,
-            )
-            if col_index == 1:
-                landmarks = landmark_lookup.get(phase_label, [])
-                landmark_sigmas = [probability_to_sigma(landmark.probability) for landmark in landmarks]
-                landmark_sizes = depth_scaled_marker_sizes(
-                    [landmark.projected_point for landmark in landmarks],
-                    x_range=x_range,
-                    y_range=y_range,
-                    z_range=z_range,
-                    camera_eye=scene_camera["eye"],
-                    base_size=10.5,
-                    min_scale=0.82,
-                    max_scale=1.5,
-                )
-                figure.add_trace(
-                    go.Scatter3d(
-                        x=[landmark.projected_point[0] for landmark in landmarks],
-                        y=[landmark.projected_point[1] for landmark in landmarks],
-                        z=[landmark.projected_point[2] for landmark in landmarks],
-                        mode="markers",
-                        customdata=[landmark.probability for landmark in landmarks],
-                        marker={
-                            "size": landmark_sizes,
-                            "color": landmark_sigmas,
-                            "colorscale": TRACE_SIGMA_COLORSCALE,
-                            "cmin": -TRACE_SIGMA_RANGE,
-                            "cmax": TRACE_SIGMA_RANGE,
-                            "line": {"color": "#111111", "width": 1.2},
-                        },
-                        showlegend=False,
-                        hovertemplate=(
-                            "%{text}<br>"
-                            "text=%{customdata}<br>"
-                            "sigma(valid)=%{marker.color:.2f}s<br>"
-                            "p(valid)=%{customdata:.3f}<extra></extra>"
-                        ),
-                        text=[landmark.label for landmark in landmarks],
-                    ),
-                    row=row_index,
-                    col=col_index,
-                )
-                scene_annotations: list[dict[str, object]] = []
-                for landmark_index, landmark in enumerate(landmarks):
-                    label_text, ax_offset, ay_offset = {
-                        "alt": ("alt valid", 56, -18),
-                        "nest": ("nested valid", 88, -48),
-                        "prefix": ("open prefix", 80, 24),
-                    }.get(
-                        landmark.label,
-                        (landmark.label, 56, -18 - landmark_index * 14),
-                    )
-                    scene_annotations.append(
-                        {
-                            "x": landmark.projected_point[0],
-                            "y": landmark.projected_point[1],
-                            "z": landmark.projected_point[2],
-                            "text": label_text,
-                            "showarrow": True,
-                            "arrowhead": 0,
-                            "arrowsize": 1,
-                            "arrowwidth": 1,
-                            "arrowcolor": "#4b5563",
-                            "ax": ax_offset,
-                            "ay": ay_offset,
-                            "font": {"size": 9, "color": "#374151"},
-                            "bgcolor": "rgba(255,255,255,0.92)",
-                            "bordercolor": "#d1d5db",
-                            "borderwidth": 1,
-                        }
-                    )
-                scene.annotations = tuple(scene_annotations)
-            else:
-                scene.annotations = ()
-            figure.add_trace(
-                go.Scatter3d(
-                    x=xs,
-                    y=ys,
-                    z=zs,
-                    mode="lines+markers+text",
-                    customdata=step_numbers,
-                    text=step_labels,
-                    textposition="top center",
-                    textfont={"size": 9, "color": style["color"]},
-                    line={
-                        "color": style["color"],
-                        "width": 2.1,
-                        "dash": style["dash"],
-                    },
-                    marker={"color": style["color"], "size": trace_sizes, "opacity": 0.96},
-                    name=status,
-                    showlegend=showlegend,
-                    hovertemplate=(
-                        f"{cell.probe_label}<br>"
-                        f"{cell.text}<br>"
-                        f"phase={cell.phase_label}<br>"
-                        "step=%{customdata}<br>"
-                        f"status={status}<br>"
-                        f"end p(valid)={cell.probability:.3f}<br>"
-                        "PC1=%{x:.3f}<br>PC2=%{y:.3f}<br>PC3=%{z:.3f}<extra></extra>"
-                    ),
-                ),
-                row=row_index,
-                col=col_index,
-            )
-            figure.add_trace(
-                go.Scatter3d(
-                    x=[xs[0]],
-                    y=[ys[0]],
-                    z=[zs[0]],
-                    mode="markers",
-                    marker={
-                        "color": "#111111",
-                        "size": depth_scaled_marker_sizes(
-                            [trace_points[0]],
-                            x_range=x_range,
-                            y_range=y_range,
-                            z_range=z_range,
-                            camera_eye=scene_camera["eye"],
-                            base_size=8.5,
-                            min_scale=1.0,
-                            max_scale=1.0,
-                        ),
-                        "symbol": "circle",
-                    },
-                    name="start" if row_index == 1 and col_index == 1 else None,
-                    showlegend=row_index == 1 and col_index == 1,
-                    hovertemplate="start<extra></extra>",
-                ),
-                row=row_index,
-                col=col_index,
-            )
-            figure.add_trace(
-                go.Scatter3d(
-                    x=[xs[-1]],
-                    y=[ys[-1]],
-                    z=[zs[-1]],
-                    mode="markers+text",
-                    text=["*" if cell.correct else ""],
-                    textposition="middle center",
-                    textfont={"size": 16, "color": "#111111"},
-                    marker={
-                        "color": style["color"],
-                        "size": depth_scaled_marker_sizes(
-                            [trace_points[-1]],
-                            x_range=x_range,
-                            y_range=y_range,
-                            z_range=z_range,
-                            camera_eye=scene_camera["eye"],
-                            base_size=13.5,
-                            min_scale=1.0,
-                            max_scale=1.0,
-                        ),
-                        "symbol": "circle" if cell.correct else "x",
-                        "line": {"color": "#111111", "width": 1.0},
-                    },
-                    name="end" if row_index == 1 and col_index == 1 else None,
-                    showlegend=row_index == 1 and col_index == 1,
-                    hovertemplate=f"end<br>{status}<br>p(valid)={cell.probability:.3f}<extra></extra>",
-                ),
-                row=row_index,
-                col=col_index,
-            )
-            scene.xaxis = {
-                "range": x_range,
-                "title": "",
-                "showticklabels": False,
-                "showspikes": False,
-                "showbackground": True,
-                "backgroundcolor": "rgba(248,250,252,0.88)",
-                "showgrid": True,
-                "gridcolor": "rgba(148,163,184,0.36)",
-                "zeroline": True,
-                "zerolinecolor": "rgba(100,116,139,0.44)",
-                "showline": True,
-                "linecolor": "rgba(100,116,139,0.6)",
-            }
-            scene.yaxis = {
-                "range": y_range,
-                "title": "",
-                "showticklabels": False,
-                "showspikes": False,
-                "showbackground": True,
-                "backgroundcolor": "rgba(249,250,251,0.84)",
-                "showgrid": True,
-                "gridcolor": "rgba(148,163,184,0.36)",
-                "zeroline": True,
-                "zerolinecolor": "rgba(100,116,139,0.44)",
-                "showline": True,
-                "linecolor": "rgba(100,116,139,0.6)",
-            }
-            scene.zaxis = {
-                "range": z_range,
-                "title": "",
-                "showticklabels": False,
-                "showspikes": False,
-                "showbackground": True,
-                "backgroundcolor": "rgba(245,247,250,0.8)",
-                "showgrid": True,
-                "gridcolor": "rgba(148,163,184,0.36)",
-                "zeroline": True,
-                "zerolinecolor": "rgba(100,116,139,0.44)",
-                "showline": True,
-                "linecolor": "rgba(100,116,139,0.6)",
-            }
-            scene.camera = scene_camera
-            scene.aspectmode = "cube"
-            scene.dragmode = "orbit"
-            scene_domain_x = [float(value) for value in scene.domain.x]
-            scene_domain_y = [float(value) for value in scene.domain.y]
-            figure.add_annotation(
-                x=scene_domain_x[0] + 0.015 * (scene_domain_x[1] - scene_domain_x[0]),
-                y=scene_domain_y[1] - 0.03 * (scene_domain_y[1] - scene_domain_y[0]),
-                xref="paper",
-                yref="paper",
-                text=f"{'accepts' if cell.predicted_valid else 'rejects'} · {'correct' if cell.correct else 'wrong'}",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                font={"size": 10, "color": "#374151"},
-                bgcolor="rgba(255,255,255,0.88)",
-                bordercolor=style["color"],
-                borderwidth=1,
-            )
-        if rows > 1:
-            figure.add_annotation(
-                x=-0.07,
-                y=1 - (row_index - 0.5) / rows,
-                xref="paper",
-                yref="paper",
-                text=compact_trace_phase_label(phase_label),
-                showarrow=False,
-                textangle=-90,
-                font={"size": 12, "color": "#4b5563"},
-            )
-
-    figure.update_layout(
-        title={
-            "text": "Probe traces in a 3D PCA view of the learned state space",
-            "y": 0.99,
-        },
-        width=max(1620, 500 * cols),
-        height=max(940, 410 * rows + 130),
-        margin={"t": 168, "l": 78, "r": 112, "b": 88},
-        legend={"orientation": "h", "yanchor": "top", "y": -0.08, "x": 0.0},
+        title="Random-init 2x4 torch.RNN with resampled counterexample shocks",
+        width=1600,
+        height=1180,
+        margin={"t": 110, "l": 64, "r": 52, "b": 60},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.03, "x": 0.0},
         **FIGURE_STYLE,
     )
     figure.add_annotation(
@@ -2922,11 +1519,129 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
         xref="paper",
         yref="paper",
         text=(
-            "Shared PCA axes: "
-            f"PC1 {payload.explained_variance[0] * 100:.0f}% var, "
-            f"PC2 {payload.explained_variance[1] * 100:.0f}% var, "
-            f"PC3 {payload.explained_variance[2] * 100:.0f}% var"
-            "<br>Color map: negative sigma = reject-leaning, positive sigma = accept-leaning"
+            "Story field: 128 fixed length-10 probes, balanced across valid, off-by-one, valid-prefix, and balanced-invalid"
+            "<br>Colors still show current classification status; line dashes distinguish probe families"
+            "<br>The training phases resample fresh pools each epoch instead of replaying one static dataset"
+        ),
+        showarrow=False,
+        xanchor="right",
+        yanchor="bottom",
+        font={"size": 11, "color": "#4b5563"},
+    )
+    return figure
+
+
+def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
+    rows = len(payload.phase_labels)
+    cols = len(payload.probe_labels)
+    figure = make_subplots(
+        rows=rows,
+        cols=cols,
+        subplot_titles=[
+            f"{role}: {text}"
+            for role, text in zip(payload.probe_role_labels, payload.probe_texts, strict=True)
+        ],
+        vertical_spacing=0.07,
+        horizontal_spacing=0.05,
+    )
+    all_x = [point[0] for cell in payload.cells for point in cell.projected_points] + [point[0] for point in payload.acceptance_region]
+    all_y = [point[1] for cell in payload.cells for point in cell.projected_points] + [point[1] for point in payload.acceptance_region]
+    x_pad = 0.08 * max(1e-6, max(all_x) - min(all_x))
+    y_pad = 0.08 * max(1e-6, max(all_y) - min(all_y))
+    x_range = [min(all_x) - x_pad * 0.45, max(all_x) + x_pad * 0.45]
+    y_range = [min(all_y) - y_pad * 0.45, max(all_y) + y_pad * 0.45]
+    cell_lookup = {(cell.phase_label, cell.probe_label): cell for cell in payload.cells}
+    for row_index, phase_label in enumerate(payload.phase_labels, start=1):
+        for col_index, probe_label in enumerate(payload.probe_labels, start=1):
+            cell = cell_lookup[(phase_label, probe_label)]
+            status = probe_status_label(cell.is_valid, cell.predicted_valid)
+            style = PROBE_STATUS_STYLES[status]
+            figure.add_trace(
+                go.Scatter(
+                    x=[point[0] for point in payload.acceptance_region],
+                    y=[point[1] for point in payload.acceptance_region],
+                    mode="lines",
+                    fill="toself",
+                    line={"color": "rgba(22,101,52,0.70)", "width": 1.6},
+                    fillcolor="rgba(74,222,128,0.18)",
+                    showlegend=False,
+                    hovertemplate="projected acceptance region<extra></extra>",
+                ),
+                row=row_index,
+                col=col_index,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=[point[0] for point in cell.projected_points],
+                    y=[point[1] for point in cell.projected_points],
+                    mode="lines+markers",
+                    customdata=list(range(1, len(cell.projected_points) + 1)),
+                    line={"color": style["color"], "width": 3.3, "dash": style["dash"]},
+                    marker={"color": style["color"], "size": 6.8, "opacity": 0.98, "line": {"color": "rgba(248,250,252,0.70)", "width": 0.4}},
+                    showlegend=False,
+                    hovertemplate=(
+                        f"text={cell.text}<br>phase={cell.phase_label}<br>step=%{{customdata}}"
+                        f"<br>status now={status}<br>end p(valid)={cell.probability:.3f}<extra></extra>"
+                    ),
+                ),
+                row=row_index,
+                col=col_index,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=[cell.projected_points[0][0]],
+                    y=[cell.projected_points[0][1]],
+                    mode="markers",
+                    marker={"color": "#111111", "size": 9, "symbol": "diamond", "line": {"color": "#f8fafc", "width": 1.0}},
+                    showlegend=False,
+                    hovertemplate="start<extra></extra>",
+                ),
+                row=row_index,
+                col=col_index,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=[cell.projected_points[-1][0]],
+                    y=[cell.projected_points[-1][1]],
+                    mode="markers",
+                    marker={"color": style["color"], "size": 11, "symbol": "circle" if cell.correct else "x", "line": {"color": "#111111", "width": 1.6}},
+                    showlegend=False,
+                    hovertemplate=f"end<br>{status}<br>p(valid)={cell.probability:.3f}<extra></extra>",
+                ),
+                row=row_index,
+                col=col_index,
+            )
+            figure.add_hline(y=0.0, line={"color": "rgba(100,116,139,0.22)", "width": 1}, row=row_index, col=col_index)
+            figure.add_vline(x=0.0, line={"color": "rgba(100,116,139,0.22)", "width": 1}, row=row_index, col=col_index)
+            figure.update_xaxes(range=x_range, showticklabels=False, title_text="", row=row_index, col=col_index)
+            figure.update_yaxes(range=y_range, showticklabels=False, title_text="", row=row_index, col=col_index)
+        figure.add_annotation(
+            x=-0.03,
+            y=1 - (row_index - 0.5) / rows,
+            xref="paper",
+            yref="paper",
+            text=phase_label,
+            showarrow=False,
+            textangle=-90,
+            font={"size": 12, "color": "#4b5563"},
+        )
+    figure.update_layout(
+        title={"text": "Hidden-state traces across random init and phased counterexample shocks", "y": 0.99},
+        width=max(1450, 360 * cols),
+        height=max(1260, 270 * rows + 180),
+        margin={"t": 150, "l": 80, "r": 80, "b": 70},
+        showlegend=False,
+        **FIGURE_STYLE,
+    )
+    figure.add_annotation(
+        x=0.995,
+        y=1.08,
+        xref="paper",
+        yref="paper",
+        text=(
+            f"Oblique PCA map: PC1 {payload.explained_variance[0] * 100:.0f}% var, PC2 {payload.explained_variance[1] * 100:.0f}% var, PC3 {payload.explained_variance[2] * 100:.0f}% var"
+            "<br>Rows are random init, after phase 1, after phase 2, and after phase 3"
+            "<br>The translucent green ellipse is the projected acceptance ball around the fixed acceptance anchor"
         ),
         showarrow=False,
         xanchor="right",
@@ -2937,47 +1652,6 @@ def build_trace_figure(payload: TraceGridPayload) -> go.Figure:
         borderwidth=1,
     )
     return figure
-
-
-def render_mlp_assets(
-    *,
-    output_dir: Path,
-    write_html: bool,
-    seed: int,
-    mlp_epochs: int,
-    mlp_batch_size: int,
-    mlp_shape: str,
-) -> dict[str, object]:
-    hidden_layers = parse_mlp_shape(mlp_shape)
-    log_progress(
-        f"training MLP {format_mlp_shape(hidden_layers)} for {mlp_epochs} epochs "
-        f"(batch={mlp_batch_size}, Adam lr=0.01)"
-    )
-    published_run = run_mlp_training(
-        seed=seed,
-        epochs=mlp_epochs,
-        batch_size=mlp_batch_size,
-        hidden_layers=hidden_layers,
-    )
-    figure, selected_epochs = build_mlp_story_figure(
-        xs=published_run.xs,
-        ys=published_run.ys,
-        predictions_by_epoch=published_run.predictions_by_epoch,
-        loss_history=published_run.loss_history,
-        hidden_layers=published_run.hidden_layers,
-    )
-    files = write_figure(
-        figure,
-        output_dir=output_dir,
-        stem="mlp-sine-story",
-        write_html=write_html,
-    )
-    return {
-        "files": files,
-        "published_shape": list(published_run.hidden_layers),
-        "selected_epochs": selected_epochs,
-        "final_loss": published_run.final_loss,
-    }
 
 
 def render_rnn_assets(
@@ -2992,220 +1666,92 @@ def render_rnn_assets(
     lr_start: float,
     lr_end: float,
 ) -> dict[str, object]:
-    random_epoch_count = phase_epochs
-    counterexample_epoch_count = counterexample_phase_epochs(phase_epochs)
-    counterexample_cohort_size = train_samples
-    random_cohort_size = random_baseline_cohort_size(train_samples)
-    log_progress(
-        "training simplified RNN "
-        f"(phases=2, phase1_epochs={random_epoch_count}, phase2_epochs={counterexample_epoch_count}, "
-        f"random_support={random_cohort_size}, counterexample_support={counterexample_cohort_size}, "
-        f"test_samples={test_samples}, batch={DEFAULT_BATCH_SIZE}, "
-        f"optimizer={RNN_OPTIMIZER_NAME}, lr={DEFAULT_RNN_LR:.3f})"
-    )
-    result, checkpoints = run_rnn_experiment(
-        seed=seed,
-        phase_epochs=phase_epochs,
-        train_samples=train_samples,
-        test_samples=test_samples,
-        lr_start=lr_start,
-        lr_end=lr_end,
-    )
-    story_probe_flips = build_probe_flips(
-        result,
-        probes=result.story_probes,
-        response_history=result.story_response_history,
-    )
-    story_probe_trajectories = build_probe_trajectories(
-        result,
-        probes=result.story_probes,
-        response_history=result.story_response_history,
-    )
-    highlighted_trajectories = select_highlighted_probe_trajectories(story_probe_trajectories)
-    highlighted_short_labels = {trajectory.probe.short_label for trajectory in highlighted_trajectories}
-    highlighted_flips = [
-        flip for flip in story_probe_flips if flip.probe.short_label in highlighted_short_labels
-    ]
-    trace_selection = select_trace_story_probes(
-        result,
-        story_probe_flips,
-        highlighted_trajectories=highlighted_trajectories,
-    )
-    trace_payload = build_trace_grid_payload(
-        model_builder=lambda: TinyTraceRNN(hidden_size=RNN_HIDDEN_SIZE, num_layers=RNN_NUM_LAYERS),
-        checkpoints=checkpoints,
-        phase_spans=result.phase_spans,
-        trace_probes=trace_selection.selected_probes,
-    )
+    with log_timing("building phased tanh torch.RNN metrics and response history"):
+        result = run_rnn_experiment(seed=seed, phase_epochs=phase_epochs, train_samples=train_samples, test_samples=test_samples, lr_start=lr_start, lr_end=lr_end)
+    with log_timing("selecting canonical trace examples and projecting hidden states"):
+        trace_selection = select_trace_story_probes(result)
+        trace_payload = build_trace_grid_payload(result=result, trace_selection=trace_selection)
     result.trace_payload = trace_payload
-
-    shared_files: list[str] = []
-    phases = build_training_phases(
-        random_phase_epochs=random_epoch_count,
-        counterexample_phase_epochs=counterexample_epoch_count,
-        random_cohort_size=random_cohort_size,
-        counterexample_cohort_size=counterexample_cohort_size,
-        lr_start=lr_start,
-        lr_end=lr_end,
-    )
-    story_figure = build_rnn_story_figure(
-        result,
-        focus_short_label=trace_selection.focus_probe.short_label,
-        highlighted_trajectories=highlighted_trajectories,
-    )
-    story_files = write_figure(
-        story_figure,
-        output_dir=output_dir,
-        stem="rnn-training-story",
-        write_html=write_html,
-    )
-    shared_files.extend(story_files)
+    files: list[str] = []
+    with log_timing("assembling phased tanh torch.RNN story figure"):
+        story_figure = build_rnn_story_figure(result)
+    files.extend(write_figure(story_figure, output_dir=output_dir, stem="rnn-training-story", write_html=write_html))
     if write_trace_images:
-        shared_files.extend(
-            write_figure(
-                build_trace_figure(trace_payload),
-                output_dir=output_dir,
-                stem="rnn-transition-traces",
-                write_html=write_html,
-            )
-        )
-    result.files = shared_files
+        with log_timing("assembling phased tanh torch.RNN trace figure"):
+            trace_figure = build_trace_figure(trace_payload)
+        files.extend(write_figure(trace_figure, output_dir=output_dir, stem="rnn-transition-traces", write_html=write_html))
+    result.files = files
     final_metrics = result.metrics[-1]
-    log_progress(
-        f"{result.model_title}: final train={final_metrics.train_acc:.3f}, "
-        f"eval10={final_metrics.eval_10_acc:.3f}, eval20={final_metrics.eval_20_acc:.3f}, "
-        f"eval30={final_metrics.eval_30_acc:.3f}"
-    )
+    log_progress(f"{result.model_title}: final eval10={final_metrics.eval_10_acc:.3f}, eval20={final_metrics.eval_20_acc:.3f}, eval30={final_metrics.eval_30_acc:.3f}, eval50={final_metrics.eval_50_acc:.3f}")
     return {
-        "files": shared_files,
-        "train_length": TRAIN_LENGTH,
-        "eval_lengths": list(EVAL_LENGTHS),
-        "batch_size": DEFAULT_BATCH_SIZE,
-        "optimizer": RNN_OPTIMIZER_NAME,
-        "learning_rate": DEFAULT_RNN_LR,
-        "phase_count": len(phases),
-        "phase_epochs": random_epoch_count,
-        "phase_epoch_split": [random_epoch_count, counterexample_epoch_count],
-        "random_cohort_size": random_cohort_size,
-        "counterexample_cohort_size": counterexample_cohort_size,
-        "cohort_size": random_cohort_size,
-        "retained_support_size": random_cohort_size + counterexample_cohort_size * 3,
-        "test_samples": test_samples,
-        "support_cohorts": {
-            SUPPORT_COHORT_RANDOM: random_cohort_size,
-            SUPPORT_COHORT_OFF_BY_ONE: counterexample_cohort_size,
-            SUPPORT_COHORT_BALANCED: counterexample_cohort_size,
-            SUPPORT_COHORT_VALID_PREFIX: counterexample_cohort_size,
-        },
-        "phase_weighting_schedule": [
-            {
-                "label": phase.label,
-                "cohort_weights": list(phase.cohort_weights),
-                "cohort_sizes": list(phase.cohort_sizes),
-                "optimizer": RNN_OPTIMIZER_NAME,
-                "learning_rate": DEFAULT_RNN_LR,
-                "lr_start": DEFAULT_RNN_LR,
-                "lr_end": DEFAULT_RNN_LR,
-                "active_cohorts": phase.active_cohorts,
-            }
-            for phase in phases
-        ],
-        "phases": result.phase_spans,
-        "probes": [asdict(probe) for probe in RESPONSE_PROBES],
-        "story_probe_mode": f"all_binary_strings_length_{STORY_PROBE_LENGTH}",
+        "files": files,
+        "model_mode": result.model_mode,
+        "language": result.language,
+        "accept_anchor": result.accept_anchor,
+        "accept_radius": result.accept_radius,
+        "state_dimension": result.state_dimension,
+        "architecture": result.architecture,
+        "optimizer": "adamw",
+        "learning_rate_start": lr_start,
+        "learning_rate_end": lr_end,
+        "learning_rate_schedule": "phase_restart_cosine_decay",
+        "dynamics": "phased_resampled_counterexample_shocks",
+        "checkpoint_labels": result.checkpoint_labels,
+        "checkpoint_epochs": result.checkpoint_epochs,
+        "phase_schedule": [span["label"] for span in result.phase_spans],
+        "phase_epoch_schedule": result.phase_epoch_schedule,
+        "phase_batch_schedule": result.phase_batch_schedule,
+        "phase_family_mix": result.phase_family_mix,
+        "eval_lengths": list(ACCURACY_EVAL_LENGTHS),
+        "story_probe_mode": "family_balanced_probe_field",
         "story_probe_count": len(result.story_probes),
-        "story_probe_lengths": [STORY_PROBE_LENGTH],
-        "highlighted_probe_flips": [
-            {
-                "probe": asdict(flip.probe),
-                "from_epoch": flip.from_epoch,
-                "to_epoch": flip.to_epoch,
-                "from_phase_label": flip.from_phase_label,
-                "to_phase_label": flip.to_phase_label,
-                "kind": flip.kind,
-                "from_probability": flip.from_probability,
-                "to_probability": flip.to_probability,
-            }
-            for flip in highlighted_flips
-        ],
-        "highlighted_probe_trajectories": [
-            {
-                "probe": asdict(trajectory.probe),
-                "turn_pattern": list(trajectory.turn_pattern),
-                "turn_label": trajectory.turn_label,
-                "flip_epochs": list(trajectory.flip_epochs),
-            }
-            for trajectory in highlighted_trajectories
-        ],
-        "trace_strings": [asdict(probe) for probe in trace_selection.selected_probes],
+        "story_plot_probe_count": len(result.story_probes),
+        "story_plot_sampling": "deterministic_family_balanced_slice",
+        "story_probe_families": {
+            "valid": [probe.text for probe in result.story_probes if probe.probe_kind == "valid"],
+            "off_by_one": [probe.text for probe in result.story_probes if probe.probe_kind == PHASE_KIND_OFF_BY_ONE],
+            "valid_prefix": [probe.text for probe in result.story_probes if probe.probe_kind == PHASE_KIND_VALID_PREFIX],
+            "balanced_invalid": [probe.text for probe in result.story_probes if probe.probe_kind == PHASE_KIND_BALANCED_INVALID],
+        },
+        "acceptance_region_shape": "projected_ball_ellipse",
         "trace_phase_epochs": trace_payload.phase_epochs,
         "trace_phase_labels": trace_payload.phase_labels,
         "trace_projection_mode": trace_payload.projection_mode,
         "trace_axis_labels": list(trace_payload.axis_labels),
         "trace_explained_variance": list(trace_payload.explained_variance),
+        "trace_example_labels": list(trace_selection.role_labels),
+        "trace_strings": [asdict(probe) for probe in trace_selection.selected_probes],
         "focus_trace": asdict(trace_selection.focus_probe),
-        "companion_traces": [asdict(probe) for probe in trace_selection.companion_probes],
         "final_metrics": asdict(final_metrics),
     }
 
 
-@app.command()
-def generate(
-    target: Literal["all", "mlp", "rnn"] = typer.Option(
-        "all",
-        help="Which artifact set to generate.",
-    ),
-    output_dir: Path = typer.Option(
-        DEFAULT_OUTPUT_DIR,
-        help="Directory where article-facing assets should be written.",
-    ),
-    seed: int = typer.Option(7, help="Random seed."),
-    mlp_epochs: int = typer.Option(400, help="Training epochs for the MLP."),
-    mlp_batch_size: int = typer.Option(64, help="Mini-batch size for the MLP."),
-    mlp_shape: str = typer.Option(
-        ",".join(str(size) for size in MLP_DEFAULT_SHAPE),
-        help="Comma-separated hidden-layer widths for the MLP.",
-    ),
-    rnn_phase_epochs: int = typer.Option(
-        DEFAULT_PHASE_EPOCHS,
-        help="Epochs to run for the random-baseline RNN phase; the counterexample phase runs for twice as long.",
-    ),
-    rnn_train_samples: int = typer.Option(
-        DEFAULT_TRAIN_SAMPLES,
-        help="Examples per counterexample family in phase 2; the random baseline uses a larger fixed multiple of this size.",
-    ),
-    rnn_test_samples: int = typer.Option(
-        DEFAULT_TEST_SAMPLES,
-        help="Examples in each fixed RNN evaluation set.",
-    ),
-    html: bool = typer.Option(
-        True,
-        "--html/--no-html",
-        help="Whether to emit Plotly HTML companions alongside PNGs.",
-    ),
-    trace_images: bool = typer.Option(
-        True,
-        "--trace-images/--no-trace-images",
-        help="Whether to emit the focused transition-trace figure PNG and HTML files.",
-    ),
-    clean: bool = typer.Option(
-        True,
-        "--clean/--no-clean",
-        help="Whether to clear the output directory before generating fresh artifacts.",
-    ),
-) -> None:
+def generate_artifacts(
+    *,
+    target: Literal["all", "mlp", "precision", "rnn"],
+    output_dir: Path,
+    seed: int,
+    mlp_epochs: int,
+    mlp_batch_size: int,
+    mlp_shape: str,
+    rnn_phase_epochs: int,
+    rnn_train_samples: int,
+    rnn_test_samples: int,
+    html: bool,
+    trace_images: bool,
+    clean: bool,
+    render_mlp: Callable[..., dict[str, object]] = render_mlp_assets,
+    render_precision: Callable[..., dict[str, object]] = render_precision_assets,
+    render_rnn: Callable[..., dict[str, object]] = render_rnn_assets,
+) -> dict[str, object]:
     if clean:
         log_progress(f"cleaning output directory {output_dir}")
         clean_output_dir(output_dir)
     ensure_dir(output_dir)
     log_progress(f"starting generation for target={target} in {output_dir}")
-    manifest: dict[str, object] = {
-        "article": ARTICLE_SLUG,
-        "seed": seed,
-        "output_dir": str(output_dir),
-    }
+    manifest: dict[str, object] = {"article": ARTICLE_SLUG, "seed": seed, "output_dir": str(output_dir)}
     if target in {"all", "mlp"}:
-        manifest["mlp"] = render_mlp_assets(
+        manifest["mlp"] = render_mlp(
             output_dir=output_dir,
             write_html=html,
             seed=seed,
@@ -3213,8 +1759,10 @@ def generate(
             mlp_batch_size=mlp_batch_size,
             mlp_shape=mlp_shape,
         )
+    if target in {"all", "precision"}:
+        manifest["precision"] = render_precision(output_dir=output_dir, write_html=html)
     if target in {"all", "rnn"}:
-        manifest["rnn"] = render_rnn_assets(
+        manifest["rnn"] = render_rnn(
             output_dir=output_dir,
             write_html=html,
             write_trace_images=trace_images,
@@ -3225,10 +1773,42 @@ def generate(
             lr_start=DEFAULT_RNN_LR_START,
             lr_end=DEFAULT_RNN_LR_END,
         )
-
     manifest_path = output_dir / "manifest.json"
     log_progress(f"writing {manifest_path.name}")
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    return manifest
+
+
+@app.command()
+def generate(
+    target: Literal["all", "mlp", "precision", "rnn"] = typer.Option("all", help="Which artifact set to generate."),
+    output_dir: Path = typer.Option(DEFAULT_OUTPUT_DIR, help="Directory where article-facing assets should be written."),
+    seed: int = typer.Option(7, help="Random seed."),
+    mlp_epochs: int = typer.Option(400, help="Training epochs for the MLP."),
+    mlp_batch_size: int = typer.Option(64, help="Mini-batch size for the MLP."),
+    mlp_shape: str = typer.Option(",".join(str(size) for size in MLP_DEFAULT_SHAPE), help="Comma-separated hidden-layer widths for the MLP."),
+    rnn_phase_epochs: int = typer.Option(DEFAULT_PHASE_EPOCHS, help="Base epoch count for the phased torch.RNN schedule (used as 1x, 2x, 2x)."),
+    rnn_train_samples: int = typer.Option(DEFAULT_TRAIN_SAMPLES, help="Resampled training examples per epoch across lengths 10, 20, and 30."),
+    rnn_test_samples: int = typer.Option(DEFAULT_TEST_SAMPLES, help="Examples in each fixed RNN evaluation set."),
+    html: bool = typer.Option(True, "--html/--no-html", help="Whether to emit Plotly HTML companions alongside PNGs."),
+    trace_images: bool = typer.Option(True, "--trace-images/--no-trace-images", help="Whether to emit the transition-trace figure PNG and HTML files."),
+    clean: bool = typer.Option(True, "--clean/--no-clean", help="Whether to clear the output directory before generating fresh artifacts."),
+) -> None:
+    generate_artifacts(
+        target=target,
+        output_dir=output_dir,
+        seed=seed,
+        mlp_epochs=mlp_epochs,
+        mlp_batch_size=mlp_batch_size,
+        mlp_shape=mlp_shape,
+        rnn_phase_epochs=rnn_phase_epochs,
+        rnn_train_samples=rnn_train_samples,
+        rnn_test_samples=rnn_test_samples,
+        html=html,
+        trace_images=trace_images,
+        clean=clean,
+    )
+    manifest_path = output_dir / "manifest.json"
     typer.echo(f"Generated assets for {target} at {output_dir}")
     typer.echo(f"Wrote manifest to {manifest_path}")
 

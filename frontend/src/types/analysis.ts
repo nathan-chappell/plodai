@@ -1,5 +1,3 @@
-import type { WorkspaceBootstrapMetadata } from "./workspace-contract";
-
 export type PrimitiveValue = string | number | boolean | null;
 export type DataRow = Record<string, PrimitiveValue>;
 
@@ -162,9 +160,7 @@ export type AppThreadMetadata = {
   chart_cache?: Record<string, string>;
   surface_key?: string;
   capability_bundle?: CapabilityBundleMetadata;
-  workspace_context?: WorkspaceThreadContext;
-  workspace_bootstrap?: WorkspaceBootstrapMetadata;
-  workspace_contract_version?: "v1";
+  workspace_state?: WorkspaceState;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
   execution_mode?: ExecutionMode;
@@ -178,13 +174,18 @@ export type RunLocalQueryToolArgs = {
 };
 
 export type CreateCsvFileToolArgs = {
-  filename: string;
+  path: string;
   query_plan: QueryPlan;
 };
 
 export type CreateJsonFileToolArgs = {
-  filename: string;
+  path: string;
   query_plan: QueryPlan;
+};
+
+export type ListWorkspaceFilesToolArgs = {
+  prefix?: string;
+  includeSamples?: boolean;
 };
 
 export type GetPdfPageRangeToolArgs = {
@@ -193,21 +194,8 @@ export type GetPdfPageRangeToolArgs = {
   end_page: number;
 };
 
-export type GetWorkspaceContextToolArgs = Record<string, never>;
-
-export type CreateWorkspaceDirectoryToolArgs = {
-  path: string;
-};
-
-export type ChangeWorkspaceDirectoryToolArgs = {
-  path: string;
-};
-
-export type ListWorkspaceFilesToolArgs = {
-  includeSamples?: boolean;
-};
-
 export type ListLoadedDatasetsToolArgs = {
+  prefix?: string;
   includeSamples?: boolean;
 };
 
@@ -240,22 +228,40 @@ export type GetReportToolArgs = {
   report_id: string;
 };
 
-export type AppendReportSectionToolArgs = {
-  report_id: string;
+export type CreateReportToolArgs = {
   title: string;
-  markdown: string;
+  report_id?: string;
+};
+
+export type ReportItemDraft =
+  | {
+      type: "section";
+      title: string;
+      markdown: string;
+    }
+  | {
+      type: "note";
+      title: string;
+      text: string;
+    };
+
+export type AppendReportItemToolArgs = {
+  report_id: string;
+  item: ReportItemDraft;
+};
+
+export type RemoveReportItemToolArgs = {
+  report_id: string;
+  item_id: string;
 };
 
 export type ClientToolArgsMap = {
-  get_workspace_context: GetWorkspaceContextToolArgs;
-  create_workspace_directory: CreateWorkspaceDirectoryToolArgs;
-  change_workspace_directory: ChangeWorkspaceDirectoryToolArgs;
-  list_workspace_files: ListWorkspaceFilesToolArgs;
-  list_attached_csv_files: ListLoadedDatasetsToolArgs;
+  list_csv_files: ListLoadedDatasetsToolArgs;
   run_aggregate_query: RunLocalQueryToolArgs;
   create_csv_file: CreateCsvFileToolArgs;
   create_json_file: CreateJsonFileToolArgs;
   list_chartable_files: ListWorkspaceFilesToolArgs;
+  list_pdf_files: ListWorkspaceFilesToolArgs;
   inspect_chartable_file_schema: InspectChartableFileSchemaToolArgs;
   render_chart_from_file: RenderChartFromFileToolArgs;
   inspect_pdf_file: InspectPdfFileToolArgs;
@@ -263,7 +269,9 @@ export type ClientToolArgsMap = {
   smart_split_pdf: SmartSplitPdfToolArgs;
   list_reports: ListReportsToolArgs;
   get_report: GetReportToolArgs;
-  append_report_section: AppendReportSectionToolArgs;
+  create_report: CreateReportToolArgs;
+  append_report_item: AppendReportItemToolArgs;
+  remove_report_item: RemoveReportItemToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;
@@ -298,8 +306,39 @@ export type SmartSplitEntry = {
 };
 
 export type WorkspaceThreadContext = {
-  cwd_path: string;
+  path_prefix: string;
   referenced_item_ids: string[];
+};
+
+export type WorkspaceStateFileSummary = {
+  id: string;
+  name: string;
+  path: string;
+  kind: "csv" | "json" | "pdf" | "other";
+  extension: string;
+  mime_type?: string;
+  byte_size?: number;
+  row_count?: number;
+  columns?: string[];
+  numeric_columns?: string[];
+  sample_rows?: DataRow[];
+  page_count?: number;
+};
+
+export type WorkspaceStateReportSummary = {
+  report_id: string;
+  title: string;
+  item_count: number;
+  updated_at: string | null;
+};
+
+export type WorkspaceState = {
+  version: "v1";
+  context: WorkspaceThreadContext;
+  files: WorkspaceStateFileSummary[];
+  reports: WorkspaceStateReportSummary[];
+  current_report_id: string | null;
+  current_goal: string | null;
 };
 
 export type PdfSmartSplitEffect = {

@@ -92,6 +92,13 @@ class CardActionWidget(TypedDict):
     action: dict[str, object]
 
 
+class ColWidget(TypedDict, total=False):
+    type: Literal["Col"]
+    children: list["WidgetComponent"]
+    gap: int | str
+    padding: int | str
+
+
 WidgetComponent = (
     BadgeWidget
     | TitleWidget
@@ -101,6 +108,7 @@ WidgetComponent = (
     | LabelWidget
     | RadioGroupWidget
     | TextareaWidget
+    | ColWidget
 )
 
 
@@ -131,23 +139,17 @@ def build_tool_trace_widget(
     summary: str,
     details: Sequence[str] | None = None,
 ) -> WidgetRoot:
-    children: list[WidgetComponent] = [
+    del details
+    content_children: list[WidgetComponent] = [
         _badge_widget("Tool", color="info", size="sm"),
         _text_widget(format_tool_label(tool_name), size="sm", weight="semibold"),
         _caption_widget(summary, size="sm"),
     ]
 
-    clean_details = [detail.strip() for detail in details or [] if detail.strip()]
-    if clean_details:
-        children.append(_divider_widget(size=1, spacing=6))
-        children.extend(_text_widget(detail) for detail in clean_details[:6])
-
     return _card_widget(
         size="sm",
-        padding="10px",
-        status_text="Tool requested",
-        status_icon="bolt",
-        children=children,
+        padding="8px",
+        children=[_col_widget(content_children, gap="4px")],
     )
 
 
@@ -163,40 +165,40 @@ def build_tool_trace_copy_text(
 def build_workspace_context_widget(
     *,
     action_label: str,
-    cwd_path: str,
+    path_prefix: str,
     target_path: str | None = None,
 ) -> WidgetRoot:
-    children: list[WidgetComponent] = [
+    content_children: list[WidgetComponent] = [
         _badge_widget("Workspace", color="info", size="sm"),
         _text_widget(action_label, size="sm", weight="semibold"),
-        _caption_widget(f"Current directory: {cwd_path}", size="sm"),
+        _caption_widget(f"Active prefix: {path_prefix}", size="sm"),
     ]
 
-    if target_path and target_path != cwd_path:
-        children.extend(
+    if target_path and target_path != path_prefix:
+        content_children.extend(
             [
-                _divider_widget(size=1, spacing=6),
-                _text_widget(f"Target: {target_path}"),
+                _divider_widget(size=1, spacing=4),
+                _text_widget(f"Target: {target_path}", size="xs"),
             ]
         )
 
     return _card_widget(
         size="sm",
-        padding="10px",
+        padding="8px",
         status_text="Workspace updated",
         status_icon="cube",
-        children=children,
+        children=[_col_widget(content_children, gap="4px")],
     )
 
 
 def build_workspace_context_copy_text(
     *,
     action_label: str,
-    cwd_path: str,
+    path_prefix: str,
     target_path: str | None = None,
 ) -> str:
-    lines = [action_label, f"Current directory: {cwd_path}"]
-    if target_path and target_path != cwd_path:
+    lines = [action_label, f"Active prefix: {path_prefix}"]
+    if target_path and target_path != path_prefix:
         lines.append(f"Target: {target_path}")
     return "\n".join(lines)
 
@@ -207,33 +209,33 @@ def build_plan_widget(plan: AgentPlan) -> WidgetRoot:
     follow_on_tool_hints = plan.get("follow_on_tool_hints", [])
     focus = plan.get("focus") or "Execution plan"
 
-    children: list[WidgetComponent] = [
+    content_children: list[WidgetComponent] = [
         _badge_widget("Plan", color="discovery"),
-        _title_widget(focus, size="lg"),
+        _title_widget(focus, size="md"),
         _caption_widget(f"{len(steps)} step{'s' if len(steps) != 1 else ''} queued"),
-        _divider_widget(),
+        _divider_widget(spacing=4),
     ]
 
-    children.extend(
-        _text_widget(f"{index}. {step}")
+    content_children.extend(
+        _text_widget(f"{index}. {step}", size="xs")
         for index, step in enumerate(steps, start=1)
     )
 
     if success_criteria:
-        children.extend(
+        content_children.extend(
             [
-                _divider_widget(),
-                _text_widget("Success criteria", weight="semibold"),
-                *(_text_widget(f"- {criterion}") for criterion in success_criteria),
+                _divider_widget(spacing=4),
+                _text_widget("Success criteria", size="xs", weight="semibold"),
+                *(_text_widget(f"- {criterion}", size="xs") for criterion in success_criteria),
             ]
         )
 
     if follow_on_tool_hints:
-        children.extend(
+        content_children.extend(
             [
-                _divider_widget(),
-                _text_widget("Suggested next tools", weight="semibold"),
-                _text_widget(", ".join(follow_on_tool_hints), color="secondary"),
+                _divider_widget(spacing=4),
+                _text_widget("Suggested next tools", size="xs", weight="semibold"),
+                _text_widget(", ".join(follow_on_tool_hints), size="xs", color="secondary"),
             ]
         )
 
@@ -241,7 +243,7 @@ def build_plan_widget(plan: AgentPlan) -> WidgetRoot:
         size="md",
         status_text="Plan captured",
         status_icon="check-circle",
-        children=children,
+        children=[_col_widget(content_children, gap="5px")],
     )
 
 
@@ -271,48 +273,49 @@ def build_plan_copy_text(plan: AgentPlan) -> str:
 def build_feedback_capture_widget(
     feedback: ChatItemFeedbackRecord,
 ) -> WidgetRoot:
+    content_children: list[WidgetComponent] = [
+        _badge_widget("Feedback", color="discovery"),
+        _title_widget("Capture feedback", size="sm"),
+        _caption_widget(
+            "Review the latest assistant response and save a short, structured note.",
+            size="sm",
+        ),
+        _divider_widget(spacing=4),
+        _label_widget("Did it go well?", field_name="kind"),
+        _radio_group_widget(
+            "kind",
+            options=[
+                {"label": "Went well", "value": "positive"},
+                {"label": "Needs work", "value": "negative"},
+            ],
+            default_value=feedback.get("kind"),
+        ),
+        _divider_widget(spacing=6),
+        _label_widget("Area", field_name="label"),
+        _radio_group_widget(
+            "label",
+            options=[
+                {"label": "UI", "value": "ui"},
+                {"label": "Tools", "value": "tools"},
+                {"label": "Behavior", "value": "behavior"},
+            ],
+            default_value=feedback.get("label"),
+        ),
+        _divider_widget(spacing=6),
+        _label_widget("Message", field_name="message"),
+        _textarea_widget(
+            "message",
+            default_value=feedback.get("message"),
+            placeholder="Add any extra detail that would help us improve the workflow.",
+        ),
+    ]
     return {
         "type": "Card",
         "size": "md",
-        "padding": "12px",
+        "padding": "10px",
         "asForm": True,
         "status": {"text": "Feedback agent", "icon": "compass"},
-        "children": [
-            _badge_widget("Feedback", color="discovery"),
-            _title_widget("Capture feedback", size="sm"),
-            _caption_widget(
-                "Review the latest assistant response and save a short, structured note.",
-                size="sm",
-            ),
-            _divider_widget(),
-            _label_widget("Did it go well?", field_name="kind"),
-            _radio_group_widget(
-                "kind",
-                options=[
-                    {"label": "Went well", "value": "positive"},
-                    {"label": "Needs work", "value": "negative"},
-                ],
-                default_value=feedback.get("kind"),
-            ),
-            _divider_widget(spacing=8),
-            _label_widget("Area", field_name="label"),
-            _radio_group_widget(
-                "label",
-                options=[
-                    {"label": "UI", "value": "ui"},
-                    {"label": "Tools", "value": "tools"},
-                    {"label": "Behavior", "value": "behavior"},
-                ],
-                default_value=feedback.get("label"),
-            ),
-            _divider_widget(spacing=8),
-            _label_widget("Message", field_name="message"),
-            _textarea_widget(
-                "message",
-                default_value=feedback.get("message"),
-                placeholder="Add any extra detail that would help us improve the workflow.",
-            ),
-        ],
+        "children": [_col_widget(content_children, gap="6px")],
         "confirm": {
             "label": "Submit feedback",
             "action": _client_action(
@@ -451,15 +454,32 @@ def _card_widget(
     *,
     size: str,
     padding: int | str | None = None,
-    status_text: str,
-    status_icon: str,
+    status_text: str | None = None,
+    status_icon: str | None = None,
     children: list[WidgetComponent],
 ) -> CardWidget:
     widget: CardWidget = {
         "type": "Card",
         "size": size,
-        "status": {"text": status_text, "icon": status_icon},
         "children": children,
+    }
+    if status_text is not None:
+        widget["status"] = {"text": status_text, "icon": status_icon or "check-circle"}
+    if padding is not None:
+        widget["padding"] = padding
+    return widget
+
+
+def _col_widget(
+    children: list[WidgetComponent],
+    *,
+    gap: int | str,
+    padding: int | str | None = None,
+) -> ColWidget:
+    widget: ColWidget = {
+        "type": "Col",
+        "children": children,
+        "gap": gap,
     }
     if padding is not None:
         widget["padding"] = padding

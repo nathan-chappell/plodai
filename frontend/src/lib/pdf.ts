@@ -43,9 +43,12 @@ export async function inspectPdfBytes(
   pdfBytes: Uint8Array,
   options: { maxPages?: number } = {},
 ): Promise<PdfInspection> {
-  const document = await PDFDocument.load(pdfBytes);
+  const document = await PDFDocument.load(clonePdfBytes(pdfBytes));
   const pageCount = document.getPageCount();
-  const inspectedPages = await inspectPdfText(pdfBytes, Math.min(pageCount, options.maxPages ?? 8));
+  const inspectedPages = await inspectPdfText(
+    clonePdfBytes(pdfBytes),
+    Math.min(pageCount, options.maxPages ?? 8),
+  );
   return {
     pageCount,
     outline: inspectedPages.outline,
@@ -61,7 +64,7 @@ export async function extractPdfPageRangeFromBytes(
     endPage: number;
   },
 ): Promise<ExtractedPdfFile> {
-  const source = await PDFDocument.load(pdfBytes);
+  const source = await PDFDocument.load(clonePdfBytes(pdfBytes));
   const totalPages = source.getPageCount();
   const { startPage, endPage } = normalizePageRange(options.startPage, options.endPage, totalPages);
 
@@ -155,6 +158,10 @@ type BufferLike = {
     toString(encoding: "base64" | "binary"): string;
   };
 };
+
+function clonePdfBytes(pdfBytes: Uint8Array): Uint8Array {
+  return pdfBytes.slice();
+}
 
 function normalizePageRange(startPage: number, endPage: number, totalPages: number) {
   const safeStart = Math.max(1, Math.trunc(startPage));

@@ -124,7 +124,11 @@ export const ReportWorkspaceColumn = styled.div`
 export const ReportChatColumn = styled.div`
   min-width: 0;
   min-height: 0;
+  width: 100%;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-self: stretch;
 `;
 
 export const CapabilityPanel = styled(CapabilitySurface)``;

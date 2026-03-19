@@ -1,6 +1,7 @@
 -r requirements.txt
 kaleido
 httpx
+pillow
 pytest
 ruff
 plotly

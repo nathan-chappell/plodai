@@ -41,7 +41,7 @@ export type WorkspaceAppStateV1 = {
   execution_mode: "interactive" | "batch";
   current_report_id: string | null;
   current_goal: string | null;
-  current_cwd_by_surface: Record<string, string>;
+  current_prefix_by_surface: Record<string, string>;
 };
 
 export type WorkspaceReportIndexV1 = {
@@ -162,7 +162,7 @@ export function buildDefaultWorkspaceAppState(
     execution_mode: defaults.execution_mode ?? "interactive",
     current_report_id: defaults.current_report_id ?? null,
     current_goal: defaults.current_goal ?? null,
-    current_cwd_by_surface: defaults.current_cwd_by_surface ?? {},
+    current_prefix_by_surface: defaults.current_prefix_by_surface ?? {},
   };
 }
 

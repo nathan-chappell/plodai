@@ -16,14 +16,13 @@ import {
   addWorkspaceFiles,
   addWorkspaceFilesWithResult,
   createWorkspaceFilesystem,
-  ensureDirectoryPath,
-  getDirectoryByPath,
   getWorkspaceContext,
   listBreadcrumbs,
   listDirectoryEntries,
   listDirectoryFiles,
   loadWorkspaceFilesystem,
   loadWorkspaceSurfaceState,
+  normalizePathPrefix,
   removeWorkspaceEntry,
   replaceDirectoryFiles,
   resolveWorkspacePath,
@@ -43,6 +42,10 @@ type WorkspaceStoreContextValue = {
 };
 
 const WorkspaceStoreContext = createContext<WorkspaceStoreContextValue | null>(null);
+
+function defaultPrefix(path: string): string {
+  return normalizePathPrefix(path.endsWith("/") ? path : `${path}/`);
+}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user } = useAppState();
@@ -111,28 +114,29 @@ export function useWorkspaceSurface(options: {
   defaultCwdPath: string;
 }) {
   const { filesystem, setFilesystem, currentUserId, filesystemHydrated } = useWorkspaceStore();
-  const [cwdPath, setCwdPath] = useState(options.defaultCwdPath);
+  const fallbackPrefix = useMemo(() => defaultPrefix(options.defaultCwdPath), [options.defaultCwdPath]);
+  const [activePrefix, setActivePrefix] = useState(fallbackPrefix);
   const [hydrated, setHydrated] = useState(false);
   const stateRef = useRef({
-    cwdPath: options.defaultCwdPath,
+    activePrefix: fallbackPrefix,
+    cwdPath: fallbackPrefix,
     files: [] as LocalWorkspaceFile[],
     entries: [] as WorkspaceItem[],
     filesystem: createWorkspaceFilesystem(),
     workspaceContext: {
-      cwd_path: options.defaultCwdPath,
+      path_prefix: fallbackPrefix,
       referenced_item_ids: [] as string[],
-    },
+    } satisfies WorkspaceContext,
   });
 
   useEffect(() => {
     setHydrated(false);
     if (!currentUserId) {
-      setCwdPath(options.defaultCwdPath);
+      setActivePrefix(fallbackPrefix);
       return;
     }
 
     let cancelled = false;
-    setFilesystem((current) => ensureDirectoryPath(current, options.defaultCwdPath).filesystem);
 
     void (async () => {
       const storedState = await loadWorkspaceSurfaceState(currentUserId, options.surfaceKey);
@@ -140,32 +144,23 @@ export function useWorkspaceSurface(options: {
         return;
       }
 
-      setCwdPath(storedState?.cwd_path ?? options.defaultCwdPath);
+      setActivePrefix(storedState?.active_prefix ?? fallbackPrefix);
       setHydrated(true);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, options.defaultCwdPath, options.surfaceKey, setFilesystem]);
+  }, [currentUserId, fallbackPrefix, options.surfaceKey]);
 
-  const resolvedFilesystem = useMemo(
-    () => ensureDirectoryPath(filesystem, options.defaultCwdPath).filesystem,
-    [filesystem, options.defaultCwdPath],
-  );
-  const safeCwdPath = useMemo(() => {
-    try {
-      return getDirectoryByPath(resolvedFilesystem, cwdPath).path;
-    } catch {
-      return options.defaultCwdPath;
-    }
-  }, [cwdPath, options.defaultCwdPath, resolvedFilesystem]);
+  const resolvedFilesystem = useMemo(() => filesystem, [filesystem]);
+  const safeActivePrefix = useMemo(() => normalizePathPrefix(activePrefix || fallbackPrefix), [activePrefix, fallbackPrefix]);
 
   useEffect(() => {
-    if (cwdPath !== safeCwdPath) {
-      setCwdPath(safeCwdPath);
+    if (activePrefix !== safeActivePrefix) {
+      setActivePrefix(safeActivePrefix);
     }
-  }, [cwdPath, safeCwdPath]);
+  }, [activePrefix, safeActivePrefix]);
 
   useEffect(() => {
     if (!currentUserId || !hydrated) {
@@ -174,32 +169,33 @@ export function useWorkspaceSurface(options: {
     const timeoutId = window.setTimeout(() => {
       void saveWorkspaceSurfaceState(currentUserId, {
         surface_key: options.surfaceKey,
-        cwd_path: safeCwdPath,
+        active_prefix: safeActivePrefix,
       });
     }, 120);
     return () => window.clearTimeout(timeoutId);
-  }, [currentUserId, hydrated, options.surfaceKey, safeCwdPath]);
+  }, [currentUserId, hydrated, options.surfaceKey, safeActivePrefix]);
 
-  const entries = useMemo(() => listDirectoryEntries(resolvedFilesystem, safeCwdPath), [resolvedFilesystem, safeCwdPath]);
-  const files = useMemo(() => listDirectoryFiles(resolvedFilesystem, safeCwdPath), [resolvedFilesystem, safeCwdPath]);
+  const entries = useMemo(() => listDirectoryEntries(resolvedFilesystem, safeActivePrefix), [resolvedFilesystem, safeActivePrefix]);
+  const files = useMemo(() => listDirectoryFiles(resolvedFilesystem, safeActivePrefix), [resolvedFilesystem, safeActivePrefix]);
   const breadcrumbs = useMemo<WorkspaceBreadcrumb[]>(
-    () => listBreadcrumbs(resolvedFilesystem, safeCwdPath),
-    [resolvedFilesystem, safeCwdPath],
+    () => listBreadcrumbs(resolvedFilesystem, safeActivePrefix),
+    [resolvedFilesystem, safeActivePrefix],
   );
   const workspaceContext = useMemo<WorkspaceContext>(
-    () => getWorkspaceContext(resolvedFilesystem, safeCwdPath),
-    [resolvedFilesystem, safeCwdPath],
+    () => getWorkspaceContext(resolvedFilesystem, safeActivePrefix),
+    [resolvedFilesystem, safeActivePrefix],
   );
 
   useEffect(() => {
     stateRef.current = {
-      cwdPath: safeCwdPath,
+      activePrefix: safeActivePrefix,
+      cwdPath: safeActivePrefix,
       files,
       entries,
       filesystem: resolvedFilesystem,
       workspaceContext,
     };
-  }, [entries, files, resolvedFilesystem, safeCwdPath, workspaceContext]);
+  }, [entries, files, resolvedFilesystem, safeActivePrefix, workspaceContext]);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -208,7 +204,7 @@ export function useWorkspaceSurface(options: {
     devLogger.workspaceEvent({
       surfaceKey: options.surfaceKey,
       event: "surface.state",
-      cwdPath: safeCwdPath,
+      pathPrefix: safeActivePrefix,
       entryCount: entries.length,
       fileCount: files.length,
       detail: {
@@ -216,26 +212,19 @@ export function useWorkspaceSurface(options: {
         surfaceHydrated: hydrated,
       },
     });
-  }, [currentUserId, entries.length, files.length, filesystemHydrated, hydrated, options.surfaceKey, safeCwdPath]);
+  }, [currentUserId, entries.length, files.length, filesystemHydrated, hydrated, options.surfaceKey, safeActivePrefix]);
 
-  const syncState = useCallback(
-    (nextFilesystem: WorkspaceFilesystem, nextCwdPath: string) => {
-      let resolvedCwdPath = nextCwdPath;
-      try {
-        resolvedCwdPath = getDirectoryByPath(nextFilesystem, nextCwdPath).path;
-      } catch {
-        resolvedCwdPath = options.defaultCwdPath;
-      }
-      stateRef.current = {
-        cwdPath: resolvedCwdPath,
-        files: listDirectoryFiles(nextFilesystem, resolvedCwdPath),
-        entries: listDirectoryEntries(nextFilesystem, resolvedCwdPath),
-        filesystem: nextFilesystem,
-        workspaceContext: getWorkspaceContext(nextFilesystem, resolvedCwdPath),
-      };
-    },
-    [options.defaultCwdPath],
-  );
+  const syncState = useCallback((nextFilesystem: WorkspaceFilesystem, nextPrefix: string) => {
+    const resolvedPrefix = normalizePathPrefix(nextPrefix || fallbackPrefix);
+    stateRef.current = {
+      activePrefix: resolvedPrefix,
+      cwdPath: resolvedPrefix,
+      files: listDirectoryFiles(nextFilesystem, resolvedPrefix),
+      entries: listDirectoryEntries(nextFilesystem, resolvedPrefix),
+      filesystem: nextFilesystem,
+      workspaceContext: getWorkspaceContext(nextFilesystem, resolvedPrefix),
+    };
+  }, [fallbackPrefix]);
 
   function summarizeFiles(nextFiles: LocalWorkspaceFile[]): Record<string, unknown> {
     return {
@@ -250,16 +239,16 @@ export function useWorkspaceSurface(options: {
         return;
       }
       const builtFiles = await Promise.all(Array.from(nextFiles).map((file) => buildWorkspaceFile(file)));
-      const activeCwdPath = stateRef.current.cwdPath;
+      const nextPrefix = stateRef.current.activePrefix;
       setFilesystem((currentFilesystem) => {
-        const nextFilesystem = addWorkspaceFiles(currentFilesystem, activeCwdPath, builtFiles, "uploaded");
-        syncState(nextFilesystem, activeCwdPath);
+        const nextFilesystem = addWorkspaceFiles(currentFilesystem, nextPrefix, builtFiles, "uploaded");
+        syncState(nextFilesystem, nextPrefix);
         return nextFilesystem;
       });
       devLogger.workspaceEvent({
         surfaceKey: options.surfaceKey,
         event: "files.uploaded",
-        cwdPath: activeCwdPath,
+        pathPrefix: nextPrefix,
         fileCount: builtFiles.length,
         detail: summarizeFiles(builtFiles),
       });
@@ -269,18 +258,18 @@ export function useWorkspaceSurface(options: {
 
   const appendFiles = useCallback(
     (nextFiles: LocalWorkspaceFile[], source: "derived" | "demo" = "derived") => {
-      const activeCwdPath = stateRef.current.cwdPath;
+      const nextPrefix = stateRef.current.activePrefix;
       let storedFiles: LocalWorkspaceFile[] = [];
       setFilesystem((currentFilesystem) => {
-        const result = addWorkspaceFilesWithResult(currentFilesystem, activeCwdPath, nextFiles, source);
+        const result = addWorkspaceFilesWithResult(currentFilesystem, nextPrefix, nextFiles, source);
         storedFiles = result.files;
-        syncState(result.filesystem, activeCwdPath);
+        syncState(result.filesystem, nextPrefix);
         return result.filesystem;
       });
       devLogger.workspaceEvent({
         surfaceKey: options.surfaceKey,
         event: source === "demo" ? "files.demo_appended" : "files.appended",
-        cwdPath: activeCwdPath,
+        pathPrefix: nextPrefix,
         fileCount: storedFiles.length,
         detail: summarizeFiles(storedFiles),
       });
@@ -291,7 +280,7 @@ export function useWorkspaceSurface(options: {
 
   const replaceFiles = useCallback(
     (nextFiles: LocalWorkspaceFile[], source: "demo" | "derived" = "demo") => {
-      const activeCwdPath = stateRef.current.cwdPath;
+      const nextPrefix = stateRef.current.activePrefix;
       const currentFiles = stateRef.current.files;
       const alreadySeeded =
         currentFiles.length === nextFiles.length &&
@@ -300,21 +289,21 @@ export function useWorkspaceSurface(options: {
         devLogger.workspaceEvent({
           surfaceKey: options.surfaceKey,
           event: source === "demo" ? "files.demo_replace_skipped" : "files.replace_skipped",
-          cwdPath: activeCwdPath,
+          pathPrefix: nextPrefix,
           fileCount: currentFiles.length,
           detail: summarizeFiles(currentFiles),
         });
         return;
       }
       setFilesystem((currentFilesystem) => {
-        const nextFilesystem = replaceDirectoryFiles(currentFilesystem, activeCwdPath, nextFiles, source);
-        syncState(nextFilesystem, activeCwdPath);
+        const nextFilesystem = replaceDirectoryFiles(currentFilesystem, nextPrefix, nextFiles, source);
+        syncState(nextFilesystem, nextPrefix);
         return nextFilesystem;
       });
       devLogger.workspaceEvent({
         surfaceKey: options.surfaceKey,
         event: source === "demo" ? "files.demo_replaced" : "files.replaced",
-        cwdPath: activeCwdPath,
+        pathPrefix: nextPrefix,
         fileCount: nextFiles.length,
         detail: summarizeFiles(nextFiles),
       });
@@ -324,16 +313,16 @@ export function useWorkspaceSurface(options: {
 
   const handleRemoveEntry = useCallback(
     (entryId: string) => {
-      const activeCwdPath = stateRef.current.cwdPath;
+      const nextPrefix = stateRef.current.activePrefix;
       setFilesystem((currentFilesystem) => {
         const nextFilesystem = removeWorkspaceEntry(currentFilesystem, entryId);
-        syncState(nextFilesystem, activeCwdPath);
+        syncState(nextFilesystem, nextPrefix);
         return nextFilesystem;
       });
       devLogger.workspaceEvent({
         surfaceKey: options.surfaceKey,
         event: "entry.removed",
-        cwdPath: activeCwdPath,
+        pathPrefix: nextPrefix,
         detail: { entryId },
       });
     },
@@ -342,61 +331,55 @@ export function useWorkspaceSurface(options: {
 
   const createDirectory = useCallback(
     (path: string) => {
-      const activeCwdPath = stateRef.current.cwdPath;
-      const resolvedPath = resolveWorkspacePath(path, activeCwdPath);
-      setFilesystem((currentFilesystem) => {
-        const result = ensureDirectoryPath(currentFilesystem, resolvedPath);
-        syncState(result.filesystem, activeCwdPath);
-        return result.filesystem;
-      });
+      const nextPrefix = normalizePathPrefix(resolveWorkspacePath(path, stateRef.current.activePrefix));
+      syncState(stateRef.current.filesystem, nextPrefix);
+      setActivePrefix(nextPrefix);
       devLogger.workspaceEvent({
         surfaceKey: options.surfaceKey,
-        event: "directory.created",
-        cwdPath: activeCwdPath,
-        detail: { path: resolvedPath },
+        event: "prefix.selected",
+        pathPrefix: nextPrefix,
+        detail: { path: nextPrefix },
       });
-      return resolvedPath;
-    },
-    [options.surfaceKey, setFilesystem, syncState],
-  );
-
-  const changeDirectory = useCallback(
-    (path: string) => {
-      const currentState = stateRef.current;
-      const resolvedPath = resolveWorkspacePath(path, currentState.cwdPath);
-      const directory = getDirectoryByPath(currentState.filesystem, resolvedPath);
-      syncState(currentState.filesystem, directory.path);
-      setCwdPath(directory.path);
-      devLogger.workspaceEvent({
-        surfaceKey: options.surfaceKey,
-        event: "directory.changed",
-        cwdPath: directory.path,
-        detail: { path: resolvedPath },
-      });
-      return directory.path;
+      return nextPrefix;
     },
     [options.surfaceKey, syncState],
   );
 
-  const setCwdPathDirect = useCallback(
-    (nextPath: string) => {
-      setCwdPath(resolveWorkspacePath(nextPath, safeCwdPath));
+  const changeDirectory = useCallback(
+    (path: string) => {
+      const nextPrefix = normalizePathPrefix(resolveWorkspacePath(path, stateRef.current.activePrefix));
+      syncState(stateRef.current.filesystem, nextPrefix);
+      setActivePrefix(nextPrefix);
+      devLogger.workspaceEvent({
+        surfaceKey: options.surfaceKey,
+        event: "prefix.changed",
+        pathPrefix: nextPrefix,
+        detail: { path: nextPrefix },
+      });
+      return nextPrefix;
     },
-    [safeCwdPath],
+    [options.surfaceKey, syncState],
+  );
+
+  const setActivePrefixDirect = useCallback(
+    (nextPrefix: string) => {
+      setActivePrefix(normalizePathPrefix(nextPrefix || fallbackPrefix));
+    },
+    [fallbackPrefix],
   );
 
   const updateFilesystem = useCallback(
     (updater: (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem) => {
-      const activeCwdPath = stateRef.current.cwdPath;
+      const nextPrefix = stateRef.current.activePrefix;
       setFilesystem((currentFilesystem) => {
         const nextFilesystem = updater(currentFilesystem);
-        syncState(nextFilesystem, activeCwdPath);
+        syncState(nextFilesystem, nextPrefix);
         return nextFilesystem;
       });
       devLogger.workspaceEvent({
         surfaceKey: options.surfaceKey,
         event: "filesystem.updated",
-        cwdPath: activeCwdPath,
+        pathPrefix: nextPrefix,
       });
     },
     [options.surfaceKey, setFilesystem, syncState],
@@ -405,7 +388,8 @@ export function useWorkspaceSurface(options: {
   const getState = useCallback(() => stateRef.current, []);
 
   return {
-    cwdPath: safeCwdPath,
+    activePrefix: safeActivePrefix,
+    cwdPath: safeActivePrefix,
     files,
     entries,
     filesystem: resolvedFilesystem,
@@ -420,7 +404,8 @@ export function useWorkspaceSurface(options: {
     handleRemoveEntry,
     createDirectory,
     changeDirectory,
-    setCwdPath: setCwdPathDirect,
+    setActivePrefix: setActivePrefixDirect,
+    setCwdPath: setActivePrefixDirect,
     updateFilesystem,
     getState,
   };

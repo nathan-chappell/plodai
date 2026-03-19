@@ -3,11 +3,14 @@ import { useEffect, useMemo } from "react";
 import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
+import {
+  bindClientToolsForBundle,
+  buildCapabilityBundleForRoot,
+  listCapabilityBundleToolNames,
+} from "./registry";
 import { pdfAgentCapability } from "./definitions";
 import { buildPdfAgentDemoScenario } from "./pdf-agent/demo";
-import { createPdfAgentClientTools } from "./pdf-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
-import { buildPdfAgentBundle } from "./manifests";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import { MetaText } from "../app/styles";
@@ -77,7 +80,9 @@ export function PdfAgentPage({
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
+    activePrefix,
     cwdPath,
+    filesystem,
     breadcrumbs,
     entries,
     files,
@@ -97,13 +102,14 @@ export function PdfAgentPage({
     handleRemoveEntry,
     createDirectory,
     changeDirectory,
+    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
     updateFilesystem,
     syncToolCatalog,
     appendReportEffects,
-    workspaceBootstrapMetadata,
+    workspaceStateMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: pdfAgentCapability.id,
     capabilityTitle: pdfAgentCapability.title,
@@ -112,12 +118,33 @@ export function PdfAgentPage({
     defaultTab: "agent",
     allowedTabs: ["agent", "demo"],
   });
-  const capabilityBundle = useMemo(() => buildPdfAgentBundle(), []);
-  const clientTools = useMemo(
-    () => createPdfAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
+  const capabilityWorkspace = useMemo(
+    () => ({
+      activePrefix,
+      cwdPath,
+      entries,
+      files,
+      workspaceContext,
+      setActivePrefix,
+      createDirectory,
+      changeDirectory,
+      updateFilesystem,
+      getState,
+    }),
+    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
   );
-  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
+  const capabilityBundle = useMemo(
+    () => buildCapabilityBundleForRoot(pdfAgentCapability.id, capabilityWorkspace),
+    [capabilityWorkspace],
+  );
+  const clientTools = useMemo(
+    () => bindClientToolsForBundle(capabilityBundle, capabilityWorkspace),
+    [capabilityBundle, capabilityWorkspace],
+  );
+  const clientToolCatalogKey = useMemo(
+    () => listCapabilityBundleToolNames(capabilityBundle).join("|"),
+    [capabilityBundle],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -138,7 +165,9 @@ export function PdfAgentPage({
       capabilityId: pdfAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      activePrefix,
       cwdPath,
+      filesystem,
       breadcrumbs,
       entries,
       accept: ".pdf",
@@ -147,7 +176,7 @@ export function PdfAgentPage({
       onChangeDirectory: changeDirectory,
       onRemoveEntry: handleRemoveEntry,
     });
-  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
@@ -189,7 +218,7 @@ export function PdfAgentPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>
-                CWD: {cwdPath}
+                Prefix: {activePrefix}
               </MetaText>
               <MetaText>
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
@@ -220,8 +249,7 @@ export function PdfAgentPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
-              workspaceContext={workspaceContext}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
@@ -270,7 +298,7 @@ export function PdfAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}

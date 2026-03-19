@@ -4,18 +4,51 @@ vi.mock("../chart", () => ({
   renderChartToDataUrl: vi.fn(async () => "data:image/png;base64,smoke-chart"),
 }));
 
-import { buildReportAgentBundle } from "../../capabilities/manifests";
+import { buildCapabilityBundleForRoot } from "../../capabilities/registry";
+import type { CapabilityWorkspaceContext } from "../../capabilities/types";
 import { createSmokeDatasets, runFrontendSmokeTest } from "../smoke";
+import { createWorkspaceFilesystem } from "../workspace-fs";
 
 describe("frontend smoke harness", () => {
   it("builds a serializable report bundle for the browser harness", () => {
-    const bundle = buildReportAgentBundle();
+    const workspace: CapabilityWorkspaceContext = {
+      activePrefix: "/report-agent/",
+      cwdPath: "/report-agent/",
+      files: [],
+      entries: [],
+      workspaceContext: {
+        path_prefix: "/report-agent/",
+        referenced_item_ids: [],
+      },
+      setActivePrefix: () => {},
+      createDirectory: (path: string) => path,
+      changeDirectory: (path: string) => path,
+      updateFilesystem: () => {},
+      getState: () => ({
+        activePrefix: "/report-agent/",
+        cwdPath: "/report-agent/",
+        files: [],
+        entries: [],
+        filesystem: createWorkspaceFilesystem(),
+        workspaceContext: {
+          path_prefix: "/report-agent/",
+          referenced_item_ids: [],
+        },
+      }),
+    };
+    const bundle = buildCapabilityBundleForRoot("report-agent", workspace);
 
     expect(() => JSON.stringify(bundle)).not.toThrow();
     const reportCapability = bundle.capabilities.find(
       (capability) => capability.capability_id === bundle.root_capability_id,
     );
-    expect(reportCapability?.client_tools.map((tool) => tool.name)).toContain("render_chart_from_file");
+    expect(reportCapability?.client_tools.map((tool) => tool.name)).toEqual([
+      "list_reports",
+      "get_report",
+      "create_report",
+      "append_report_item",
+      "remove_report_item",
+    ]);
   });
 
   it("creates bundled smoke datasets", () => {

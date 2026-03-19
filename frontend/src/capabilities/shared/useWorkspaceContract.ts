@@ -57,7 +57,7 @@ function migrateLegacySnapshot(
       activeWorkspaceTab: options.defaultTab,
       executionMode: options.defaultExecutionMode,
       toolNames: options.toolNames ?? [],
-      cwdPathBySurface: { [options.capabilityId]: workspace.cwdPath },
+      prefixBySurface: { [options.capabilityId]: workspace.activePrefix },
     });
 
     const legacy = options.legacySnapshot;
@@ -128,7 +128,7 @@ export function useWorkspaceContract(options: {
     options.defaultGoal,
     options.defaultTab,
     options.legacySnapshot,
-    options.workspace.cwdPath,
+    options.workspace.activePrefix,
     options.workspace.updateFilesystem,
     toolNamesKey,
   ]);

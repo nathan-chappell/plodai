@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let latestHandlers: Record<string, (...args: any[]) => void> | null = null;
 let latestChatKitOptions: Record<string, unknown> | null = null;
+let latestChatKitApi: Record<string, unknown> | null = null;
 let latestHostElement: HTMLElement | null = null;
 let latestScrollTarget: HTMLElement | null = null;
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -42,8 +43,8 @@ vi.mock("@openai/chatkit-react", async () => {
         }),
         [chatKitOptions, handlers],
       );
-      return ReactModule.useMemo(
-        () => ({
+      return ReactModule.useMemo(() => {
+        const api = {
           control,
           ref,
           fetchUpdates: vi.fn(async () => {}),
@@ -54,9 +55,10 @@ vi.mock("@openai/chatkit-react", async () => {
           setComposerValue: vi.fn(async () => {}),
           setThreadId: vi.fn(async () => {}),
           showHistory: vi.fn(async () => {}),
-        }),
-        [control],
-      );
+        };
+        latestChatKitApi = api;
+        return api;
+      }, [control]);
     },
     ChatKit: ReactModule.forwardRef(function MockChatKit(
       { control }: { control: { setInstance: (instance: HTMLElement | null) => void; handlers: Record<string, any> } },
@@ -85,6 +87,7 @@ vi.mock("@openai/chatkit-react", async () => {
         return () => {
           latestHandlers = null;
           latestChatKitOptions = null;
+          latestChatKitApi = null;
           latestHostElement = null;
           latestScrollTarget = null;
         };
@@ -174,9 +177,30 @@ const files: LocalWorkspaceFile[] = [
 ];
 
 const workspaceContext = {
-  cwd_path: "/report-agent",
+  path_prefix: "/report-agent/",
   referenced_item_ids: ["file_csv"],
 } as const;
+
+const workspaceState = {
+  version: "v1" as const,
+  context: workspaceContext,
+  files: [
+    {
+      id: "file_csv",
+      name: "sales.csv",
+      path: "/report-agent/sales.csv",
+      kind: "csv" as const,
+      extension: "csv",
+      row_count: 1,
+      columns: ["region"],
+      numeric_columns: [],
+      sample_rows: [{ region: "West" }],
+    },
+  ],
+  reports: [],
+  current_report_id: "report-1",
+  current_goal: null,
+};
 
 describe("ChatKitHarness auto-scroll", () => {
   let container: HTMLDivElement;
@@ -186,6 +210,7 @@ describe("ChatKitHarness auto-scroll", () => {
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     latestHandlers = null;
     latestChatKitOptions = null;
+    latestChatKitApi = null;
     latestHostElement = null;
     latestScrollTarget = null;
     container = document.createElement("div");
@@ -216,8 +241,9 @@ describe("ChatKitHarness auto-scroll", () => {
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
           files={files}
-          workspaceContext={workspaceContext}
+          workspaceState={workspaceState}
           executionMode={executionMode}
+          onExecutionModeChange={() => {}}
           investigationBrief=""
           clientTools={clientTools}
           onEffects={() => {}}
@@ -236,7 +262,7 @@ describe("ChatKitHarness auto-scroll", () => {
           capabilityBundle={capabilityBundle}
           enabled
           files={files}
-          workspaceContext={workspaceContext}
+          workspaceState={workspaceState}
           executionMode="interactive"
           onExecutionModeChange={() => {}}
           investigationBrief={investigationBrief}
@@ -314,13 +340,13 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(
       buildChatKitRequestMetadata({
         capabilityBundle,
-        workspaceContext,
+        workspaceState,
         threadOrigin: "interactive",
         executionMode: "batch",
       }),
     ).toMatchObject({
       capability_bundle: capabilityBundle,
-      workspace_context: workspaceContext,
+      workspace_state: workspaceState,
       execution_mode: "batch",
       origin: "interactive",
     });
@@ -360,5 +386,122 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(container.textContent).not.toContain("Run mode");
     expect(container.querySelector("[data-testid='chatkit-provide-feedback']")).not.toBeNull();
     expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
+  });
+
+  it("keeps the run mode toggle beside feedback and disables both while a run is active", async () => {
+    await renderPane("", {
+      feedbackButtonVariant: "icon",
+      showChatKitHeader: false,
+    });
+
+    await act(async () => {
+      latestHandlers?.onReady?.();
+      latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
+    });
+
+    const controls = container.querySelector("[data-testid='chatkit-execution-mode-controls']");
+    const feedbackButton = container.querySelector("[data-testid='chatkit-provide-feedback']") as HTMLButtonElement | null;
+    const interactiveModeButton = container.querySelector(
+      "[data-testid='chatkit-execution-mode-interactive']",
+    ) as HTMLButtonElement | null;
+
+    expect(controls).not.toBeNull();
+    expect(feedbackButton?.getAttribute("aria-label")).toBe("Open feedback flow");
+    expect(feedbackButton?.title).toBe("Open feedback flow");
+    expect(interactiveModeButton?.disabled).toBe(false);
+
+    await act(async () => {
+      latestHandlers?.onResponseStart?.();
+    });
+
+    expect(feedbackButton?.disabled).toBe(true);
+    expect(interactiveModeButton?.disabled).toBe(true);
+  });
+
+  it("asks for confirmation before starting the icon feedback flow", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    await renderPane("", {
+      feedbackButtonVariant: "icon",
+      showChatKitHeader: false,
+    });
+
+    await act(async () => {
+      latestHandlers?.onReady?.();
+      latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
+    });
+
+    const feedbackButton = container.querySelector("[data-testid='chatkit-provide-feedback']") as HTMLButtonElement | null;
+    expect(feedbackButton).not.toBeNull();
+    expect(container.textContent).toContain("Chat ready.");
+
+    await act(async () => {
+      feedbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Open the feedback flow for the latest assistant response in this thread?",
+    );
+    expect(container.textContent).toContain("Chat ready.");
+
+    confirmSpy.mockReturnValue(true);
+
+    await act(async () => {
+      feedbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Starting feedback flow.");
+  });
+
+  it("does not send custom metadata actions from client tools while ChatKit is responding", async () => {
+    const toolHandler = vi.fn(async () => ({
+      workspace_context: {
+        path_prefix: "/report-agent/reports/",
+        referenced_item_ids: ["file_csv"],
+      },
+    }));
+
+    await renderHarness([
+      {
+        type: "function",
+        name: "list_reports",
+        description: "List reports.",
+        strict: true,
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {},
+        },
+        handler: toolHandler,
+      },
+    ]);
+
+    await act(async () => {
+      latestHandlers?.onReady?.();
+      latestHandlers?.onThreadChange?.({ threadId: "thread_tool" });
+      latestHandlers?.onResponseStart?.();
+    });
+
+    const onClientTool = latestChatKitOptions?.onClientTool as
+      | ((input: { name: string; params: Record<string, unknown> }) => Promise<unknown>)
+      | undefined;
+    const sendCustomAction = latestChatKitApi?.sendCustomAction as ReturnType<typeof vi.fn> | undefined;
+
+    let result: unknown;
+    await act(async () => {
+      result = await onClientTool?.({
+        name: "list_reports",
+        params: {},
+      });
+    });
+
+    expect(toolHandler).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      workspace_context: {
+        path_prefix: "/report-agent/reports/",
+        referenced_item_ids: ["file_csv"],
+      },
+    });
+    expect(sendCustomAction).not.toHaveBeenCalled();
   });
 });

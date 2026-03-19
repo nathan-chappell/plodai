@@ -62,16 +62,6 @@ export const feedbackAgentCapability: CapabilityDefinition = {
   tabs: [{ id: "agent", label: "Agent" }],
 };
 
-export const workspaceAgentCapability: CapabilityDefinition = {
-  id: "workspace-agent",
-  path: "/capabilities/workspace-agent",
-  navLabel: "Workspace Agent",
-  title: "Workspace Agent",
-  eyebrow: "Capability",
-  description: "Shared workspace navigation over the client-side filesystem.",
-  tabs: [{ id: "agent", label: "Agent" }],
-};
-
 export const adminUsersCapability: CapabilityDefinition = {
   id: "admin-users",
   path: "/capabilities/admin-users",

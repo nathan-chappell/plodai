@@ -10,14 +10,17 @@ import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
 import { NarrativeCard } from "../components/NarrativeCard";
 import { WorkspaceArtifactInspector } from "../components/WorkspaceArtifactInspector";
+import {
+  bindClientToolsForBundle,
+  buildCapabilityBundleForRoot,
+  listCapabilityBundleToolNames,
+} from "./registry";
 import { reportAgentCapability } from "./definitions";
 import { buildReportAgentDemoScenario } from "./report-agent/demo";
-import { createReportAgentClientTools } from "./report-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
-import { buildReportAgentBundle } from "./manifests";
 import { useDemoScenario } from "./shared/useDemoScenario";
-import type { CapabilityClientTool, CapabilityWorkspaceContext, ShellWorkspaceRegistration } from "./types";
+import type { ShellWorkspaceRegistration } from "./types";
 import type { ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import {
@@ -101,10 +104,6 @@ function InvestigationBriefPanel({
       />
     </CapabilityPanel>
   );
-}
-
-export function createReportFoundryClientTools(workspace: CapabilityWorkspaceContext): CapabilityClientTool[] {
-  return createReportAgentClientTools(workspace);
 }
 
 function ReportSummaryArtifacts({ files }: { files: LocalWorkspaceFile[] }) {
@@ -201,7 +200,9 @@ export function ReportFoundryPage({
   }
 
   const {
+    activePrefix,
     cwdPath,
+    filesystem,
     breadcrumbs,
     entries,
     files,
@@ -221,6 +222,7 @@ export function ReportFoundryPage({
     setFiles,
     createDirectory,
     changeDirectory,
+    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
@@ -228,7 +230,7 @@ export function ReportFoundryPage({
     syncToolCatalog,
     appendReportEffects,
     reportIds,
-    workspaceBootstrapMetadata,
+    workspaceStateMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: reportAgentCapability.id,
     capabilityTitle: reportAgentCapability.title,
@@ -237,12 +239,33 @@ export function ReportFoundryPage({
     defaultTab: "report",
     allowedTabs: ["report", "demo"],
   });
-  const capabilityBundle = useMemo(() => buildReportAgentBundle(reportIds), [reportIds]);
-  const clientTools = useMemo<CapabilityClientTool[]>(
-    () => createReportFoundryClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
+  const capabilityWorkspace = useMemo(
+    () => ({
+      activePrefix,
+      cwdPath,
+      entries,
+      files,
+      workspaceContext,
+      setActivePrefix,
+      createDirectory,
+      changeDirectory,
+      updateFilesystem,
+      getState,
+    }),
+    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
   );
-  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
+  const capabilityBundle = useMemo(
+    () => buildCapabilityBundleForRoot(reportAgentCapability.id, capabilityWorkspace),
+    [capabilityWorkspace],
+  );
+  const clientTools = useMemo(
+    () => bindClientToolsForBundle(capabilityBundle, capabilityWorkspace),
+    [capabilityBundle, capabilityWorkspace],
+  );
+  const clientToolCatalogKey = useMemo(
+    () => listCapabilityBundleToolNames(capabilityBundle).join("|"),
+    [capabilityBundle],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -264,7 +287,9 @@ export function ReportFoundryPage({
       capabilityId: reportAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      activePrefix,
       cwdPath,
+      filesystem,
       breadcrumbs,
       entries,
       accept: ".csv,.json,.pdf",
@@ -273,7 +298,7 @@ export function ReportFoundryPage({
       onChangeDirectory: changeDirectory,
       onRemoveEntry: handleRemoveEntry,
     });
-  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
@@ -315,7 +340,7 @@ export function ReportFoundryPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}</MetaText>
-              <MetaText>CWD: {cwdPath}</MetaText>
+              <MetaText>Prefix: {activePrefix}</MetaText>
               <MetaText>
                 Current goal: {investigationBrief.trim() || "No goal set yet."}
               </MetaText>
@@ -355,8 +380,7 @@ export function ReportFoundryPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
-              workspaceContext={workspaceContext}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
@@ -450,7 +474,7 @@ export function ReportFoundryPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}

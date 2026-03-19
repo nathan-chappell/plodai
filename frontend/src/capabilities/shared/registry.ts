@@ -1,8 +1,14 @@
-import type { CapabilityAgentSpec, CapabilityBundle, CapabilityModule } from "../types";
+import type {
+  CapabilityAgentSpec,
+  CapabilityBundle,
+  CapabilityModule,
+  CapabilityWorkspaceContext,
+} from "../types";
 
 export function buildCapabilityBundle(
   rootCapabilityId: string,
   capabilityModules: CapabilityModule[],
+  workspace: CapabilityWorkspaceContext,
 ): CapabilityBundle {
   const moduleByCapabilityId = new Map(
     capabilityModules.map((capabilityModule) => [
@@ -22,7 +28,7 @@ export function buildCapabilityBundle(
     if (!capabilityModule) {
       throw new Error(`Unknown capability dependency: ${capabilityId}`);
     }
-    const capabilityAgentSpec = capabilityModule.buildAgentSpec();
+    const capabilityAgentSpec = capabilityModule.buildAgentSpec(workspace);
     orderedCapabilitySpecs.push(capabilityAgentSpec);
     for (const handoffTarget of capabilityAgentSpec.handoff_targets) {
       visit(handoffTarget.capability_id);

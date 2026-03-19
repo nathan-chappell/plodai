@@ -1,67 +1,93 @@
-import { createChartAgentClientTools } from "../chart-agent/tools";
-import { createCsvAgentClientTools } from "../csv-agent/tools";
-import { createPdfAgentClientTools } from "../pdf-agent/tools";
+import {
+  appendReportItemToolSchema,
+  createReportToolSchema,
+  getReportToolSchema,
+  listReportsToolSchema,
+  removeReportItemToolSchema,
+} from "../../lib/tool-schemas";
+import { readWorkspaceReportIndex } from "../../lib/workspace-contract";
+import type { JsonSchema } from "../../types/json-schema";
+import {
+  buildToolDefinition,
+  cloneSchema,
+  createBrokeredCapabilityTool,
+  isObjectSchema,
+} from "../shared/tool-helpers";
 import type {
   CapabilityClientTool,
   CapabilityWorkspaceContext,
   FunctionToolDefinition,
 } from "../types";
-import { buildChartAgentClientToolCatalog } from "../chart-agent/tools";
-import { buildCsvAgentClientToolCatalog } from "../csv-agent/tools";
-import { buildPdfAgentClientToolCatalog } from "../pdf-agent/tools";
-import {
-  buildAppendReportSectionToolDefinition,
-  buildGetReportToolDefinition,
-  createAppendReportSectionTool,
-  createGetReportTool,
-  createListReportsTool,
-  listReportsToolDefinition,
-} from "../shared/client-tools";
+
+function reportIdsForWorkspace(workspace: CapabilityWorkspaceContext): string[] {
+  const reportIndex = readWorkspaceReportIndex(workspace.getState().filesystem);
+  return reportIndex?.report_ids ?? [];
+}
+
+function withReportIdEnum(
+  schema: JsonSchema,
+  workspace: CapabilityWorkspaceContext,
+): JsonSchema {
+  const reportIds = reportIdsForWorkspace(workspace);
+  const cloned = cloneSchema(schema);
+  if (!reportIds.length || !isObjectSchema(cloned)) {
+    return cloned;
+  }
+  cloned.properties = {
+    ...cloned.properties,
+    report_id: {
+      ...(cloned.properties.report_id as JsonSchema),
+      enum: reportIds,
+    },
+  };
+  return cloned;
+}
 
 export function buildReportAgentClientToolCatalog(
-  reportIds: readonly string[] = ["report-1"],
+  workspace: CapabilityWorkspaceContext,
 ): FunctionToolDefinition[] {
-  return buildUniqueDefinitions([
-    listReportsToolDefinition,
-    buildGetReportToolDefinition(reportIds),
-    buildAppendReportSectionToolDefinition(reportIds),
-    ...buildCsvAgentClientToolCatalog(),
-    ...buildChartAgentClientToolCatalog(),
-    ...buildPdfAgentClientToolCatalog(),
-  ]);
+  return [
+    buildToolDefinition(
+      "list_reports",
+      "List structured reports stored in the shared workspace.",
+      listReportsToolSchema,
+    ),
+    buildToolDefinition(
+      "get_report",
+      "Read a structured report document from the shared workspace.",
+      withReportIdEnum(getReportToolSchema, workspace),
+    ),
+    buildToolDefinition(
+      "create_report",
+      "Create a new structured report in the shared workspace and make it available for follow-on updates.",
+      createReportToolSchema,
+    ),
+    buildToolDefinition(
+      "append_report_item",
+      "Append a narrative report item to a structured report in the shared workspace.",
+      withReportIdEnum(appendReportItemToolSchema, workspace),
+    ),
+    buildToolDefinition(
+      "remove_report_item",
+      "Remove a report item from a structured report in the shared workspace.",
+      withReportIdEnum(removeReportItemToolSchema, workspace),
+    ),
+  ];
 }
 
 export function createReportAgentClientTools(
   workspace: CapabilityWorkspaceContext,
 ): CapabilityClientTool[] {
-  return buildUniqueTools([
-    createListReportsTool(workspace),
-    createGetReportTool(workspace),
-    createAppendReportSectionTool(workspace),
-    ...createCsvAgentClientTools(workspace),
-    ...createChartAgentClientTools(workspace),
-    ...createPdfAgentClientTools(workspace),
-  ]);
-}
-
-function buildUniqueTools(tools: CapabilityClientTool[]): CapabilityClientTool[] {
-  const seen = new Set<string>();
-  return tools.filter((tool) => {
-    if (seen.has(tool.name)) {
-      return false;
-    }
-    seen.add(tool.name);
-    return true;
-  });
-}
-
-function buildUniqueDefinitions(tools: FunctionToolDefinition[]): FunctionToolDefinition[] {
-  const seen = new Set<string>();
-  return tools.filter((tool) => {
-    if (seen.has(tool.name)) {
-      return false;
-    }
-    seen.add(tool.name);
-    return true;
-  });
+  return buildReportAgentClientToolCatalog(workspace).map((definition) =>
+    createBrokeredCapabilityTool(
+      workspace,
+      definition,
+      definition.name as
+        | "list_reports"
+        | "get_report"
+        | "create_report"
+        | "append_report_item"
+        | "remove_report_item",
+    ),
+  );
 }

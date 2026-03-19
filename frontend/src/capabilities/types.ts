@@ -73,7 +73,9 @@ export type ShellWorkspaceRegistration = {
   capabilityId: string;
   title: string;
   description: string;
+  activePrefix: string;
   cwdPath: string;
+  filesystem: WorkspaceFilesystem;
   breadcrumbs: WorkspaceBreadcrumb[];
   entries: WorkspaceItem[];
   accept?: string;
@@ -84,16 +86,19 @@ export type ShellWorkspaceRegistration = {
 };
 
 export type CapabilityWorkspaceContext = {
+  activePrefix: string;
   cwdPath: string;
   files: LocalWorkspaceFile[];
   entries: WorkspaceItem[];
   workspaceContext: WorkspaceContext;
+  setActivePrefix: (prefix: string) => void;
   createDirectory: (path: string) => string;
   changeDirectory: (path: string) => string;
   updateFilesystem: (
     updater: (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem,
   ) => void;
   getState: () => {
+    activePrefix: string;
     cwdPath: string;
     files: LocalWorkspaceFile[];
     entries: WorkspaceItem[];
@@ -116,7 +121,9 @@ export type CapabilityDemoScenario = {
 
 export type CapabilityModule = {
   definition: CapabilityDefinition;
-  buildAgentSpec: () => CapabilityAgentSpec;
+  buildAgentSpec: (
+    workspace: CapabilityWorkspaceContext,
+  ) => CapabilityAgentSpec;
   buildDemoScenario: () => CapabilityDemoScenario | Promise<CapabilityDemoScenario>;
   bindClientTools: (
     workspace: CapabilityWorkspaceContext,

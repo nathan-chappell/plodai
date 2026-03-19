@@ -40,7 +40,7 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
 
   const listResult = await executeSmokeTool(
     {
-      name: "list_attached_csv_files",
+      name: "list_csv_files",
       arguments: { includeSamples: true },
     },
     datasets,

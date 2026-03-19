@@ -1,13 +1,15 @@
+import secrets
+import logging
 from dataclasses import dataclass
 from typing import Mapping
 
-from clerk_backend_api.models.user import User as ClerkUser
 from clerk_backend_api.sdk import Clerk
 from clerk_backend_api.security.types import AuthenticateRequestOptions
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from backend.app.core.config import get_settings
+from backend.app.core.config import Settings, get_settings
+from backend.app.core.logging import get_logger, log_event
 from backend.app.db.session import get_db
 from backend.app.models.credit import UserCreditBalance
 from backend.app.models.types import UserRole
@@ -15,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
+logger = get_logger("auth")
+DEFAULT_DEV_AUTH_BEARER_TOKEN = "banana-for-scale"
 
 
 @dataclass
@@ -31,11 +35,47 @@ class ClerkRequest:
     headers: Mapping[str, str]
 
 
+def _resolve_dev_authenticated_user(
+    credentials: HTTPAuthorizationCredentials | None,
+    *,
+    settings: Settings | None = None,
+) -> AuthenticatedUser | None:
+    resolved_settings = settings if settings is not None else get_settings()
+    if not resolved_settings.ENABLE_DEV_AUTH_BEARER:
+        return None
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        return None
+    if not secrets.compare_digest(credentials.credentials, DEFAULT_DEV_AUTH_BEARER_TOKEN):
+        return None
+
+    user = AuthenticatedUser(
+        id="local-dev-admin",
+        email="dev@local.test",
+        full_name="Local Dev Admin",
+        role="admin",
+        is_active=True,
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        "auth.dev_bearer_authenticated",
+        user_id=user.id,
+        role=user.role,
+    )
+    return user
+
+
 async def _require_clerk_user(
     credentials: HTTPAuthorizationCredentials | None,
+    *,
+    settings: Settings | None = None,
 ) -> AuthenticatedUser:
-    settings = get_settings()
-    if not settings.CLERK_SECRET_KEY:
+    resolved_settings = settings if settings is not None else get_settings()
+    dev_user = _resolve_dev_authenticated_user(credentials, settings=resolved_settings)
+    if dev_user is not None:
+        return dev_user
+
+    if not resolved_settings.CLERK_SECRET_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Clerk auth is not configured on the server. Set CLERK_SECRET_KEY in the backend environment and restart the API.",
@@ -47,14 +87,14 @@ async def _require_clerk_user(
             detail="Missing Clerk bearer token.",
         )
 
-    client = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+    client = Clerk(bearer_auth=resolved_settings.CLERK_SECRET_KEY)
     request_state = await client.authenticate_request_async(
         ClerkRequest(headers={"Authorization": f"{credentials.scheme} {credentials.credentials}"}),
         AuthenticateRequestOptions(
-            secret_key=settings.CLERK_SECRET_KEY,
-            jwt_key=settings.CLERK_JWT_KEY,
-            authorized_parties=settings.clerk_authorized_parties or None,
-            clock_skew_in_ms=settings.clerk_clock_skew_ms,
+            secret_key=resolved_settings.CLERK_SECRET_KEY,
+            jwt_key=resolved_settings.CLERK_JWT_KEY,
+            authorized_parties=resolved_settings.clerk_authorized_parties or None,
+            clock_skew_in_ms=resolved_settings.clerk_clock_skew_ms,
         ),
     )
     if not request_state.is_signed_in or request_state.payload is None:

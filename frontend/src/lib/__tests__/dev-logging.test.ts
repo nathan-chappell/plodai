@@ -36,7 +36,8 @@ describe("dev logger", () => {
     expect(
       _summarizeClientToolArgsForLog({
         file_id: "file_123",
-        filename: "q1-sales.csv",
+        path: "/artifacts/data/q1-sales.csv",
+        includeSamples: true,
         query_plan: {
           dataset_id: "sales_csv",
           group_by: ["region", "month"],
@@ -48,9 +49,10 @@ describe("dev logger", () => {
         },
       }),
     ).toEqual({
-      argumentKeys: ["chart_plan", "file_id", "filename", "query_plan"],
+      argumentKeys: ["chart_plan", "file_id", "includeSamples", "path", "query_plan"],
       fileId: "file_123",
-      hasFilename: true,
+      hasPath: true,
+      includeSamples: true,
       queryPlan: {
         datasetId: "sales_csv",
         groupByCount: 2,

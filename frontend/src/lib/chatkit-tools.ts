@@ -1,13 +1,17 @@
 import type {
-  ChangeWorkspaceDirectoryToolArgs,
   ClientEffect,
   ClientToolCall,
   ClientToolName,
-  CreateWorkspaceDirectoryToolArgs,
+  CreateReportToolArgs,
+  CreateCsvFileToolArgs,
   CreateJsonFileToolArgs,
   DataRow,
-  GetWorkspaceContextToolArgs,
+  GetReportToolArgs,
+  AppendReportItemToolArgs,
   ListLoadedDatasetsToolArgs,
+  ListReportsToolArgs,
+  ListWorkspaceFilesToolArgs,
+  RemoveReportItemToolArgs,
   RenderChartFromFileToolArgs,
   RunLocalQueryToolArgs,
 } from "../types/analysis";
@@ -15,8 +19,10 @@ import type { LocalChartableFile, LocalDataset } from "../types/report";
 
 import { executeQueryPlan } from "./analysis";
 import { renderChartToDataUrl } from "./chart";
+import { parseCsvText } from "./csv";
 import { parseJsonText } from "./json";
-import { rowsToJson } from "./workspace-files";
+import { normalizeAbsolutePath, normalizePathPrefix, pathStartsWithPrefix, resolveWorkspacePath } from "./workspace-fs";
+import { rowsToCsv, rowsToJson } from "./workspace-files";
 
 export type LoadedDataset = LocalDataset;
 
@@ -25,138 +31,100 @@ export type ClientToolExecutionResult = {
   effects: ClientEffect[];
 };
 
+function filePathForDataset(dataset: LoadedDataset): string {
+  return normalizeAbsolutePath(`/${dataset.name}`);
+}
+
+function summarizeDataset(dataset: LoadedDataset, includeSamples: boolean): Record<string, unknown> {
+  return {
+    id: dataset.id,
+    name: dataset.name,
+    path: filePathForDataset(dataset),
+    kind: "csv",
+    extension: "csv",
+    row_count: dataset.row_count,
+    columns: dataset.columns,
+    numeric_columns: dataset.numeric_columns,
+    sample_rows: includeSamples ? dataset.sample_rows : [],
+  };
+}
+
+function listDatasetsByPrefix(
+  datasets: LoadedDataset[],
+  prefix: string | undefined,
+): LoadedDataset[] {
+  const normalizedPrefix = prefix?.trim() ? normalizePathPrefix(prefix) : "/";
+  return datasets.filter((dataset) => pathStartsWithPrefix(filePathForDataset(dataset), normalizedPrefix));
+}
+
+function buildWorkspaceContextPayload(
+  datasets: LoadedDataset[],
+  prefix = "/",
+): { path_prefix: string; referenced_item_ids: string[] } {
+  const normalizedPrefix = normalizePathPrefix(prefix);
+  return {
+    path_prefix: normalizedPrefix,
+    referenced_item_ids: listDatasetsByPrefix(datasets, normalizedPrefix).map((dataset) => dataset.id),
+  };
+}
+
+function ensureCsvPath(path: string): string {
+  const trimmed = path.trim() || "derived.csv";
+  const resolvedPath = resolveWorkspacePath(trimmed, "/");
+  return resolvedPath.toLowerCase().endsWith(".csv") ? resolvedPath : `${resolvedPath}.csv`;
+}
+
+function ensureJsonPath(path: string): string {
+  const trimmed = path.trim() || "derived.json";
+  const resolvedPath = resolveWorkspacePath(trimmed, "/");
+  return resolvedPath.toLowerCase().endsWith(".json") ? resolvedPath : `${resolvedPath}.json`;
+}
+
 export async function executeClientTool<Name extends ClientToolName>(
   toolCall: ClientToolCall<Name>,
   datasets: LoadedDataset[],
 ): Promise<ClientToolExecutionResult> {
   switch (toolCall.name) {
-    case "get_workspace_context": {
-      void (toolCall.arguments as GetWorkspaceContextToolArgs);
-      return {
-        payload: {
-          cwd_path: "/",
-          workspace_context: {
-            cwd_path: "/",
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
-        },
-        effects: [],
-      };
-    }
-    case "create_workspace_directory": {
-      const args = toolCall.arguments as CreateWorkspaceDirectoryToolArgs;
-      return {
-        payload: {
-          cwd_path: "/",
-          created_directory: { path: args.path },
-          workspace_context: {
-            cwd_path: "/",
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
-        },
-        effects: [],
-      };
-    }
-    case "change_workspace_directory": {
-      const args = toolCall.arguments as ChangeWorkspaceDirectoryToolArgs;
-      return {
-        payload: {
-          cwd_path: args.path,
-          changed_directory: { path: args.path },
-          workspace_context: {
-            cwd_path: args.path,
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
-        },
-        effects: [],
-      };
-    }
-    case "list_workspace_files": {
+    case "list_csv_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
+      const csvFiles = listDatasetsByPrefix(datasets, normalizedPrefix).map((dataset) =>
+        summarizeDataset(dataset, args.includeSamples ?? true),
+      );
       return {
         payload: {
-          cwd_path: "/",
-          workspace_context: {
-            cwd_path: "/",
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
-          files: datasets.map((dataset) => ({
-            id: dataset.id,
-            name: dataset.name,
-            path: `/${dataset.name}`,
-            kind: "csv",
-            extension: "csv",
-            row_count: dataset.row_count,
-            columns: dataset.columns,
-            numeric_columns: dataset.numeric_columns,
-            sample_rows: args.includeSamples ? dataset.sample_rows : [],
-          })),
-          csv_files: datasets.map((dataset) => ({
-            id: dataset.id,
-            name: dataset.name,
-            path: `/${dataset.name}`,
-            row_count: dataset.row_count,
-            columns: dataset.columns,
-            numeric_columns: dataset.numeric_columns,
-            sample_rows: args.includeSamples ? dataset.sample_rows : [],
-          })),
-          chartable_files: datasets.map((dataset) => ({
-            id: dataset.id,
-            name: dataset.name,
-            path: `/${dataset.name}`,
-            kind: "csv",
-            extension: "csv",
-            row_count: dataset.row_count,
-            columns: dataset.columns,
-            numeric_columns: dataset.numeric_columns,
-            sample_rows: args.includeSamples ? dataset.sample_rows : [],
-          })),
-        },
-        effects: [],
-      };
-    }
-    case "list_attached_csv_files": {
-      const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
-      return {
-        payload: {
-          cwd_path: "/",
-          workspace_context: {
-            cwd_path: "/",
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
-          csv_files: datasets.map((dataset) => ({
-            id: dataset.id,
-            name: dataset.name,
-            path: `/${dataset.name}`,
-            row_count: dataset.row_count,
-            columns: dataset.columns,
-            numeric_columns: dataset.numeric_columns,
-            sample_rows: args.includeSamples ? dataset.sample_rows : [],
-          })),
+          path_prefix: normalizedPrefix,
+          workspace_context: buildWorkspaceContextPayload(datasets, normalizedPrefix),
+          csv_files: csvFiles,
+          files: csvFiles,
         },
         effects: [],
       };
     }
     case "list_chartable_files": {
-      const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
+      const args = toolCall.arguments as ListWorkspaceFilesToolArgs;
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
+      const chartableFiles = listDatasetsByPrefix(datasets, normalizedPrefix).map((dataset) =>
+        summarizeDataset(dataset, args.includeSamples ?? true),
+      );
       return {
         payload: {
-          cwd_path: "/",
-          workspace_context: {
-            cwd_path: "/",
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
-          chartable_files: datasets.map((dataset) => ({
-            id: dataset.id,
-            name: dataset.name,
-            path: `/${dataset.name}`,
-            kind: "csv",
-            extension: "csv",
-            row_count: dataset.row_count,
-            columns: dataset.columns,
-            numeric_columns: dataset.numeric_columns,
-            sample_rows: args.includeSamples ? dataset.sample_rows : [],
-          })),
+          path_prefix: normalizedPrefix,
+          workspace_context: buildWorkspaceContextPayload(datasets, normalizedPrefix),
+          chartable_files: chartableFiles,
+          files: chartableFiles,
+        },
+        effects: [],
+      };
+    }
+    case "list_pdf_files": {
+      void (toolCall.arguments as ListWorkspaceFilesToolArgs);
+      return {
+        payload: {
+          path_prefix: "/",
+          workspace_context: buildWorkspaceContextPayload(datasets, "/"),
+          pdf_files: [],
+          files: [],
         },
         effects: [],
       };
@@ -164,7 +132,7 @@ export async function executeClientTool<Name extends ClientToolName>(
     case "run_aggregate_query": {
       const args = toolCall.arguments as RunLocalQueryToolArgs;
       const dataset = findDataset(datasets, args.query_plan.dataset_id);
-      const result = executeQueryPlan(dataset.rows, args.query_plan);
+      const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
       return {
         payload: {
           rows: result.rows,
@@ -173,23 +141,48 @@ export async function executeClientTool<Name extends ClientToolName>(
         effects: [],
       };
     }
+    case "create_csv_file": {
+      const args = toolCall.arguments as CreateCsvFileToolArgs;
+      const dataset = findDataset(datasets, args.query_plan.dataset_id);
+      const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
+      const csvText = rowsToCsv(result.rows);
+      const preview = parseCsvText(csvText);
+      const targetPath = ensureCsvPath(args.path);
+      return {
+        payload: {
+          path_prefix: "/",
+          workspace_context: buildWorkspaceContextPayload(datasets, "/"),
+          created_file: {
+            id: "smoke-csv",
+            name: targetPath.split("/").filter(Boolean).at(-1) ?? "derived.csv",
+            path: targetPath,
+            kind: "csv",
+            extension: "csv",
+            row_count: preview.rowCount,
+            columns: preview.columns,
+            numeric_columns: preview.numericColumns,
+            sample_rows: preview.sampleRows,
+          },
+          row_count: result.rows.length,
+        },
+        effects: [],
+      };
+    }
     case "create_json_file": {
       const args = toolCall.arguments as CreateJsonFileToolArgs;
       const dataset = findDataset(datasets, args.query_plan.dataset_id);
-      const result = executeQueryPlan(dataset.rows, args.query_plan);
+      const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
       const jsonText = rowsToJson(result.rows);
       const preview = parseJsonText(jsonText);
+      const targetPath = ensureJsonPath(args.path);
       return {
         payload: {
-          cwd_path: "/",
-          workspace_context: {
-            cwd_path: "/",
-            referenced_item_ids: datasets.map((dataset) => dataset.id),
-          },
+          path_prefix: "/",
+          workspace_context: buildWorkspaceContextPayload(datasets, "/"),
           created_file: {
             id: "smoke-json",
-            name: args.filename,
-            path: `/${args.filename}`,
+            name: targetPath.split("/").filter(Boolean).at(-1) ?? "derived.json",
+            path: targetPath,
             kind: "json",
             extension: "json",
             row_count: preview.rowCount,
@@ -230,6 +223,71 @@ export async function executeClientTool<Name extends ClientToolName>(
             rows: dataset.rows,
           },
         ],
+      };
+    }
+    case "list_reports": {
+      void (toolCall.arguments as ListReportsToolArgs);
+      return {
+        payload: {
+          reports: [],
+          current_report_id: null,
+        },
+        effects: [],
+      };
+    }
+    case "get_report": {
+      const args = toolCall.arguments as GetReportToolArgs;
+      return {
+        payload: {
+          report: {
+            version: "v1",
+            report_id: args.report_id,
+            title: args.report_id,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            items: [],
+          },
+        },
+        effects: [],
+      };
+    }
+    case "create_report": {
+      const args = toolCall.arguments as CreateReportToolArgs;
+      return {
+        payload: {
+          report: {
+            version: "v1",
+            report_id: args.report_id ?? "smoke-report",
+            title: args.title,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            items: [],
+          },
+          reports: [],
+          current_report_id: args.report_id ?? "smoke-report",
+        },
+        effects: [],
+      };
+    }
+    case "append_report_item": {
+      const args = toolCall.arguments as AppendReportItemToolArgs;
+      return {
+        payload: {
+          report_id: args.report_id,
+          item: args.item,
+        },
+        effects: [],
+      };
+    }
+    case "remove_report_item": {
+      const args = toolCall.arguments as RemoveReportItemToolArgs;
+      return {
+        payload: {
+          report_id: args.report_id,
+          item_id: args.item_id,
+          removed: true,
+        },
+        effects: [],
       };
     }
     default:

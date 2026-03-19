@@ -22,6 +22,7 @@ import {
   ChatKitPaneModeButton,
   ChatKitPaneModeRow,
   ChatKitPanePill,
+  ChatKitPaneStatusActions,
   ChatKitPaneStatusRow,
   ChatKitPaneStatusText,
   ChatKitPaneSurface,
@@ -34,7 +35,7 @@ import type {
   ClientToolCall,
   ClientToolName,
   ExecutionMode,
-  WorkspaceThreadContext,
+  WorkspaceState,
 } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 
@@ -87,13 +88,14 @@ function scrollElementToBottom(element: HTMLElement): void {
 
 function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
   switch (tool) {
-    case "get_workspace_context":
-    case "create_workspace_directory":
-    case "change_workspace_directory":
-    case "list_workspace_files":
-    case "list_attached_csv_files":
+    case "list_csv_files":
     case "list_chartable_files":
     case "inspect_chartable_file_schema":
+    case "list_reports":
+    case "get_report":
+    case "create_report":
+    case "append_report_item":
+    case "remove_report_item":
       return "cube";
     case "run_aggregate_query":
     case "create_csv_file":
@@ -101,6 +103,7 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
       return "analytics";
     case "render_chart_from_file":
       return "chart";
+    case "list_pdf_files":
     case "inspect_pdf_file":
     case "get_pdf_page_range":
     case "smart_split_pdf":
@@ -142,8 +145,7 @@ const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
 
 export function buildChatKitRequestMetadata(options: {
   capabilityBundle: CapabilityBundle;
-  workspaceContext?: WorkspaceThreadContext;
-  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
+  workspaceState?: WorkspaceState;
   threadOrigin: FeedbackOrigin;
   executionMode: ExecutionMode;
 }): AppThreadMetadata {
@@ -153,9 +155,7 @@ export function buildChatKitRequestMetadata(options: {
         ? window.location.pathname
         : options.capabilityBundle.root_capability_id,
     capability_bundle: options.capabilityBundle,
-    workspace_context: options.workspaceContext,
-    workspace_bootstrap: options.workspaceBootstrap,
-    workspace_contract_version: options.workspaceBootstrap ? "v1" : undefined,
+    workspace_state: options.workspaceState,
     execution_mode: options.executionMode,
     origin: options.threadOrigin,
   };
@@ -176,12 +176,16 @@ function FeedbackIcon() {
   );
 }
 
+const FEEDBACK_ACTION_LABEL = "Open feedback flow";
+const FEEDBACK_CONFIRMATION_MESSAGE =
+  "Open the feedback flow for the latest assistant response in this thread?";
+
 export function ChatKitHarness({
   capabilityBundle,
   files,
-  workspaceContext,
-  workspaceBootstrap,
+  workspaceState,
   executionMode,
+  onExecutionModeChange,
   investigationBrief,
   onEffects,
   onFilesAdded,
@@ -195,14 +199,15 @@ export function ChatKitHarness({
   colorScheme = "dark",
   showDictation = true,
   surfaceMinHeight,
+  showExecutionModeControls = true,
   feedbackButtonVariant = "button",
   showChatKitHeader = true,
 }: {
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
-  workspaceContext?: WorkspaceThreadContext;
-  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
+  workspaceState?: WorkspaceState;
   executionMode: ExecutionMode;
+  onExecutionModeChange: (mode: ExecutionMode) => void;
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
@@ -216,6 +221,7 @@ export function ChatKitHarness({
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
   surfaceMinHeight?: number;
+  showExecutionModeControls?: boolean;
   feedbackButtonVariant?: "button" | "icon";
   showChatKitHeader?: boolean;
 }) {
@@ -283,8 +289,7 @@ export function ChatKitHarness({
     setChatKitMetadataGetter(() =>
       buildChatKitRequestMetadata({
         capabilityBundle,
-        workspaceContext,
-        workspaceBootstrap,
+        workspaceState,
         threadOrigin,
         executionMode,
       }),
@@ -292,7 +297,7 @@ export function ChatKitHarness({
     return () => {
       setChatKitMetadataGetter(null);
     };
-  }, [capabilityBundle, executionMode, threadOrigin, workspaceBootstrap, workspaceContext]);
+  }, [capabilityBundle, executionMode, threadOrigin, workspaceState]);
 
   useEffect(() => {
     const previousMode = lastExecutionModeRef.current;
@@ -378,6 +383,9 @@ export function ChatKitHarness({
         colorScheme,
         radius: "round",
         density: "compact",
+        typography: {
+          baseSize: 14,
+        },
       },
       history: {
         enabled: true,
@@ -523,14 +531,6 @@ export function ChatKitHarness({
               return nextFiles;
             },
           });
-          const nextWorkspaceContext = extractWorkspaceContext(result);
-          if (nextWorkspaceContext && threadIdRef.current) {
-            await chatKitRef.current?.sendCustomAction(
-              buildThreadMetadataUpdateAction({
-                workspace_context: nextWorkspaceContext,
-              }),
-            );
-          }
           devLogger.clientToolSuccess({
             capabilityId: capabilityBundle.root_capability_id,
             fileCount: files.length,
@@ -625,8 +625,15 @@ export function ChatKitHarness({
   }
 
   async function handleProvideFeedback() {
-    if (!threadIdRef.current) {
+    const busy = runningRef.current || Boolean(activeClientToolRef.current);
+    if (!threadIdRef.current || busy) {
       return;
+    }
+    if (feedbackButtonVariant === "icon" && typeof window !== "undefined") {
+      const confirmed = window.confirm(FEEDBACK_CONFIRMATION_MESSAGE);
+      if (!confirmed) {
+        return;
+      }
     }
     clearFinishStatusTimeout();
     setStatus("Starting feedback flow.");
@@ -639,6 +646,12 @@ export function ChatKitHarness({
   const isBusy = running || activeClientToolName !== null;
   const showFeedbackIcon = feedbackButtonVariant === "icon" && Boolean(threadId);
   const showFeedbackButton = feedbackButtonVariant === "button" && Boolean(threadId);
+  const showStatusRow = Boolean(status) || showFeedbackIcon || showExecutionModeControls;
+  const feedbackActionTitle = !threadId
+    ? "Feedback is available after the first assistant response."
+    : isBusy
+      ? "Wait for the current run to finish before opening feedback."
+      : FEEDBACK_ACTION_LABEL;
 
   return (
     <ChatKitPaneHarness>
@@ -661,30 +674,53 @@ export function ChatKitHarness({
               type="button"
               onClick={() => void handleProvideFeedback()}
               disabled={isBusy || !threadId}
+              title={feedbackActionTitle}
             >
-              Provide feedback
+              Open feedback
             </ChatKitPaneToolbarButton>
           ) : null}
         </ChatKitPaneToolbar>
       ) : null}
-      {status || showFeedbackIcon ? (
+      {showStatusRow ? (
         <ChatKitPaneStatusRow>
           <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
             {status}
           </ChatKitPaneStatusText>
-          {showFeedbackIcon ? (
-            <ChatKitPaneIconButton
-              $light={colorScheme === "light"}
-              aria-label="Provide feedback"
-              data-testid="chatkit-provide-feedback"
-              onClick={() => void handleProvideFeedback()}
-              disabled={isBusy || !threadId}
-              title="Provide feedback"
-              type="button"
-            >
-              <FeedbackIcon />
-            </ChatKitPaneIconButton>
-          ) : null}
+          <ChatKitPaneStatusActions>
+            {showExecutionModeControls ? (
+              <>
+                <ChatKitPaneHarnessMeta $light={colorScheme === "light"}>Mode</ChatKitPaneHarnessMeta>
+                <ChatKitPaneModeRow aria-label="Run mode toggle" data-testid="chatkit-execution-mode-controls">
+                  {(["interactive", "batch"] as const).map((mode) => (
+                    <ChatKitPaneModeButton
+                      key={mode}
+                      type="button"
+                      $active={executionMode === mode}
+                      onClick={() => onExecutionModeChange(mode)}
+                      data-testid={`chatkit-execution-mode-${mode}`}
+                      disabled={isBusy}
+                      title={isBusy ? "Wait for the current run to finish before changing the run mode." : "Run mode"}
+                    >
+                      {EXECUTION_MODE_LABELS[mode]}
+                    </ChatKitPaneModeButton>
+                  ))}
+                </ChatKitPaneModeRow>
+              </>
+            ) : null}
+            {showFeedbackIcon ? (
+              <ChatKitPaneIconButton
+                $light={colorScheme === "light"}
+                aria-label={FEEDBACK_ACTION_LABEL}
+                data-testid="chatkit-provide-feedback"
+                onClick={() => void handleProvideFeedback()}
+                disabled={isBusy || !threadId}
+                title={feedbackActionTitle}
+                type="button"
+              >
+                <FeedbackIcon />
+              </ChatKitPaneIconButton>
+            ) : null}
+          </ChatKitPaneStatusActions>
         </ChatKitPaneStatusRow>
       ) : null}
       <ChatKitPaneSurface
@@ -703,8 +739,7 @@ export function ChatKitPane({
   capabilityBundle,
   enabled,
   files,
-  workspaceContext,
-  workspaceBootstrap,
+  workspaceState,
   executionMode,
   onExecutionModeChange,
   investigationBrief,
@@ -733,8 +768,7 @@ export function ChatKitPane({
   capabilityBundle: CapabilityBundle;
   enabled: boolean;
   files: LocalWorkspaceFile[];
-  workspaceContext?: WorkspaceThreadContext;
-  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
+  workspaceState?: WorkspaceState;
   executionMode: ExecutionMode;
   onExecutionModeChange: (mode: ExecutionMode) => void;
   investigationBrief: string;
@@ -792,29 +826,13 @@ export function ChatKitPane({
       {showDefaultModelMeta ? (
         <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
       ) : null}
-      {showExecutionModeControls ? (
-        <ChatKitPaneModeRow>
-          <ChatKitPaneMeta>Run mode</ChatKitPaneMeta>
-          {(["interactive", "batch"] as const).map((mode) => (
-            <ChatKitPaneModeButton
-              key={mode}
-              type="button"
-              $active={executionMode === mode}
-              onClick={() => onExecutionModeChange(mode)}
-              data-testid={`chatkit-execution-mode-${mode}`}
-            >
-              {EXECUTION_MODE_LABELS[mode]}
-            </ChatKitPaneModeButton>
-          ))}
-        </ChatKitPaneModeRow>
-      ) : null}
       {canInvestigate ? (
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
           files={files}
-          workspaceContext={workspaceContext}
-          workspaceBootstrap={workspaceBootstrap}
+          workspaceState={workspaceState}
           executionMode={executionMode}
+          onExecutionModeChange={onExecutionModeChange}
           investigationBrief={investigationBrief}
           clientTools={clientTools}
           onEffects={onEffects}
@@ -828,6 +846,7 @@ export function ChatKitPane({
           colorScheme={colorScheme}
           showDictation={showDictation}
           surfaceMinHeight={surfaceMinHeight}
+          showExecutionModeControls={showExecutionModeControls}
           feedbackButtonVariant={feedbackButtonVariant}
           showChatKitHeader={showChatKitHeader}
         />
@@ -840,28 +859,4 @@ export function ChatKitPane({
       )}
     </ChatKitPaneCard>
   );
-}
-
-function extractWorkspaceContext(result: unknown): WorkspaceThreadContext | null {
-  if (!result || typeof result !== "object" || Array.isArray(result)) {
-    return null;
-  }
-
-  const rawWorkspaceContext = (result as { workspace_context?: unknown }).workspace_context;
-  if (!rawWorkspaceContext || typeof rawWorkspaceContext !== "object" || Array.isArray(rawWorkspaceContext)) {
-    return null;
-  }
-
-  const cwdPath = (rawWorkspaceContext as { cwd_path?: unknown }).cwd_path;
-  const referencedItemIds = (rawWorkspaceContext as { referenced_item_ids?: unknown }).referenced_item_ids;
-  if (typeof cwdPath !== "string" || !Array.isArray(referencedItemIds)) {
-    return null;
-  }
-
-  return {
-    cwd_path: cwdPath,
-    referenced_item_ids: referencedItemIds.filter(
-      (value): value is string => typeof value === "string" && Boolean(value),
-    ),
-  };
 }

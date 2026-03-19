@@ -1,12 +1,16 @@
 import type { ClientEffect, ClientToolArgsMap, ClientToolName } from "./analysis";
 import type { LocalWorkspaceFile } from "./report";
 import type { WorkspaceContext, WorkspaceFilesystem } from "./workspace";
-import type { ReportItemV1, WorkspaceBootstrapMetadata } from "./workspace-contract";
+import type {
+  ReportItemV1,
+  WorkspaceBootstrapMetadata,
+  WorkspaceReportV1,
+} from "./workspace-contract";
 
 export type WorkspaceSnapshotV1 = {
   version: "v1";
   filesystem: WorkspaceFilesystem;
-  cwd_path: string;
+  path_prefix: string;
   workspace_context: WorkspaceContext;
   bootstrap: WorkspaceBootstrapMetadata;
 };
@@ -23,22 +27,30 @@ export type DeletePathMutationV1 = {
   path: string;
 };
 
-export type MkdirMutationV1 = {
-  type: "mkdir";
-  path: string;
-};
-
-export type AppendWorkspaceFilesMutationV1 = {
-  type: "append_workspace_files";
-  directory_path: string;
-  files: LocalWorkspaceFile[];
-  source: "derived" | "demo";
+export type UpsertWorkspaceFilesMutationV1 = {
+  type: "upsert_workspace_files";
+  files: Array<{
+    path: string;
+    file: LocalWorkspaceFile;
+    source: "derived" | "demo";
+  }>;
 };
 
 export type ReplaceReportItemsMutationV1 = {
   type: "replace_report_items";
   report_id: string;
   items: ReportItemV1[];
+};
+
+export type UpsertReportMutationV1 = {
+  type: "upsert_report";
+  report: WorkspaceReportV1;
+};
+
+export type UpdateReportIndexMutationV1 = {
+  type: "update_report_index";
+  report_ids: string[];
+  current_report_id: string | null;
 };
 
 export type AppendReportItemsMutationV1 = {
@@ -50,11 +62,6 @@ export type AppendReportItemsMutationV1 = {
 export type UpdateAppStateMutationV1 = {
   type: "update_app_state";
   patch: Record<string, unknown>;
-};
-
-export type ChangeDirectoryMutationV1 = {
-  type: "change_directory";
-  path: string;
 };
 
 export type RenderChartArtifactMutationV1 = {
@@ -69,12 +76,12 @@ export type RenderChartArtifactMutationV1 = {
 export type VfsMutationV1 =
   | WriteTextFileMutationV1
   | DeletePathMutationV1
-  | MkdirMutationV1
-  | AppendWorkspaceFilesMutationV1
+  | UpsertWorkspaceFilesMutationV1
+  | UpsertReportMutationV1
+  | UpdateReportIndexMutationV1
   | ReplaceReportItemsMutationV1
   | AppendReportItemsMutationV1
   | UpdateAppStateMutationV1
-  | ChangeDirectoryMutationV1
   | RenderChartArtifactMutationV1;
 
 export type ToolExecutionRequestV1<

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
 import { ChatKitPaneMeta } from "./styles";
 import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
-import type { AppThreadMetadata, ClientEffect, ExecutionMode } from "../types/analysis";
+import type { ClientEffect, ExecutionMode, WorkspaceState } from "../types/analysis";
 import { devLogger } from "../lib/dev-logging";
 import type { LocalWorkspaceFile } from "../types/report";
 
@@ -17,7 +17,7 @@ export function CapabilityDemoPane({
   error,
   capabilityBundle,
   files,
-  workspaceBootstrap,
+  workspaceState,
   executionMode,
   onExecutionModeChange,
   clientTools,
@@ -33,7 +33,7 @@ export function CapabilityDemoPane({
   error: string | null;
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
-  workspaceBootstrap?: AppThreadMetadata["workspace_bootstrap"];
+  workspaceState?: WorkspaceState;
   executionMode: ExecutionMode;
   onExecutionModeChange: (mode: ExecutionMode) => void;
   clientTools: CapabilityClientTool[];
@@ -97,7 +97,7 @@ export function CapabilityDemoPane({
         capabilityBundle={capabilityBundle}
         enabled={demoReady}
         files={files}
-        workspaceBootstrap={workspaceBootstrap}
+        workspaceState={workspaceState}
         investigationBrief={scenario?.summary ?? ""}
         clientTools={clientTools}
         executionMode={executionMode}

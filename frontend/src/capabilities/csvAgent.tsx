@@ -5,12 +5,15 @@ import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
+import {
+  bindClientToolsForBundle,
+  buildCapabilityBundleForRoot,
+  listCapabilityBundleToolNames,
+} from "./registry";
 import { csvAgentCapability } from "./definitions";
 import { buildCsvAgentDemoScenario } from "./csv-agent/demo";
-import { createCsvAgentClientTools } from "./csv-agent/tools";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
-import { buildCsvAgentBundle } from "./manifests";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import type { ShellWorkspaceRegistration } from "./types";
 import type { ClientEffect } from "../types/analysis";
@@ -78,7 +81,9 @@ export function CsvAgentPage({
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
+    activePrefix,
     cwdPath,
+    filesystem,
     breadcrumbs,
     entries,
     files,
@@ -98,13 +103,14 @@ export function CsvAgentPage({
     handleRemoveEntry,
     createDirectory,
     changeDirectory,
+    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
     updateFilesystem,
     syncToolCatalog,
     appendReportEffects,
-    workspaceBootstrapMetadata,
+    workspaceStateMetadata,
   } = useCapabilityFileWorkspace({
     capabilityId: csvAgentCapability.id,
     capabilityTitle: csvAgentCapability.title,
@@ -113,12 +119,33 @@ export function CsvAgentPage({
     defaultTab: "agent",
     allowedTabs: ["agent", "demo"],
   });
-  const capabilityBundle = useMemo(() => buildCsvAgentBundle(), []);
-  const clientTools = useMemo(
-    () => createCsvAgentClientTools({ cwdPath, entries, files, workspaceContext, createDirectory, changeDirectory, updateFilesystem, getState }),
-    [changeDirectory, createDirectory, cwdPath, entries, files, getState, updateFilesystem, workspaceContext],
+  const capabilityWorkspace = useMemo(
+    () => ({
+      activePrefix,
+      cwdPath,
+      entries,
+      files,
+      workspaceContext,
+      setActivePrefix,
+      createDirectory,
+      changeDirectory,
+      updateFilesystem,
+      getState,
+    }),
+    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
   );
-  const clientToolCatalogKey = useMemo(() => clientTools.map((tool) => tool.name).join("|"), [clientTools]);
+  const capabilityBundle = useMemo(
+    () => buildCapabilityBundleForRoot(csvAgentCapability.id, capabilityWorkspace),
+    [capabilityWorkspace],
+  );
+  const clientTools = useMemo(
+    () => bindClientToolsForBundle(capabilityBundle, capabilityWorkspace),
+    [capabilityBundle, capabilityWorkspace],
+  );
+  const clientToolCatalogKey = useMemo(
+    () => listCapabilityBundleToolNames(capabilityBundle).join("|"),
+    [capabilityBundle],
+  );
   const {
     scenario: demoScenario,
     loading: demoLoading,
@@ -139,7 +166,9 @@ export function CsvAgentPage({
       capabilityId: csvAgentCapability.id,
       title: "Files",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
+      activePrefix,
       cwdPath,
+      filesystem,
       breadcrumbs,
       entries,
       accept: ".csv",
@@ -148,7 +177,7 @@ export function CsvAgentPage({
       onChangeDirectory: changeDirectory,
       onRemoveEntry: handleRemoveEntry,
     });
-  }, [breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
@@ -190,7 +219,7 @@ export function CsvAgentPage({
                 <CapabilityMetaText>{status}</CapabilityMetaText>
               </CapabilitySectionHeader>
               <MetaText>
-                CWD: {cwdPath}
+                Prefix: {activePrefix}
               </MetaText>
               <MetaText>
                 Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
@@ -206,8 +235,7 @@ export function CsvAgentPage({
               capabilityBundle={capabilityBundle}
               enabled
               files={files}
-              workspaceContext={workspaceContext}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
@@ -258,7 +286,7 @@ export function CsvAgentPage({
               error={demoError}
               capabilityBundle={capabilityBundle}
               files={files}
-              workspaceBootstrap={workspaceBootstrapMetadata}
+              workspaceState={workspaceStateMetadata}
               executionMode={executionMode}
               onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}

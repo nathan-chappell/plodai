@@ -388,7 +388,9 @@ export function PlatformShell({
               </WorkspaceModalCloseButton>
             </WorkspaceModalHeader>
             <WorkspaceInventoryPane
+              activePrefix={workspaceRegistration.activePrefix}
               cwdPath={workspaceRegistration.cwdPath}
+              filesystem={workspaceRegistration.filesystem}
               breadcrumbs={workspaceRegistration.breadcrumbs}
               entries={workspaceRegistration.entries}
               accept={workspaceRegistration.accept}

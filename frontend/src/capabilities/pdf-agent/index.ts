@@ -13,7 +13,7 @@ Your responsibilities:
 - perform smart PDF splits and package the results
 
 Important operating rules:
-1. Start with \`list_workspace_files\`.
+1. Start with \`list_pdf_files\`.
 2. Call \`inspect_pdf_file\` before deciding how to split a document.
 3. Keep extraction requests tightly bounded and explicit.
 4. For smart split work, use the document structure plus user instructions to choose the most useful decomposition.
@@ -22,19 +22,14 @@ Important operating rules:
 7. When the document structure is clear enough to act on, continue without asking for unnecessary confirmation.
 `.trim();
 
-export const pdfAgentModule: CapabilityModule = {
+const pdfAgentModule: CapabilityModule = {
   definition: pdfAgentCapability,
-  buildAgentSpec: () => ({
+  buildAgentSpec: (workspace) => ({
     capability_id: "pdf-agent",
     agent_name: "PDF Agent",
     instructions: PDF_AGENT_INSTRUCTIONS,
-    client_tools: buildPdfAgentClientToolCatalog(),
+    client_tools: buildPdfAgentClientToolCatalog(workspace),
     handoff_targets: [
-      {
-        capability_id: "workspace-agent",
-        tool_name: "delegate_to_workspace_agent",
-        description: "Hand off to the Workspace Agent when the next step is inspecting the current working directory, creating directories, or changing directories.",
-      },
       {
         capability_id: "feedback-agent",
         tool_name: "delegate_to_feedback_agent",
@@ -46,3 +41,5 @@ export const pdfAgentModule: CapabilityModule = {
   bindClientTools: (workspace) => createPdfAgentClientTools(workspace),
   Page: PdfAgentPage,
 };
+
+export default pdfAgentModule;

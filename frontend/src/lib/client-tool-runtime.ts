@@ -5,22 +5,25 @@ import {
   appendWorkspaceReportItems,
   buildArtifactTargetPath,
   buildWorkspaceBootstrapMetadata,
-  effectsToReportItems,
+  createWorkspaceReport,
   readWorkspaceAppState,
   readWorkspaceReport,
   readWorkspaceReportIndex,
   removeWorkspacePath,
   replaceWorkspaceReportItems,
   updateWorkspaceAppState,
+  writeWorkspaceIndex,
+  writeWorkspaceReport,
+  writeWorkspaceReportIndex,
   writeWorkspaceTextFile,
 } from "./workspace-contract";
 import {
-  addWorkspaceFilesWithResult,
-  ensureDirectoryPath,
-  getDirectoryByPath,
+  addWorkspaceFilesAtPathsWithResult,
+  findWorkspaceFileNodeByPath,
   getWorkspaceContext,
   listDirectoryEntries,
   normalizeAbsolutePath,
+  normalizePathPrefix,
   resolveWorkspacePath,
 } from "./workspace-fs";
 import { findWorkspaceFile, getFileExtension, rowsToCsv, rowsToJson, summarizeWorkspaceFiles } from "./workspace-files";
@@ -30,47 +33,34 @@ import {
   inspectPdfBytes,
   smartSplitPdfBytes,
 } from "./pdf";
+
 import type {
-  AppendReportSectionToolArgs,
-  ChangeWorkspaceDirectoryToolArgs,
+  AppendReportItemToolArgs,
   ClientEffect,
   ClientToolCall,
   ClientToolName,
+  CreateReportToolArgs,
   CreateCsvFileToolArgs,
   CreateJsonFileToolArgs,
-  CreateWorkspaceDirectoryToolArgs,
   DataRow,
   GetPdfPageRangeToolArgs,
   GetReportToolArgs,
-  GetWorkspaceContextToolArgs,
   InspectChartableFileSchemaToolArgs,
   InspectPdfFileToolArgs,
   ListLoadedDatasetsToolArgs,
   ListWorkspaceFilesToolArgs,
+  RemoveReportItemToolArgs,
   RenderChartFromFileToolArgs,
   RunLocalQueryToolArgs,
   SmartSplitPdfToolArgs,
 } from "../types/analysis";
 import type { LocalChartableFile, LocalDataset, LocalJsonFile, LocalPdfFile, LocalWorkspaceFile } from "../types/report";
 import type { ToolExecutionRequestV1, ToolExecutionResultV1, VfsMutationV1, WorkspaceSnapshotV1 } from "../types/tool-runtime";
-import type { WorkspaceDirectoryNode, WorkspaceFileNode, WorkspaceFilesystem, WorkspaceItem } from "../types/workspace";
+import type { WorkspaceFileNode, WorkspaceFilesystem } from "../types/workspace";
 import type { ReportItemV1 } from "../types/workspace-contract";
-import {
-  WORKSPACE_DATA_ARTIFACTS_DIR,
-  WORKSPACE_PDF_ARTIFACTS_DIR,
-} from "../types/workspace-contract";
-
-function summarizeDirectory(directory: WorkspaceDirectoryNode): Record<string, unknown> {
-  return {
-    id: directory.id,
-    kind: "directory",
-    name: directory.name || "/",
-    path: directory.path,
-  };
-}
 
 function listAllFileNodes(filesystem: WorkspaceFilesystem): WorkspaceFileNode[] {
-  return filesystem.items.filter((item): item is WorkspaceFileNode => item.kind === "file");
+  return listDirectoryEntries(filesystem, "/");
 }
 
 function summarizeWorkspaceFileNode(
@@ -83,33 +73,30 @@ function summarizeWorkspaceFileNode(
   };
 }
 
-function currentDirectoryNodes(snapshot: WorkspaceSnapshotV1): WorkspaceItem[] {
-  return listDirectoryEntries(snapshot.filesystem, snapshot.cwd_path);
-}
-
-function currentDirectoryFileNodes(snapshot: WorkspaceSnapshotV1): WorkspaceFileNode[] {
-  return currentDirectoryNodes(snapshot).filter(
-    (entry): entry is WorkspaceFileNode => entry.kind === "file",
+function fileNodesForPrefix(
+  snapshot: WorkspaceSnapshotV1,
+  prefix?: string,
+): WorkspaceFileNode[] {
+  return listDirectoryEntries(
+    snapshot.filesystem,
+    prefix?.trim() ? normalizePathPrefix(prefix) : snapshot.path_prefix,
   );
 }
 
 function buildWorkspacePayload(
   snapshot: WorkspaceSnapshotV1,
-  options: { includeSamples?: boolean } = {},
+  options: { includeSamples?: boolean; prefix?: string } = {},
 ): Record<string, unknown> {
   const includeSamples = options.includeSamples ?? true;
-  const fileNodes = currentDirectoryFileNodes(snapshot);
+  const effectivePrefix = options.prefix?.trim()
+    ? normalizePathPrefix(options.prefix)
+    : snapshot.path_prefix;
+  const fileNodes = fileNodesForPrefix(snapshot, effectivePrefix);
   const reportIndex = readWorkspaceReportIndex(snapshot.filesystem);
   return {
-    cwd_path: snapshot.cwd_path,
-    workspace_context: snapshot.workspace_context,
-    directories: currentDirectoryNodes(snapshot)
-      .filter((entry): entry is WorkspaceDirectoryNode => entry.kind === "directory")
-      .map(summarizeDirectory),
-    files: listAllFileNodes(snapshot.filesystem).map((fileNode) =>
-      summarizeWorkspaceFileNode(fileNode, includeSamples),
-    ),
-    cwd_files: fileNodes.map((fileNode) => summarizeWorkspaceFileNode(fileNode, includeSamples)),
+    path_prefix: effectivePrefix,
+    workspace_context: getWorkspaceContext(snapshot.filesystem, effectivePrefix),
+    files: fileNodes.map((fileNode) => summarizeWorkspaceFileNode(fileNode, includeSamples)),
     reports:
       reportIndex?.report_ids.map((reportId) => {
         const report = readWorkspaceReport(snapshot.filesystem, reportId);
@@ -121,7 +108,6 @@ function buildWorkspacePayload(
         };
       }) ?? [],
     current_report_id: reportIndex?.current_report_id ?? null,
-    agents_file: snapshot.bootstrap.agents_file,
   };
 }
 
@@ -143,13 +129,14 @@ function findChartableFile(files: LocalWorkspaceFile[], fileId: string): LocalCh
 
 function createSnapshot(
   filesystem: WorkspaceFilesystem,
-  cwdPath: string,
+  pathPrefix: string,
 ): WorkspaceSnapshotV1 {
+  const normalizedPrefix = normalizePathPrefix(pathPrefix);
   return {
     version: "v1",
     filesystem,
-    cwd_path: cwdPath,
-    workspace_context: getWorkspaceContext(filesystem, cwdPath),
+    path_prefix: normalizedPrefix,
+    workspace_context: getWorkspaceContext(filesystem, normalizedPrefix),
     bootstrap: buildWorkspaceBootstrapMetadata(filesystem),
   };
 }
@@ -159,13 +146,9 @@ export function applyVfsMutations(
   mutations: VfsMutationV1[],
 ): WorkspaceSnapshotV1 {
   let filesystem = snapshot.filesystem;
-  let cwdPath = snapshot.cwd_path;
 
   for (const mutation of mutations) {
     switch (mutation.type) {
-      case "mkdir":
-        filesystem = ensureDirectoryPath(filesystem, mutation.path).filesystem;
-        break;
       case "write_text_file":
         filesystem = writeWorkspaceTextFile(
           filesystem,
@@ -177,13 +160,30 @@ export function applyVfsMutations(
       case "delete_path":
         filesystem = removeWorkspacePath(filesystem, mutation.path);
         break;
-      case "append_workspace_files":
-        filesystem = addWorkspaceFilesWithResult(
+      case "upsert_workspace_files":
+        filesystem = addWorkspaceFilesAtPathsWithResult(filesystem, mutation.files).filesystem;
+        break;
+      case "upsert_report":
+        filesystem = writeWorkspaceReport(filesystem, mutation.report);
+        break;
+      case "update_report_index":
+        filesystem = writeWorkspaceReportIndex(filesystem, {
+          version: "v1",
+          report_ids: mutation.report_ids,
+          current_report_id: mutation.current_report_id,
+        });
+        filesystem = updateWorkspaceAppState(filesystem, {
+          current_report_id: mutation.current_report_id,
+        });
+        filesystem = writeWorkspaceIndex(
           filesystem,
-          mutation.directory_path,
-          mutation.files,
-          mutation.source,
-        ).filesystem;
+          {
+            version: "v1",
+            reserved_paths: [],
+            report_ids: mutation.report_ids,
+            current_report_id: mutation.current_report_id,
+          },
+        );
         break;
       case "replace_report_items":
         filesystem = replaceWorkspaceReportItems(
@@ -202,40 +202,59 @@ export function applyVfsMutations(
       case "update_app_state":
         filesystem = updateWorkspaceAppState(filesystem, mutation.patch as never);
         break;
-      case "change_directory":
-        cwdPath = getDirectoryByPath(
-          filesystem,
-          resolveWorkspacePath(mutation.path, cwdPath),
-        ).path;
-        break;
       case "render_chart_artifact":
         break;
     }
   }
 
-  return createSnapshot(filesystem, cwdPath);
+  return createSnapshot(filesystem, snapshot.path_prefix);
 }
 
-function ensureCsvFilename(filename: string): string {
-  const trimmed = filename.trim() || "derived.csv";
-  return trimmed.toLowerCase().endsWith(".csv") ? trimmed : `${trimmed}.csv`;
+function ensureCsvPath(path: string, basePrefix: string): string {
+  const resolvedPath = resolveWorkspacePath(path.trim() || "derived.csv", basePrefix);
+  return resolvedPath.toLowerCase().endsWith(".csv") ? resolvedPath : `${resolvedPath}.csv`;
 }
 
-function ensureJsonFilename(filename: string): string {
-  const trimmed = filename.trim() || "derived.json";
-  return trimmed.toLowerCase().endsWith(".json") ? trimmed : `${trimmed}.json`;
+function ensureJsonPath(path: string, basePrefix: string): string {
+  const resolvedPath = resolveWorkspacePath(path.trim() || "derived.json", basePrefix);
+  return resolvedPath.toLowerCase().endsWith(".json") ? resolvedPath : `${resolvedPath}.json`;
 }
 
 function buildCreatedFilePayload(
   snapshot: WorkspaceSnapshotV1,
-  file: LocalWorkspaceFile,
+  filePath: string,
 ): Record<string, unknown> {
-  const node =
-    listAllFileNodes(snapshot.filesystem).find((candidate) => candidate.file.id === file.id) ??
-    null;
-  return node
-    ? summarizeWorkspaceFileNode(node, true)
-    : summarizeWorkspaceFiles([file], { includeSamples: true })[0];
+  const node = findWorkspaceFileNodeByPath(snapshot.filesystem, filePath);
+  if (!node) {
+    throw new Error(`Expected workspace file at path ${filePath}.`);
+  }
+  return summarizeWorkspaceFileNode(node, true);
+}
+
+function buildPdfIndexFilename(archiveName: string): string {
+  return archiveName.toLowerCase().endsWith(".zip")
+    ? archiveName.slice(0, -4) + ".md"
+    : `${archiveName}.md`;
+}
+
+function buildReportItemFromDraft(args: AppendReportItemToolArgs): ReportItemV1 {
+  const createdAt = new Date().toISOString();
+  if (args.item.type === "section") {
+    return {
+      id: crypto.randomUUID(),
+      type: "section",
+      created_at: createdAt,
+      title: args.item.title,
+      markdown: args.item.markdown,
+    };
+  }
+  return {
+    id: crypto.randomUUID(),
+    type: "note",
+    created_at: createdAt,
+    title: args.item.title,
+    text: args.item.text,
+  };
 }
 
 async function executeTool<Name extends ClientToolName>(
@@ -245,76 +264,40 @@ async function executeTool<Name extends ClientToolName>(
   const allFiles = listAllFileNodes(snapshot.filesystem).map((node) => node.file);
 
   switch (toolCall.name) {
-    case "get_workspace_context": {
-      void (toolCall.arguments as GetWorkspaceContextToolArgs);
-      return {
-        payload: buildWorkspacePayload(snapshot, { includeSamples: true }),
-        mutations: [],
-        effects: [],
-        warnings: [],
-      };
-    }
-    case "create_workspace_directory": {
-      const args = toolCall.arguments as CreateWorkspaceDirectoryToolArgs;
-      const targetPath = resolveWorkspacePath(args.path, snapshot.cwd_path);
-      const mutations: VfsMutationV1[] = [{ type: "mkdir", path: targetPath }];
-      const nextSnapshot = applyVfsMutations(snapshot, mutations);
-      return {
-        payload: {
-          ...buildWorkspacePayload(nextSnapshot, { includeSamples: false }),
-          created_directory: { path: targetPath },
-          workspace_operation: {
-            kind: "create_directory",
-            target_path: targetPath,
-            cwd_path: nextSnapshot.cwd_path,
-          },
-        },
-        mutations,
-        effects: [],
-        warnings: [],
-      };
-    }
-    case "change_workspace_directory": {
-      const args = toolCall.arguments as ChangeWorkspaceDirectoryToolArgs;
-      const targetPath = resolveWorkspacePath(args.path, snapshot.cwd_path);
-      const mutations: VfsMutationV1[] = [{ type: "change_directory", path: targetPath }];
-      const nextSnapshot = applyVfsMutations(snapshot, mutations);
-      return {
-        payload: {
-          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true }),
-          changed_directory: { path: nextSnapshot.cwd_path },
-          workspace_operation: {
-            kind: "change_directory",
-            target_path: nextSnapshot.cwd_path,
-            cwd_path: nextSnapshot.cwd_path,
-          },
-        },
-        mutations,
-        effects: [],
-        warnings: [],
-      };
-    }
-    case "list_workspace_files": {
-      const args = toolCall.arguments as ListWorkspaceFilesToolArgs;
-      return {
-        payload: buildWorkspacePayload(snapshot, { includeSamples: args.includeSamples }),
-        mutations: [],
-        effects: [],
-        warnings: [],
-      };
-    }
-    case "list_attached_csv_files": {
+    case "list_csv_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       const includeSamples = args.includeSamples ?? true;
-      const csvFiles = currentDirectoryFileNodes(snapshot).filter((entry) => entry.file.kind === "csv");
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : snapshot.path_prefix;
+      const csvFiles = fileNodesForPrefix(snapshot, normalizedPrefix).filter((entry) => entry.file.kind === "csv");
       return {
         payload: {
-          cwd_path: snapshot.cwd_path,
-          workspace_context: snapshot.workspace_context,
+          path_prefix: normalizedPrefix,
+          workspace_context: getWorkspaceContext(snapshot.filesystem, normalizedPrefix),
           csv_files: csvFiles.map((fileNode) =>
             summarizeWorkspaceFileNode(fileNode, includeSamples),
           ),
-          files: listAllFileNodes(snapshot.filesystem).map((fileNode) =>
+          files: csvFiles.map((fileNode) =>
+            summarizeWorkspaceFileNode(fileNode, includeSamples),
+          ),
+        },
+        mutations: [],
+        effects: [],
+        warnings: [],
+      };
+    }
+    case "list_pdf_files": {
+      const args = toolCall.arguments as ListWorkspaceFilesToolArgs;
+      const includeSamples = args.includeSamples ?? true;
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : snapshot.path_prefix;
+      const pdfFiles = fileNodesForPrefix(snapshot, normalizedPrefix).filter((entry) => entry.file.kind === "pdf");
+      return {
+        payload: {
+          path_prefix: normalizedPrefix,
+          workspace_context: getWorkspaceContext(snapshot.filesystem, normalizedPrefix),
+          pdf_files: pdfFiles.map((fileNode) =>
+            summarizeWorkspaceFileNode(fileNode, includeSamples),
+          ),
+          files: pdfFiles.map((fileNode) =>
             summarizeWorkspaceFileNode(fileNode, includeSamples),
           ),
         },
@@ -326,17 +309,18 @@ async function executeTool<Name extends ClientToolName>(
     case "list_chartable_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       const includeSamples = args.includeSamples ?? true;
-      const chartableFiles = currentDirectoryFileNodes(snapshot).filter(
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : snapshot.path_prefix;
+      const chartableFiles = fileNodesForPrefix(snapshot, normalizedPrefix).filter(
         (entry) => entry.file.kind === "csv" || entry.file.kind === "json",
       );
       return {
         payload: {
-          cwd_path: snapshot.cwd_path,
-          workspace_context: snapshot.workspace_context,
+          path_prefix: normalizedPrefix,
+          workspace_context: getWorkspaceContext(snapshot.filesystem, normalizedPrefix),
           chartable_files: chartableFiles.map((fileNode) =>
             summarizeWorkspaceFileNode(fileNode, includeSamples),
           ),
-          files: listAllFileNodes(snapshot.filesystem).map((fileNode) =>
+          files: chartableFiles.map((fileNode) =>
             summarizeWorkspaceFileNode(fileNode, includeSamples),
           ),
         },
@@ -383,10 +367,10 @@ async function executeTool<Name extends ClientToolName>(
       const resultRows = executeQueryPlan(dataset.rows as DataRow[], args.query_plan).rows;
       const csvText = rowsToCsv(resultRows);
       const preview = parseCsvText(csvText);
-      const filename = ensureCsvFilename(args.filename);
+      const targetPath = ensureCsvPath(args.path, snapshot.path_prefix);
       const nextFile: LocalDataset = {
         id: crypto.randomUUID(),
-        name: filename,
+        name: targetPath.split("/").filter(Boolean).at(-1) ?? "derived.csv",
         kind: "csv",
         extension: "csv",
         byte_size: new TextEncoder().encode(csvText).length,
@@ -400,17 +384,15 @@ async function executeTool<Name extends ClientToolName>(
       };
       const mutations: VfsMutationV1[] = [
         {
-          type: "append_workspace_files",
-          directory_path: WORKSPACE_DATA_ARTIFACTS_DIR,
-          files: [nextFile],
-          source: "derived",
+          type: "upsert_workspace_files",
+          files: [{ path: targetPath, file: nextFile, source: "derived" }],
         },
       ];
       const nextSnapshot = applyVfsMutations(snapshot, mutations);
       return {
         payload: {
-          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true }),
-          created_file: buildCreatedFilePayload(nextSnapshot, nextFile),
+          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true, prefix: snapshot.path_prefix }),
+          created_file: buildCreatedFilePayload(nextSnapshot, targetPath),
           row_count: nextFile.row_count,
         },
         mutations,
@@ -424,10 +406,10 @@ async function executeTool<Name extends ClientToolName>(
       const resultRows = executeQueryPlan(dataset.rows as DataRow[], args.query_plan).rows;
       const jsonText = rowsToJson(resultRows);
       const preview = parseJsonText(jsonText);
-      const filename = ensureJsonFilename(args.filename);
+      const targetPath = ensureJsonPath(args.path, snapshot.path_prefix);
       const nextFile: LocalJsonFile = {
         id: crypto.randomUUID(),
-        name: filename,
+        name: targetPath.split("/").filter(Boolean).at(-1) ?? "derived.json",
         kind: "json",
         extension: "json",
         byte_size: new TextEncoder().encode(jsonText).length,
@@ -442,17 +424,15 @@ async function executeTool<Name extends ClientToolName>(
       };
       const mutations: VfsMutationV1[] = [
         {
-          type: "append_workspace_files",
-          directory_path: WORKSPACE_DATA_ARTIFACTS_DIR,
-          files: [nextFile],
-          source: "derived",
+          type: "upsert_workspace_files",
+          files: [{ path: targetPath, file: nextFile, source: "derived" }],
         },
       ];
       const nextSnapshot = applyVfsMutations(snapshot, mutations);
       return {
         payload: {
-          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true }),
-          created_file: buildCreatedFilePayload(nextSnapshot, nextFile),
+          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true, prefix: snapshot.path_prefix }),
+          created_file: buildCreatedFilePayload(nextSnapshot, targetPath),
           row_count: nextFile.row_count,
         },
         mutations,
@@ -496,6 +476,7 @@ async function executeTool<Name extends ClientToolName>(
           chart_plan_id: args.chart_plan_id,
           imageDataUrl: null,
           workspace_context: snapshot.workspace_context,
+          path_prefix: snapshot.path_prefix,
         },
         mutations,
         effects: [],
@@ -538,6 +519,7 @@ async function executeTool<Name extends ClientToolName>(
         startPage: args.start_page,
         endPage: args.end_page,
       });
+      const targetPath = buildArtifactTargetPath("pdf", extracted.filename);
       const nextFile: LocalPdfFile = {
         id: crypto.randomUUID(),
         name: extracted.filename,
@@ -550,17 +532,15 @@ async function executeTool<Name extends ClientToolName>(
       };
       const mutations: VfsMutationV1[] = [
         {
-          type: "append_workspace_files",
-          directory_path: WORKSPACE_PDF_ARTIFACTS_DIR,
-          files: [nextFile],
-          source: "derived",
+          type: "upsert_workspace_files",
+          files: [{ path: targetPath, file: nextFile, source: "derived" }],
         },
       ];
       const nextSnapshot = applyVfsMutations(snapshot, mutations);
       return {
         payload: {
-          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true }),
-          created_file: buildCreatedFilePayload(nextSnapshot, nextFile),
+          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true, prefix: snapshot.path_prefix }),
+          created_file: buildCreatedFilePayload(nextSnapshot, targetPath),
           page_range: {
             start_page: extracted.pageRange.startPage,
             end_page: extracted.pageRange.endPage,
@@ -587,25 +567,33 @@ async function executeTool<Name extends ClientToolName>(
         filename: file.name,
         goal: args.goal,
       });
-      const createdFiles: LocalWorkspaceFile[] = result.extractedFiles.map((extracted) => ({
-        id: crypto.randomUUID(),
-        name: extracted.filename,
-        kind: "pdf",
-        extension: "pdf",
-        byte_size: Math.ceil((extracted.fileDataBase64.length * 3) / 4),
-        mime_type: extracted.mimeType,
-        page_count: extracted.pageRange.pageCount,
-        bytes_base64: extracted.fileDataBase64,
-      }));
+      const createdFiles = result.extractedFiles.map((extracted) => {
+        const targetPath = buildArtifactTargetPath("pdf", extracted.filename);
+        return {
+          path: targetPath,
+          file: {
+            id: crypto.randomUUID(),
+            name: extracted.filename,
+            kind: "pdf",
+            extension: "pdf",
+            byte_size: Math.ceil((extracted.fileDataBase64.length * 3) / 4),
+            mime_type: extracted.mimeType,
+            page_count: extracted.pageRange.pageCount,
+            bytes_base64: extracted.fileDataBase64,
+          } satisfies LocalPdfFile,
+        };
+      });
+      const indexPath = buildArtifactTargetPath("pdf", buildPdfIndexFilename(result.archiveName));
       const indexFile: LocalWorkspaceFile = {
         id: crypto.randomUUID(),
-        name: "index.md",
+        name: indexPath.split("/").filter(Boolean).at(-1) ?? "index.md",
         kind: "other",
         extension: "md",
         mime_type: "text/markdown",
         byte_size: new TextEncoder().encode(result.indexMarkdown).length,
         text_content: result.indexMarkdown,
       };
+      const archivePath = buildArtifactTargetPath("pdf", result.archiveName);
       const archiveFile: LocalWorkspaceFile = {
         id: crypto.randomUUID(),
         name: result.archiveName,
@@ -615,7 +603,6 @@ async function executeTool<Name extends ClientToolName>(
         byte_size: Math.ceil((result.archiveBase64.length * 3) / 4),
         bytes_base64: result.archiveBase64,
       };
-      const allCreatedFiles = [...createdFiles, indexFile, archiveFile];
       const effect: ClientEffect = {
         type: "pdf_smart_split_completed",
         sourceFileId: file.id,
@@ -625,8 +612,8 @@ async function executeTool<Name extends ClientToolName>(
         indexFileId: indexFile.id,
         indexFileName: indexFile.name,
         entries: createdFiles.map((createdFile, index) => ({
-          fileId: createdFile.id,
-          name: createdFile.name,
+          fileId: createdFile.file.id,
+          name: createdFile.file.name,
           title: result.extractedFiles[index].title,
           startPage: result.extractedFiles[index].pageRange.startPage,
           endPage: result.extractedFiles[index].pageRange.endPage,
@@ -636,27 +623,27 @@ async function executeTool<Name extends ClientToolName>(
       };
       const mutations: VfsMutationV1[] = [
         {
-          type: "append_workspace_files",
-          directory_path: WORKSPACE_PDF_ARTIFACTS_DIR,
-          files: allCreatedFiles,
-          source: "derived",
-        },
-        {
-          type: "append_report_items",
-          report_id:
-            readWorkspaceAppState(snapshot.filesystem)?.current_report_id ??
-            readWorkspaceReportIndex(snapshot.filesystem)?.current_report_id ??
-            "report-1",
-          items: effectsToReportItems([effect]),
+          type: "upsert_workspace_files",
+          files: [
+            ...createdFiles.map((createdFile) => ({
+              path: createdFile.path,
+              file: createdFile.file,
+              source: "derived" as const,
+            })),
+            { path: indexPath, file: indexFile, source: "derived" as const },
+            { path: archivePath, file: archiveFile, source: "derived" as const },
+          ],
         },
       ];
       const nextSnapshot = applyVfsMutations(snapshot, mutations);
       return {
         payload: {
-          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true }),
-          created_files: allCreatedFiles.map((createdFile) =>
-            buildCreatedFilePayload(nextSnapshot, createdFile),
-          ),
+          ...buildWorkspacePayload(nextSnapshot, { includeSamples: true, prefix: snapshot.path_prefix }),
+          created_files: [
+            ...createdFiles.map((createdFile) => buildCreatedFilePayload(nextSnapshot, createdFile.path)),
+            buildCreatedFilePayload(nextSnapshot, indexPath),
+            buildCreatedFilePayload(nextSnapshot, archivePath),
+          ],
           smart_split: {
             entries: effect.entries.map((entry) => ({
               title: entry.title,
@@ -666,8 +653,8 @@ async function executeTool<Name extends ClientToolName>(
               file_id: entry.fileId,
               file_name: entry.name,
             })),
-            archive_file: buildCreatedFilePayload(nextSnapshot, archiveFile),
-            index_file: buildCreatedFilePayload(nextSnapshot, indexFile),
+            archive_file: buildCreatedFilePayload(nextSnapshot, archivePath),
+            index_file: buildCreatedFilePayload(nextSnapshot, indexPath),
           },
         },
         mutations,
@@ -711,20 +698,42 @@ async function executeTool<Name extends ClientToolName>(
         warnings: [],
       };
     }
-    case "append_report_section": {
-      const args = toolCall.arguments as AppendReportSectionToolArgs;
-      const item: ReportItemV1 = {
-        id: crypto.randomUUID(),
-        type: "section",
-        created_at: new Date().toISOString(),
+    case "create_report": {
+      const args = toolCall.arguments as CreateReportToolArgs;
+      const created = createWorkspaceReport(snapshot.filesystem, {
+        reportId: args.report_id,
         title: args.title,
-        markdown: args.markdown,
+      });
+      const nextReportIndex = readWorkspaceReportIndex(created.filesystem);
+      if (!nextReportIndex) {
+        throw new Error("Unable to persist report index for created report.");
+      }
+      const mutations: VfsMutationV1[] = [
+        {
+          type: "upsert_report",
+          report: created.report,
+        },
+        {
+          type: "update_report_index",
+          report_ids: nextReportIndex.report_ids,
+          current_report_id: nextReportIndex.current_report_id,
+        },
+      ];
+      const nextSnapshot = applyVfsMutations(snapshot, mutations);
+      return {
+        payload: {
+          report: created.report,
+          reports: buildWorkspacePayload(nextSnapshot).reports,
+          current_report_id: nextReportIndex.current_report_id,
+        },
+        mutations,
+        effects: [],
+        warnings: [],
       };
-      const effect: ClientEffect = {
-        type: "report_section_appended",
-        title: args.title,
-        markdown: args.markdown,
-      };
+    }
+    case "append_report_item": {
+      const args = toolCall.arguments as AppendReportItemToolArgs;
+      const item = buildReportItemFromDraft(args);
       const mutations: VfsMutationV1[] = [
         {
           type: "append_report_items",
@@ -736,12 +745,43 @@ async function executeTool<Name extends ClientToolName>(
       return {
         payload: {
           report_id: args.report_id,
-          title: args.title,
-          markdown: args.markdown,
+          item,
+          report: readWorkspaceReport(nextSnapshot.filesystem, args.report_id),
           reports: buildWorkspacePayload(nextSnapshot).reports,
+          current_report_id:
+            readWorkspaceAppState(nextSnapshot.filesystem)?.current_report_id ??
+            readWorkspaceReportIndex(nextSnapshot.filesystem)?.current_report_id ??
+            null,
         },
         mutations,
-        effects: [effect],
+        effects: [],
+        warnings: [],
+      };
+    }
+    case "remove_report_item": {
+      const args = toolCall.arguments as RemoveReportItemToolArgs;
+      const report = readWorkspaceReport(snapshot.filesystem, args.report_id);
+      if (!report) {
+        throw new Error(`Unknown report: ${args.report_id}`);
+      }
+      const nextItems = report.items.filter((item) => item.id !== args.item_id);
+      const mutations: VfsMutationV1[] = [
+        {
+          type: "replace_report_items",
+          report_id: args.report_id,
+          items: nextItems,
+        },
+      ];
+      const nextSnapshot = applyVfsMutations(snapshot, mutations);
+      return {
+        payload: {
+          report_id: args.report_id,
+          item_id: args.item_id,
+          removed: nextItems.length !== report.items.length,
+          report: readWorkspaceReport(nextSnapshot.filesystem, args.report_id),
+        },
+        mutations,
+        effects: [],
         warnings: [],
       };
     }
@@ -755,7 +795,17 @@ export async function executeToolRequest(
     name: request.tool_name,
     arguments: request.arguments,
   };
-  const result = await executeTool(toolCall, request.snapshot);
+  const normalizedSnapshot = createSnapshot(
+    request.snapshot.filesystem,
+    request.snapshot.path_prefix,
+  );
+  const result = await executeTool(toolCall, {
+    ...request.snapshot,
+    filesystem: normalizedSnapshot.filesystem,
+    path_prefix: normalizedSnapshot.path_prefix,
+    workspace_context: normalizedSnapshot.workspace_context,
+    bootstrap: request.snapshot.bootstrap ?? normalizedSnapshot.bootstrap,
+  });
   return {
     version: "v1",
     request_id: request.request_id,

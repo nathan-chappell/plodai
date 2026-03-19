@@ -36,14 +36,16 @@ describe("workspace filesystem", () => {
     expect(resolveWorkspacePath("../shared", "/reports/2026")).toBe("/reports/shared");
   });
 
-  it("creates nested directories idempotently", () => {
+  it("returns synthetic directories without persisting directory entries", () => {
     const initial = createWorkspaceFilesystem();
     const first = ensureDirectoryPath(initial, "/reports/2026");
     const second = ensureDirectoryPath(first.filesystem, "/reports/2026");
 
-    expect(first.created).toBe(true);
+    expect(first.created).toBe(false);
     expect(second.created).toBe(false);
+    expect(first.directory.id).toBe("dir:/reports/2026");
     expect(second.directory.path).toBe("/reports/2026");
+    expect(listDirectoryEntries(second.filesystem, "/reports/2026")).toEqual([]);
   });
 
   it("writes uploaded files into the current directory and dedupes sibling names", () => {

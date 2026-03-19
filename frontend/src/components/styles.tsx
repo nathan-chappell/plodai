@@ -414,9 +414,9 @@ export const WorkspaceModalBackdrop = styled.div`
 
 export const WorkspaceModalCard = styled.section`
   ${sectionPanelCss("1rem", "0.7rem")};
-  width: min(820px, 100%);
+  width: min(1120px, 100%);
   max-height: min(88vh, 920px);
-  overflow: auto;
+  overflow: hidden;
   border-radius: var(--radius-xl);
   box-shadow: 0 28px 80px rgba(10, 10, 10, 0.24);
 `;
@@ -921,6 +921,8 @@ export const ChatKitPaneCard = styled.section`
   top: 0.8rem;
   min-width: 0;
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
   height: 100%;
   background: linear-gradient(135deg, rgba(44, 62, 80, 0.96), rgba(26, 36, 47, 0.98));
   color: #f8f6f2;
@@ -952,6 +954,16 @@ export const ChatKitPaneStatusRow = styled.div`
   justify-content: space-between;
   gap: 0.45rem;
   min-height: 1.75rem;
+`;
+
+export const ChatKitPaneStatusActions = styled.div`
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
 `;
 
 export const ChatKitPaneStatusText = styled(OverlayMetaText)<{ $light?: boolean }>`
@@ -1053,10 +1065,14 @@ export const ChatKitPaneToolbarButton = styled.button`
 `;
 
 export const ChatKitPaneModeRow = styled.div`
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
+  gap: 0.14rem;
+  flex: 0 0 auto;
+  padding: 0.12rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.07);
 `;
 
 export const ChatKitPaneModeButton = styled.button<{ $active?: boolean }>`
@@ -1065,12 +1081,17 @@ export const ChatKitPaneModeButton = styled.button<{ $active?: boolean }>`
   background: ${({ $active }) => ($active ? "rgba(244, 196, 48, 0.18)" : "rgba(255, 255, 255, 0.08)")};
   color: #f8f6f2;
   border-radius: 999px;
-  padding: 0.34rem 0.64rem;
+  padding: 0.28rem 0.56rem;
   font: inherit;
   font-weight: 700;
-  font-size: 0.84rem;
+  font-size: 0.76rem;
   line-height: 1;
   cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
 `;
 
 export const ChatKitPaneHarnessMeta = styled(OverlayMetaText)<{ $light?: boolean }>`

@@ -1,7 +1,7 @@
 {
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
   "seed": 7,
-  "output_dir": "frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "output_dir": "/home/uphill/programming/openai/form/ai-portfolio/frontend/public/blog-assets/theoretical-justification-of-neural-networks",
   "mlp": {
     "files": [
       "mlp-sine-story.png",
@@ -16,7 +16,53 @@
       200,
       400
     ],
-    "final_loss": 0.12900468707084656
+    "final_loss": 0.3058984875679016
+  },
+  "precision": {
+    "files": [
+      "stack-cantor-dust-story.png",
+      "stack-cantor-dust-story.html"
+    ],
+    "encoding": "two_stack_cantor4",
+    "dust_depth": 6,
+    "initial_left_stack": "",
+    "initial_right_stack": "101011001110010110100111001011010011010111001011",
+    "step_labels": [
+      "start",
+      "write 0",
+      "move R",
+      "move R",
+      "write 1",
+      "move R",
+      "move R",
+      "write 0",
+      "move R",
+      "move R",
+      "write 1",
+      "move R",
+      "move R",
+      "write 0",
+      "move L",
+      "move L",
+      "write 1",
+      "move L",
+      "move L",
+      "write 0",
+      "move L",
+      "move L",
+      "write 1",
+      "move R",
+      "move R",
+      "write 0",
+      "move R",
+      "move R",
+      "write 1",
+      "move R"
+    ],
+    "zoom_depths": [
+      2,
+      6
+    ]
   },
   "rnn": {
     "files": [
@@ -25,1174 +71,309 @@
       "rnn-transition-traces.png",
       "rnn-transition-traces.html"
     ],
-    "train_length": 20,
+    "model_mode": "phased_torch_rnn",
+    "language": "balanced_parentheses",
+    "accept_anchor": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "accept_radius": 0.85,
+    "state_dimension": 4,
+    "architecture": {
+      "module": "torch.RNN",
+      "nonlinearity": "tanh",
+      "hidden_size": 4,
+      "num_layers": 2
+    },
+    "optimizer": "adamw",
+    "learning_rate_start": 0.0015,
+    "learning_rate_end": 0.00015,
+    "learning_rate_schedule": "phase_restart_cosine_decay",
+    "dynamics": "phased_resampled_counterexample_shocks",
+    "checkpoint_labels": [
+      "Random init",
+      "P1 0.25",
+      "P1 0.50",
+      "P1 0.75",
+      "After phase 1",
+      "P2 0.25",
+      "P2 0.50",
+      "P2 0.75",
+      "After phase 2",
+      "P3 0.25",
+      "P3 0.50",
+      "P3 0.75",
+      "After phase 3"
+    ],
+    "checkpoint_epochs": [
+      0,
+      15,
+      30,
+      45,
+      60,
+      90,
+      120,
+      150,
+      180,
+      210,
+      240,
+      270,
+      300
+    ],
+    "phase_schedule": [
+      "Phase 1: random baseline",
+      "Phase 2: add off-by-one",
+      "Phase 3: add valid-prefix + balanced-invalid"
+    ],
+    "phase_epoch_schedule": [
+      60,
+      120,
+      120
+    ],
+    "phase_batch_schedule": [
+      8,
+      16,
+      32
+    ],
+    "phase_family_mix": [
+      {
+        "random": 1.0
+      },
+      {
+        "random": 0.5,
+        "off_by_one": 0.5
+      },
+      {
+        "random": 0.25,
+        "off_by_one": 0.25,
+        "valid_prefix": 0.25,
+        "balanced_invalid": 0.25
+      }
+    ],
     "eval_lengths": [
       10,
       20,
-      30
+      30,
+      50
     ],
-    "batch_size": 16,
-    "optimizer": "adam",
-    "learning_rate": 0.001,
-    "phase_count": 2,
-    "phase_epochs": 10,
-    "phase_epoch_split": [
-      10,
-      20
-    ],
-    "random_cohort_size": 768,
-    "counterexample_cohort_size": 64,
-    "cohort_size": 768,
-    "retained_support_size": 960,
-    "test_samples": 128,
-    "support_cohorts": {
-      "support-random": 768,
-      "support-off-by-one": 64,
-      "support-balanced-invalid": 64,
-      "support-valid-prefix": 64
+    "story_probe_mode": "family_balanced_probe_field",
+    "story_probe_count": 128,
+    "story_plot_probe_count": 128,
+    "story_plot_sampling": "deterministic_family_balanced_slice",
+    "story_probe_families": {
+      "valid": [
+        "((((()))))",
+        "(((()())))",
+        "(((())()))",
+        "(((()))())",
+        "(((())))()",
+        "((()(())))",
+        "((()()()))",
+        "((()())())",
+        "((()()))()",
+        "((())(()))",
+        "((())()())",
+        "((())())()",
+        "((()))(())",
+        "((()))()()",
+        "(()((())))",
+        "(()(()()))",
+        "(()(())())",
+        "(()(()))()",
+        "(()()(()))",
+        "(()()()())",
+        "(()()())()",
+        "(()())(())",
+        "(()())()()",
+        "(())((()))",
+        "(())(()())",
+        "(())(())()",
+        "(())()(())",
+        "(())()()()",
+        "()(((())))",
+        "()((()()))",
+        "()((())())",
+        "()((()))()"
+      ],
+      "off_by_one": [
+        "(((())))))",
+        "((()()))))",
+        "((())())))",
+        "((()))()))",
+        "((())))(((",
+        "((())))())",
+        "((()))))()",
+        "((())))))(",
+        "((()))))))",
+        "(()(()))))",
+        "(()()())))",
+        "(()())()))",
+        "(()()))(((",
+        "(()()))())",
+        "(()())))()",
+        "(()()))))(",
+        "(()())))))",
+        "(())(())))",
+        "(())()()))",
+        "(())())(((",
+        "(())())())",
+        "(())()))()",
+        "(())())))(",
+        "(())()))))",
+        "(()))(((((",
+        "(()))(((()",
+        "(()))((()(",
+        "(()))(()((",
+        "(()))(()))",
+        "(()))()(((",
+        "(()))()())",
+        "(()))())()"
+      ],
+      "valid_prefix": [
+        "((((((((((",
+        "((((((((()",
+        "(((((((()(",
+        "(((((((())",
+        "((((((()((",
+        "((((((()()",
+        "((((((())(",
+        "((((((()))",
+        "(((((()(((",
+        "(((((()(()",
+        "(((((()()(",
+        "(((((()())",
+        "(((((())((",
+        "(((((())()",
+        "(((((()))(",
+        "(((((())))",
+        "((((()((((",
+        "((((()((()",
+        "((((()(()(",
+        "((((()(())",
+        "((((()()((",
+        "((((()()()",
+        "((((()())(",
+        "((((()()))",
+        "((((())(((",
+        "((((())(()",
+        "((((())()(",
+        "((((())())",
+        "((((()))((",
+        "((((()))()",
+        "((((())))(",
+        "(((()((((("
+      ],
+      "balanced_invalid": [
+        "(((()))))(",
+        "((()())))(",
+        "((())()))(",
+        "((()))())(",
+        "((())))(()",
+        "((())))()(",
+        "((()))))((",
+        "(()(())))(",
+        "(()()()))(",
+        "(()())())(",
+        "(()()))(()",
+        "(()()))()(",
+        "(()())))((",
+        "(())(()))(",
+        "(())()())(",
+        "(())())(()",
+        "(())())()(",
+        "(())()))((",
+        "(()))((())",
+        "(()))(()()",
+        "(()))(())(",
+        "(()))()(()",
+        "(()))()()(",
+        "(()))())((",
+        "(())))((()",
+        "(())))(()(",
+        "(())))()((",
+        "(()))))(((",
+        "()((())))(",
+        "()(()()))(",
+        "()(())())(",
+        "()(()))(()"
+      ]
     },
-    "phase_weighting_schedule": [
-      {
-        "label": "Phase 1: random baseline",
-        "cohort_weights": [
-          1.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        "cohort_sizes": [
-          768,
-          0,
-          0,
-          0
-        ],
-        "optimizer": "adam",
-        "learning_rate": 0.001,
-        "lr_start": 0.001,
-        "lr_end": 0.001,
-        "active_cohorts": [
-          "support-random"
-        ]
-      },
-      {
-        "label": "Phase 2: add counterexamples",
-        "cohort_weights": [
-          1.0,
-          1.0,
-          1.0,
-          1.0
-        ],
-        "cohort_sizes": [
-          768,
-          64,
-          64,
-          64
-        ],
-        "optimizer": "adam",
-        "learning_rate": 0.001,
-        "lr_start": 0.001,
-        "lr_end": 0.001,
-        "active_cohorts": [
-          "support-random",
-          "support-off-by-one",
-          "support-balanced-invalid",
-          "support-valid-prefix"
-        ]
-      }
+    "acceptance_region_shape": "projected_ball_ellipse",
+    "trace_phase_epochs": [
+      0,
+      60,
+      180,
+      300
     ],
-    "phases": [
-      {
-        "name": "phase-1-random-baseline",
-        "label": "Phase 1: random baseline",
-        "phase_kind": "random",
-        "start_epoch": 1,
-        "end_epoch": 10,
-        "epochs": 10,
-        "support_size": 768,
-        "cohort_size": 768,
-        "cohort_sizes": [
-          768,
-          0,
-          0,
-          0
-        ],
-        "cohort_weights": [
-          1.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        "active_cohorts": [
-          "support-random"
-        ],
-        "optimizer": "adam",
-        "learning_rate": 0.001,
-        "lr_start": 0.001,
-        "lr_end": 0.001,
-        "batch_size": 16
-      },
-      {
-        "name": "phase-2-counterexamples",
-        "label": "Phase 2: add counterexamples",
-        "phase_kind": "counterexamples",
-        "start_epoch": 11,
-        "end_epoch": 30,
-        "epochs": 20,
-        "support_size": 960,
-        "cohort_size": 768,
-        "cohort_sizes": [
-          768,
-          64,
-          64,
-          64
-        ],
-        "cohort_weights": [
-          1.0,
-          1.0,
-          1.0,
-          1.0
-        ],
-        "active_cohorts": [
-          "support-random",
-          "support-off-by-one",
-          "support-balanced-invalid",
-          "support-valid-prefix"
-        ],
-        "optimizer": "adam",
-        "learning_rate": 0.001,
-        "lr_start": 0.001,
-        "lr_end": 0.001,
-        "batch_size": 16
-      }
+    "trace_phase_labels": [
+      "Random init",
+      "After phase 1",
+      "After phase 2",
+      "After phase 3"
     ],
-    "probes": [
-      {
-        "label": "10 valid 1",
-        "text": "()(())(())",
-        "probe_kind": "valid",
-        "length": 10,
-        "short_label": "10V1",
-        "highlight": true
-      },
-      {
-        "label": "10 valid 2",
-        "text": "(())()(())",
-        "probe_kind": "valid",
-        "length": 10,
-        "short_label": "10V2",
-        "highlight": false
-      },
-      {
-        "label": "10 valid 3",
-        "text": "(())()()()",
-        "probe_kind": "valid",
-        "length": 10,
-        "short_label": "10V3",
-        "highlight": false
-      },
-      {
-        "label": "10 valid 4",
-        "text": "(())((()))",
-        "probe_kind": "valid",
-        "length": 10,
-        "short_label": "10V4",
-        "highlight": false
-      },
-      {
-        "label": "10 random invalid 1",
-        "text": ")(()(()))(",
-        "probe_kind": "random",
-        "length": 10,
-        "short_label": "10R1",
-        "highlight": true
-      },
-      {
-        "label": "10 random invalid 2",
-        "text": "())()()()(",
-        "probe_kind": "random",
-        "length": 10,
-        "short_label": "10R2",
-        "highlight": false
-      },
-      {
-        "label": "10 random invalid 3",
-        "text": "))()())(()",
-        "probe_kind": "random",
-        "length": 10,
-        "short_label": "10R3",
-        "highlight": false
-      },
-      {
-        "label": "10 random invalid 4",
-        "text": "(()()))))(",
-        "probe_kind": "random",
-        "length": 10,
-        "short_label": "10R4",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 1",
-        "text": "(())))(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O1",
-        "highlight": true
-      },
-      {
-        "label": "10 off-by-one 2",
-        "text": "()()))(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O2",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 3",
-        "text": ")(()))(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O3",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 4",
-        "text": "())())(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O4",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 5",
-        "text": "()))()(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O5",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 6",
-        "text": "))()()(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O6",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 7",
-        "text": "))(())(())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O7",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 8",
-        "text": ")(())()())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O8",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 9",
-        "text": "))()((()))",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O9",
-        "highlight": false
-      },
-      {
-        "label": "10 off-by-one 10",
-        "text": "()())()())",
-        "probe_kind": "off_by_one",
-        "length": 10,
-        "short_label": "10O10",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 1",
-        "text": "(()))))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B1",
-        "highlight": true
-      },
-      {
-        "label": "10 balanced-invalid 2",
-        "text": "()())))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B2",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 3",
-        "text": "()))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B3",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 4",
-        "text": "))))(()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B4",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 5",
-        "text": ")()))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B5",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 6",
-        "text": ")(()))))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B6",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 7",
-        "text": ")()()))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B7",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 8",
-        "text": ")))(())(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B8",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 9",
-        "text": ")))()()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B9",
-        "highlight": false
-      },
-      {
-        "label": "10 balanced-invalid 10",
-        "text": "))(()))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B10",
-        "highlight": false
-      },
-      {
-        "label": "10 valid-prefix 1",
-        "text": "()(()())((",
-        "probe_kind": "valid_prefix",
-        "length": 10,
-        "short_label": "10P1",
-        "highlight": true
-      },
-      {
-        "label": "10 valid-prefix 2",
-        "text": "(()()())((",
-        "probe_kind": "valid_prefix",
-        "length": 10,
-        "short_label": "10P2",
-        "highlight": false
-      },
-      {
-        "label": "10 valid-prefix 3",
-        "text": "()()(())((",
-        "probe_kind": "valid_prefix",
-        "length": 10,
-        "short_label": "10P3",
-        "highlight": false
-      },
-      {
-        "label": "10 valid-prefix 4",
-        "text": "((())())((",
-        "probe_kind": "valid_prefix",
-        "length": 10,
-        "short_label": "10P4",
-        "highlight": false
-      },
-      {
-        "label": "20 valid 1",
-        "text": "()()()()((((()))()))",
-        "probe_kind": "valid",
-        "length": 20,
-        "short_label": "20V1",
-        "highlight": true
-      },
-      {
-        "label": "20 valid 2",
-        "text": "()(())()()((((()))))",
-        "probe_kind": "valid",
-        "length": 20,
-        "short_label": "20V2",
-        "highlight": false
-      },
-      {
-        "label": "20 valid 3",
-        "text": "()()()(())(((()())))",
-        "probe_kind": "valid",
-        "length": 20,
-        "short_label": "20V3",
-        "highlight": false
-      },
-      {
-        "label": "20 valid 4",
-        "text": "()(()((())))()()()()",
-        "probe_kind": "valid",
-        "length": 20,
-        "short_label": "20V4",
-        "highlight": false
-      },
-      {
-        "label": "20 random invalid 1",
-        "text": "())()()))())())())))",
-        "probe_kind": "random",
-        "length": 20,
-        "short_label": "20R1",
-        "highlight": true
-      },
-      {
-        "label": "20 random invalid 2",
-        "text": ")))())()))()()))()))",
-        "probe_kind": "random",
-        "length": 20,
-        "short_label": "20R2",
-        "highlight": false
-      },
-      {
-        "label": "20 random invalid 3",
-        "text": "()()((()(()(()())(((",
-        "probe_kind": "random",
-        "length": 20,
-        "short_label": "20R3",
-        "highlight": false
-      },
-      {
-        "label": "20 random invalid 4",
-        "text": ")(()()((())))))((())",
-        "probe_kind": "random",
-        "length": 20,
-        "short_label": "20R4",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 1",
-        "text": "))))((()()(())))(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O1",
-        "highlight": true
-      },
-      {
-        "label": "20 off-by-one 2",
-        "text": "()()()()(())))))(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O2",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 3",
-        "text": "(())()())(()))))(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O3",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 4",
-        "text": "(((()())))()))))(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O4",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 5",
-        "text": "(()()))(())))())(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O5",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 6",
-        "text": "))((()))))(()())(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O6",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 7",
-        "text": "()()))()))(())()(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O7",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 8",
-        "text": "()()(()())))))()(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O8",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 9",
-        "text": ")))((((())))))()(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O9",
-        "highlight": false
-      },
-      {
-        "label": "20 off-by-one 10",
-        "text": "))()((()))()))()(())",
-        "probe_kind": "off_by_one",
-        "length": 20,
-        "short_label": "20O10",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 1",
-        "text": "()(((()))(())))))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B1",
-        "highlight": true
-      },
-      {
-        "label": "20 balanced-invalid 2",
-        "text": "((()(()()))))))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B2",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 3",
-        "text": "(()()(()())))))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B3",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 4",
-        "text": "()((())())))())()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B4",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 5",
-        "text": ")(()))((()))))(()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B5",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 6",
-        "text": ")(())()()(())()))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B6",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 7",
-        "text": "))((()))((())))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B7",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 8",
-        "text": ")(()()())()(())))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B8",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 9",
-        "text": "()(()))))(())()()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B9",
-        "highlight": false
-      },
-      {
-        "label": "20 balanced-invalid 10",
-        "text": ")())(())())())(()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 20,
-        "short_label": "20B10",
-        "highlight": false
-      },
-      {
-        "label": "20 valid-prefix 1",
-        "text": "((((((()))))))(())((",
-        "probe_kind": "valid_prefix",
-        "length": 20,
-        "short_label": "20P1",
-        "highlight": true
-      },
-      {
-        "label": "20 valid-prefix 2",
-        "text": "()((()(())))(()())((",
-        "probe_kind": "valid_prefix",
-        "length": 20,
-        "short_label": "20P2",
-        "highlight": false
-      },
-      {
-        "label": "20 valid-prefix 3",
-        "text": "(())((()()))(()())((",
-        "probe_kind": "valid_prefix",
-        "length": 20,
-        "short_label": "20P3",
-        "highlight": false
-      },
-      {
-        "label": "20 valid-prefix 4",
-        "text": "((((())()()))()())((",
-        "probe_kind": "valid_prefix",
-        "length": 20,
-        "short_label": "20P4",
-        "highlight": false
-      },
-      {
-        "label": "30 valid 1",
-        "text": "(((()))(()))((()))()((((()))))",
-        "probe_kind": "valid",
-        "length": 30,
-        "short_label": "30V1",
-        "highlight": true
-      },
-      {
-        "label": "30 valid 2",
-        "text": "((())())(((((()()()(())())))))",
-        "probe_kind": "valid",
-        "length": 30,
-        "short_label": "30V2",
-        "highlight": false
-      },
-      {
-        "label": "30 valid 3",
-        "text": "()(())(((()))())()()(())((()))",
-        "probe_kind": "valid",
-        "length": 30,
-        "short_label": "30V3",
-        "highlight": false
-      },
-      {
-        "label": "30 valid 4",
-        "text": "(()((()((()((())()())()))())))",
-        "probe_kind": "valid",
-        "length": 30,
-        "short_label": "30V4",
-        "highlight": false
-      },
-      {
-        "label": "30 random invalid 1",
-        "text": ")()()())((())))))))))))((())((",
-        "probe_kind": "random",
-        "length": 30,
-        "short_label": "30R1",
-        "highlight": true
-      },
-      {
-        "label": "30 random invalid 2",
-        "text": ")(())(())(())(()(())(()()))))(",
-        "probe_kind": "random",
-        "length": 30,
-        "short_label": "30R2",
-        "highlight": false
-      },
-      {
-        "label": "30 random invalid 3",
-        "text": "(()()(())(())))(())())(())()((",
-        "probe_kind": "random",
-        "length": 30,
-        "short_label": "30R3",
-        "highlight": false
-      },
-      {
-        "label": "30 random invalid 4",
-        "text": ")())))()()(())()())())))(())()",
-        "probe_kind": "random",
-        "length": 30,
-        "short_label": "30R4",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 1",
-        "text": "())())()()((()))()()()()))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O1",
-        "highlight": true
-      },
-      {
-        "label": "30 off-by-one 2",
-        "text": "(())))()(())()(())()()()))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O2",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 3",
-        "text": "(())()))(()(()())(())())))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O3",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 4",
-        "text": "(()()(()(())))(())())())))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O4",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 5",
-        "text": "((())(())())()(()()))())))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O5",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 6",
-        "text": ")()()(())()()))(()(())()))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O6",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 7",
-        "text": "(()()()()(())(((()))))))))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O7",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 8",
-        "text": "()()()(()((()())))(())))))(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O8",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 9",
-        "text": "(((())))())))((()()))()())(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O9",
-        "highlight": false
-      },
-      {
-        "label": "30 off-by-one 10",
-        "text": "()()(())(()))(()()())))())(())",
-        "probe_kind": "off_by_one",
-        "length": 30,
-        "short_label": "30O10",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 1",
-        "text": ")((())())(())((()))(((())))(()",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B1",
-        "highlight": true
-      },
-      {
-        "label": "30 balanced-invalid 2",
-        "text": ")(()((((())))))(((()())()))(()",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B2",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 3",
-        "text": "()))))((())()(()(((()))))))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B3",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 4",
-        "text": ")((()((((((()()))))))))))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B4",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 5",
-        "text": ")))(()((()(()(()(()))))))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B5",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 6",
-        "text": ")(((()(()))()((()))))))(())(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B6",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 7",
-        "text": "()))()())(())((())(())())()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B7",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 8",
-        "text": ")()())((())()()))(((())))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B8",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 9",
-        "text": "()(((()))))))))((((()))()()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B9",
-        "highlight": false
-      },
-      {
-        "label": "30 balanced-invalid 10",
-        "text": "()))))()()((()))()(()(()))()(((",
-        "probe_kind": "balanced_invalid",
-        "length": 30,
-        "short_label": "30B10",
-        "highlight": false
-      },
-      {
-        "label": "30 valid-prefix 1",
-        "text": "(()((()()())((()))()))(()())((",
-        "probe_kind": "valid_prefix",
-        "length": 30,
-        "short_label": "30P1",
-        "highlight": true
-      },
-      {
-        "label": "30 valid-prefix 2",
-        "text": "((())((()(((())))))())(()())((",
-        "probe_kind": "valid_prefix",
-        "length": 30,
-        "short_label": "30P2",
-        "highlight": false
-      },
-      {
-        "label": "30 valid-prefix 3",
-        "text": "()()(())((()))(()(()))(()())((",
-        "probe_kind": "valid_prefix",
-        "length": 30,
-        "short_label": "30P3",
-        "highlight": false
-      },
-      {
-        "label": "30 valid-prefix 4",
-        "text": "()(())()((()()()((())))()())((",
-        "probe_kind": "valid_prefix",
-        "length": 30,
-        "short_label": "30P4",
-        "highlight": false
-      }
+    "trace_projection_mode": "oblique_pca_2d",
+    "trace_axis_labels": [
+      "PC1 + 0.28*PC3",
+      "PC2 + 0.18*PC3"
     ],
-    "story_probe_mode": "all_binary_strings_length_10",
-    "story_probe_count": 1024,
-    "story_probe_lengths": [
-      10
+    "trace_explained_variance": [
+      0.5769733190536499,
+      0.3168390393257141,
+      0.08306435495615005
     ],
-    "highlighted_probe_flips": [
-      {
-        "probe": {
-          "label": "10 full-space 1001100011",
-          "text": ")(())((())",
-          "probe_kind": "balanced_invalid",
-          "length": 10,
-          "short_label": "10A0611",
-          "highlight": false
-        },
-        "from_epoch": 0,
-        "to_epoch": 10,
-        "from_phase_label": "start",
-        "to_phase_label": "phase 1: random baseline",
-        "kind": "wrong_to_right",
-        "from_probability": 0.5787588357925415,
-        "to_probability": 0.3925611674785614
-      },
-      {
-        "probe": {
-          "label": "10 full-space 1001100011",
-          "text": ")(())((())",
-          "probe_kind": "balanced_invalid",
-          "length": 10,
-          "short_label": "10A0611",
-          "highlight": false
-        },
-        "from_epoch": 10,
-        "to_epoch": 30,
-        "from_phase_label": "phase 1: random baseline",
-        "to_phase_label": "phase 2: add counterexamples",
-        "kind": "right_to_wrong",
-        "from_probability": 0.3925611674785614,
-        "to_probability": 0.5546509623527527
-      }
-    ],
-    "highlighted_probe_trajectories": [
-      {
-        "probe": {
-          "label": "10 full-space 0010101101",
-          "text": "(()()())()",
-          "probe_kind": "valid",
-          "length": 10,
-          "short_label": "10A0173",
-          "highlight": false
-        },
-        "turn_pattern": [
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true
-        ],
-        "turn_label": "C -> I -> C -> I -> C -> I -> C",
-        "flip_epochs": [
-          11,
-          12,
-          24,
-          26,
-          29,
-          30
-        ]
-      },
-      {
-        "probe": {
-          "label": "10 full-space 1001100011",
-          "text": ")(())((())",
-          "probe_kind": "balanced_invalid",
-          "length": 10,
-          "short_label": "10A0611",
-          "highlight": false
-        },
-        "turn_pattern": [
-          false,
-          true,
-          false
-        ],
-        "turn_label": "I -> C -> I",
-        "flip_epochs": [
-          6,
-          30
-        ]
-      },
-      {
-        "probe": {
-          "label": "10 full-space 0110010101",
-          "text": "())(()()()",
-          "probe_kind": "balanced_invalid",
-          "length": 10,
-          "short_label": "10A0405",
-          "highlight": false
-        },
-        "turn_pattern": [
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false
-        ],
-        "turn_label": "I -> C -> I -> C -> I -> C -> I -> C -> I -> C -> I -> C -> I -> C -> I -> C -> I",
-        "flip_epochs": [
-          3,
-          6,
-          7,
-          9,
-          11,
-          12,
-          13,
-          14,
-          16,
-          18,
-          19,
-          20,
-          21,
-          22,
-          23,
-          26
-        ]
-      },
-      {
-        "probe": {
-          "label": "10 full-space 1010001101",
-          "text": ")()((())()",
-          "probe_kind": "balanced_invalid",
-          "length": 10,
-          "short_label": "10A0653",
-          "highlight": false
-        },
-        "turn_pattern": [
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false,
-          true,
-          false
-        ],
-        "turn_label": "I -> C -> I -> C -> I -> C -> I -> C -> I -> C -> I -> C -> I",
-        "flip_epochs": [
-          4,
-          5,
-          7,
-          9,
-          11,
-          12,
-          13,
-          14,
-          16,
-          26,
-          27,
-          28
-        ]
-      }
+    "trace_example_labels": [
+      "Valid control",
+      "Off-by-one shock",
+      "Valid-prefix repair"
     ],
     "trace_strings": [
       {
-        "label": "10 full-space 0010101101",
-        "text": "(()()())()",
+        "label": "valid_control",
+        "text": "()(()(()))",
         "probe_kind": "valid",
         "length": 10,
-        "short_label": "10A0173",
+        "short_label": "T1",
         "highlight": false
       },
       {
-        "label": "10 valid 1",
-        "text": "()(())(())",
-        "probe_kind": "valid",
+        "label": "off_by_one_shock",
+        "text": ")(()(())))",
+        "probe_kind": "off_by_one",
         "length": 10,
-        "short_label": "10V1",
-        "highlight": true
+        "short_label": "T2",
+        "highlight": false
       },
       {
-        "label": "10 balanced-invalid 1",
-        "text": "(()))))(((",
-        "probe_kind": "balanced_invalid",
+        "label": "repair_shock",
+        "text": "()((()))((",
+        "probe_kind": "valid_prefix",
         "length": 10,
-        "short_label": "10B1",
-        "highlight": true
+        "short_label": "T3",
+        "highlight": false
       }
-    ],
-    "trace_phase_epochs": [
-      10,
-      30
-    ],
-    "trace_phase_labels": [
-      "After phase 1: random baseline",
-      "After phase 2: add counterexamples"
-    ],
-    "trace_projection_mode": "pca_top_layer_3d",
-    "trace_axis_labels": [
-      "PC1 (94% var)",
-      "PC2 (3% var)",
-      "PC3 (1% var)"
-    ],
-    "trace_explained_variance": [
-      0.937744859942293,
-      0.030958767810620545,
-      0.011550365107029302
     ],
     "focus_trace": {
-      "label": "10 full-space 0010101101",
-      "text": "(()()())()",
+      "label": "valid_control",
+      "text": "()(()(()))",
       "probe_kind": "valid",
       "length": 10,
-      "short_label": "10A0173",
+      "short_label": "T1",
       "highlight": false
     },
-    "companion_traces": [
-      {
-        "label": "10 valid 1",
-        "text": "()(())(())",
-        "probe_kind": "valid",
-        "length": 10,
-        "short_label": "10V1",
-        "highlight": true
-      },
-      {
-        "label": "10 balanced-invalid 1",
-        "text": "(()))))(((",
-        "probe_kind": "balanced_invalid",
-        "length": 10,
-        "short_label": "10B1",
-        "highlight": true
-      }
-    ],
     "final_metrics": {
-      "epoch": 30,
-      "phase": "phase-2-counterexamples",
-      "train_loss": 0.24749226868152618,
-      "train_acc": 0.9114583134651184,
-      "eval_10_acc": 0.8359375,
-      "eval_20_acc": 0.9140625,
-      "eval_30_acc": 0.8203125
+      "epoch": 300,
+      "phase": "Phase 3: add valid-prefix + balanced-invalid",
+      "train_loss": 0.42581857519131217,
+      "train_acc": 0.90625,
+      "eval_10_acc": 0.90625,
+      "eval_20_acc": 0.96875,
+      "eval_30_acc": 0.75,
+      "eval_50_acc": 0.625,
+      "off_by_one_acc": 0.5625,
+      "valid_prefix_acc": 1.0,
+      "balanced_invalid_acc": 0.875
     }
   }
 }

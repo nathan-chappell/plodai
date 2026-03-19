@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from base64 import b64decode
 from binascii import Error as BinasciiError
-from datetime import datetime
 import json
 import logging
 import random
@@ -22,17 +21,13 @@ from chatkit.types import (
     AudioInput,
     ChatKitReq,
     ClientToolCallItem,
-    StreamingReq,
-    HiddenContextItem,
     ProgressUpdateEvent,
     SyncCustomActionResponse,
     ThreadItem,
-    ThreadItemDoneEvent,
     ThreadItemRemovedEvent,
     ThreadItemReplacedEvent,
     ThreadMetadata,
     ThreadStreamEvent,
-    ThreadsAddClientToolOutputReq,
     TranscriptionResult,
     UserMessageItem,
     WidgetItem,
@@ -42,14 +37,12 @@ from openai import AsyncOpenAI
 from openai.types.conversations.conversation_item import ConversationItem
 from openai.types.responses import (
     ResponseFunctionCallOutputItemListParam,
-    ResponseInputTextParam,
 )
 from openai.types.responses.response_function_tool_call_item import (
     ResponseFunctionToolCallItem,
 )
 from openai.types.responses.response_input_item_param import (
     FunctionCallOutput,
-    Message,
     ResponseInputItemParam,
 )
 from pydantic import TypeAdapter
@@ -58,22 +51,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.agents.agent_builder import build_registered_agent
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.query_models import build_query_plan_model
-from backend.app.agents.workspace_file import (
-    CsvWorkspaceMetadata,
-    JsonWorkspaceMetadata,
-    PdfWorkspaceMetadata,
-    WorkspaceFileMetadata,
-)
-from backend.app.agents.widgets import (
-    build_workspace_context_copy_text,
-    build_workspace_context_widget,
-)
 from backend.app.chatkit.client_tools import (
-    ClientToolCsvFile,
     ClientToolResultPayload,
-    ClientToolWorkspaceFile,
     coerce_client_tool_result,
 )
+from backend.app.chatkit.batch_continuation import decide_batch_continuation
 from backend.app.chatkit.feedback_types import (
     CancelFeedbackDetailsPayload,
     ChatItemFeedbackRecord,
@@ -82,11 +64,13 @@ from backend.app.chatkit.feedback_types import (
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
-    ExecutionMode,
-    WorkspaceContext,
     ThreadMetadataPatch,
     merge_thread_metadata,
-    normalize_thread_metadata,
+    parse_thread_metadata,
+)
+from backend.app.chatkit.runtime_state import (
+    resolve_thread_runtime_state,
+    workspace_files_from_workspace_state,
 )
 from backend.app.chatkit.usage import (
     accumulate_transcription_usage,
@@ -100,6 +84,7 @@ from backend.app.core.logging import (
     get_logger,
     log_event,
     summarize_mapping_keys_for_log,
+    summarize_pairs_for_log,
     summarize_sequence_for_log,
 )
 from backend.app.db.session import get_db
@@ -116,33 +101,65 @@ MODEL_ALIASES = {
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
 MAX_AGENT_TURNS = 30
+MAX_BATCH_CONTINUATIONS = 3
 RATE_LIMIT_RETRY_PATTERN = re.compile(
     r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
     re.IGNORECASE,
 )
-BATCH_MODE_CONTINUATION_PATTERNS = (
-    re.compile(r"\bwould you like me to\b", re.IGNORECASE),
-    re.compile(r"\bdo you want me to\b", re.IGNORECASE),
-    re.compile(r"\bshould I\b", re.IGNORECASE),
-    re.compile(r"\bcan you confirm\b", re.IGNORECASE),
-    re.compile(r"\bif you'd like\b", re.IGNORECASE),
-    re.compile(r"\blet me know if\b", re.IGNORECASE),
-)
-BATCH_MODE_HARD_BLOCK_PATTERNS = (
-    re.compile(r"\bI (?:can't|cannot|do not have)\b", re.IGNORECASE),
-    re.compile(r"\bpermission\b", re.IGNORECASE),
-    re.compile(r"\bmissing\b", re.IGNORECASE),
-    re.compile(r"\bunavailable\b", re.IGNORECASE),
-    re.compile(r"\bnot present\b", re.IGNORECASE),
-)
-BATCH_MODE_CONTINUE_TEXT = (
-    "Batch mode is enabled. Do not wait for user confirmation when a reasonable next "
-    "step is available. Continue with the strongest best-effort assumptions you can "
-    "make from the current request, the workspace, and the existing results. Only stop "
-    "if you are genuinely blocked by missing data, permissions, or an unavailable capability."
-)
-CLIENT_TOOL_OUTPUT_LOOKBACK_LIMIT = 20
-CLIENT_TOOL_OUTPUT_RETRY_DELAYS = (0.0, 0.05, 0.12, 0.25)
+
+
+def _context_line(
+    *,
+    user_id: str | None = None,
+    thread_id: str | None = None,
+    report_id: str | None = None,
+) -> str | None:
+    return summarize_pairs_for_log(
+        (
+            ("user", user_id),
+            ("thread", thread_id),
+            ("report", report_id),
+        )
+    )
+
+
+def _logs_link(*identifiers: str | None) -> str | None:
+    for identifier in identifiers:
+        if identifier:
+            return platform_logs_url(identifier)
+    return None
+
+
+def _format_cost_usd(value: float | None) -> str | None:
+    if value is None:
+        return None
+    text = f"{value:.8f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _usage_line(usage: object) -> str | None:
+    if not isinstance(usage, dict):
+        return None
+    return summarize_pairs_for_log(
+        (
+            ("input", usage.get("input_tokens", 0)),
+            ("output", usage.get("output_tokens", 0)),
+            ("cost_usd", _format_cost_usd(float(usage.get("cost_usd", 0.0)))),
+        )
+    )
+
+
+def _result_line(result: ClientToolResultPayload | None) -> str | None:
+    summary = _summarize_client_tool_result_for_log(result)
+    if set(summary.keys()) == {"result"}:
+        raw_result = summary.get("result")
+        return str(raw_result) if raw_result is not None else None
+    return summarize_pairs_for_log(
+        [
+            ("keys" if key == "result_keys" else key, value)
+            for key, value in summary.items()
+        ]
+    )
 
 
 def _summarize_client_tool_result_for_log(
@@ -165,14 +182,14 @@ def _summarize_client_tool_result_for_log(
         summary["rows"] = len(rows)
     if isinstance(result.get("imageDataUrl") or result.get("image_data_url"), str):
         summary["has_image"] = True
-    cwd_path = result.get("cwd_path")
-    if isinstance(cwd_path, str) and cwd_path:
-        summary["cwd_path"] = cwd_path
+    path_prefix = result.get("path_prefix")
+    if isinstance(path_prefix, str) and path_prefix:
+        summary["path_prefix"] = path_prefix
     file_input = result.get("file_input")
     if isinstance(file_input, dict):
         summary["has_file_input"] = True
         summary["file_input_keys"] = summarize_mapping_keys_for_log(file_input)
-    for key in ("files", "csv_files", "chartable_files"):
+    for key in ("files", "csv_files", "pdf_files", "chartable_files", "reports"):
         raw_value = result.get(key)
         if isinstance(raw_value, list):
             summary[key] = len(raw_value)
@@ -197,30 +214,6 @@ def _summarize_client_tool_result_for_log(
     return summary
 
 
-def _workspace_context_from_tool_result(
-    result: ClientToolResultPayload | None,
-) -> WorkspaceContext | None:
-    if result is None:
-        return None
-    raw_context = result.get("workspace_context")
-    if not isinstance(raw_context, dict):
-        return None
-    cwd_path = raw_context.get("cwd_path")
-    referenced_item_ids = raw_context.get("referenced_item_ids")
-    if not isinstance(cwd_path, str) or not cwd_path.strip():
-        return None
-    if not isinstance(referenced_item_ids, list):
-        return None
-    return {
-        "cwd_path": cwd_path.strip(),
-        "referenced_item_ids": [
-            str(item).strip()
-            for item in referenced_item_ids
-            if isinstance(item, str) and str(item).strip()
-        ],
-    }
-
-
 class ClientToolResultConverter(ThreadItemConverter):
     def __init__(self, openai_client: AsyncOpenAI, upload_cache: dict[str, str]):
         self.openai_client = openai_client
@@ -235,14 +228,15 @@ class ClientToolResultConverter(ThreadItemConverter):
         if item.status == "pending" or item.output is None:
             return None
         result = coerce_client_tool_result(item.output)
+        result_summary = _result_line(result)
         log_event(
             logger,
             logging.INFO,
             "tool.output.received",
-            call_id=item.call_id,
-            tool_name=item.name,
-            status=item.status,
-            **_summarize_client_tool_result_for_log(result),
+            rendered=[
+                f"{item.name or 'unknown_tool'} [{summarize_pairs_for_log((('id', item.call_id), ('status', item.status))) or 'call=unknown'}]",
+                *([f"result={result_summary}"] if result_summary else []),
+            ],
         )
         return await self.client_tool_result_to_input(
             result,
@@ -390,119 +384,38 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         self, raw_request: bytes | str, user_id: str, user_email: str | None
     ) -> ReportAgentContext:
         parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
-        metadata = normalize_thread_metadata(parsed_request.metadata)
+        metadata = parse_thread_metadata(parsed_request.metadata)
         thread_id = getattr(parsed_request.params, "thread_id", None)
-        recent_items = await self._load_recent_items(thread_id, user_id)
-        recovered_workspace_context = self._workspace_context_from_recent_items(recent_items)
-        if recovered_workspace_context is not None:
-            metadata["workspace_context"] = recovered_workspace_context
-        files = self._files_from_recent_items(recent_items)
         context = ReportAgentContext(
             report_id=thread_id or "pending_thread",
             user_id=user_id,
             user_email=user_email,
             db=self.db,
             chart_cache=dict(metadata.get("chart_cache") or {}),
+            request_metadata=metadata,
             thread_metadata=metadata,
-            available_files=files,
+            available_files=workspace_files_from_workspace_state(
+                metadata.get("workspace_state")
+            ),
             capability_bundle=metadata.get("capability_bundle"),
         )
-        query_plan_model, _ = build_query_plan_model(context.available_datasets)
-        context.query_plan_model = query_plan_model
+        context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
 
         log_event(
             self.logger,
             logging.INFO,
             "request_context.build",
-            op=parsed_request.type,
-            thread_id=thread_id,
-            user_id=user_id,
-            file_count=len(files),
-            dataset_count=len(context.available_datasets),
+            context=_context_line(user_id=user_id, thread_id=thread_id),
+            request=summarize_pairs_for_log(
+                (
+                    ("op", parsed_request.type),
+                    ("files", len(context.available_files)),
+                    ("datasets", len(context.available_datasets)),
+                )
+            ),
         )
 
         return context
-
-    async def _find_pending_client_tool_call(
-        self,
-        thread_id: str,
-        context: ReportAgentContext,
-    ) -> ClientToolCallItem | None:
-        for attempt, delay_seconds in enumerate(CLIENT_TOOL_OUTPUT_RETRY_DELAYS, start=1):
-            if delay_seconds:
-                await asyncio.sleep(delay_seconds)
-
-            items = await self.store.load_thread_items(
-                thread_id,
-                after=None,
-                limit=CLIENT_TOOL_OUTPUT_LOOKBACK_LIMIT,
-                order="desc",
-                context=context,
-            )
-            tool_call = next(
-                (
-                    item
-                    for item in items.data
-                    if isinstance(item, ClientToolCallItem) and item.status == "pending"
-                ),
-                None,
-            )
-            if tool_call is not None:
-                if attempt > 1:
-                    log_event(
-                        self.logger,
-                        logging.INFO,
-                        "client_tool_output.pending_call_recovered",
-                        thread_id=thread_id,
-                        user_id=context.user_id,
-                        attempt=attempt,
-                        call_id=tool_call.call_id,
-                        item_id=tool_call.id,
-                    )
-                return tool_call
-
-        log_event(
-            self.logger,
-            logging.WARNING,
-            "client_tool_output.pending_call_missing",
-            thread_id=thread_id,
-            user_id=context.user_id,
-            lookback_limit=CLIENT_TOOL_OUTPUT_LOOKBACK_LIMIT,
-            attempts=len(CLIENT_TOOL_OUTPUT_RETRY_DELAYS),
-        )
-        return None
-
-    async def _process_streaming_impl(
-        self,
-        request: StreamingReq,
-        context: ReportAgentContext,
-    ) -> AsyncIterator[ThreadStreamEvent]:
-        if isinstance(request, ThreadsAddClientToolOutputReq):
-            thread = await self.store.load_thread(
-                request.params.thread_id,
-                context=context,
-            )
-            tool_call = await self._find_pending_client_tool_call(thread.id, context)
-            if tool_call is None:
-                raise ValueError(
-                    f"No pending ClientToolCallItem found in recent items for {thread.id}"
-                )
-
-            tool_call.output = request.params.result
-            tool_call.status = "completed"
-            await self.store.save_item(thread.id, tool_call, context=context)
-            await self._cleanup_pending_client_tool_call(thread, context)
-
-            async for event in self._process_events(
-                thread,
-                context,
-                lambda: self.respond(thread, None, context),
-            ):
-                yield event
-            return
-
-        async for event in super()._process_streaming_impl(request, context):
-            yield event
 
     async def respond(
         self,
@@ -510,20 +423,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         input_user_message: UserMessageItem | None,
         context: ReportAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
-        typed_metadata = normalize_thread_metadata(thread.metadata)
-        request_metadata = normalize_thread_metadata(context.thread_metadata)
-        runtime_patch = self._runtime_metadata_patch(
-            current_metadata=typed_metadata,
-            request_metadata=request_metadata,
-        )
-        if runtime_patch:
-            typed_metadata = merge_thread_metadata(typed_metadata, runtime_patch)
-            thread.metadata = dict(typed_metadata)
-            await self.store.save_thread(thread, context=context)
-        context.report_id = thread.id
-        context.thread_metadata = typed_metadata
-        context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
-
+        runtime_state = resolve_thread_runtime_state(thread=thread, context=context)
+        typed_metadata = runtime_state.metadata
         recent_items = await self.store.load_thread_items(
             thread.id,
             after=None,
@@ -532,33 +433,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             context=context,
         )
         recent_item_data = recent_items.data
-        recovered_workspace_context = self._workspace_context_from_recent_items(
-            recent_item_data
-        )
-        if recovered_workspace_context is not None and (
-            typed_metadata.get("workspace_context") != recovered_workspace_context
-        ):
-            typed_metadata = merge_thread_metadata(
-                typed_metadata,
-                {"workspace_context": recovered_workspace_context},
-            )
-            thread.metadata = dict(typed_metadata)
-            await self.store.save_thread(thread, context=context)
-        context.available_files = self._files_from_recent_items(recent_item_data)
-        context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
-        context.capability_bundle = typed_metadata.get("capability_bundle")
-        context.thread_metadata = typed_metadata
         if context.capability_bundle is None:
             raise RuntimeError(
                 "No registered capability bundle is available for this thread or request surface."
             )
-
-        async for event in self._sync_workspace_context_items(
-            thread,
-            recent_item_data,
-            context=context,
-        ):
-            yield event
 
         pending_items = self._collect_pending_items(
             recent_item_data,
@@ -582,17 +460,17 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "respond.start",
-            thread_id=thread.id,
-            user_id=context.user_id,
-            model=requested_model,
-            pending_items=len(pending_items),
-            agent_input_items=len(agent_input),
-            dataset_count=len(context.dataset_ids),
+            context=_context_line(user_id=context.user_id, thread_id=thread.id),
+            run=summarize_pairs_for_log(
+                (
+                    ("model", requested_model),
+                    ("pending_items", len(pending_items)),
+                    ("agent_input_items", len(agent_input)),
+                    ("datasets", len(context.dataset_ids)),
+                )
+            ),
             dataset_ids=summarize_sequence_for_log(context.dataset_ids),
-            conversation_id=conversation_id,
-            conversation_logs=platform_logs_url(conversation_id),
-            previous_response_id=previous_response_id,
-            response_logs=platform_logs_url(previous_response_id),
+            logs=_logs_link(conversation_id),
         )
 
         agent = build_registered_agent(context, model=requested_model)
@@ -601,7 +479,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         )
         max_retries = max(0, self.settings.openai_max_retries)
         next_agent_input = agent_input
-        continuation_used = False
+        continuation_count = 0
         final_response_id: str | None = None
         final_conversation_id = conversation_id
         updated_usage = typed_metadata.get("usage")
@@ -631,11 +509,14 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         self.logger,
                         logging.WARNING,
                         "respond.retry",
-                        thread_id=thread.id,
-                        user_id=context.user_id,
-                        conversation_id=conversation_id,
-                        attempt=f"{attempt_number}/{total_attempts}",
-                        delay_seconds=f"{retry_delay_seconds:.3f}",
+                        context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                        retry=summarize_pairs_for_log(
+                            (
+                                ("attempt", f"{attempt_number}/{total_attempts}"),
+                                ("delay_seconds", f"{retry_delay_seconds:.3f}"),
+                            )
+                        ),
+                        logs=_logs_link(conversation_id),
                         error=str(exc),
                     )
                     yield ProgressUpdateEvent(
@@ -661,10 +542,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                             logging.ERROR,
                             "respond.error",
                             exc_info=exc,
-                            thread_id=thread.id,
-                            user_id=context.user_id,
-                            conversation_id=conversation_id,
-                            previous_response_id=previous_response_id,
+                            context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                            logs=_logs_link(previous_response_id, conversation_id),
                         )
                         raise
 
@@ -714,7 +593,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         "openai_conversation_id": result_conversation_id,
                         "openai_previous_response_id": result_response_id,
                         "chart_cache": context.chart_cache,
-                        "workspace_context": typed_metadata.get("workspace_context"),
                         "execution_mode": context.execution_mode,
                         "usage": updated_usage,
                     },
@@ -722,35 +600,49 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             )
             thread.metadata = dict(typed_metadata)
             context.thread_metadata = typed_metadata
+            context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
             conversation_id = result_conversation_id
             previous_response_id = result_response_id
             final_conversation_id = result_conversation_id
             final_response_id = result_response_id
 
-            latest_assistant_text = await self._latest_assistant_message_text(
-                thread.id,
-                context,
-            )
-            if self._should_auto_continue_batch(
-                execution_mode=context.execution_mode,
-                continuation_used=continuation_used,
-                assistant_text=latest_assistant_text,
-            ):
-                continuation_used = True
-                next_agent_input = self._build_batch_continue_input()
+            if context.execution_mode == "batch":
+                latest_assistant_text = await self._latest_assistant_message_text(
+                    thread.id,
+                    context,
+                )
+                decision = await decide_batch_continuation(
+                    capability_id=context.capability_id,
+                    investigation_brief=typed_metadata.get("investigation_brief"),
+                    latest_assistant_text=latest_assistant_text,
+                )
                 yield ProgressUpdateEvent(
-                    text="Batch mode is continuing automatically with best-effort assumptions."
+                    text=(
+                        f"Batch continuation decision: {'continue' if decision.should_continue else 'stop'}. "
+                        f"{decision.reason}"
+                    )
                 )
-                log_event(
-                    self.logger,
-                    logging.INFO,
-                    "respond.batch_continue",
-                    thread_id=thread.id,
-                    user_id=context.user_id,
-                    conversation_id=result_conversation_id,
-                    response_id=result_response_id,
-                )
-                continue
+                if decision.should_continue:
+                    if continuation_count >= MAX_BATCH_CONTINUATIONS:
+                        yield ProgressUpdateEvent(
+                            text=(
+                                "Batch continuation stopped after reaching the safety cap "
+                                f"of {MAX_BATCH_CONTINUATIONS} follow-on runs."
+                            )
+                        )
+                        break
+                    continuation_count += 1
+                    next_agent_input = decision.next_input or ""
+                    log_event(
+                        self.logger,
+                        logging.INFO,
+                        "respond.batch_continue",
+                        context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                        logs=_logs_link(result_response_id, result_conversation_id),
+                        continuation_count=continuation_count,
+                        reason=decision.reason,
+                    )
+                    continue
 
             break
 
@@ -758,16 +650,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "respond.end",
-            thread_id=thread.id,
-            user_id=context.user_id,
-            conversation_id=final_conversation_id,
-            conversation_logs=platform_logs_url(final_conversation_id),
-            response_id=final_response_id,
-            response_logs=platform_logs_url(final_response_id),
-            input_tokens=updated_usage.get("input_tokens", 0) if updated_usage else 0,
-            output_tokens=updated_usage.get("output_tokens", 0) if updated_usage else 0,
-            cost_usd=updated_usage.get("cost_usd", 0.0) if updated_usage else 0.0,
-            title_chars=len(thread.title or ""),
+            context=_context_line(user_id=context.user_id, thread_id=thread.id),
+            model=requested_model,
+            logs=_logs_link(final_response_id, final_conversation_id),
+            usage=_usage_line(updated_usage),
         )
 
     def _resolve_requested_model(
@@ -814,10 +700,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "respond.conversation_created",
-            thread_id=thread.id,
-            user_id=context.user_id,
-            conversation_id=conversation.id,
-            conversation_logs=platform_logs_url(conversation.id),
+            context=_context_line(user_id=context.user_id, thread_id=thread.id),
+            logs=_logs_link(conversation.id),
         )
         return conversation.id
 
@@ -874,12 +758,18 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "conversation.validate",
-            conversation_id=conversation_id,
-            conversation_logs=platform_logs_url(conversation_id),
-            trailing_items=len(trailing_items),
-            dangling_tool_calls=len(dangling_tool_calls),
-            dangling_call_ids=summarize_sequence_for_log(
-                [item.call_id for item in dangling_tool_calls]
+            logs=_logs_link(conversation_id),
+            summary=summarize_pairs_for_log(
+                (
+                    ("trailing_items", len(trailing_items)),
+                    ("dangling_tool_calls", len(dangling_tool_calls)),
+                    (
+                        "dangling_call_ids",
+                        summarize_sequence_for_log(
+                            [item.call_id for item in dangling_tool_calls]
+                        ),
+                    ),
+                )
             ),
         )
         return dangling_tool_calls
@@ -920,381 +810,20 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.WARNING,
             "conversation.recovered_dangling_tool_calls",
-            conversation_id=conversation_id,
-            conversation_logs=platform_logs_url(conversation_id),
-            count=len(dangling_tool_calls),
-            call_ids=summarize_sequence_for_log(
-                [item.call_id for item in dangling_tool_calls]
+            logs=_logs_link(conversation_id),
+            recovery=summarize_pairs_for_log(
+                (
+                    ("count", len(dangling_tool_calls)),
+                    (
+                        "call_ids",
+                        summarize_sequence_for_log(
+                            [item.call_id for item in dangling_tool_calls]
+                        ),
+                    ),
+                )
             ),
         )
         return len(dangling_tool_calls)
-
-    async def _load_recent_items(
-        self, thread_id: str | None, user_id: str
-    ) -> list[ThreadItem]:
-        if not thread_id:
-            return []
-        context = ReportAgentContext(
-            report_id=thread_id,
-            user_id=user_id,
-            user_email=None,
-            db=self.db,
-        )
-        try:
-            page = await self.store.load_thread_items(
-                thread_id,
-                after=None,
-                limit=20,
-                order="desc",
-                context=context,
-            )
-        except Exception:
-            return []
-        return page.data
-
-    def _files_from_recent_items(
-        self, recent_items: list[ThreadItem]
-    ) -> list[WorkspaceFileMetadata]:
-        files: list[WorkspaceFileMetadata] = []
-        for item in reversed(recent_items):
-            if item.type != "client_tool_call":
-                continue
-            if item.status != "completed":
-                continue
-            result = coerce_client_tool_result(item.output)
-            next_files = self._workspace_files_from_client_tool_result(result)
-            if next_files:
-                files = next_files
-        return files
-
-    def _workspace_context_from_recent_items(
-        self,
-        recent_items: list[ThreadItem],
-    ) -> WorkspaceContext | None:
-        for item in recent_items:
-            if item.type == "hidden_context_item" and isinstance(item.content, dict):
-                raw_workspace_context = item.content.get("workspace_context")
-                if isinstance(raw_workspace_context, dict):
-                    result = _workspace_context_from_tool_result(
-                        {"workspace_context": raw_workspace_context}
-                    )
-                    if result is not None:
-                        return result
-            if item.type != "client_tool_call" or item.status != "completed":
-                continue
-            result = _workspace_context_from_tool_result(
-                coerce_client_tool_result(item.output)
-            )
-            if result is not None:
-                return result
-        return None
-
-    async def _sync_workspace_context_items(
-        self,
-        thread: ThreadMetadata,
-        recent_items: list[ThreadItem],
-        *,
-        context: ReportAgentContext,
-    ) -> AsyncIterator[ThreadStreamEvent]:
-        seen_call_ids = {
-            str(item.content.get("source_call_id"))
-            for item in recent_items
-            if item.type == "hidden_context_item"
-            and isinstance(item.content, dict)
-            and isinstance(item.content.get("source_call_id"), str)
-        }
-
-        for item in reversed(recent_items):
-            if item.type != "client_tool_call" or item.status != "completed":
-                continue
-            if item.call_id in seen_call_ids:
-                continue
-
-            result = coerce_client_tool_result(item.output)
-            workspace_context = _workspace_context_from_tool_result(result)
-            if workspace_context is None:
-                continue
-
-            hidden_item = HiddenContextItem(
-                id=f"ctx_{uuid4().hex}",
-                thread_id=thread.id,
-                created_at=datetime.now(),
-                content={
-                    "source_call_id": item.call_id,
-                    "tool_name": item.name,
-                    "workspace_context": workspace_context,
-                    "workspace_operation": result.get("workspace_operation")
-                    if isinstance(result, dict)
-                    else None,
-                },
-            )
-            await self.store.add_thread_item(thread.id, hidden_item, context=context)
-            seen_call_ids.add(item.call_id)
-
-            operation = (
-                result.get("workspace_operation")
-                if isinstance(result, dict)
-                else None
-            )
-            if not isinstance(operation, dict):
-                continue
-
-            operation_kind = str(operation.get("kind", "")).strip()
-            if operation_kind not in {"create_directory", "change_directory"}:
-                continue
-
-            target_path = operation.get("target_path")
-            widget = build_workspace_context_widget(
-                action_label=(
-                    "Created directory"
-                    if operation_kind == "create_directory"
-                    else "Changed directory"
-                ),
-                cwd_path=workspace_context["cwd_path"],
-                target_path=target_path if isinstance(target_path, str) else None,
-            )
-            yield ThreadItemDoneEvent(
-                item=WidgetItem(
-                    id=f"widget_{uuid4().hex}",
-                    thread_id=thread.id,
-                    created_at=datetime.now(),
-                    widget=widget,
-                    copy_text=build_workspace_context_copy_text(
-                        action_label=(
-                            "Created directory"
-                            if operation_kind == "create_directory"
-                            else "Changed directory"
-                        ),
-                        cwd_path=workspace_context["cwd_path"],
-                        target_path=target_path if isinstance(target_path, str) else None,
-                    ),
-                )
-            )
-
-    def _workspace_files_from_client_tool_result(
-        self, result: ClientToolResultPayload | None
-    ) -> list[WorkspaceFileMetadata]:
-        if result is None:
-            return []
-        raw_files = result.get("files")
-        if isinstance(raw_files, list):
-            files: list[WorkspaceFileMetadata] = []
-            for raw_file in raw_files:
-                if not isinstance(raw_file, dict):
-                    continue
-                workspace_file = cast(ClientToolWorkspaceFile, raw_file)
-                file_id = str(workspace_file.get("id", "")).strip()
-                if not file_id:
-                    continue
-                files.append(
-                    WorkspaceFileMetadata(
-                        id=file_id,
-                        name=str(workspace_file.get("name", "Workspace file")),
-                        kind=cast(
-                            Literal["csv", "json", "pdf", "other"],
-                            str(workspace_file.get("kind", "other")),
-                        ),
-                        path=str(workspace_file.get("path", "")),
-                        extension=str(workspace_file.get("extension", "")),
-                        mime_type=(
-                            str(workspace_file.get("mime_type"))
-                            if workspace_file.get("mime_type")
-                            else None
-                        ),
-                        byte_size=workspace_file.get("byte_size") or 0,
-                        csv=(
-                            CsvWorkspaceMetadata(
-                                row_count=int(workspace_file.get("row_count", 0)),
-                                columns=[
-                                    str(column)
-                                    for column in workspace_file.get("columns", [])
-                                ],
-                                numeric_columns=[
-                                    str(column)
-                                    for column in workspace_file.get(
-                                        "numeric_columns", []
-                                    )
-                                ],
-                                sample_rows=[
-                                    {str(key): value for key, value in row.items()}
-                                    for row in workspace_file.get("sample_rows", [])
-                                    if isinstance(row, dict)
-                                ],
-                            )
-                            if str(workspace_file.get("kind", "other")) == "csv"
-                            else None
-                        ),
-                        json=(
-                            JsonWorkspaceMetadata(
-                                row_count=int(workspace_file.get("row_count", 0)),
-                                columns=[
-                                    str(column)
-                                    for column in workspace_file.get("columns", [])
-                                ],
-                                numeric_columns=[
-                                    str(column)
-                                    for column in workspace_file.get(
-                                        "numeric_columns", []
-                                    )
-                                ],
-                                sample_rows=[
-                                    {str(key): value for key, value in row.items()}
-                                    for row in workspace_file.get("sample_rows", [])
-                                    if isinstance(row, dict)
-                                ],
-                            )
-                            if str(workspace_file.get("kind", "other")) == "json"
-                            else None
-                        ),
-                        pdf=(
-                            PdfWorkspaceMetadata(
-                                page_count=workspace_file.get("page_count") or 0
-                            )
-                            if str(workspace_file.get("kind", "other")) == "pdf"
-                            else None
-                        ),
-                    )
-                )
-            if files:
-                return files
-
-        raw_csv_files = result.get("csv_files")
-        if isinstance(raw_csv_files, list):
-            files: list[WorkspaceFileMetadata] = []
-            for raw_file in raw_csv_files:
-                if not isinstance(raw_file, dict):
-                    continue
-                csv_file = cast(ClientToolCsvFile, raw_file)
-                file_id = str(csv_file.get("id", "")).strip()
-                if not file_id:
-                    continue
-                files.append(
-                    WorkspaceFileMetadata(
-                        id=file_id,
-                        name=str(csv_file.get("name", "CSV file")),
-                        kind="csv",
-                        path=str(csv_file.get("path", "")),
-                        extension="csv",
-                        csv=CsvWorkspaceMetadata(
-                            row_count=int(csv_file.get("row_count", 0)),
-                            columns=[str(column) for column in csv_file.get("columns", [])],
-                            numeric_columns=[
-                                str(column)
-                                for column in csv_file.get("numeric_columns", [])
-                            ],
-                            sample_rows=[
-                                {str(key): value for key, value in row.items()}
-                                for row in csv_file.get("sample_rows", [])
-                                if isinstance(row, dict)
-                            ],
-                        ),
-                    )
-                )
-            if files:
-                return files
-
-        raw_chartable_files = result.get("chartable_files")
-        if not isinstance(raw_chartable_files, list):
-            return []
-
-        files: list[WorkspaceFileMetadata] = []
-        for raw_file in raw_chartable_files:
-            if not isinstance(raw_file, dict):
-                continue
-            workspace_file = cast(ClientToolWorkspaceFile, raw_file)
-            file_id = str(workspace_file.get("id", "")).strip()
-            if not file_id:
-                continue
-            kind = str(workspace_file.get("kind", "other"))
-            files.append(
-                WorkspaceFileMetadata(
-                    id=file_id,
-                    name=str(workspace_file.get("name", "Chartable file")),
-                    kind=cast(Literal["csv", "json", "pdf", "other"], kind),
-                    path=str(workspace_file.get("path", "")),
-                    extension=str(workspace_file.get("extension", "")),
-                    csv=(
-                        CsvWorkspaceMetadata(
-                            row_count=int(workspace_file.get("row_count", 0)),
-                            columns=[str(column) for column in workspace_file.get("columns", [])],
-                            numeric_columns=[
-                                str(column)
-                                for column in workspace_file.get("numeric_columns", [])
-                            ],
-                            sample_rows=[
-                                {str(key): value for key, value in row.items()}
-                                for row in workspace_file.get("sample_rows", [])
-                                if isinstance(row, dict)
-                            ],
-                        )
-                        if kind == "csv"
-                        else None
-                    ),
-                    json=(
-                        JsonWorkspaceMetadata(
-                            row_count=int(workspace_file.get("row_count", 0)),
-                            columns=[str(column) for column in workspace_file.get("columns", [])],
-                            numeric_columns=[
-                                str(column)
-                                for column in workspace_file.get("numeric_columns", [])
-                            ],
-                            sample_rows=[
-                                {str(key): value for key, value in row.items()}
-                                for row in workspace_file.get("sample_rows", [])
-                                if isinstance(row, dict)
-                            ],
-                        )
-                        if kind == "json"
-                        else None
-                    ),
-                )
-            )
-        return files
-
-    def _runtime_metadata_patch(
-        self,
-        *,
-        current_metadata: ThreadMetadataPatch,
-        request_metadata: ThreadMetadataPatch,
-    ) -> ThreadMetadataPatch:
-        patch: ThreadMetadataPatch = {}
-        request_surface_key = request_metadata.get("surface_key")
-        request_bundle = request_metadata.get("capability_bundle")
-        request_workspace_context = request_metadata.get("workspace_context")
-        request_workspace_bootstrap = request_metadata.get("workspace_bootstrap")
-        request_workspace_contract_version = request_metadata.get("workspace_contract_version")
-        request_execution_mode = request_metadata.get("execution_mode")
-        request_origin = request_metadata.get("origin")
-        if request_surface_key and current_metadata.get("surface_key") != request_surface_key:
-            patch["surface_key"] = request_surface_key
-        if request_bundle is not None:
-            current_bundle = current_metadata.get("capability_bundle")
-            if current_bundle != request_bundle or patch.get("surface_key"):
-                patch["capability_bundle"] = request_bundle
-        if (
-            request_workspace_context is not None
-            and current_metadata.get("workspace_context") != request_workspace_context
-        ):
-            patch["workspace_context"] = request_workspace_context
-        if (
-            request_workspace_bootstrap is not None
-            and current_metadata.get("workspace_bootstrap") != request_workspace_bootstrap
-        ):
-            patch["workspace_bootstrap"] = request_workspace_bootstrap
-        if (
-            request_workspace_contract_version == "v1"
-            and current_metadata.get("workspace_contract_version")
-            != request_workspace_contract_version
-        ):
-            patch["workspace_contract_version"] = request_workspace_contract_version
-        if (
-            request_execution_mode in {"interactive", "batch"}
-            and current_metadata.get("execution_mode") != request_execution_mode
-        ):
-            patch["execution_mode"] = request_execution_mode
-        if request_origin and current_metadata.get("origin") != request_origin:
-            patch["origin"] = request_origin
-        return patch
 
     async def latest_assistant_item_ids(
         self,
@@ -1340,40 +869,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             if text:
                 return text
         return None
-
-    @classmethod
-    def _should_auto_continue_batch(
-        cls,
-        *,
-        execution_mode: ExecutionMode,
-        continuation_used: bool,
-        assistant_text: str | None,
-    ) -> bool:
-        if execution_mode != "batch" or continuation_used:
-            return False
-        if not assistant_text:
-            return False
-        if any(pattern.search(assistant_text) for pattern in BATCH_MODE_HARD_BLOCK_PATTERNS):
-            return False
-        return any(pattern.search(assistant_text) for pattern in BATCH_MODE_CONTINUATION_PATTERNS)
-
-    @staticmethod
-    def _build_batch_continue_input() -> list[ResponseInputItemParam]:
-        return [
-            cast(
-                ResponseInputItemParam,
-                Message(
-                    type="message",
-                    role="user",
-                    content=[
-                        ResponseInputTextParam(
-                            type="input_text",
-                            text=BATCH_MODE_CONTINUE_TEXT,
-                        )
-                    ],
-                ),
-            )
-        ]
 
     async def create_feedback_draft(
         self,
@@ -1473,19 +968,17 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         context: ReportAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
         if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
-            current_metadata = normalize_thread_metadata(thread.metadata)
+            current_metadata = parse_thread_metadata(thread.metadata)
             patch = cast(ThreadMetadataPatch, action.payload)
             thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
             if title := patch.get("title"):
                 thread.title = title
-            await self.store.save_thread(thread, context=context)
             log_event(
                 self.logger,
                 logging.INFO,
                 "thread_metadata.updated",
-                thread_id=thread.id,
-                user_id=context.user_id,
-                title_chars=len(thread.title or ""),
+                context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                changes=summarize_mapping_keys_for_log(patch),
             )
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
@@ -1503,13 +996,16 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 self.logger,
                 logging.INFO,
                 "feedback.submitted",
-                thread_id=thread.id,
-                user_id=context.user_id,
-                feedback_id=feedback.id,
-                item_ids=summarize_sequence_for_log(feedback.item_ids_json),
-                kind=feedback.kind,
-                label=feedback.label,
-                origin=feedback.origin,
+                context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                feedback=summarize_pairs_for_log(
+                    (
+                        ("id", feedback.id),
+                        ("kind", feedback.kind),
+                        ("label", feedback.label),
+                        ("origin", feedback.origin),
+                        ("item_ids", summarize_sequence_for_log(feedback.item_ids_json)),
+                    )
+                ),
             )
             yield ThreadItemReplacedEvent(
                 item=sender.model_copy(
@@ -1546,8 +1042,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                     self.logger,
                     logging.INFO,
                     "feedback.cancelled",
-                    thread_id=thread.id,
-                    user_id=context.user_id,
+                    context=_context_line(user_id=context.user_id, thread_id=thread.id),
                     feedback_id=payload.feedback_id,
                 )
             yield ThreadItemRemovedEvent(item_id=sender.id)
@@ -1563,7 +1058,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         context: ReportAgentContext,
     ) -> SyncCustomActionResponse:
         if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
-            current_metadata = normalize_thread_metadata(thread.metadata)
+            current_metadata = parse_thread_metadata(thread.metadata)
             patch = cast(ThreadMetadataPatch, action.payload)
             thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
             if title := patch.get("title"):
@@ -1573,9 +1068,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 self.logger,
                 logging.INFO,
                 "thread_metadata.sync_updated",
-                thread_id=thread.id,
-                user_id=context.user_id,
-                title_chars=len(thread.title or ""),
+                context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                changes=summarize_mapping_keys_for_log(patch),
             )
         return SyncCustomActionResponse(updated_item=sender)
 
@@ -1587,11 +1081,14 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "transcribe.start",
-            report_id=context.report_id,
-            user_id=context.user_id,
-            mime_type=audio_input.mime_type,
-            bytes=len(audio_input.data),
-            model=model,
+            context=_context_line(user_id=context.user_id, report_id=context.report_id),
+            request=summarize_pairs_for_log(
+                (
+                    ("model", model),
+                    ("mime_type", audio_input.mime_type),
+                    ("bytes", len(audio_input.data)),
+                )
+            ),
         )
         result = await self.openai_client.audio.transcriptions.create(
             file=("dictation.webm", audio_input.data, audio_input.media_type),
@@ -1614,12 +1111,23 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "transcribe.end",
-            report_id=context.report_id,
-            user_id=context.user_id,
-            model=model,
-            seconds=seconds,
-            cost_usd=context.thread_metadata.get("usage", {}).get("cost_usd", 0.0),
-            text_chars=len(result.text),
+            context=_context_line(user_id=context.user_id, report_id=context.report_id),
+            usage=summarize_pairs_for_log(
+                (
+                    ("model", model),
+                    ("seconds", seconds),
+                    (
+                        "cost_usd",
+                        _format_cost_usd(
+                            float(
+                                context.thread_metadata.get("usage", {}).get(
+                                    "cost_usd", 0.0
+                                )
+                            )
+                        ),
+                    ),
+                )
+            ),
         )
         return TranscriptionResult(text=result.text)
 

@@ -19,21 +19,18 @@ Important operating rules:
 4. Use explicit keys for labels and series. Do not invent structure that is not present in the file.
 5. JSON inputs must already be top-level arrays of objects.
 6. When the best chart is clear from the available artifact, render it without asking for unnecessary confirmation.
+7. When another agent or the user explicitly asks you to render a chart, do the inspection you need, make the plan, and call \`render_chart_from_file\` in the same run.
+8. Do not stop after schema inspection or planning if the request still requires an actual rendered chart.
 `.trim();
 
-export const chartAgentModule: CapabilityModule = {
+const chartAgentModule: CapabilityModule = {
   definition: chartAgentCapability,
-  buildAgentSpec: () => ({
+  buildAgentSpec: (workspace) => ({
     capability_id: "chart-agent",
     agent_name: "Chart Agent",
     instructions: CHART_AGENT_INSTRUCTIONS,
-    client_tools: buildChartAgentClientToolCatalog(),
+    client_tools: buildChartAgentClientToolCatalog(workspace),
     handoff_targets: [
-      {
-        capability_id: "workspace-agent",
-        tool_name: "delegate_to_workspace_agent",
-        description: "Hand off to the Workspace Agent when the next step is inspecting the current working directory, creating directories, or changing directories.",
-      },
       {
         capability_id: "feedback-agent",
         tool_name: "delegate_to_feedback_agent",
@@ -45,3 +42,5 @@ export const chartAgentModule: CapabilityModule = {
   bindClientTools: (workspace) => createChartAgentClientTools(workspace),
   Page: ChartAgentPage,
 };
+
+export default chartAgentModule;

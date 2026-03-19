@@ -1,7 +1,9 @@
-from typing import Literal, NotRequired, TypeAlias, TypeGuard, TypedDict
+from typing import Any, Literal, NotRequired, TypeAlias, TypeGuard, TypedDict, cast
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from backend.app.chatkit.feedback_types import FeedbackOrigin
-from backend.app.chatkit.usage import ThreadUsageTotals, empty_usage_totals
+from backend.app.chatkit.usage import ThreadUsageTotals
 
 
 JsonSchemaPrimitive: TypeAlias = str | int | float | bool | None
@@ -59,22 +61,45 @@ class CapabilityBundle(TypedDict):
 
 
 class WorkspaceContext(TypedDict):
-    cwd_path: str
+    path_prefix: str
     referenced_item_ids: list[str]
 
 
-class AgentsFileSummary(TypedDict):
+class WorkspaceStateFileSummary(TypedDict, total=False):
+    id: str
+    name: str
     path: str
-    present: bool
-    text: NotRequired[str | None]
+    kind: Literal["csv", "json", "pdf", "other"]
+    extension: str
+    mime_type: NotRequired[str | None]
+    byte_size: NotRequired[int | None]
+    row_count: NotRequired[int]
+    columns: NotRequired[list[str]]
+    numeric_columns: NotRequired[list[str]]
+    sample_rows: NotRequired[list[dict[str, object]]]
+    page_count: NotRequired[int | None]
 
 
-class WorkspaceBootstrapMetadata(TypedDict):
-    contract_version: Literal["v1"]
-    agents_file: AgentsFileSummary
-    current_goal: NotRequired[str | None]
+class WorkspaceStateReportSummary(TypedDict):
+    report_id: str
+    title: str
+    item_count: int
+    updated_at: NotRequired[str | None]
+
+
+class WorkspaceState(TypedDict):
+    version: Literal["v1"]
+    context: WorkspaceContext
+    files: list[WorkspaceStateFileSummary]
+    reports: list[WorkspaceStateReportSummary]
     current_report_id: NotRequired[str | None]
-    report_ids: list[str]
+    current_goal: NotRequired[str | None]
+
+
+class DemoValidatorCostSnapshot(TypedDict):
+    thread_id: str
+    scope: Literal["before_current_turn"]
+    usage: ThreadUsageTotals
 
 
 class ThreadMetadataPatch(TypedDict, total=False):
@@ -88,11 +113,10 @@ class ThreadMetadataPatch(TypedDict, total=False):
     openai_previous_response_id: str
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
-    workspace_context: WorkspaceContext
-    workspace_bootstrap: WorkspaceBootstrapMetadata
-    workspace_contract_version: Literal["v1"]
+    workspace_state: WorkspaceState
     execution_mode: ExecutionMode
     origin: FeedbackOrigin
+    demo_validator_cost_snapshot: DemoValidatorCostSnapshot
 
 
 class AppThreadMetadata(TypedDict, total=False):
@@ -106,80 +130,48 @@ class AppThreadMetadata(TypedDict, total=False):
     openai_previous_response_id: str
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
-    workspace_context: WorkspaceContext
-    workspace_bootstrap: WorkspaceBootstrapMetadata
-    workspace_contract_version: Literal["v1"]
+    workspace_state: WorkspaceState
     execution_mode: ExecutionMode
     origin: FeedbackOrigin
+    demo_validator_cost_snapshot: DemoValidatorCostSnapshot
 
 
-def _normalize_usage(raw_usage: object) -> ThreadUsageTotals | None:
-    if not isinstance(raw_usage, dict):
+class _MetadataModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+def _strip_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _validated_model_or_none(
+    model_cls: type[_MetadataModel],
+    value: object,
+) -> _MetadataModel | None:
+    if value is None:
+        return None
+    try:
+        return model_cls.model_validate(value)
+    except ValidationError:
         return None
 
-    usage = empty_usage_totals()
-    usage["input_tokens"] = int(raw_usage.get("input_tokens", 0))
-    usage["output_tokens"] = int(raw_usage.get("output_tokens", 0))
-    usage["cost_usd"] = round(
-        float(raw_usage.get("cost_usd", 0.0)),
-        8,
-    )
-    return usage
 
-
-def _normalize_agent_plan(raw_plan: object) -> AgentPlan | None:
-    if not isinstance(raw_plan, dict):
-        return None
-
-    plan_id = raw_plan.get("id")
-    focus = raw_plan.get("focus")
-    planned_steps = raw_plan.get("planned_steps")
-    if not isinstance(plan_id, str) or not plan_id.strip():
-        return None
-    if not isinstance(focus, str) or not focus.strip():
-        return None
-    if not isinstance(planned_steps, list):
-        return None
-
-    normalized_steps = [
-        str(step).strip()
-        for step in planned_steps
-        if isinstance(step, str) and step.strip()
-    ]
-    if not normalized_steps:
-        return None
-
-    plan: AgentPlan = {
-        "id": plan_id.strip(),
-        "focus": focus.strip(),
-        "planned_steps": normalized_steps,
-    }
-
-    raw_success_criteria = raw_plan.get("success_criteria")
-    if isinstance(raw_success_criteria, list):
-        success_criteria = [
-            str(item).strip()
-            for item in raw_success_criteria
-            if isinstance(item, str) and item.strip()
-        ]
-        if success_criteria:
-            plan["success_criteria"] = success_criteria
-
-    raw_follow_on_tool_hints = raw_plan.get("follow_on_tool_hints")
-    if isinstance(raw_follow_on_tool_hints, list):
-        follow_on_tool_hints = [
-            str(item).strip()
-            for item in raw_follow_on_tool_hints
-            if isinstance(item, str) and item.strip()
-        ]
-        if follow_on_tool_hints:
-            plan["follow_on_tool_hints"] = follow_on_tool_hints
-
-    created_at = raw_plan.get("created_at")
-    if isinstance(created_at, str) and created_at.strip():
-        plan["created_at"] = created_at.strip()
-
-    return plan
+def _validated_model_list(
+    model_cls: type[_MetadataModel],
+    value: object,
+) -> list[_MetadataModel]:
+    if not isinstance(value, list):
+        raise ValueError("expected a list")
+    validated: list[_MetadataModel] = []
+    for raw_item in value:
+        try:
+            validated.append(model_cls.model_validate(raw_item))
+        except ValidationError:
+            continue
+    return validated
 
 
 def _is_strict_json_schema(raw_schema: object) -> TypeGuard[JsonSchema]:
@@ -214,266 +206,467 @@ def _is_strict_json_schema(raw_schema: object) -> TypeGuard[JsonSchema]:
     return False
 
 
-def _normalize_client_tools(raw_tools: object) -> list[ClientToolDefinition] | None:
-    if not isinstance(raw_tools, list):
-        return None
+class ThreadUsageTotalsModel(_MetadataModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
 
-    tools: list[ClientToolDefinition] = []
-    for raw_tool in raw_tools:
-        if not isinstance(raw_tool, dict):
-            continue
-        name = raw_tool.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        parameters = raw_tool.get("parameters")
-        if not _is_strict_json_schema(parameters):
-            continue
-        tool: ClientToolDefinition = {
-            "type": "function",
-            "name": name.strip(),
-            "description": str(raw_tool.get("description", "")).strip(),
-            "parameters": parameters,
-            "strict": bool(raw_tool.get("strict", True)),
-        }
-        tools.append(tool)
+    @field_validator("input_tokens", "output_tokens", mode="before")
+    @classmethod
+    def _coerce_int(cls, value: object) -> int:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return 0
+        return 0
 
-    return tools
+    @field_validator("cost_usd", mode="before")
+    @classmethod
+    def _coerce_cost(cls, value: object) -> float:
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return 0.0
+        return 0.0
 
-
-def _normalize_handoff_targets(
-    raw_handoff_targets: object,
-) -> list[CapabilityHandoffTarget] | None:
-    if not isinstance(raw_handoff_targets, list):
-        return None
-
-    handoff_targets: list[CapabilityHandoffTarget] = []
-    for raw_handoff_target in raw_handoff_targets:
-        if not isinstance(raw_handoff_target, dict):
-            continue
-        capability_id = raw_handoff_target.get("capability_id")
-        tool_name = raw_handoff_target.get("tool_name")
-        description = raw_handoff_target.get("description")
-        if not isinstance(capability_id, str) or not capability_id.strip():
-            continue
-        if not isinstance(tool_name, str) or not tool_name.strip():
-            continue
-        if not isinstance(description, str) or not description.strip():
-            continue
-        handoff_targets.append(
-            {
-                "capability_id": capability_id.strip(),
-                "tool_name": tool_name.strip(),
-                "description": description.strip(),
-            }
-        )
-    return handoff_targets
+    @field_validator("cost_usd")
+    @classmethod
+    def _round_cost(cls, value: float) -> float:
+        return round(value, 8)
 
 
-def _normalize_capability_agent_spec(
-    raw_capability_agent_spec: object,
-) -> CapabilityAgentSpec | None:
-    if not isinstance(raw_capability_agent_spec, dict):
-        return None
+class AgentPlanModel(_MetadataModel):
+    id: str
+    focus: str
+    planned_steps: list[str]
+    success_criteria: list[str] | None = None
+    follow_on_tool_hints: list[str] | None = None
+    created_at: str | None = None
 
-    capability_id = raw_capability_agent_spec.get("capability_id")
-    agent_name = raw_capability_agent_spec.get("agent_name")
-    instructions = raw_capability_agent_spec.get("instructions")
-    client_tools = _normalize_client_tools(raw_capability_agent_spec.get("client_tools"))
-    handoff_targets = _normalize_handoff_targets(
-        raw_capability_agent_spec.get("handoff_targets")
-    )
+    @field_validator("id", "focus", mode="before")
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
 
-    if not isinstance(capability_id, str) or not capability_id.strip():
-        return None
-    if not isinstance(agent_name, str) or not agent_name.strip():
-        return None
-    if not isinstance(instructions, str) or not instructions.strip():
-        return None
-    if client_tools is None:
-        return None
-    if handoff_targets is None:
-        return None
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
 
-    return {
-        "capability_id": capability_id.strip(),
-        "agent_name": agent_name.strip(),
-        "instructions": instructions.strip(),
-        "client_tools": client_tools,
-        "handoff_targets": handoff_targets,
-    }
-
-
-def _normalize_capability_bundle(raw_bundle: object) -> CapabilityBundle | None:
-    if not isinstance(raw_bundle, dict):
-        return None
-    root_capability_id = raw_bundle.get("root_capability_id")
-    raw_capabilities = raw_bundle.get("capabilities")
-    if not isinstance(root_capability_id, str) or not root_capability_id.strip():
-        return None
-    if not isinstance(raw_capabilities, list):
-        return None
-    capabilities = [
-        capability
-        for raw_capability in raw_capabilities
-        if (capability := _normalize_capability_agent_spec(raw_capability)) is not None
-    ]
-    if not capabilities:
-        return None
-    if root_capability_id.strip() not in {
-        capability["capability_id"] for capability in capabilities
-    }:
-        return None
-    return {
-        "root_capability_id": root_capability_id.strip(),
-        "capabilities": capabilities,
-    }
-
-
-def _normalize_execution_mode(raw_mode: object) -> ExecutionMode | None:
-    if raw_mode in {"interactive", "batch"}:
-        return raw_mode
-    return None
-
-
-def _normalize_workspace_context(raw_context: object) -> WorkspaceContext | None:
-    if not isinstance(raw_context, dict):
-        return None
-
-    cwd_path = raw_context.get("cwd_path")
-    referenced_item_ids = raw_context.get("referenced_item_ids")
-    if not isinstance(cwd_path, str) or not cwd_path.strip():
-        return None
-    if not isinstance(referenced_item_ids, list):
-        return None
-
-    return {
-        "cwd_path": cwd_path.strip(),
-        "referenced_item_ids": [
+    @field_validator("planned_steps", mode="before")
+    @classmethod
+    def _planned_steps(cls, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [
             item.strip()
-            for item in referenced_item_ids
+            for item in value
             if isinstance(item, str) and item.strip()
-        ],
-    }
+        ]
+
+    @field_validator("success_criteria", "follow_on_tool_hints", mode="before")
+    @classmethod
+    def _optional_string_list(cls, value: object) -> list[str] | None:
+        if not isinstance(value, list):
+            return None
+        cleaned = [
+            item.strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def _require_planned_steps(self) -> "AgentPlanModel":
+        if not self.planned_steps:
+            raise ValueError("planned_steps must contain at least one step")
+        return self
 
 
-def _normalize_workspace_bootstrap(
-    raw_bootstrap: object,
-) -> WorkspaceBootstrapMetadata | None:
-    if not isinstance(raw_bootstrap, dict):
-        return None
+class ClientToolDefinitionModel(_MetadataModel):
+    type: Literal["function"] = "function"
+    name: str
+    description: str = ""
+    parameters: dict[str, Any]
+    strict: bool = True
 
-    agents_file = raw_bootstrap.get("agents_file")
-    report_ids = raw_bootstrap.get("report_ids")
-    if (
-        raw_bootstrap.get("contract_version") != "v1"
-        or not isinstance(agents_file, dict)
-        or not isinstance(report_ids, list)
-    ):
-        return None
+    @field_validator("name", mode="before")
+    @classmethod
+    def _tool_name(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty tool name")
+        return text
 
-    path = agents_file.get("path")
-    present = agents_file.get("present")
-    if not isinstance(path, str) or not isinstance(present, bool):
-        return None
+    @field_validator("description", mode="before")
+    @classmethod
+    def _tool_description(cls, value: object) -> str:
+        return _strip_string(value) or ""
 
-    metadata: WorkspaceBootstrapMetadata = {
-        "contract_version": "v1",
-        "agents_file": {
-            "path": path.strip(),
-            "present": present,
-        },
-        "report_ids": [
-            item.strip() for item in report_ids if isinstance(item, str) and item.strip()
-        ],
-    }
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def _tool_parameters(cls, value: object) -> dict[str, Any]:
+        if not _is_strict_json_schema(value):
+            raise ValueError("expected a strict JSON schema")
+        return cast(dict[str, Any], value)
 
-    text = agents_file.get("text")
-    if isinstance(text, str):
-        metadata["agents_file"]["text"] = text
-
-    current_goal = raw_bootstrap.get("current_goal")
-    if isinstance(current_goal, str):
-        metadata["current_goal"] = current_goal.strip()
-
-    current_report_id = raw_bootstrap.get("current_report_id")
-    if isinstance(current_report_id, str):
-        metadata["current_report_id"] = current_report_id.strip()
-
-    return metadata
+    @field_validator("strict", mode="before")
+    @classmethod
+    def _tool_strict(cls, value: object) -> bool:
+        return True if value is None else bool(value)
 
 
-def normalize_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
+class CapabilityHandoffTargetModel(_MetadataModel):
+    capability_id: str
+    tool_name: str
+    description: str
+
+    @field_validator("capability_id", "tool_name", "description", mode="before")
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+
+class CapabilityAgentSpecModel(_MetadataModel):
+    capability_id: str
+    agent_name: str
+    instructions: str
+    client_tools: list[ClientToolDefinitionModel] = Field(default_factory=list)
+    handoff_targets: list[CapabilityHandoffTargetModel] = Field(default_factory=list)
+
+    @field_validator("capability_id", "agent_name", "instructions", mode="before")
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("client_tools", mode="before")
+    @classmethod
+    def _client_tools(
+        cls,
+        value: object,
+    ) -> list[ClientToolDefinitionModel]:
+        return cast(
+            list[ClientToolDefinitionModel],
+            _validated_model_list(ClientToolDefinitionModel, value),
+        )
+
+    @field_validator("handoff_targets", mode="before")
+    @classmethod
+    def _handoff_targets(
+        cls,
+        value: object,
+    ) -> list[CapabilityHandoffTargetModel]:
+        return cast(
+            list[CapabilityHandoffTargetModel],
+            _validated_model_list(CapabilityHandoffTargetModel, value),
+        )
+
+
+class CapabilityBundleModel(_MetadataModel):
+    root_capability_id: str
+    capabilities: list[CapabilityAgentSpecModel]
+
+    @field_validator("root_capability_id", mode="before")
+    @classmethod
+    def _root_capability_id(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty root_capability_id")
+        return text
+
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def _capabilities(
+        cls,
+        value: object,
+    ) -> list[CapabilityAgentSpecModel]:
+        return cast(
+            list[CapabilityAgentSpecModel],
+            _validated_model_list(CapabilityAgentSpecModel, value),
+        )
+
+    @model_validator(mode="after")
+    def _validate_root_capability(self) -> "CapabilityBundleModel":
+        if not self.capabilities:
+            raise ValueError("capabilities must not be empty")
+        capability_ids = {capability.capability_id for capability in self.capabilities}
+        if self.root_capability_id not in capability_ids:
+            raise ValueError("root_capability_id must be present in capabilities")
+        return self
+
+
+class WorkspaceContextModel(_MetadataModel):
+    path_prefix: str
+    referenced_item_ids: list[str]
+
+    @field_validator("path_prefix", mode="before")
+    @classmethod
+    def _path_prefix(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty path_prefix")
+        return text
+
+    @field_validator("referenced_item_ids", mode="before")
+    @classmethod
+    def _referenced_item_ids(cls, value: object) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("expected a list")
+        return [
+            item.strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+
+
+class WorkspaceStateFileSummaryModel(_MetadataModel):
+    id: str
+    name: str
+    path: str
+    kind: Literal["csv", "json", "pdf", "other"]
+    extension: str
+    mime_type: str | None = None
+    byte_size: int | None = None
+    row_count: int | None = None
+    columns: list[str] | None = None
+    numeric_columns: list[str] | None = None
+    sample_rows: list[dict[str, object]] | None = None
+    page_count: int | None = None
+
+    @field_validator("id", "name", "path", "extension", mode="before")
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("mime_type", mode="before")
+    @classmethod
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+    @field_validator("byte_size", "row_count", "page_count", mode="before")
+    @classmethod
+    def _optional_int(cls, value: object) -> int | None:
+        return value if isinstance(value, int) else None
+
+    @field_validator("columns", "numeric_columns", mode="before")
+    @classmethod
+    def _string_list(cls, value: object) -> list[str] | None:
+        if not isinstance(value, list):
+            return None
+        cleaned = [
+            item.strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+        return cleaned or None
+
+    @field_validator("sample_rows", mode="before")
+    @classmethod
+    def _sample_rows(cls, value: object) -> list[dict[str, object]] | None:
+        if not isinstance(value, list):
+            return None
+        rows = [
+            {str(key): row_value for key, row_value in row.items()}
+            for row in value
+            if isinstance(row, dict)
+        ]
+        return rows or None
+
+
+class WorkspaceStateReportSummaryModel(_MetadataModel):
+    report_id: str
+    title: str
+    item_count: int
+    updated_at: str | None = None
+
+    @field_validator("report_id", "title", mode="before")
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("updated_at", mode="before")
+    @classmethod
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+
+class WorkspaceStateModel(_MetadataModel):
+    version: Literal["v1"]
+    context: WorkspaceContextModel
+    files: list[WorkspaceStateFileSummaryModel] = Field(default_factory=list)
+    reports: list[WorkspaceStateReportSummaryModel] = Field(default_factory=list)
+    current_report_id: str | None = None
+    current_goal: str | None = None
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def _context(cls, value: object) -> WorkspaceContextModel:
+        validated = _validated_model_or_none(WorkspaceContextModel, value)
+        if not isinstance(validated, WorkspaceContextModel):
+            raise ValueError("expected a valid workspace context")
+        return validated
+
+    @field_validator("files", mode="before")
+    @classmethod
+    def _files(
+        cls,
+        value: object,
+    ) -> list[WorkspaceStateFileSummaryModel]:
+        return cast(
+            list[WorkspaceStateFileSummaryModel],
+            _validated_model_list(WorkspaceStateFileSummaryModel, value),
+        )
+
+    @field_validator("reports", mode="before")
+    @classmethod
+    def _reports(
+        cls,
+        value: object,
+    ) -> list[WorkspaceStateReportSummaryModel]:
+        return cast(
+            list[WorkspaceStateReportSummaryModel],
+            _validated_model_list(WorkspaceStateReportSummaryModel, value),
+        )
+
+    @field_validator("current_report_id", "current_goal", mode="before")
+    @classmethod
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+
+class DemoValidatorCostSnapshotModel(_MetadataModel):
+    thread_id: str
+    scope: Literal["before_current_turn"]
+    usage: ThreadUsageTotalsModel
+
+    @field_validator("thread_id", mode="before")
+    @classmethod
+    def _thread_id(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty thread_id")
+        return text
+
+    @field_validator("usage", mode="before")
+    @classmethod
+    def _usage(cls, value: object) -> ThreadUsageTotalsModel:
+        validated = _validated_model_or_none(ThreadUsageTotalsModel, value)
+        if not isinstance(validated, ThreadUsageTotalsModel):
+            raise ValueError("expected a valid usage snapshot")
+        return validated
+
+
+class AppThreadMetadataModel(_MetadataModel):
+    title: str | None = None
+    investigation_brief: str | None = None
+    plan: AgentPlanModel | None = None
+    chart_plan: AgentPlanModel | None = None
+    chart_cache: dict[str, str] | None = None
+    surface_key: str | None = None
+    openai_conversation_id: str | None = None
+    openai_previous_response_id: str | None = None
+    usage: ThreadUsageTotalsModel | None = None
+    capability_bundle: CapabilityBundleModel | None = None
+    workspace_state: WorkspaceStateModel | None = None
+    execution_mode: ExecutionMode | None = None
+    origin: FeedbackOrigin | None = None
+    demo_validator_cost_snapshot: DemoValidatorCostSnapshotModel | None = None
+
+    @field_validator(
+        "title",
+        "investigation_brief",
+        "surface_key",
+        "openai_conversation_id",
+        "openai_previous_response_id",
+        mode="before",
+    )
+    @classmethod
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+    @field_validator("chart_cache", mode="before")
+    @classmethod
+    def _chart_cache(cls, value: object) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        return {
+            key: cache_value
+            for key, cache_value in value.items()
+            if isinstance(key, str) and isinstance(cache_value, str)
+        }
+
+    @field_validator("plan", "chart_plan", mode="before")
+    @classmethod
+    def _agent_plan(cls, value: object) -> AgentPlanModel | None:
+        validated = _validated_model_or_none(AgentPlanModel, value)
+        return cast(AgentPlanModel | None, validated)
+
+    @field_validator("usage", mode="before")
+    @classmethod
+    def _thread_usage(cls, value: object) -> ThreadUsageTotalsModel | None:
+        validated = _validated_model_or_none(ThreadUsageTotalsModel, value)
+        return cast(ThreadUsageTotalsModel | None, validated)
+
+    @field_validator("capability_bundle", mode="before")
+    @classmethod
+    def _capability_bundle(cls, value: object) -> CapabilityBundleModel | None:
+        validated = _validated_model_or_none(CapabilityBundleModel, value)
+        return cast(CapabilityBundleModel | None, validated)
+
+    @field_validator("workspace_state", mode="before")
+    @classmethod
+    def _workspace_state(cls, value: object) -> WorkspaceStateModel | None:
+        validated = _validated_model_or_none(WorkspaceStateModel, value)
+        return cast(WorkspaceStateModel | None, validated)
+
+    @field_validator("demo_validator_cost_snapshot", mode="before")
+    @classmethod
+    def _demo_validator_cost_snapshot(
+        cls,
+        value: object,
+    ) -> DemoValidatorCostSnapshotModel | None:
+        validated = _validated_model_or_none(DemoValidatorCostSnapshotModel, value)
+        return cast(DemoValidatorCostSnapshotModel | None, validated)
+
+    @field_validator("execution_mode", mode="before")
+    @classmethod
+    def _execution_mode(cls, value: object) -> ExecutionMode | None:
+        return value if value in {"interactive", "batch"} else None
+
+    @field_validator("origin", mode="before")
+    @classmethod
+    def _origin(cls, value: object) -> FeedbackOrigin | None:
+        return value if value in {"interactive", "ui_integration_test"} else None
+
+
+def parse_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
     if not isinstance(raw_metadata, dict):
         return {}
-
-    metadata: AppThreadMetadata = {}
-
-    title = raw_metadata.get("title")
-    if isinstance(title, str) and title:
-        metadata["title"] = title
-
-    investigation_brief = raw_metadata.get("investigation_brief")
-    if isinstance(investigation_brief, str) and investigation_brief.strip():
-        metadata["investigation_brief"] = investigation_brief.strip()
-
-    plan = _normalize_agent_plan(raw_metadata.get("plan"))
-    if plan is not None:
-        metadata["plan"] = plan
-
-    chart_plan = _normalize_agent_plan(raw_metadata.get("chart_plan"))
-    if chart_plan is not None:
-        metadata["chart_plan"] = chart_plan
-
-    chart_cache = raw_metadata.get("chart_cache")
-    if isinstance(chart_cache, dict):
-        metadata["chart_cache"] = {
-            str(key): str(value)
-            for key, value in chart_cache.items()
-            if isinstance(key, str) and isinstance(value, str)
-        }
-
-    conversation_id = raw_metadata.get("openai_conversation_id")
-    if isinstance(conversation_id, str) and conversation_id:
-        metadata["openai_conversation_id"] = conversation_id
-
-    previous_response_id = raw_metadata.get("openai_previous_response_id")
-    if isinstance(previous_response_id, str) and previous_response_id:
-        metadata["openai_previous_response_id"] = previous_response_id
-
-    surface_key = raw_metadata.get("surface_key")
-    if isinstance(surface_key, str) and surface_key.strip():
-        metadata["surface_key"] = surface_key.strip()
-
-    origin = raw_metadata.get("origin")
-    if origin in {"interactive", "ui_integration_test"}:
-        metadata["origin"] = origin
-
-    capability_bundle = _normalize_capability_bundle(raw_metadata.get("capability_bundle"))
-    if capability_bundle is not None:
-        metadata["capability_bundle"] = capability_bundle
-
-    workspace_context = _normalize_workspace_context(raw_metadata.get("workspace_context"))
-    if workspace_context is not None:
-        metadata["workspace_context"] = workspace_context
-
-    workspace_bootstrap = _normalize_workspace_bootstrap(
-        raw_metadata.get("workspace_bootstrap")
-    )
-    if workspace_bootstrap is not None:
-        metadata["workspace_bootstrap"] = workspace_bootstrap
-
-    if raw_metadata.get("workspace_contract_version") == "v1":
-        metadata["workspace_contract_version"] = "v1"
-
-    execution_mode = _normalize_execution_mode(raw_metadata.get("execution_mode"))
-    if execution_mode is not None:
-        metadata["execution_mode"] = execution_mode
-
-    usage = _normalize_usage(raw_metadata.get("usage"))
-    if usage is not None:
-        metadata["usage"] = usage
-
-    return metadata
+    parsed = AppThreadMetadataModel.model_validate(raw_metadata)
+    return cast(AppThreadMetadata, parsed.model_dump(exclude_none=True))
 
 
 def merge_thread_metadata(

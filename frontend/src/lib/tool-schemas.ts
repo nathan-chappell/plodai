@@ -148,6 +148,66 @@ export const queryPlanSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+const compactGroupKeySchema: JsonSchema = {
+  type: "object",
+  properties: {
+    as: { type: "string" },
+    expr: columnExprSchema,
+  },
+  required: ["as", "expr"],
+  additionalProperties: false,
+};
+
+const compactAggregateSpecSchema: JsonSchema = {
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        op: { enum: ["count"] },
+        as: { type: "string" },
+      },
+      required: ["op", "as"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        op: { enum: ["sum", "avg", "min", "max"] },
+        as: { type: "string" },
+        expr: columnExprSchema,
+      },
+      required: ["op", "as", "expr"],
+      additionalProperties: false,
+    },
+  ],
+};
+
+export const compactAggregateQueryPlanSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    dataset_id: { type: "string" },
+    group_by: {
+      type: "array",
+      items: compactGroupKeySchema,
+    },
+    aggregates: {
+      type: "array",
+      items: compactAggregateSpecSchema,
+    },
+    sort: {
+      type: "array",
+      items: sortSpecSchema,
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 500,
+    },
+  },
+  required: ["dataset_id"],
+  additionalProperties: false,
+};
+
 const chartSeriesSchema: JsonSchema = {
   type: "object",
   properties: {
@@ -194,35 +254,15 @@ export const clientChartSpecSchema: JsonSchema = {
 export const includeSamplesSchema: JsonSchema = {
   type: "object",
   properties: {
+    prefix: {
+      type: "string",
+      description: "Optional absolute path prefix used to scope the listing.",
+    },
     includeSamples: {
       type: "boolean",
       description: "Whether to include tiny familiarization samples.",
     },
   },
-  additionalProperties: false,
-};
-
-export const getWorkspaceContextToolSchema: JsonSchema = {
-  type: "object",
-  properties: {},
-  additionalProperties: false,
-};
-
-export const createWorkspaceDirectoryToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    path: { type: "string" },
-  },
-  required: ["path"],
-  additionalProperties: false,
-};
-
-export const changeWorkspaceDirectoryToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    path: { type: "string" },
-  },
-  required: ["path"],
   additionalProperties: false,
 };
 
@@ -244,23 +284,52 @@ export const runAggregateQueryToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+export const compactRunAggregateQueryToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    query_plan: compactAggregateQueryPlanSchema,
+  },
+  required: ["query_plan"],
+  additionalProperties: false,
+};
+
 export const createCsvFileToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    filename: { type: "string" },
+    path: { type: "string" },
     query_plan: queryPlanSchema,
   },
-  required: ["filename", "query_plan"],
+  required: ["path", "query_plan"],
+  additionalProperties: false,
+};
+
+export const compactCreateCsvFileToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    query_plan: compactAggregateQueryPlanSchema,
+  },
+  required: ["path", "query_plan"],
   additionalProperties: false,
 };
 
 export const createJsonFileToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    filename: { type: "string" },
+    path: { type: "string" },
     query_plan: queryPlanSchema,
   },
-  required: ["filename", "query_plan"],
+  required: ["path", "query_plan"],
+  additionalProperties: false,
+};
+
+export const compactCreateJsonFileToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    query_plan: compactAggregateQueryPlanSchema,
+  },
+  required: ["path", "query_plan"],
   additionalProperties: false,
 };
 
@@ -315,31 +384,68 @@ export const listReportsToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-export function buildGetReportToolSchema(reportIds: readonly string[]): JsonSchema {
-  return {
-    type: "object",
-    properties: {
-      report_id: { enum: [...reportIds] },
-    },
-    required: ["report_id"],
-    additionalProperties: false,
-  };
-}
+export const getReportToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    report_id: { type: "string" },
+  },
+  required: ["report_id"],
+  additionalProperties: false,
+};
 
-export function buildAppendReportSectionToolSchema(
-  reportIds: readonly string[],
-): JsonSchema {
-  return {
-    type: "object",
-    properties: {
-      report_id: { enum: [...reportIds] },
-      title: { type: "string" },
-      markdown: { type: "string" },
+export const createReportToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    report_id: { type: "string" },
+  },
+  required: ["title"],
+  additionalProperties: false,
+};
+
+const reportSectionDraftSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    type: { enum: ["section"] },
+    title: { type: "string" },
+    markdown: { type: "string" },
+  },
+  required: ["type", "title", "markdown"],
+  additionalProperties: false,
+};
+
+const reportNoteDraftSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    type: { enum: ["note"] },
+    title: { type: "string" },
+    text: { type: "string" },
+  },
+  required: ["type", "title", "text"],
+  additionalProperties: false,
+};
+
+export const appendReportItemToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    report_id: { type: "string" },
+    item: {
+      anyOf: [reportSectionDraftSchema, reportNoteDraftSchema],
     },
-    required: ["report_id", "title", "markdown"],
-    additionalProperties: false,
-  };
-}
+  },
+  required: ["report_id", "item"],
+  additionalProperties: false,
+};
+
+export const removeReportItemToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    report_id: { type: "string" },
+    item_id: { type: "string" },
+  },
+  required: ["report_id", "item_id"],
+  additionalProperties: false,
+};
 
 function buildRowExprSchema(depth: number): JsonSchema {
   if (depth <= 0) {

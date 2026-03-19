@@ -1,7 +1,5 @@
-from dataclasses import replace
 import json
 from pathlib import Path
-import random
 import sys
 
 import pytest
@@ -10,419 +8,220 @@ from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import blog.scripts.mlp_story_artifacts as mlp_story
 import blog.scripts.neural_dynamics_artifacts as demo
+import blog.scripts.precision_story_artifacts as precision_story
 
 
-def make_probe_trajectory(
-    probe: demo.ProbeSpec,
-    correctness: tuple[bool, ...],
-    probabilities: tuple[float, ...],
-) -> demo.ProbeTrajectory:
-    epochs = tuple(index * 10 for index in range(len(correctness)))
-    return demo.ProbeTrajectory(
-        probe=probe,
-        actual_valid=demo.is_balanced_parentheses(probe.text),
-        epochs=epochs,
-        probabilities=probabilities,
-        correctness=correctness,
-        turn_pattern=demo.compress_boolean_runs(list(correctness)),
-        flip_epochs=tuple(
-            epochs[index + 1]
-            for index in range(len(correctness) - 1)
-            if correctness[index] != correctness[index + 1]
-        ),
-    )
-
-
-def test_balanced_parentheses_validator() -> None:
-    assert demo.is_balanced_parentheses("(())()")
-    assert not demo.is_balanced_parentheses("(()")
-    assert not demo.is_balanced_parentheses("())(")
-
-
-def test_valid_prefix_invalid_validator_and_sampler() -> None:
-    assert demo.is_valid_prefix_invalid("()(()(")
-    assert not demo.is_valid_prefix_invalid("(())()")
-    assert not demo.is_valid_prefix_invalid("())(()")
-
-    sampled = demo.sample_valid_prefix_invalid_sequence(random.Random(7), 20)
-    assert len(sampled) == 20
-    assert demo.is_valid_prefix_invalid(sampled)
-    assert not demo.is_balanced_parentheses(sampled)
-    assert demo.min_prefix_balance(sampled) >= 0
-    assert demo.terminal_balance(sampled) > 0
-
-
-def test_corruption_invalid_validator_excludes_balanced_and_prefix_cases() -> None:
-    assert demo.is_corruption_invalid("(())))(())")
-    assert not demo.is_corruption_invalid("()(()(")
-    assert not demo.is_corruption_invalid(")((()))(")
-    assert not demo.is_corruption_invalid("(())()")
-
-
-def test_rnn_publication_defaults_match_requested_refresh() -> None:
-    assert demo.RNN_HIDDEN_SIZE == 8
-    assert demo.RNN_NUM_LAYERS == 2
-    assert demo.DEFAULT_PHASE_EPOCHS == 10
-    assert demo.DEFAULT_RANDOM_PHASE_EPOCHS == 10
-    assert demo.DEFAULT_COUNTEREXAMPLE_PHASE_EPOCHS == 20
-    assert demo.DEFAULT_BATCH_SIZE == 16
-    assert demo.DEFAULT_TRAIN_SAMPLES == 64
-    assert demo.DEFAULT_RANDOM_COHORT_SIZE == 768
-    assert demo.DEFAULT_COUNTEREXAMPLE_COHORT_SIZE == 64
-    assert demo.DEFAULT_RNN_LR == pytest.approx(0.001)
-
-
-def test_parse_mlp_shape_accepts_single_and_multiple_layers() -> None:
-    assert demo.parse_mlp_shape("32") == (32,)
-    assert demo.parse_mlp_shape("32, 32") == (32, 32)
-
-
-def test_retained_support_builder_returns_explicit_baseline_and_shock_pool() -> None:
-    support = demo.build_retained_support(
-        random_cohort_size=80,
-        counterexample_cohort_size=20,
+@pytest.fixture(scope="module")
+def small_rnn_result() -> demo.RNNExperimentResult:
+    return demo.run_rnn_experiment(
         seed=7,
-    )
-    assert set(support) == {
-        demo.SUPPORT_COHORT_RANDOM,
-        demo.SUPPORT_COHORT_OFF_BY_ONE,
-        demo.SUPPORT_COHORT_BALANCED,
-        demo.SUPPORT_COHORT_VALID_PREFIX,
-    }
-    assert len(support[demo.SUPPORT_COHORT_RANDOM]) == 80
-    assert len(support[demo.SUPPORT_COHORT_OFF_BY_ONE]) == 20
-    assert len(support[demo.SUPPORT_COHORT_BALANCED]) == 20
-    assert len(support[demo.SUPPORT_COHORT_VALID_PREFIX]) == 20
-    assert sum(len(examples) for examples in support.values()) == 140
-
-
-def test_phase_support_uses_large_random_baseline_and_small_cumulative_shock() -> None:
-    phases = demo.build_training_phases(
-        random_phase_epochs=5,
-        counterexample_phase_epochs=10,
-        random_cohort_size=80,
-        counterexample_cohort_size=20,
-        lr_start=0.08,
-        lr_end=0.02,
-    )
-    support = demo.build_retained_support(
-        random_cohort_size=80,
-        counterexample_cohort_size=20,
-        seed=7,
+        phase_epochs=2,
+        train_samples=12,
+        test_samples=12,
+        lr_start=demo.DEFAULT_RNN_LR_START,
+        lr_end=demo.DEFAULT_RNN_LR_END,
     )
 
-    phase_1 = demo.materialize_phase_examples(support, phases[0])
-    phase_2 = demo.materialize_phase_examples(support, phases[1])
 
-    assert len(phases) == 2
-    assert phases[0].cohort_sizes == (80, 0, 0, 0)
-    assert phases[1].cohort_sizes == (80, 20, 20, 20)
-    assert phases[0].support_size == 80
-    assert phases[1].support_size == 140
-    assert len(phase_1) == 80
-    assert len(phase_2) == 140
-    assert {example.text for example in phase_1}.issubset({example.text for example in phase_2})
-    assert demo.random_baseline_cohort_size(20) == 240
-    assert demo.counterexample_phase_epochs(5) == 10
+def test_balanced_parentheses_family_predicates() -> None:
+    assert demo.is_balanced_parentheses("(())")
+    assert demo.is_off_by_one_invalid("(()(()))))")
+    assert demo.is_valid_prefix_invalid("(()()(((")
+    assert demo.is_balanced_invalid(")(()())(")
 
 
-def test_evaluation_sets_use_only_lengths_10_20_30() -> None:
-    evaluation_sets = demo.build_evaluation_sets(test_samples=24, seed=7)
-    assert set(evaluation_sets) == {10, 20, 30}
-    for length, examples in evaluation_sets.items():
-        assert len(examples) == 24
-        assert all(len(example.text) == length for example in examples)
+def test_balanced_parentheses_family_samplers_are_constructive() -> None:
+    rng = demo.random.Random(7)
+    valid = demo.sample_valid_sequence_of_length(rng, 10)
+    off_by_one = demo.sample_off_by_one_invalid_sequence(rng, 10)
+    valid_prefix = demo.sample_valid_prefix_invalid_sequence(rng, 10)
+    balanced_invalid = demo.sample_balanced_invalid_sequence(rng, 10)
+
+    assert demo.is_balanced_parentheses(valid)
+    assert demo.is_off_by_one_invalid(off_by_one)
+    assert demo.is_valid_prefix_invalid(valid_prefix)
+    assert demo.is_balanced_invalid(balanced_invalid)
 
 
-def test_trace_rnn_returns_two_layer_four_state_traces() -> None:
-    tokens, lengths = demo.encode_sequences(["()()" * 5, "((()))" * 3 + "()"])
-    model = demo.TinyTraceRNN(hidden_size=demo.RNN_HIDDEN_SIZE, num_layers=demo.RNN_NUM_LAYERS)
-    logits, traces = model(tokens, lengths, capture_traces=True)
-    assert logits.shape == (2,)
-    assert traces is not None
-    assert len(traces) == demo.RNN_NUM_LAYERS
-    assert traces[0].shape[0] == 2
-    assert traces[0].shape[2] == 8
+def test_orchestrator_delegates_mlp_and_precision_stories_to_separate_scripts() -> None:
+    assert demo.render_mlp_assets is mlp_story.render_mlp_assets
+    assert demo.render_precision_assets is precision_story.render_precision_assets
+    assert demo.build_precision_story_payload is precision_story.build_precision_story_payload
+    assert demo.build_precision_story_figure is precision_story.build_precision_story_figure
 
 
-def test_probe_flips_and_trace_payload_use_displayed_probe_pool() -> None:
-    result, checkpoints = demo.run_rnn_experiment(
-        seed=7,
-        phase_epochs=1,
-        train_samples=4,
-        test_samples=24,
-        lr_start=0.08,
-        lr_end=0.02,
-    )
-    flips = demo.build_probe_flips(result)
-    trajectories = demo.build_probe_trajectories(result)
-    highlighted = demo.select_highlighted_probe_trajectories(trajectories)
-    selection = demo.select_trace_story_probes(result, flips)
-    payload = demo.build_trace_grid_payload(
-        model_builder=lambda: demo.TinyTraceRNN(hidden_size=demo.RNN_HIDDEN_SIZE, num_layers=demo.RNN_NUM_LAYERS),
-        checkpoints=checkpoints,
-        phase_spans=result.phase_spans,
-        trace_probes=selection.selected_probes,
-    )
+def test_precision_story_payload_uses_curated_two_stack_sequence() -> None:
+    payload = demo.build_precision_story_payload()
 
-    assert payload.phase_epochs == [1, 3]
-    assert payload.phase_labels == [
-        "After phase 1: random baseline",
-        "After phase 2: add counterexamples",
+    assert payload.encoding == demo.PRECISION_STORY_MODE
+    assert payload.dust_depth == demo.PRECISION_DUST_DEPTH
+    assert payload.initial_left_stack == ""
+    assert payload.initial_right_stack == "101011001110010110100111001011010011010111001011"
+    assert len(payload.states) == 30
+    assert payload.step_labels[0] == "start"
+    assert payload.step_labels[-1] == "move R"
+
+
+def test_precision_story_figure_uses_2d_panels_and_precision_annotations() -> None:
+    figure = demo.build_precision_story_figure(demo.build_precision_story_payload())
+
+    assert all(trace.type != "scatter3d" for trace in figure.data)
+    assert {trace.type for trace in figure.data} == {"scatter"}
+    assert len(figure.layout.images) == 1
+    assert any("10-bit tape windows" in annotation.text for annotation in figure.layout.annotations)
+    assert any("[0]" in annotation.text or "[1]" in annotation.text for annotation in figure.layout.annotations)
+    assert any("Finite picture, infinite claim" in annotation.text for annotation in figure.layout.annotations)
+
+
+def test_story_probe_pool_uses_balanced_family_slice() -> None:
+    assert len(demo.STORY_PROBES) == 128
+    assert len([probe for probe in demo.STORY_PROBES if probe.probe_kind == "valid"]) == 32
+    assert len([probe for probe in demo.STORY_PROBES if probe.probe_kind == demo.PHASE_KIND_OFF_BY_ONE]) == 32
+    assert len([probe for probe in demo.STORY_PROBES if probe.probe_kind == demo.PHASE_KIND_VALID_PREFIX]) == 32
+    assert len([probe for probe in demo.STORY_PROBES if probe.probe_kind == demo.PHASE_KIND_BALANCED_INVALID]) == 32
+
+
+def test_acceptance_probability_uses_fixed_ball_geometry() -> None:
+    anchor = demo.RNN_ACCEPT_ANCHOR.unsqueeze(0)
+    boundary = demo.RNN_ACCEPT_ANCHOR.clone()
+    boundary[1] = demo.RNN_ACCEPT_RADIUS
+    outside = demo.RNN_ACCEPT_ANCHOR.clone()
+    outside[1] = demo.RNN_ACCEPT_RADIUS + 0.35
+    probabilities = demo.acceptance_probability(torch.stack([anchor.squeeze(0), boundary, outside], dim=0)).tolist()
+    assert probabilities[0] > 0.99
+    assert pytest.approx(probabilities[1], rel=0.0, abs=1e-6) == 0.5
+    assert probabilities[2] < 0.05
+
+
+def test_publication_checkpoint_epochs_cover_three_training_phases() -> None:
+    assert demo.phase_epoch_schedule(2) == [2, 4, 4]
+    assert demo.phase_batch_schedule() == [8, 16, 32]
+    assert demo.build_publication_checkpoint_epochs(2) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert demo.checkpoint_label(0, 2) == "Random init"
+    assert demo.checkpoint_label(2, 2) == "After phase 1"
+    assert demo.checkpoint_label(6, 2) == "After phase 2"
+    assert demo.checkpoint_label(10, 2) == "After phase 3"
+
+
+def test_phase_learning_rate_decays_with_cosine_restarts() -> None:
+    phase_1_start = demo.phase_learning_rate(phase_index=0, epoch_in_phase=1, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
+    phase_1_end = demo.phase_learning_rate(phase_index=0, epoch_in_phase=6, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
+    phase_2_start = demo.phase_learning_rate(phase_index=1, epoch_in_phase=1, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
+    phase_3_end = demo.phase_learning_rate(phase_index=2, epoch_in_phase=6, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
+
+    assert phase_1_start > phase_1_end > 0.00015
+    assert phase_2_start < phase_1_start
+    assert phase_3_end == pytest.approx(0.00015)
+
+
+def test_run_rnn_experiment_returns_phased_shock_story_metadata(
+    small_rnn_result: demo.RNNExperimentResult,
+) -> None:
+    result = small_rnn_result
+    assert result.model_mode == demo.RNN_MODEL_MODE
+    assert result.language == demo.TARGET_LANGUAGE
+    assert result.architecture["module"] == "torch.RNN"
+    assert result.architecture["nonlinearity"] == "tanh"
+    assert result.architecture["hidden_size"] == 4
+    assert result.architecture["num_layers"] == 2
+    assert result.checkpoint_labels[0] == "Random init"
+    assert result.checkpoint_labels[-1] == "After phase 3"
+    assert result.phase_epoch_schedule == [2, 4, 4]
+    assert result.phase_batch_schedule == [8, 16, 32]
+    assert result.phase_family_mix == [
+        {"random": 1.0},
+        {"random": 0.5, "off_by_one": 0.5},
+        {"random": 0.25, "off_by_one": 0.25, "valid_prefix": 0.25, "balanced_invalid": 0.25},
     ]
-    assert len(payload.probe_labels) == 3
-    assert len(payload.cells) == 6
-    assert len(payload.cells[0].raw_points[0]) == 8
-    assert len(payload.cells[0].projected_points[0]) == 3
-    assert len(payload.backgrounds) == 2
-    assert len(payload.landmarks) == 6
-    assert payload.projection_mode == "pca_top_layer_3d"
-    assert payload.axis_labels[0].startswith("PC1")
-    assert payload.axis_labels[1].startswith("PC2")
-    assert payload.axis_labels[2].startswith("PC3")
-    assert len(payload.explained_variance) == 3
-    assert len(payload.backgrounds[0].projected_points) == len(payload.backgrounds[0].probabilities)
-    assert selection.focus_probe.short_label in (
-        {probe.short_label for probe in result.story_probes}
-        | {probe.short_label for probe in demo.RESPONSE_PROBES}
-    )
-    if highlighted:
-        assert selection.focus_probe.short_label == highlighted[0].probe.short_label
-    assert payload.probe_labels == [probe.label for probe in selection.selected_probes]
-    assert all(trajectory.probe.short_label in {probe.short_label for probe in result.story_probes} for trajectory in highlighted)
-
-
-def test_trace_background_probabilities_cover_plotted_states() -> None:
-    result, checkpoints = demo.run_rnn_experiment(
-        seed=7,
-        phase_epochs=1,
-        train_samples=4,
-        test_samples=24,
-        lr_start=0.08,
-        lr_end=0.02,
-    )
-    payload = demo.build_trace_grid_payload(
-        model_builder=lambda: demo.TinyTraceRNN(hidden_size=demo.RNN_HIDDEN_SIZE, num_layers=demo.RNN_NUM_LAYERS),
-        checkpoints=checkpoints,
-        phase_spans=result.phase_spans,
-        trace_probes=demo.RESPONSE_PROBES[:3],
-    )
-    assert len(payload.phase_epochs) == 2
-    for background in payload.backgrounds:
-        assert background.projected_points
-        assert len(background.projected_points) == len(background.probabilities)
-        assert len(background.projected_points[0]) == 3
-        assert all(0.0 <= probability <= 1.0 for probability in background.probabilities)
-
-
-def test_response_probe_pool_has_expected_story_samples() -> None:
-    labels = {probe.short_label for probe in demo.RESPONSE_PROBES}
-    assert len(demo.RESPONSE_PROBES) == 96
-    assert {"10O10", "20B10", "30P4", "10V4", "20R4"} <= labels
-
-
-def test_story_probe_pool_covers_all_binary_strings_of_length_10() -> None:
-    assert len(demo.STORY_PROBES) == 2 ** 10
-    assert len({probe.text for probe in demo.STORY_PROBES}) == 2 ** 10
-    assert all(len(probe.text) == 10 for probe in demo.STORY_PROBES)
-    assert sum(1 for probe in demo.STORY_PROBES if probe.probe_kind == "valid") == 42
-
-
-def test_candidate_probe_pool_is_deterministic_and_family_specific() -> None:
-    off_by_one_pool = demo.build_probe_candidate_pool(length=20, probe_kind=demo.PHASE_KIND_OFF_BY_ONE, pool_size=24)
-    assert off_by_one_pool == demo.build_probe_candidate_pool(length=20, probe_kind=demo.PHASE_KIND_OFF_BY_ONE, pool_size=24)
-    assert off_by_one_pool
-    assert all(demo.is_corruption_invalid(text) for text in off_by_one_pool)
-
-    balanced_pool = demo.build_probe_candidate_pool(length=20, probe_kind=demo.PHASE_KIND_BALANCED, pool_size=24)
-    assert balanced_pool
-    assert all(demo.is_balanced_invalid(text) for text in balanced_pool)
-
-    prefix_pool = demo.build_probe_candidate_pool(length=20, probe_kind=demo.PHASE_KIND_VALID_PREFIX, pool_size=24)
-    assert prefix_pool
-    assert all(demo.is_valid_prefix_invalid(text) for text in prefix_pool)
-
-
-def test_probe_trajectory_scoring_prefers_late_recoveries() -> None:
-    late = demo.score_probe_probability_trajectory(
-        [0.64, 0.61, 0.59, 0.51, 0.42],
-        actual_valid=False,
-        checkpoint_epochs=[0, 10, 20, 30, 40],
-    )
-    early = demo.score_probe_probability_trajectory(
-        [0.64, 0.44, 0.41, 0.33, 0.24],
-        actual_valid=False,
-        checkpoint_epochs=[0, 10, 20, 30, 40],
-    )
-    assert late > early
-
-
-def test_probability_to_sigma_clips_and_preserves_sign() -> None:
-    assert demo.probability_to_sigma(0.5) == pytest.approx(0.0)
-    assert demo.probability_to_sigma(0.8413447460685429) == pytest.approx(1.0, abs=1e-3)
-    assert demo.probability_to_sigma(0.15865525393145707) == pytest.approx(-1.0, abs=1e-3)
-    assert demo.probability_to_sigma(1.0) == demo.probability_to_sigma(1.0 - demo.SIGMA_CLIP_PROBABILITY)
-    assert demo.probability_to_sigma(0.0) == demo.probability_to_sigma(demo.SIGMA_CLIP_PROBABILITY)
-    assert demo.probability_to_sigma(0.99) > 0
-    assert demo.probability_to_sigma(0.01) < 0
-
-
-def test_select_highlighted_probe_trajectories_prefers_multi_turn_patterns() -> None:
-    simple = make_probe_trajectory(
-        demo.RESPONSE_PROBES[0],
-        (False, True, True, True, True),
-        (0.62, 0.44, 0.41, 0.39, 0.38),
-    )
-    multi_turn = make_probe_trajectory(
-        demo.RESPONSE_PROBES[1],
-        (True, False, True, True, True),
-        (0.18, 0.62, 0.46, 0.58, 0.61),
-    )
-    oscillating = make_probe_trajectory(
-        demo.RESPONSE_PROBES[2],
-        (False, True, False, True, False),
-        (0.63, 0.43, 0.58, 0.42, 0.61),
-    )
-
-    selected = demo.select_highlighted_probe_trajectories(
-        [simple, multi_turn, oscillating],
-        limit=2,
-    )
-
-    assert [trajectory.probe.short_label for trajectory in selected] == [
-        oscillating.probe.short_label,
-        multi_turn.probe.short_label,
+    assert len(result.metrics) == len(result.checkpoint_epochs)
+    assert len(result.story_response_history) == len(result.checkpoint_epochs)
+    assert len(result.story_response_history[0]) == len(result.story_probes)
+    assert [span["phase_kind"] for span in result.phase_spans] == [
+        demo.PHASE_KIND_PRETRAIN,
+        demo.PHASE_KIND_SHOCK,
+        demo.PHASE_KIND_REINFORCE,
     ]
-    assert all(trajectory.turn_count >= 2 for trajectory in selected)
+    assert sorted(result.checkpoint_states) == result.checkpoint_epochs
 
 
-def test_trace_figure_uses_status_colors_and_emphasized_region_map() -> None:
-    result, checkpoints = demo.run_rnn_experiment(
-        seed=7,
-        phase_epochs=1,
-        train_samples=4,
-        test_samples=24,
-        lr_start=0.08,
-        lr_end=0.02,
-    )
+def test_trace_selection_and_payload_use_four_rows_and_literal_headers(
+    small_rnn_result: demo.RNNExperimentResult,
+) -> None:
+    selection = demo.select_trace_story_probes(small_rnn_result)
+    payload = demo.build_trace_grid_payload(result=small_rnn_result, trace_selection=selection)
+
+    assert payload.phase_labels == ["Random init", "After phase 1", "After phase 2", "After phase 3"]
+    assert payload.phase_epochs == [0, 2, 6, 10]
+    assert payload.probe_role_labels == ["Valid control", "Off-by-one shock", "Valid-prefix repair"]
+    assert len(payload.probe_texts) == 3
+    assert all(set(text) <= {"(", ")"} for text in payload.probe_texts)
+    assert payload.projection_mode == "oblique_pca_2d"
+    assert len(payload.cells) == 12
+    assert len(payload.acceptance_region) == 73
+
+
+def test_story_figure_has_three_rows_and_family_probe_annotation(
+    small_rnn_result: demo.RNNExperimentResult,
+) -> None:
+    figure = demo.build_rnn_story_figure(small_rnn_result)
+
+    family_traces = [
+        trace
+        for trace in figure.data
+        if getattr(trace, "yaxis", "") == "y2"
+        and getattr(trace, "name", "") in {"off-by-one", "valid-prefix", "balanced-invalid"}
+    ]
+    sigma_traces = [trace for trace in figure.data if getattr(trace, "yaxis", "") == "y3"]
+
+    assert family_traces
+    assert sigma_traces
+    assert all(trace.line.dash == "dash" for trace in family_traces)
+    assert figure.layout.yaxis3.title.text == "sigma(valid) · boundary zoom"
+    assert any("128 fixed length-10 probes" in annotation.text for annotation in figure.layout.annotations)
+
+
+def test_trace_figure_uses_2d_subplots_with_acceptance_ellipse(
+    small_rnn_result: demo.RNNExperimentResult,
+) -> None:
     payload = demo.build_trace_grid_payload(
-        model_builder=lambda: demo.TinyTraceRNN(hidden_size=demo.RNN_HIDDEN_SIZE, num_layers=demo.RNN_NUM_LAYERS),
-        checkpoints=checkpoints,
-        phase_spans=result.phase_spans,
-        trace_probes=demo.select_trace_story_probes(result, demo.build_probe_flips(result)).selected_probes,
+        result=small_rnn_result,
+        trace_selection=demo.select_trace_story_probes(small_rnn_result),
     )
     figure = demo.build_trace_figure(payload)
 
-    background_trace = next(
+    path_trace = next(
         trace
         for trace in figure.data
-        if trace.type == "scatter3d" and "sigma(valid)" in str(trace.hovertemplate) and "map point" in str(trace.hovertemplate)
+        if trace.type == "scatter" and getattr(trace, "mode", "") == "lines+markers"
     )
-    trace_path = next(
+    acceptance_trace = next(
         trace
         for trace in figure.data
-        if trace.type == "scatter3d" and getattr(trace, "mode", "") == "lines+markers+text" and "phase=" in str(trace.hovertemplate)
-    )
-    layout_dict = figure.to_dict()["layout"]
-    scene_names = [key for key in layout_dict if key.startswith("scene")]
-    anchor_labels = {str(step) for step in demo.trace_anchor_steps(len(payload.cells[0].projected_points))}
-    rendered_labels = {label for label in trace_path.text if label}
-    frame_axes = [
-        trace for trace in figure.data if trace.type == "scatter3d" and getattr(trace, "meta", None) == "frame-axis"
-    ]
-
-    assert isinstance(background_trace.marker.size, tuple)
-    assert min(background_trace.marker.size) < max(background_trace.marker.size)
-    assert max(background_trace.marker.size) < 12
-    assert background_trace.marker.opacity == 0.24
-    assert background_trace.marker.cmin == -demo.TRACE_SIGMA_RANGE
-    assert background_trace.marker.cmax == demo.TRACE_SIGMA_RANGE
-    assert background_trace.marker.colorbar.title.text == "sigma(valid)"
-    assert trace_path.line.dash == "dot"
-    assert trace_path.line.color in {"#2a9d55", "#ca8a04", "#dc2626"}
-    assert isinstance(trace_path.marker.size, tuple)
-    assert min(trace_path.marker.size) < max(trace_path.marker.size)
-    assert rendered_labels == anchor_labels
-    assert len(frame_axes) == len(payload.phase_labels) * len(payload.probe_labels) * 3
-    assert len(scene_names) == len(payload.phase_labels) * len(payload.probe_labels)
-    assert any("Shared PCA axes:" in annotation.text for annotation in figure.layout.annotations)
-    assert any("negative sigma = reject-leaning" in annotation.text for annotation in figure.layout.annotations)
-    for scene_name in scene_names:
-        scene = layout_dict[scene_name]
-        assert scene["xaxis"]["title"]["text"] == ""
-        assert scene["yaxis"]["title"]["text"] == ""
-        assert scene["zaxis"]["title"]["text"] == ""
-        assert scene["xaxis"]["showbackground"] is True
-        assert scene["yaxis"]["showbackground"] is True
-        assert scene["zaxis"]["showbackground"] is True
-
-
-def test_story_figure_uses_linear_lines_left_aligned_phase_boundaries_and_turn_annotations() -> None:
-    result, _ = demo.run_rnn_experiment(
-        seed=7,
-        phase_epochs=1,
-        train_samples=4,
-        test_samples=24,
-        lr_start=demo.DEFAULT_RNN_LR,
-        lr_end=demo.DEFAULT_RNN_LR,
-    )
-    trajectories = demo.build_probe_trajectories(
-        result,
-        probes=result.story_probes,
-        response_history=result.story_response_history,
-    )
-    interesting = next(trajectory for trajectory in trajectories if trajectory.ever_wrong)
-    stable = next(trajectory for trajectory in trajectories if not trajectory.ever_wrong)
-    highlighted = replace(
-        interesting,
-        turn_pattern=(True, False, True),
-        flip_epochs=(2, 3),
-    )
-    figure = demo.build_rnn_story_figure(
-        result,
-        focus_short_label=highlighted.probe.short_label,
-        highlighted_trajectories=[highlighted],
+        if trace.type == "scatter" and getattr(trace, "fill", None) == "toself"
     )
 
-    interesting_trace = next(
-        trace for trace in figure.data if getattr(trace, "mode", "") == "lines" and highlighted.probe.short_label in str(trace.hovertemplate)
-    )
-    stable_trace = next(
-        trace for trace in figure.data if getattr(trace, "mode", "") == "lines" and stable.probe.short_label in str(trace.hovertemplate)
-    )
-    phase_boundaries = sorted(
-        shape.x0 for shape in figure.layout.shapes if shape.type == "line" and shape.x0 == shape.x1
-    )
-    annotations = [annotation.text for annotation in figure.layout.annotations]
+    assert all(trace.type != "scatter3d" for trace in figure.data)
+    assert path_trace.line.color in demo.STORY_STATUS_COLORS.values()
+    assert acceptance_trace.fillcolor == "rgba(74,222,128,0.18)"
+    assert any("Valid control: ((((()))))"[:12] in annotation.text or "Valid control: " in annotation.text for annotation in figure.layout.annotations)
 
-    assert interesting_trace.line.shape in (None, "linear")
-    assert stable_trace.line.shape in (None, "linear")
-    assert interesting_trace.line.dash == "dash"
-    assert stable_trace.line.dash == "solid"
-    assert interesting_trace.opacity > stable_trace.opacity
-    assert interesting_trace.line.width > stable_trace.line.width
-    assert interesting_trace.line.color in demo.STORY_STATUS_COLORS.values()
-    assert stable_trace.line.color in demo.STORY_STATUS_COLORS.values()
-    assert figure.layout.yaxis2.title.text == "sigma(valid)"
-    assert phase_boundaries == [2]
-    assert any("<b>P1 · random baseline</b>" == text for text in annotations)
-    assert any("<b>P2 · add counterexamples</b>" == text for text in annotations)
-    assert any("bottom axis uses signed sigma units" in text for text in annotations)
-    assert any("C = correct, I = incorrect" in text for text in annotations)
-    assert any("all 1024 binary strings of length 10" in text for text in annotations)
-    assert any("C -> I -> C" in text for text in annotations)
+
+def test_parse_mlp_shape_accepts_single_and_multiple_layers() -> None:
+    assert mlp_story.parse_mlp_shape("32") == (32,)
+    assert mlp_story.parse_mlp_shape("32, 32") == (32, 32)
 
 
 def test_mlp_story_epoch_selector_uses_fixed_story_checkpoints() -> None:
-    selected = demo.mlp_story_epochs(400)
-    assert selected == [0, 30, 200, 400]
-
-    short_run = demo.mlp_story_epochs(40)
-    assert short_run == [0, 30, 40]
+    assert mlp_story.mlp_story_epochs(400) == [0, 30, 200, 400]
+    assert mlp_story.mlp_story_epochs(40) == [0, 30, 40]
 
 
-def test_render_mlp_assets_uses_fixed_publication_shape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_render_mlp_assets_uses_fixed_publication_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     xs = torch.zeros((2, 1))
     ys = torch.zeros((2, 1))
 
@@ -435,7 +234,7 @@ def test_render_mlp_assets_uses_fixed_publication_shape(monkeypatch: pytest.Monk
             ys=ys,
         )
 
-    monkeypatch.setattr(demo, "run_mlp_training", fake_run_mlp_training)
+    monkeypatch.setattr(mlp_story, "run_mlp_training", fake_run_mlp_training)
     manifest = demo.render_mlp_assets(
         output_dir=tmp_path,
         write_html=False,
@@ -445,32 +244,65 @@ def test_render_mlp_assets_uses_fixed_publication_shape(monkeypatch: pytest.Monk
         mlp_shape="32",
     )
     assert manifest["published_shape"] == [32]
-    assert "attempted_shape" not in manifest
-    assert "loss_threshold" not in manifest
 
 
 def test_generate_mlp_cli_smoke(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         demo.app,
-        [
-            "generate",
-            "--target",
-            "mlp",
-            "--output-dir",
-            str(tmp_path),
-            "--mlp-epochs",
-            "8",
-            "--mlp-batch-size",
-            "32",
-            "--no-html",
-        ],
+        ["generate", "--target", "mlp", "--output-dir", str(tmp_path), "--mlp-epochs", "8", "--mlp-batch-size", "32", "--no-html"],
     )
     assert result.exit_code == 0, result.output
     assert (tmp_path / "mlp-sine-story.png").exists()
-    assert (tmp_path / "manifest.json").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
-    assert manifest["mlp"]["published_shape"] == [32]
+    assert manifest["mlp"]["published_shape"] == [32, 32]
+
+
+def test_generate_precision_cli_smoke(tmp_path: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        demo.app,
+        ["generate", "--target", "precision", "--output-dir", str(tmp_path), "--no-html"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "stack-cantor-dust-story.png").exists()
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["precision"]["encoding"] == demo.PRECISION_STORY_MODE
+    assert manifest["precision"]["dust_depth"] == demo.PRECISION_DUST_DEPTH
+
+
+def test_generate_all_manifest_includes_precision_section(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(demo, "render_mlp_assets", lambda **_: {"files": ["mlp-sine-story.png"]})
+    monkeypatch.setattr(
+        demo,
+        "render_precision_assets",
+        lambda **_: {
+            "files": ["stack-cantor-dust-story.png"],
+            "encoding": demo.PRECISION_STORY_MODE,
+            "dust_depth": demo.PRECISION_DUST_DEPTH,
+            "initial_left_stack": demo.PRECISION_INITIAL_LEFT_STACK,
+            "initial_right_stack": demo.PRECISION_INITIAL_RIGHT_STACK,
+            "step_labels": ["start"],
+            "zoom_depths": list(demo.PRECISION_ZOOM_DEPTHS),
+        },
+    )
+    monkeypatch.setattr(demo, "render_rnn_assets", lambda **_: {"files": ["rnn-training-story.png"]})
+
+    runner = CliRunner()
+    result = runner.invoke(
+        demo.app,
+        ["generate", "--target", "all", "--output-dir", str(tmp_path), "--no-html", "--no-trace-images"],
+    )
+
+    assert result.exit_code == 0, result.output
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["mlp"]["files"] == ["mlp-sine-story.png"]
+    assert manifest["precision"]["files"] == ["stack-cantor-dust-story.png"]
+    assert manifest["rnn"]["files"] == ["rnn-training-story.png"]
 
 
 def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
@@ -488,31 +320,30 @@ def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
             "--rnn-train-samples",
             "4",
             "--rnn-test-samples",
-            "24",
+            "8",
             "--no-html",
             "--no-trace-images",
         ],
     )
     assert result.exit_code == 0, result.output
     assert (tmp_path / "rnn-training-story.png").exists()
-    assert (tmp_path / "manifest.json").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
-    assert manifest["rnn"]["trace_projection_mode"] == "pca_top_layer_3d"
-    assert len(manifest["rnn"]["phases"]) == 2
-    assert demo.SUPPORT_COHORT_VALID_PREFIX in manifest["rnn"]["support_cohorts"]
-    assert manifest["rnn"]["batch_size"] == 16
-    assert manifest["rnn"]["optimizer"] == "adam"
-    assert manifest["rnn"]["learning_rate"] == pytest.approx(0.001)
-    assert manifest["rnn"]["phase_count"] == 2
-    assert manifest["rnn"]["phase_epoch_split"] == [1, 2]
-    assert manifest["rnn"]["random_cohort_size"] == 48
-    assert manifest["rnn"]["counterexample_cohort_size"] == 4
-    assert manifest["rnn"]["cohort_size"] == 48
-    assert manifest["rnn"]["retained_support_size"] == 60
-    assert "highlighted_probe_trajectories" in manifest["rnn"]
-    assert manifest["rnn"]["story_probe_mode"] == "all_binary_strings_length_10"
-    assert manifest["rnn"]["story_probe_count"] == 1024
-    assert len(manifest["rnn"]["trace_phase_epochs"]) == 2
-    assert len(manifest["rnn"]["trace_phase_labels"]) == 2
-    assert len(manifest["rnn"]["trace_axis_labels"]) == 3
-    assert len(manifest["rnn"]["trace_explained_variance"]) == 3
+    assert manifest["rnn"]["model_mode"] == demo.RNN_MODEL_MODE
+    assert manifest["rnn"]["language"] == demo.TARGET_LANGUAGE
+    assert manifest["rnn"]["architecture"]["module"] == "torch.RNN"
+    assert manifest["rnn"]["architecture"]["nonlinearity"] == "tanh"
+    assert manifest["rnn"]["architecture"]["hidden_size"] == 4
+    assert manifest["rnn"]["architecture"]["num_layers"] == 2
+    assert manifest["rnn"]["dynamics"] == "phased_resampled_counterexample_shocks"
+    assert manifest["rnn"]["optimizer"] == "adamw"
+    assert manifest["rnn"]["learning_rate_schedule"] == "phase_restart_cosine_decay"
+    assert manifest["rnn"]["story_plot_sampling"] == "deterministic_family_balanced_slice"
+    assert manifest["rnn"]["acceptance_region_shape"] == "projected_ball_ellipse"
+    assert manifest["rnn"]["trace_projection_mode"] == "oblique_pca_2d"
+    assert manifest["rnn"]["phase_schedule"] == [
+        "Phase 1: random baseline",
+        "Phase 2: add off-by-one",
+        "Phase 3: add valid-prefix + balanced-invalid",
+    ]
+    assert manifest["rnn"]["phase_epoch_schedule"] == [1, 2, 2]
+    assert manifest["rnn"]["phase_batch_schedule"] == [8, 16, 32]

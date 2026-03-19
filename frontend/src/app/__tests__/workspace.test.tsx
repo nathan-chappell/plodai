@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppStateProvider } from "../context";
 import { WorkspaceProvider, useWorkspaceSurface } from "../workspace";
+import { writeWorkspaceTextFile } from "../../lib/workspace-contract";
 import type { AuthUser } from "../../types/auth";
 import type { WorkspaceFilesystem } from "../../types/workspace";
 import {
   createWorkspaceFilesystem,
-  ensureDirectoryPath,
   loadWorkspaceFilesystem,
   loadWorkspaceSurfaceState,
   saveWorkspaceFilesystem,
@@ -80,7 +80,7 @@ function WorkspaceSurfaceHarness() {
   useEffect(() => {
     function handleRun() {
       workspace.updateFilesystem((filesystem) =>
-        ensureDirectoryPath(filesystem, "/csv-agent/meta").filesystem,
+        writeWorkspaceTextFile(filesystem, "/csv-agent/meta/notes.txt", "meta", "derived"),
       );
       workspace.replaceFiles([demoFile], "demo");
     }
@@ -94,7 +94,7 @@ function WorkspaceSurfaceHarness() {
   return (
     <div
       data-files={workspace.files.map((file) => file.id).join(",")}
-      data-items={workspace.filesystem.items.map((item) => item.path).sort().join("|")}
+      data-items={Object.keys(workspace.filesystem.files_by_path).sort().join("|")}
       data-hydrated={String(workspace.hydrated)}
       data-surface-hydrated={String(workspace.surfaceHydrated)}
     />
@@ -163,7 +163,10 @@ describe("WorkspaceProvider", () => {
     });
 
     expect(saveWorkspaceFilesystem).toHaveBeenCalledTimes(1);
-    expect(saveWorkspaceFilesystem).toHaveBeenCalledWith(user.id, expect.objectContaining({ root_id: "workspace-root" }));
+    expect(saveWorkspaceFilesystem).toHaveBeenCalledWith(
+      user.id,
+      expect.objectContaining({ files_by_path: expect.any(Object) }),
+    );
   });
 
   it("preserves adjacent workspace updates instead of clobbering earlier filesystem changes", async () => {
@@ -204,7 +207,6 @@ describe("WorkspaceProvider", () => {
 
     expect(harness?.dataset.files).toContain("demo-csv");
     expect(harness?.dataset.items).toContain("/csv-agent/demo.csv");
-    expect(harness?.dataset.items).toContain("/csv-agent/meta");
-    expect(harness?.dataset.items).toContain("/csv-agent");
+    expect(harness?.dataset.items).toContain("/csv-agent/meta/notes.txt");
   });
 });

@@ -38,14 +38,15 @@ class ClientToolResultPayload(TypedDict, total=False):
     rows: list[dict[str, object]]
     chart: dict[str, object]
     files: list[ClientToolWorkspaceFile]
-    directories: list[dict[str, object]]
     csv_files: list[ClientToolCsvFile]
+    pdf_files: list[ClientToolWorkspaceFile]
     chartable_files: list[ClientToolWorkspaceFile]
+    reports: list[dict[str, object]]
+    report: dict[str, object]
+    current_report_id: str
     created_file: ClientToolWorkspaceFile
     created_files: list[ClientToolWorkspaceFile]
-    created_directory: dict[str, object]
-    changed_directory: dict[str, object]
-    cwd_path: str
+    path_prefix: str
     workspace_context: dict[str, object]
     workspace_operation: dict[str, object]
     file_input: dict[str, object]

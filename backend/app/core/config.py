@@ -17,11 +17,13 @@ class Settings(BaseSettings):
     clerk_authorized_parties: list[str] = []
     clerk_clock_skew_ms: int = 5000
     USE_COLORLOG: bool = False
+    LOG_LEVEL: str = "INFO"
 
     OPENAI_API_KEY: str = Field(init=False)
     CORS_ORIGINS: list[str] = Field(init=False)
     CLERK_SECRET_KEY: str | None = None
     CLERK_JWT_KEY: str | None = None
+    ENABLE_DEV_AUTH_BEARER: bool = False
 
     @property
     def async_database_url(self) -> str:

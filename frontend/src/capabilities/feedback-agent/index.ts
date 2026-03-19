@@ -1,5 +1,7 @@
 import { feedbackAgentCapability } from "../definitions";
 import type { CapabilityModule } from "../types";
+import { buildFeedbackAgentDemoScenario } from "./demo";
+import { buildFeedbackAgentClientToolCatalog, createFeedbackAgentClientTools } from "./tools";
 
 const FEEDBACK_AGENT_INSTRUCTIONS = `
 You are the Feedback Agent for the client workspace.
@@ -17,43 +19,22 @@ Important operating rules:
 4. If there is no assistant response yet, say so plainly.
 `.trim();
 
-const seedWorkspace = [
-  {
-    id: "feedback-thread-note",
-    name: "feedback_context.txt",
-    kind: "other" as const,
-    extension: "txt",
-    text_content: "This hidden capability exists so active workspaces can hand off into the feedback agent.",
-  },
-];
-
 function FeedbackAgentPage() {
   return null;
 }
 
-export const feedbackAgentModule: CapabilityModule = {
+const feedbackAgentModule: CapabilityModule = {
   definition: feedbackAgentCapability,
   buildAgentSpec: () => ({
     capability_id: "feedback-agent",
     agent_name: "Feedback Agent",
     instructions: FEEDBACK_AGENT_INSTRUCTIONS,
-    client_tools: [],
+    client_tools: buildFeedbackAgentClientToolCatalog(),
     handoff_targets: [],
   }),
-  buildDemoScenario: () => ({
-    id: "feedback-agent-demo",
-    title: "Feedback Agent Flow",
-    summary: "Captures structured feedback on the latest assistant response in the current thread.",
-    initialPrompt:
-      "Please help me provide structured feedback on the latest assistant response in this thread.",
-    workspaceSeed: seedWorkspace,
-    defaultExecutionMode: "batch",
-    expectedOutcomes: [
-      "The agent opens a structured feedback widget.",
-      "The flow stays scoped to feedback capture.",
-    ],
-    notes: ["This capability is hidden from the main navigation and is intended for handoffs."],
-  }),
-  bindClientTools: async () => [],
+  buildDemoScenario: () => buildFeedbackAgentDemoScenario(),
+  bindClientTools: (workspace) => createFeedbackAgentClientTools(workspace),
   Page: FeedbackAgentPage,
 };
+
+export default feedbackAgentModule;

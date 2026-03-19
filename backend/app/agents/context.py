@@ -21,6 +21,7 @@ class ReportAgentContext:
     user_email: str | None
     db: AsyncSession
     chart_cache: dict[str, str] = field(default_factory=dict)
+    request_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
     thread_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
     available_files: list[WorkspaceFileMetadata] = field(default_factory=list)
     query_plan_model: type[BaseModel] | None = None
@@ -81,8 +82,11 @@ class ReportAgentContext:
 
     @property
     def capability_spec(self) -> CapabilityAgentSpec | None:
-        bundle = self.capability_bundle
         capability_id = self.capability_id
+        return self.get_capability_spec(capability_id) if capability_id is not None else None
+
+    def get_capability_spec(self, capability_id: str | None) -> CapabilityAgentSpec | None:
+        bundle = self.capability_bundle
         if bundle is None or capability_id is None:
             return None
         return next(
@@ -97,6 +101,14 @@ class ReportAgentContext:
     @property
     def client_tools(self) -> list[ClientToolDefinition]:
         capability_spec = self.capability_spec
+        return (
+            list(capability_spec.get("client_tools") or [])
+            if capability_spec is not None
+            else []
+        )
+
+    def get_client_tools(self, capability_id: str | None) -> list[ClientToolDefinition]:
+        capability_spec = self.get_capability_spec(capability_id)
         return (
             list(capability_spec.get("client_tools") or [])
             if capability_spec is not None

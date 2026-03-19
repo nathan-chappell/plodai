@@ -1,13 +1,21 @@
+import logging
+
 from agents import Agent, handoff
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 from agents.model_settings import ModelSettings
 from chatkit.agents import AgentContext as ChatKitAgentContext
 
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.tools import build_agent_tools, get_client_tool_names
+from backend.app.agents.tools import (
+    build_agent_tools,
+    describe_tool_signature,
+    get_client_tool_names,
+)
 from backend.app.chatkit.metadata import CapabilityAgentSpec, CapabilityBundle
+from backend.app.core.logging import get_logger, log_event
 
 COMPACTION_THRESHOLD_TOKENS = 200_000
+logger = get_logger("agents.agent_builder")
 
 BASE_AGENT_INSTRUCTIONS = """
 You are a client-configured agent operating over tools and context declared by the current workspace.
@@ -30,40 +38,14 @@ In batch mode, complete as much of the task as possible without engaging the use
 - Stop only when you are genuinely blocked by missing data, permissions, or unavailable capabilities.
 """.strip()
 
-CAPABILITY_POLICY: dict[str, dict[str, bool]] = {
-    "csv-agent": {"append_report_section": False},
-    "chart-agent": {"append_report_section": False},
-    "pdf-agent": {"append_report_section": False},
-    "report-agent": {"append_report_section": False},
-    "workspace-agent": {"append_report_section": False},
-    "feedback-agent": {"append_report_section": False},
-}
-
-
 def _build_agent_instructions(
     context: ReportAgentContext,
     *,
     instructions: str,
 ) -> str:
-    workspace_bootstrap = context.thread_metadata.get("workspace_bootstrap") or {}
-    agents_file = workspace_bootstrap.get("agents_file") if isinstance(
-        workspace_bootstrap, dict
-    ) else None
-    agents_markdown = (
-        agents_file.get("text")
-        if isinstance(agents_file, dict)
-        and isinstance(agents_file.get("text"), str)
-        and agents_file.get("text").strip()
-        else None
-    )
     investigation_brief = context.thread_metadata.get("investigation_brief")
     brief_section = ""
-    if agents_markdown:
-        brief_section = (
-            "\nCurrent workspace guidance from /AGENTS.md:\n"
-            f"{agents_markdown.strip()}\n"
-        )
-    elif investigation_brief:
+    if investigation_brief:
         brief_section = (
             "\nCurrent investigation brief from the user:\n"
             f"- {investigation_brief}\n"
@@ -100,7 +82,6 @@ def _build_agent_graph(
     model: str | None,
 ) -> dict[str, Agent[ChatKitAgentContext[ReportAgentContext]]]:
     model_settings = _build_model_settings(context)
-    stop_at_tool_names = get_client_tool_names(context)
     agents_by_capability_id: dict[str, Agent[ChatKitAgentContext[ReportAgentContext]]] = {}
     capability_specs = {
         capability["capability_id"]: capability
@@ -108,7 +89,41 @@ def _build_agent_graph(
     }
 
     for capability_id, capability_spec in capability_specs.items():
-        policy = CAPABILITY_POLICY.get(capability_id, {"append_report_section": False})
+        client_tools = capability_spec.get("client_tools", [])
+        tool_names = get_client_tool_names(client_tools)
+        compiled_tools = list(
+            build_agent_tools(
+                context,
+                capability_id=capability_id,
+                client_tools=client_tools,
+            )
+        )
+        handoff_agent_names = [
+            capability_specs[target["capability_id"]]["agent_name"]
+            for target in capability_spec.get("handoff_targets", [])
+            if target["capability_id"] in capability_specs
+        ]
+        agent_heading = (
+            f"{capability_spec['agent_name']}({', '.join(handoff_agent_names)}):"
+            if handoff_agent_names
+            else f"{capability_spec['agent_name']}:"
+        )
+        rendered_lines = [
+            agent_heading,
+            *(
+                f"- {describe_tool_signature(tool.name, tool.params_json_schema)}"
+                for tool in compiled_tools
+            ),
+        ]
+        if len(rendered_lines) == 1:
+            rendered_lines.append("- no tools")
+        log_event(
+            logger,
+            logging.DEBUG,
+            "agent.capability_compiled",
+            rendered=rendered_lines,
+            dedupe=True,
+        )
         agents_by_capability_id[capability_id] = Agent[
             ChatKitAgentContext[ReportAgentContext]
         ](
@@ -118,18 +133,12 @@ def _build_agent_graph(
                 context,
                 instructions=capability_spec["instructions"],
             ),
-            tools=list(
-                build_agent_tools(
-                    context,
-                    capability_id=capability_id,
-                    allow_append_report_section=policy.get(
-                        "append_report_section", False
-                    ),
-                )
-            ),
+            tools=compiled_tools,
             model_settings=model_settings,
             handoffs=[],
-            tool_use_behavior={"stop_at_tool_names": stop_at_tool_names},
+            tool_use_behavior={
+                "stop_at_tool_names": tool_names
+            },
         )
 
     for capability_id, capability_spec in capability_specs.items():

@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Sequence, cast
 from uuid import uuid4
@@ -7,10 +8,9 @@ from uuid import uuid4
 from agents import FunctionTool, function_tool
 from agents.tool_context import ToolContext
 from chatkit.agents import AgentContext as ChatKitAgentContext, ClientToolCall
-from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
+from chatkit.types import ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
-from backend.app.agents.query_models import ChartPlan
 from backend.app.agents.widgets import (
     build_feedback_capture_copy_text,
     build_feedback_capture_widget,
@@ -21,10 +21,13 @@ from backend.app.agents.widgets import (
 )
 from backend.app.chatkit.feedback_types import ChatItemFeedbackRecord, FeedbackOrigin
 from backend.app.chatkit.metadata import AgentPlan
+from backend.app.chatkit.usage import empty_usage_totals
 from backend.app.core.logging import (
     get_logger,
     log_event,
     summarize_mapping_keys_for_log,
+    summarize_pairs_for_log,
+    summarize_for_log,
     summarize_sequence_for_log,
 )
 from backend.app.models.chatkit import ChatItemFeedback
@@ -32,14 +35,186 @@ from backend.app.models.chatkit import ChatItemFeedback
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
-AgentRole = Literal[
-    "csv-agent",
-    "chart-agent",
-    "pdf-agent",
-    "report-agent",
-    "workspace-agent",
-    "feedback-agent",
-]
+DEMO_VALIDATOR_CAPABILITY_ID = "demo-validator-agent"
+DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY = "demo_validator_cost_snapshot"
+DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX = "DEMO_VALIDATOR_COST_SNAPSHOT "
+
+
+@dataclass(frozen=True, kw_only=True)
+class ToolSchemaLogSummary:
+    signature: str
+    schema_line: str
+    enum_line: str | None
+    schema_chars: int
+
+
+def _ordered_schema_properties(
+    params_json_schema: Mapping[str, Any],
+) -> tuple[list[str], Mapping[str, Any], set[str]]:
+    properties = params_json_schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return ([], {}, set())
+    property_names = [
+        name.strip()
+        for name in properties.keys()
+        if isinstance(name, str) and name.strip()
+    ]
+    required_value = params_json_schema.get("required")
+    required_entries = (
+        required_value
+        if isinstance(required_value, Sequence) and not isinstance(required_value, str)
+        else ()
+    )
+    required_names = {
+        name
+        for name in required_entries
+        if isinstance(name, str) and name in property_names
+    }
+    return (property_names, properties, required_names)
+
+
+def _require_closed_tool_parameters_schema(
+    tool_name: str,
+    params_json_schema: Mapping[str, Any],
+) -> tuple[list[str], Mapping[str, Any], set[str]]:
+    schema_type = params_json_schema.get("type")
+    if schema_type != "object":
+        raise ValueError(
+            f"Client tool {tool_name} must use an object parameter schema, got {schema_type!r}."
+        )
+    if not isinstance(params_json_schema.get("properties"), Mapping):
+        raise ValueError(f"Client tool {tool_name} is missing parameter properties.")
+    property_names, properties, required_names = _ordered_schema_properties(
+        params_json_schema
+    )
+    if params_json_schema.get("additionalProperties") is not False:
+        raise ValueError(
+            f"Client tool {tool_name} must set parameters.additionalProperties to false."
+        )
+    return (property_names, properties, required_names)
+
+
+def _format_schema_literal(value: object) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    except TypeError:
+        return summarize_for_log(value, limit=32)
+
+
+def _format_enum_hint(property_name: str, property_schema: object) -> str | None:
+    if not isinstance(property_schema, Mapping):
+        return None
+    enum_values = property_schema.get("enum")
+    if not isinstance(enum_values, Sequence) or isinstance(enum_values, str):
+        return None
+    values = list(enum_values)
+    if not values:
+        return None
+    preview = [_format_schema_literal(value) for value in values[:3]]
+    if len(values) == 1:
+        return f"{property_name}={preview[0]}"
+    joined_preview = "|".join(preview)
+    if len(values) > 3:
+        joined_preview += "|..."
+    return f"{property_name}={{" + joined_preview + "}}"
+
+
+def describe_tool_signature(
+    tool_name: str,
+    params_json_schema: Mapping[str, Any] | None,
+) -> str:
+    if not isinstance(params_json_schema, Mapping):
+        return f"{tool_name}(...)"
+    property_names, _, required_names = _ordered_schema_properties(params_json_schema)
+    if not property_names:
+        return f"{tool_name}()"
+    signature_parameters = [
+        name if name in required_names else f"{name}?"
+        for name in property_names
+    ]
+    return f"{tool_name}({', '.join(signature_parameters)})"
+
+
+def summarize_client_tool_schema_for_log(
+    tool_name: str,
+    params_json_schema: Mapping[str, Any],
+    *,
+    strict_json_schema: bool,
+) -> ToolSchemaLogSummary:
+    property_names, properties, required_names = _require_closed_tool_parameters_schema(
+        tool_name,
+        params_json_schema,
+    )
+    required_parameters = [name for name in property_names if name in required_names]
+    optional_parameters = [
+        f"{name}?"
+        for name in property_names
+        if name not in required_names
+    ]
+    schema_parts = [
+        "schema=closed",
+        f"strict={'true' if strict_json_schema else 'false'}",
+    ]
+    if required_parameters:
+        schema_parts.append(f"required={','.join(required_parameters)}")
+    if optional_parameters:
+        schema_parts.append(f"optional={','.join(optional_parameters)}")
+    if not property_names:
+        schema_parts.append("params=none")
+    enum_hints = [
+        enum_hint
+        for property_name in property_names
+        if (
+            enum_hint := _format_enum_hint(property_name, properties.get(property_name))
+        )
+        is not None
+    ]
+    schema_json = json.dumps(
+        params_json_schema,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return ToolSchemaLogSummary(
+        signature=describe_tool_signature(tool_name, params_json_schema),
+        schema_line=" ".join(schema_parts),
+        enum_line=f"enums={'; '.join(enum_hints)}" if enum_hints else None,
+        schema_chars=len(schema_json),
+    )
+
+
+def _log_client_tool_schema(
+    tool_name: str,
+    params_json_schema: Mapping[str, Any],
+    *,
+    strict_json_schema: bool,
+) -> None:
+    summary = summarize_client_tool_schema_for_log(
+        tool_name,
+        params_json_schema,
+        strict_json_schema=strict_json_schema,
+    )
+    rendered_lines = [
+        summary.signature,
+        summary.schema_line,
+        *([summary.enum_line] if summary.enum_line else []),
+    ]
+    log_event(
+        logger,
+        logging.DEBUG,
+        "tool.schema_compiled",
+        rendered=rendered_lines,
+        dedupe=True,
+        size=f"{summary.schema_chars} chars",
+    )
+    if summary.schema_chars > 4500:
+        log_event(
+            logger,
+            logging.WARNING,
+            "tool.schema_near_limit",
+            rendered=rendered_lines,
+            dedupe=True,
+            size=f"{summary.schema_chars} chars",
+        )
 
 
 def _log_tool_start(
@@ -47,14 +222,19 @@ def _log_tool_start(
     tool_name: str,
     **details: object,
 ) -> None:
+    rendered_lines = [
+        f"{tool_name} [{summarize_pairs_for_log((('user', context.user_id), ('report', context.report_id))) or 'context=unknown'}]",
+        *[
+            line
+            for key, value in details.items()
+            if (line := summarize_pairs_for_log(((key, value),))) is not None
+        ],
+    ]
     log_event(
         logger,
         logging.INFO,
         "tool.start",
-        report_id=context.report_id,
-        user_id=context.user_id,
-        tool_name=tool_name,
-        **details,
+        rendered=rendered_lines,
     )
 
 
@@ -63,21 +243,30 @@ def _log_tool_end(
     tool_name: str,
     **details: object,
 ) -> None:
+    rendered_lines = [
+        f"{tool_name} [{summarize_pairs_for_log((('user', context.user_id), ('report', context.report_id))) or 'context=unknown'}]",
+        *[
+            line
+            for key, value in details.items()
+            if (line := summarize_pairs_for_log(((key, value),))) is not None
+        ],
+    ]
     log_event(
         logger,
         logging.INFO,
         "tool.end",
-        report_id=context.report_id,
-        user_id=context.user_id,
-        tool_name=tool_name,
-        **details,
+        rendered=rendered_lines,
     )
 
 
 def get_client_tool_names(
-    context: ReportAgentContext,
+    client_tools: Sequence[Mapping[str, Any]],
 ) -> list[str]:
-    return [name for tool in context.client_tools if (name := tool.get("name"))]
+    return [
+        name.strip()
+        for tool in client_tools
+        if isinstance((name := tool.get("name")), str) and name.strip()
+    ]
 
 
 def _tool_summary_from_query_plan(query_plan: Mapping[str, object]) -> list[str]:
@@ -97,31 +286,55 @@ def _summarize_client_tool_request(
     tool_name: str,
     arguments: Mapping[str, object],
 ) -> tuple[str, list[str]]:
-    if tool_name == "get_workspace_context":
-        return ("Queued a workspace context request.", ["Inspecting the current working directory."])
-
-    if tool_name == "create_workspace_directory":
-        return (
-            "Queued a workspace directory creation.",
-            [f"Path: {arguments.get('path') or 'unknown'}"],
-        )
-
-    if tool_name == "change_workspace_directory":
-        return (
-            "Queued a workspace directory change.",
-            [f"Path: {arguments.get('path') or 'unknown'}"],
-        )
-
-    if tool_name in {"list_workspace_files", "list_attached_csv_files", "list_chartable_files"}:
+    if tool_name in {"list_csv_files", "list_chartable_files", "list_pdf_files"}:
+        details: list[str] = []
+        prefix = arguments.get("prefix")
+        if isinstance(prefix, str) and prefix.strip():
+            details.append(f"Prefix: {prefix.strip()}")
         include_samples = arguments.get("includeSamples")
+        label = (
+            "CSV workspace listing"
+            if tool_name == "list_csv_files"
+            else "PDF workspace listing"
+            if tool_name == "list_pdf_files"
+            else "chartable workspace listing"
+        )
+        if include_samples is True:
+            return (f"Queued a {label} with samples.", details)
+        return (f"Queued a {label}.", details)
+
+    if tool_name == "list_reports":
+        return ("Queued a report listing request.", [])
+
+    if tool_name == "get_report":
         return (
-            "Queued a workspace inventory request.",
+            "Queued a report read.",
+            [f"Report: {arguments.get('report_id') or 'unknown'}"],
+        )
+
+    if tool_name == "create_report":
+        details = []
+        if isinstance(arguments.get("title"), str) and arguments["title"].strip():
+            details.append(f"Title: {arguments['title'].strip()}")
+        if isinstance(arguments.get("report_id"), str) and arguments["report_id"].strip():
+            details.append(f"Requested id: {arguments['report_id'].strip()}")
+        return ("Queued a report creation.", details)
+
+    if tool_name == "append_report_item":
+        details = [f"Report: {arguments.get('report_id') or 'unknown'}"]
+        raw_item = arguments.get("item")
+        if isinstance(raw_item, Mapping):
+            details.append(f"Item type: {raw_item.get('type') or 'unknown'}")
+            if isinstance(raw_item.get("title"), str) and raw_item["title"].strip():
+                details.append(f"Title: {raw_item['title'].strip()}")
+        return ("Queued a report item append.", details)
+
+    if tool_name == "remove_report_item":
+        return (
+            "Queued a report item removal.",
             [
-                (
-                    f"Include samples: {'yes' if include_samples else 'no'}"
-                    if isinstance(include_samples, bool)
-                    else "Using default inventory options."
-                )
+                f"Report: {arguments.get('report_id') or 'unknown'}",
+                f"Item: {arguments.get('item_id') or 'unknown'}",
             ],
         )
 
@@ -161,7 +374,7 @@ def _summarize_client_tool_request(
             )
 
     if tool_name in {"create_csv_file", "create_json_file"}:
-        details = [f"Filename: {arguments.get('filename') or 'unknown'}"]
+        details = [f"Path: {arguments.get('path') or 'unknown'}"]
         query_plan = arguments.get("query_plan")
         if isinstance(query_plan, Mapping):
             details.extend(_tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)))
@@ -183,6 +396,16 @@ def _summarize_client_tool_request(
         "Queued for client-side execution.",
         [f"Argument fields: {argument_fields}"],
     )
+
+
+def _get_thread_usage_snapshot(context: ReportAgentContext) -> dict[str, int | float]:
+    usage = empty_usage_totals()
+    raw_usage = context.thread_metadata.get("usage")
+    if isinstance(raw_usage, Mapping):
+        usage["input_tokens"] = int(raw_usage.get("input_tokens", 0))
+        usage["output_tokens"] = int(raw_usage.get("output_tokens", 0))
+        usage["cost_usd"] = round(float(raw_usage.get("cost_usd", 0.0)), 8)
+    return usage
 
 
 async def _stream_tool_trace_widget(
@@ -233,6 +456,11 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
     strict_json_schema = bool(tool_definition.get("strict", True))
     if not strict_json_schema:
         raise ValueError(f"Client tool {tool_name} must use strict JSON schema mode.")
+    _log_client_tool_schema(
+        tool_name,
+        params_json_schema,
+        strict_json_schema=strict_json_schema,
+    )
 
     async def on_invoke_tool(ctx: ChatKitToolContext, input_json: str) -> Any:
         request_context = ctx.context.request_context
@@ -247,11 +475,12 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
         _log_tool_start(
             request_context,
             tool_name,
-            mode="client_proxy",
-            argument_keys=summarize_mapping_keys_for_log(arguments) or "none",
-        )
-        await ctx.context.stream(
-            ProgressUpdateEvent(text=f"Requesting client tool {tool_name}.")
+            request=summarize_pairs_for_log(
+                (
+                    ("mode", "client_proxy"),
+                    ("args", summarize_mapping_keys_for_log(arguments) or "none"),
+                )
+            ),
         )
         trace_summary, trace_details = _summarize_client_tool_request(
             tool_name,
@@ -265,7 +494,7 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
         )
         client_tool_call = ClientToolCall(name=tool_name, arguments=arguments)
         ctx.context.client_tool_call = client_tool_call
-        _log_tool_end(request_context, tool_name, mode="client_tool_call")
+        _log_tool_end(request_context, tool_name, result="client_tool_call")
         return client_tool_call.model_dump(mode="json")
 
     return FunctionTool(
@@ -281,16 +510,15 @@ def build_agent_tools(
     context: ReportAgentContext,
     *,
     capability_id: str,
-    allow_append_report_section: bool = False,
+    client_tools: Sequence[Mapping[str, Any]],
 ) -> list[FunctionTool]:
     tools: list[FunctionTool] = []
-    tool_names = set(get_client_tool_names(context))
+    tool_names = get_client_tool_names(client_tools)
     registered_tool_map = {
         name.strip(): tool_definition
-        for tool_definition in context.client_tools
+        for tool_definition in client_tools
         if isinstance((name := tool_definition.get("name")), str) and name.strip()
     }
-    built_client_tool_names: set[str] = set()
 
     @function_tool(name_override="name_current_thread")
     async def name_current_thread_tool(
@@ -303,7 +531,7 @@ def build_agent_tools(
         _log_tool_start(
             request_context,
             "name_current_thread",
-            title_chars=len(cleaned_title),
+            title=summarize_for_log(cleaned_title, limit=96),
         )
         request_context.thread_metadata["title"] = cleaned_title
         ctx.context.thread.title = cleaned_title
@@ -324,7 +552,7 @@ def build_agent_tools(
         _log_tool_end(
             request_context,
             "name_current_thread",
-            title_chars=len(cleaned_title),
+            title=summarize_for_log(cleaned_title, limit=96),
         )
         return result
 
@@ -349,10 +577,14 @@ def build_agent_tools(
         _log_tool_start(
             request_context,
             "make_plan",
-            focus_chars=len(cleaned_focus),
-            planned_steps=len(cleaned_steps),
-            success_criteria=len(cleaned_success_criteria),
-            follow_on_tool_hints=summarize_sequence_for_log(cleaned_follow_on_tool_hints),
+            focus=summarize_for_log(cleaned_focus, limit=160),
+            plan=summarize_pairs_for_log(
+                (
+                    ("steps", len(cleaned_steps)),
+                    ("success", len(cleaned_success_criteria)),
+                    ("next", summarize_sequence_for_log(cleaned_follow_on_tool_hints)),
+                )
+            ),
         )
         plan: AgentPlan = {
             "id": f"plan_{uuid4().hex}",
@@ -380,64 +612,77 @@ def build_agent_tools(
             build_plan_widget(plan),
             copy_text=build_plan_copy_text(plan),
         )
-        _log_tool_end(request_context, "make_plan", plan_id=plan["id"])
+        _log_tool_end(
+            request_context,
+            "make_plan",
+            plan=summarize_pairs_for_log(
+                (
+                    ("id", plan["id"]),
+                    ("steps", len(cleaned_steps)),
+                    ("success", len(cleaned_success_criteria)),
+                )
+            ),
+        )
         return {
             "plan_id": plan["id"],
             "plan": plan,
             "report_id": request_context.report_id,
         }
 
-    tools.extend([name_current_thread_tool, make_plan_tool])
-
-    if allow_append_report_section:
-
-        @function_tool(name_override="append_report_section")
-        async def append_report_section_tool(
-            ctx: ChatKitToolContext,
-            title: str,
-            markdown: str,
-        ) -> dict[str, str]:
-            """Append a markdown narrative section to the in-progress report."""
-            request_context = ctx.context.request_context
-            _log_tool_start(
-                request_context,
-                "append_report_section",
-                title_chars=len(title.strip()),
-                markdown_chars=len(markdown),
-            )
-            await ctx.context.stream(
-                ProgressUpdateEvent(text=f"Appending report section: {title}."),
-            )
-            await _stream_tool_trace_widget(
-                ctx,
-                "append_report_section",
-                "Added narrative to the in-progress report.",
-                [f"Section: {title}", f"Markdown length: {len(markdown)} chars"],
-            )
-            await ctx.context.stream(
-                ClientEffectEvent(
-                    name="report_section_appended",
-                    data={
-                        "type": "report_section_appended",
-                        "title": title,
-                        "markdown": markdown,
-                    },
+    @function_tool(name_override="get_current_thread_cost")
+    async def get_current_thread_cost_tool(
+        ctx: ChatKitToolContext,
+    ) -> dict[str, object]:
+        """Validator pricing tool. Returns the pre-response thread usage totals; copy usage.cost_usd exactly into COST_USD."""
+        request_context = ctx.context.request_context
+        usage = _get_thread_usage_snapshot(request_context)
+        result = {
+            "thread_id": ctx.context.thread.id,
+            "scope": "before_current_turn",
+            "usage": usage,
+        }
+        _log_tool_start(
+            request_context,
+            "get_current_thread_cost",
+            scope="before_current_turn",
+            usage=summarize_pairs_for_log(
+                (
+                    ("input", usage["input_tokens"]),
+                    ("output", usage["output_tokens"]),
+                    ("cost_usd", usage["cost_usd"]),
                 )
+            ),
+        )
+        request_context.thread_metadata[
+            DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY
+        ] = result
+        await ctx.context.stream(
+            ProgressUpdateEvent(
+                text=f"{DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX}{json.dumps(result, ensure_ascii=True)}"
             )
-            result = {
-                "title": title,
-                "markdown": markdown,
-                "report_id": request_context.report_id,
-            }
-            _log_tool_end(
-                request_context,
-                "append_report_section",
-                title_chars=len(title.strip()),
-                markdown_chars=len(markdown),
-            )
-            return result
+        )
+        ctx.context.thread.metadata = {
+            **dict(ctx.context.thread.metadata),
+            DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY: result,
+        }
+        _log_tool_end(
+            request_context,
+            "get_current_thread_cost",
+            thread_id=ctx.context.thread.id,
+            usage=summarize_pairs_for_log(
+                (
+                    ("input", usage["input_tokens"]),
+                    ("output", usage["output_tokens"]),
+                    ("cost_usd", usage["cost_usd"]),
+                )
+            ),
+        )
+        return result
 
-        tools.append(append_report_section_tool)
+    if capability_id == DEMO_VALIDATOR_CAPABILITY_ID:
+        return [get_current_thread_cost_tool]
+
+    tools.extend([name_current_thread_tool, make_plan_tool])
 
     if capability_id == "feedback-agent":
 
@@ -486,9 +731,13 @@ def build_agent_tools(
             _log_tool_start(
                 request_context,
                 "start_feedback_capture_for_latest_response",
-                item_ids=summarize_sequence_for_log(item_ids),
-                kind=kind,
-                label=label,
+                feedback=summarize_pairs_for_log(
+                    (
+                        ("items", summarize_sequence_for_log(item_ids)),
+                        ("kind", kind),
+                        ("label", label),
+                    )
+                ),
             )
             await ctx.context.stream(
                 ProgressUpdateEvent(
@@ -502,8 +751,12 @@ def build_agent_tools(
             _log_tool_end(
                 request_context,
                 "start_feedback_capture_for_latest_response",
-                feedback_id=feedback.id,
-                item_ids=summarize_sequence_for_log(item_ids),
+                feedback=summarize_pairs_for_log(
+                    (
+                        ("id", feedback.id),
+                        ("items", summarize_sequence_for_log(item_ids)),
+                    )
+                ),
             )
             return {
                 "feedback_id": feedback.id,
@@ -513,272 +766,9 @@ def build_agent_tools(
 
         tools.append(start_feedback_capture_for_latest_response_tool)
 
-    if context.available_datasets:
-        dataset_ids = tuple(dataset.id for dataset in context.available_datasets)
-        DatasetIdLiteral = Literal[*dataset_ids]
-
-        @function_tool(name_override="inspect_csv_file_schema")
-        async def inspect_csv_file_schema_tool(
-            ctx: ChatKitToolContext,
-            dataset_id: DatasetIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
-        ) -> dict[str, object]:
-            """Inspect one CSV file before writing or revising a query plan."""
-            request_context = ctx.context.request_context
-            _log_tool_start(
-                request_context, "inspect_csv_file_schema", dataset_id=dataset_id
-            )
-            await ctx.context.stream(
-                ProgressUpdateEvent(text=f"Inspecting schema for CSV file {dataset_id}.")
-            )
-            await _stream_tool_trace_widget(
-                ctx,
-                "inspect_csv_file_schema",
-                "Inspecting one CSV schema.",
-                [f"Dataset: {dataset_id}"],
-            )
-            dataset = request_context.get_dataset(dataset_id)
-            result = {
-                "dataset_id": dataset_id,
-                "columns": dataset.columns if dataset else [],
-                "numeric_columns": dataset.numeric_columns if dataset else [],
-                "row_count": dataset.row_count if dataset else 0,
-                "sample_rows": dataset.sample_rows[:5] if dataset else [],
-            }
-            _log_tool_end(
-                request_context,
-                "inspect_csv_file_schema",
-                found=bool(dataset),
-                column_count=len(result["columns"]),
-                numeric_count=len(result["numeric_columns"]),
-            )
-            return result
-
-        tools.append(inspect_csv_file_schema_tool)
-
-    if context.available_chartable_files:
-        file_ids = tuple(file.id for file in context.available_chartable_files)
-        ChartableFileIdLiteral = Literal[*file_ids]
-
-        @function_tool(name_override="inspect_chartable_file_schema")
-        async def inspect_chartable_file_schema_tool(
-            ctx: ChatKitToolContext,
-            file_id: ChartableFileIdLiteral,  # pyright: ignore[reportInvalidTypeForm]
-        ) -> dict[str, object]:
-            """Inspect a CSV or JSON chartable artifact before building a chart plan."""
-            request_context = ctx.context.request_context
-            _log_tool_start(
-                request_context, "inspect_chartable_file_schema", file_id=file_id
-            )
-            file = request_context.get_file(file_id)
-            columns: list[str] = []
-            numeric_columns: list[str] = []
-            row_count = 0
-            sample_rows: list[dict[str, Any]] = []
-            kind = None
-            if file is not None:
-                kind = file.kind
-                if file.kind == "csv" and file.csv is not None:
-                    columns = list(file.csv.columns)
-                    numeric_columns = list(file.csv.numeric_columns)
-                    row_count = file.csv.row_count
-                    sample_rows = list(file.csv.sample_rows[:5])
-                elif file.kind == "json" and file.json is not None:
-                    columns = list(file.json.columns)
-                    numeric_columns = list(file.json.numeric_columns)
-                    row_count = file.json.row_count
-                    sample_rows = list(file.json.sample_rows[:5])
-            result = {
-                "file_id": file_id,
-                "kind": kind,
-                "columns": columns,
-                "numeric_columns": numeric_columns,
-                "row_count": row_count,
-                "sample_rows": sample_rows,
-            }
-            await _stream_tool_trace_widget(
-                ctx,
-                "inspect_chartable_file_schema",
-                "Inspecting a chartable artifact schema.",
-                [f"File: {file_id}", f"Kind: {kind or 'unknown'}"],
-            )
-            _log_tool_end(
-                request_context,
-                "inspect_chartable_file_schema",
-                found=bool(file),
-                column_count=len(columns),
-            )
-            return result
-
-        tools.append(inspect_chartable_file_schema_tool)
-
-    query_plan_model = context.query_plan_model
-    if query_plan_model is not None and "run_aggregate_query" in tool_names:
-
-        @function_tool(name_override="run_aggregate_query")
-        async def run_aggregate_query_tool(
-            ctx: ChatKitToolContext,
-            query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-        ) -> dict[str, object]:
-            """Validate a structured row/filter/group/aggregate query plan, then ask the client to execute it."""
-            request_context = ctx.context.request_context
-            validated_plan = query_plan.model_dump(by_alias=True)
-            _log_tool_start(
-                request_context,
-                "run_aggregate_query",
-                dataset_id=validated_plan.get("dataset_id"),
-                group_by=len(validated_plan.get("group_by") or []),
-            )
-            await ctx.context.stream(
-                ProgressUpdateEvent(text="Validating an aggregate query plan.")
-            )
-            await _stream_tool_trace_widget(
-                ctx,
-                "run_aggregate_query",
-                "Validated a grouped aggregate query plan.",
-                [
-                    f"Dataset: {validated_plan.get('dataset_id') or 'unknown'}",
-                    f"Group by: {len(validated_plan.get('group_by') or [])}",
-                    f"Aggregates: {len(validated_plan.get('aggregates') or [])}",
-                ],
-            )
-            client_tool_call = ClientToolCall(
-                name="run_aggregate_query",
-                arguments={"query_plan": validated_plan},
-            )
-            ctx.context.client_tool_call = client_tool_call
-            _log_tool_end(
-                request_context,
-                "run_aggregate_query",
-                dataset_id=validated_plan.get("dataset_id"),
-                mode="client_tool_call",
-            )
-            return client_tool_call.model_dump(mode="json")
-
-        tools.append(run_aggregate_query_tool)
-        built_client_tool_names.add("run_aggregate_query")
-
-    for materialize_tool_name in ("create_csv_file", "create_json_file"):
-        if query_plan_model is None or materialize_tool_name not in tool_names:
-            continue
-
-        def build_materialize_query_result_tool(tool_name: str) -> FunctionTool:
-            @function_tool(name_override=tool_name)
-            async def materialize_query_result_tool(
-                ctx: ChatKitToolContext,
-                filename: str,
-                query_plan: query_plan_model,  # pyright: ignore[reportInvalidTypeForm]
-            ) -> dict[str, object]:
-                """Validate a query plan, then ask the client to materialize the result rows as a file."""
-                request_context = ctx.context.request_context
-                cleaned_filename = filename.strip()
-                validated_plan = query_plan.model_dump(by_alias=True)
-                _log_tool_start(
-                    request_context,
-                    tool_name,
-                    filename=cleaned_filename,
-                    dataset_id=validated_plan.get("dataset_id"),
-                )
-                await ctx.context.stream(
-                    ProgressUpdateEvent(
-                        text=f"Creating derived artifact {cleaned_filename}."
-                    )
-                )
-                await _stream_tool_trace_widget(
-                    ctx,
-                    tool_name,
-                    "Preparing a derived artifact from a query result.",
-                    [
-                        f"Filename: {cleaned_filename}",
-                        f"Dataset: {validated_plan.get('dataset_id') or 'unknown'}",
-                    ],
-                )
-                client_tool_call = ClientToolCall(
-                    name=tool_name,
-                    arguments={
-                        "filename": cleaned_filename,
-                        "query_plan": validated_plan,
-                    },
-                )
-                ctx.context.client_tool_call = client_tool_call
-                _log_tool_end(
-                    request_context,
-                    tool_name,
-                    filename=cleaned_filename,
-                    mode="client_tool_call",
-                )
-                return client_tool_call.model_dump(mode="json")
-
-            return materialize_query_result_tool
-
-        tools.append(build_materialize_query_result_tool(materialize_tool_name))
-        built_client_tool_names.add(materialize_tool_name)
-
-    if "render_chart_from_file" in tool_names:
-
-        @function_tool(name_override="render_chart_from_file")
-        async def render_chart_from_file_tool(
-            ctx: ChatKitToolContext,
-            file_id: str,
-            chart_plan_id: str,
-            chart_plan: ChartPlan,
-            x_key: str,
-            y_key: str | None = None,
-            series_key: str | None = None,
-        ) -> dict[str, object]:
-            """Render a chart from a chartable CSV or JSON artifact after the chart has been planned."""
-            request_context = ctx.context.request_context
-            active_plan = request_context.thread_metadata.get("plan")
-            if active_plan is None or active_plan.get("id") != chart_plan_id:
-                raise ValueError(
-                    "render_chart_from_file requires a current chart plan id from the latest make_plan call."
-                )
-            raw_chart_plan = chart_plan.model_dump(by_alias=True)
-            _log_tool_start(
-                request_context,
-                "render_chart_from_file",
-                file_id=file_id,
-                chart_plan_id=chart_plan_id,
-                chart_type=raw_chart_plan.get("type"),
-            )
-            await ctx.context.stream(
-                ProgressUpdateEvent(text=f"Requesting chart render for file {file_id}.")
-            )
-            await _stream_tool_trace_widget(
-                ctx,
-                "render_chart_from_file",
-                "Queued a chart render on the client.",
-                [
-                    f"File: {file_id}",
-                    f"Chart: {raw_chart_plan.get('type') or 'unknown'}",
-                    f"X key: {x_key}",
-                    f"Y key: {y_key or 'auto'}",
-                ],
-            )
-            client_tool_call = ClientToolCall(
-                name="render_chart_from_file",
-                arguments={
-                    "file_id": file_id,
-                    "chart_plan_id": chart_plan_id,
-                    "chart_plan": raw_chart_plan,
-                    "x_key": x_key,
-                    "y_key": y_key,
-                    "series_key": series_key,
-                },
-            )
-            ctx.context.client_tool_call = client_tool_call
-            _log_tool_end(
-                request_context,
-                "render_chart_from_file",
-                file_id=file_id,
-                mode="client_tool_call",
-            )
-            return client_tool_call.model_dump(mode="json")
-
-        tools.append(render_chart_from_file_tool)
-        built_client_tool_names.add("render_chart_from_file")
-
-    for tool_name, tool_definition in registered_tool_map.items():
-        if tool_name in built_client_tool_names:
+    for tool_name in tool_names:
+        tool_definition = registered_tool_map.get(tool_name)
+        if tool_definition is None:
             continue
         tools.append(_build_client_tool_proxy(tool_definition))
 

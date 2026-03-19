@@ -6,7 +6,10 @@ import { loadCapabilityWorkspace, type CapabilityWorkspaceSnapshot } from "../li
 import type { ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import { useWorkspaceContract } from "./shared/useWorkspaceContract";
-import { syncWorkspaceToolCatalog } from "../lib/workspace-contract";
+import {
+  buildWorkspaceStateMetadata,
+  syncWorkspaceToolCatalog,
+} from "../lib/workspace-contract";
 
 export function useCapabilityFileWorkspace(options: {
   capabilityId: string;
@@ -20,7 +23,7 @@ export function useCapabilityFileWorkspace(options: {
   const { user } = useAppState();
   const workspace = useWorkspaceSurface({
     surfaceKey: options.capabilityId,
-    defaultCwdPath: `/${options.capabilityId}`,
+    defaultCwdPath: `/${options.capabilityId}/`,
   });
   const allowedTabsKey = options.allowedTabs.join("|");
   const [status, setStatus] = useState(options.defaultStatus);
@@ -68,10 +71,12 @@ export function useCapabilityFileWorkspace(options: {
   ]);
   const contract = useWorkspaceContract({
     workspace: {
+      activePrefix: workspace.activePrefix,
       cwdPath: workspace.cwdPath,
       files: workspace.files,
       entries: workspace.entries,
       workspaceContext: workspace.workspaceContext,
+      setActivePrefix: workspace.setActivePrefix,
       createDirectory: workspace.createDirectory,
       changeDirectory: workspace.changeDirectory,
       updateFilesystem: workspace.updateFilesystem,
@@ -94,11 +99,11 @@ export function useCapabilityFileWorkspace(options: {
     await workspace.handleSelectFiles(nextFiles);
     const builtCount = nextFiles.length;
     setStatus(
-      `Added ${builtCount} workspace file${builtCount === 1 ? "" : "s"} to ${workspace.cwdPath}. ${
+      `Added ${builtCount} workspace file${builtCount === 1 ? "" : "s"} under ${workspace.activePrefix}. ${
         builtCount === 1 ? "The file is" : "The files are"
       } ready for the agent.`,
     );
-  }, [workspace.cwdPath, workspace.handleSelectFiles]);
+  }, [workspace.activePrefix, workspace.handleSelectFiles]);
 
   const appendFiles = useCallback((nextFiles: LocalWorkspaceFile[]) => {
     if (!nextFiles.length) {
@@ -106,10 +111,10 @@ export function useCapabilityFileWorkspace(options: {
     }
     const storedFiles = workspace.appendFiles(nextFiles, "derived");
     setStatus(
-      `Added ${nextFiles.length} derived file${nextFiles.length === 1 ? "" : "s"} to ${workspace.cwdPath}.`,
+      `Added ${nextFiles.length} derived file${nextFiles.length === 1 ? "" : "s"} under ${workspace.activePrefix}.`,
     );
     return storedFiles;
-  }, [workspace.appendFiles, workspace.cwdPath]);
+  }, [workspace.activePrefix, workspace.appendFiles]);
 
   const setFiles = useCallback((nextFiles: LocalWorkspaceFile[]) => {
     workspace.replaceFiles(nextFiles, "demo");
@@ -127,8 +132,15 @@ export function useCapabilityFileWorkspace(options: {
     );
   }, [options.capabilityId, workspace.updateFilesystem]);
 
+  const workspaceStateMetadata = buildWorkspaceStateMetadata(
+    workspace.filesystem,
+    workspace.activePrefix,
+  );
+
   return {
+    activePrefix: workspace.activePrefix,
     cwdPath: workspace.cwdPath,
+    filesystem: workspace.filesystem,
     entries: workspace.entries,
     files: workspace.files,
     workspaceContext: workspace.workspaceContext,
@@ -152,11 +164,13 @@ export function useCapabilityFileWorkspace(options: {
     reportIds: contract.reportIds,
     currentReport: contract.currentReport,
     workspaceBootstrapMetadata: contract.bootstrapMetadata,
+    workspaceStateMetadata,
     syncToolCatalog,
     handleFiles,
     handleRemoveEntry,
     createDirectory: workspace.createDirectory,
     changeDirectory: workspace.changeDirectory,
+    setActivePrefix: workspace.setActivePrefix,
     updateFilesystem: workspace.updateFilesystem,
   };
 }
