@@ -61,7 +61,12 @@ export function useCapabilityFileWorkspace(options: {
   const [status, setStatus] = useState(options.defaultStatus);
   const [legacySnapshot, setLegacySnapshot] = useState<CapabilityWorkspaceSnapshot | null>(null);
   const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
+  const [pendingWorkspaceTab, setPendingWorkspaceTab] = useState<string | null>(null);
   const demoWorkspaceOwnedRef = useRef(false);
+  const defaultNonDemoTab = useMemo(
+    () => options.allowedTabs.find((tab) => tab !== "demo") ?? options.defaultTab,
+    [allowedTabsKey, options.defaultTab, options.allowedTabs],
+  );
 
   function normalizeTab(tab: string): string {
     return options.allowedTabs.includes(tab) ? tab : options.defaultTab;
@@ -72,6 +77,7 @@ export function useCapabilityFileWorkspace(options: {
       setStatus(options.defaultStatus);
       setLegacySnapshot(null);
       setReportEffects([]);
+      setPendingWorkspaceTab(null);
       return;
     }
 
@@ -91,9 +97,9 @@ export function useCapabilityFileWorkspace(options: {
         });
         setReportEffects(snapshot.reportEffects);
       } else {
-        setReportEffects([]);
-      }
-    })();
+      setReportEffects([]);
+    }
+  })();
 
     return () => {
       cancelled = true;
@@ -107,6 +113,11 @@ export function useCapabilityFileWorkspace(options: {
     options.defaultTab,
     user,
   ]);
+  const storedSurfaceTab = normalizeTab(
+    workspace.activeSurfaceTab ??
+      legacySnapshot?.activeWorkspaceTab ??
+      options.defaultTab,
+  );
   const contract = useWorkspaceContract({
     workspace: {
       activePrefix: workspace.activePrefix,
@@ -124,28 +135,100 @@ export function useCapabilityFileWorkspace(options: {
     capabilityTitle: options.capabilityTitle,
     defaultGoal: options.defaultBrief,
     defaultTab: options.defaultTab,
+    allowedTabs: options.allowedTabs,
     defaultExecutionMode: options.defaultExecutionMode ?? "interactive",
     legacySnapshot,
   });
 
   useEffect(() => {
-    if (contract.activeWorkspaceTab === "demo") {
-      if (workspace.selectedWorkspaceKind !== "demo") {
-        workspace.activateDemoWorkspace();
-        demoWorkspaceOwnedRef.current = true;
-      }
+    if (pendingWorkspaceTab && !workspace.hydrated) {
       return;
     }
 
-    if (demoWorkspaceOwnedRef.current && workspace.selectedWorkspaceKind === "demo") {
-      workspace.restorePreviousWorkspace();
+    if (pendingWorkspaceTab === "demo") {
+      if (workspace.selectedWorkspaceKind !== "demo") {
+        return;
+      }
+      workspace.setActiveSurfaceTab("demo");
+      setPendingWorkspaceTab(null);
+      return;
     }
-    demoWorkspaceOwnedRef.current = false;
+
+    if (pendingWorkspaceTab && workspace.selectedWorkspaceKind !== "demo") {
+      workspace.setActiveSurfaceTab(pendingWorkspaceTab);
+      demoWorkspaceOwnedRef.current = false;
+      setPendingWorkspaceTab(null);
+    }
   }, [
-    contract.activeWorkspaceTab,
+    pendingWorkspaceTab,
+    workspace.hydrated,
+    workspace.selectedWorkspaceKind,
+    workspace.setActiveSurfaceTab,
+  ]);
+
+  useEffect(() => {
+    if (pendingWorkspaceTab || workspace.selectedWorkspaceKind === "demo") {
+      return;
+    }
+    if (storedSurfaceTab === "demo") {
+      workspace.setActiveSurfaceTab(defaultNonDemoTab);
+    }
+  }, [
+    defaultNonDemoTab,
+    pendingWorkspaceTab,
+    storedSurfaceTab,
+    workspace.selectedWorkspaceKind,
+    workspace.setActiveSurfaceTab,
+  ]);
+
+  const activeWorkspaceTab = useMemo(() => {
+    if (pendingWorkspaceTab === "demo") {
+      if (workspace.selectedWorkspaceKind === "demo") {
+        return "demo";
+      }
+      return storedSurfaceTab === "demo" ? defaultNonDemoTab : storedSurfaceTab;
+    }
+    if (pendingWorkspaceTab && workspace.selectedWorkspaceKind !== "demo") {
+      return pendingWorkspaceTab;
+    }
+    if (workspace.selectedWorkspaceKind !== "demo" && storedSurfaceTab === "demo") {
+      return defaultNonDemoTab;
+    }
+    return storedSurfaceTab;
+  }, [
+    defaultNonDemoTab,
+    pendingWorkspaceTab,
+    storedSurfaceTab,
+    workspace.selectedWorkspaceKind,
+  ]);
+
+  const setActiveWorkspaceTab = useCallback((nextTab: string) => {
+    const normalizedNextTab = normalizeTab(nextTab);
+
+    if (normalizedNextTab === "demo") {
+      if (workspace.selectedWorkspaceKind === "demo") {
+        workspace.setActiveSurfaceTab("demo");
+        return;
+      }
+      demoWorkspaceOwnedRef.current = true;
+      setPendingWorkspaceTab("demo");
+      workspace.activateDemoWorkspace();
+      return;
+    }
+
+    if (workspace.selectedWorkspaceKind === "demo" && demoWorkspaceOwnedRef.current) {
+      setPendingWorkspaceTab(normalizedNextTab);
+      workspace.restorePreviousWorkspace();
+      return;
+    }
+
+    demoWorkspaceOwnedRef.current = false;
+    workspace.setActiveSurfaceTab(normalizedNextTab);
+  }, [
     workspace.activateDemoWorkspace,
     workspace.restorePreviousWorkspace,
     workspace.selectedWorkspaceKind,
+    workspace.setActiveSurfaceTab,
   ]);
 
   const handleFiles = useCallback(async (nextFiles: FileList | null) => {
@@ -243,8 +326,8 @@ export function useCapabilityFileWorkspace(options: {
     setStatus,
     investigationBrief: contract.investigationBrief,
     setInvestigationBrief: contract.setInvestigationBrief,
-    activeWorkspaceTab: contract.activeWorkspaceTab,
-    setActiveWorkspaceTab: contract.setActiveWorkspaceTab,
+    activeWorkspaceTab,
+    setActiveWorkspaceTab,
     executionMode: contract.executionMode,
     setExecutionMode: contract.setExecutionMode,
     reportEffects,
@@ -252,6 +335,9 @@ export function useCapabilityFileWorkspace(options: {
     appendReportEffects,
     currentReportId: contract.currentReportId,
     reportIds: contract.reportIds,
+    reports: contract.reports,
+    reportSummaries: contract.reportSummaries,
+    selectCurrentReport: contract.selectCurrentReport,
     currentReport: contract.currentReport,
     workspaceBootstrapMetadata: contract.bootstrapMetadata,
     workspaceStateMetadata,

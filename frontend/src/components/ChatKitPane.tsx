@@ -131,6 +131,14 @@ export type ChatKitQuickAction = {
   label: string;
   prompt: string;
   model?: string;
+  beforeRun?: () => Promise<unknown> | void;
+  followUp?: {
+    label: string;
+    prompt: string;
+    model?: string;
+    capabilityBundle?: CapabilityBundle;
+    threadOrigin?: FeedbackOrigin;
+  };
 };
 
 const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
@@ -219,6 +227,15 @@ export function ChatKitHarness({
   const runningRef = useRef(false);
   const activeClientToolRef = useRef<string | null>(null);
   const finishStatusTimeoutRef = useRef<number | null>(null);
+  const capabilityBundleRef = useRef(capabilityBundle);
+  const workspaceStateRef = useRef(workspaceState);
+  const threadOriginRef = useRef(threadOrigin);
+  const executionModeRef = useRef(executionMode);
+  const metadataCapabilityBundleOverrideRef = useRef<CapabilityBundle | null>(null);
+  const metadataThreadOriginOverrideRef = useRef<FeedbackOrigin | null>(null);
+  const pendingQuickActionFollowUpRef = useRef<ChatKitQuickAction["followUp"] | null>(null);
+  const pendingQuickActionFollowUpReadyRef = useRef(false);
+  const quickActionFollowUpInFlightRef = useRef(false);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -239,6 +256,22 @@ export function ChatKitHarness({
   useEffect(() => {
     activeClientToolRef.current = activeClientToolName;
   }, [activeClientToolName]);
+
+  useEffect(() => {
+    capabilityBundleRef.current = capabilityBundle;
+  }, [capabilityBundle]);
+
+  useEffect(() => {
+    workspaceStateRef.current = workspaceState;
+  }, [workspaceState]);
+
+  useEffect(() => {
+    threadOriginRef.current = threadOrigin;
+  }, [threadOrigin]);
+
+  useEffect(() => {
+    executionModeRef.current = executionMode;
+  }, [executionMode]);
 
   function clearFinishStatusTimeout() {
     if (finishStatusTimeoutRef.current !== null && typeof window !== "undefined") {
@@ -261,19 +294,60 @@ export function ChatKitHarness({
     }, 180);
   }
 
+  async function maybeRunQuickActionFollowUp() {
+    const followUp = pendingQuickActionFollowUpRef.current;
+    if (
+      !followUp ||
+      !pendingQuickActionFollowUpReadyRef.current ||
+      quickActionFollowUpInFlightRef.current ||
+      !threadIdRef.current ||
+      runningRef.current ||
+      Boolean(activeClientToolRef.current)
+    ) {
+      return;
+    }
+
+    pendingQuickActionFollowUpRef.current = null;
+    pendingQuickActionFollowUpReadyRef.current = false;
+    quickActionFollowUpInFlightRef.current = true;
+    clearFinishStatusTimeout();
+    setStatus(`Starting ${followUp.label.toLowerCase()}.`);
+    metadataCapabilityBundleOverrideRef.current = followUp.capabilityBundle ?? null;
+    metadataThreadOriginOverrideRef.current = followUp.threadOrigin ?? null;
+    try {
+      await chatKitRef.current?.sendUserMessage({
+        text: followUp.prompt,
+        model: followUp.model ?? CHATKIT_DEFAULT_MODEL_ID,
+        newThread: false,
+      });
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? `Unable to start ${followUp.label.toLowerCase()}: ${error.message}`
+          : `Unable to start ${followUp.label.toLowerCase()}.`,
+      );
+    } finally {
+      metadataCapabilityBundleOverrideRef.current = null;
+      metadataThreadOriginOverrideRef.current = null;
+      quickActionFollowUpInFlightRef.current = false;
+    }
+  }
+
   useEffect(() => {
     setChatKitMetadataGetter(() =>
       buildChatKitRequestMetadata({
-        capabilityBundle,
-        workspaceState,
-        threadOrigin,
-        executionMode,
+        capabilityBundle:
+          metadataCapabilityBundleOverrideRef.current ?? capabilityBundleRef.current,
+        workspaceState: workspaceStateRef.current,
+        threadOrigin:
+          metadataThreadOriginOverrideRef.current ?? threadOriginRef.current,
+        executionMode: executionModeRef.current,
       }),
     );
     return () => {
       setChatKitMetadataGetter(null);
     };
-  }, [capabilityBundle, executionMode, threadOrigin, workspaceState]);
+  }, []);
 
   useEffect(() => {
     const previousMode = lastExecutionModeRef.current;
@@ -442,6 +516,11 @@ export function ChatKitHarness({
         runningRef.current = false;
         setRunning(false);
         scheduleScrollToBottom();
+        if (pendingQuickActionFollowUpRef.current) {
+          pendingQuickActionFollowUpReadyRef.current = true;
+          void maybeRunQuickActionFollowUp();
+          return;
+        }
         if (activeClientToolRef.current) {
           setStatus(`Running ${formatToolLabel(activeClientToolRef.current)} locally.`);
         } else {
@@ -455,10 +534,14 @@ export function ChatKitHarness({
         });
       },
       onThreadChange: ({ threadId: nextThreadId }) => {
+        threadIdRef.current = nextThreadId;
         setThreadId(nextThreadId);
         autoScrollEnabledRef.current = true;
         resolveScrollTarget();
         scheduleScrollToBottom(true);
+        if (pendingQuickActionFollowUpReadyRef.current) {
+          void maybeRunQuickActionFollowUp();
+        }
       },
       onThreadLoadEnd: () => {
         resolveScrollTarget();
@@ -589,6 +672,9 @@ export function ChatKitHarness({
   async function handleQuickAction(action: ChatKitQuickAction) {
     const needsNewThread = !threadIdRef.current;
     setStatus(`Starting ${action.label.toLowerCase()}.`);
+    await action.beforeRun?.();
+    pendingQuickActionFollowUpRef.current = action.followUp ?? null;
+    pendingQuickActionFollowUpReadyRef.current = false;
     await chatKit.sendUserMessage({
       text: action.prompt,
       model: action.model ?? CHATKIT_DEFAULT_MODEL_ID,

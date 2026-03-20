@@ -78,10 +78,47 @@ def _build_agent_instructions(
     return prompt_with_handoff_instructions("\n\n".join(sections))
 
 
-def _build_model_settings(context: ReportAgentContext) -> ModelSettings:
+def _build_response_api_metadata(
+    context: ReportAgentContext,
+    *,
+    capability_spec: CapabilityAgentSpec,
+) -> dict[str, str] | None:
+    capability_bundle = context.capability_bundle
+    root_capability_id = (
+        capability_bundle.get("root_capability_id")
+        if capability_bundle is not None
+        else None
+    )
+    root_capability_spec = context.get_capability_spec(root_capability_id)
+    surface_key = context.thread_metadata.get("surface_key")
+
+    metadata: dict[str, str] = {}
+    if root_capability_id:
+        metadata["root_capability_id"] = root_capability_id
+    if root_capability_spec is not None:
+        metadata["root_agent_name"] = root_capability_spec["agent_name"]
+
+    metadata["capability_id"] = capability_spec["capability_id"]
+    metadata["agent_name"] = capability_spec["agent_name"]
+
+    if isinstance(surface_key, str) and surface_key.strip():
+        metadata["surface_key"] = surface_key.strip()
+
+    return metadata or None
+
+
+def _build_model_settings(
+    context: ReportAgentContext,
+    *,
+    capability_spec: CapabilityAgentSpec,
+) -> ModelSettings:
     safety_identifier = context.user_id[:64]
     return ModelSettings(
         parallel_tool_calls=False,
+        metadata=_build_response_api_metadata(
+            context,
+            capability_spec=capability_spec,
+        ),
         extra_args={
             "safety_identifier": safety_identifier,
             "context_management": [
@@ -100,7 +137,6 @@ def _build_agent_graph(
     capability_bundle: CapabilityBundle,
     model: str | None,
 ) -> dict[str, Agent[ChatKitAgentContext[ReportAgentContext]]]:
-    model_settings = _build_model_settings(context)
     agents_by_capability_id: dict[
         str, Agent[ChatKitAgentContext[ReportAgentContext]]
     ] = {}
@@ -155,7 +191,10 @@ def _build_agent_graph(
                 instructions=capability_spec["instructions"],
             ),
             tools=compiled_tools,
-            model_settings=model_settings,
+            model_settings=_build_model_settings(
+                context,
+                capability_spec=capability_spec,
+            ),
             handoffs=[],
             tool_use_behavior={"stop_at_tool_names": tool_names},
         )

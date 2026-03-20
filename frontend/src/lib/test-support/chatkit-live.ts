@@ -275,7 +275,8 @@ function buildCapabilityInvestigationBrief(
     return [
       scenario.title,
       "Complete exactly one report-agent demo pass.",
-      "Create or reuse the active report, use dataset_id demo-report-sales for the sales CSV work, produce the grouped revenue-by-region artifact, render one bar chart, append exactly one report slide, then stop.",
+      "Reuse the active report when it already exists, and only create one report if no active report is available.",
+      "Use dataset_id demo-report-sales for the sales CSV work, produce exactly one grouped revenue-by-region artifact, render exactly one bar chart, append exactly one 1x2 report slide with the chart first and the summary second, then stop.",
       "After each specialist handoff, control returns to the report agent, which must check the original demo requirements again before stopping.",
       "The run is not complete until render_chart_from_file has actually happened and chart evidence is visible in the thread.",
       "A plan, inspection step, or recommendation does not count as chart completion.",

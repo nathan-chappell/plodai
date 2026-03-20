@@ -41,6 +41,7 @@ vi.mock("../shared/useDemoScenario", () => ({
     scenario: null,
     loading: false,
     error: null,
+    prepareDemoRun: vi.fn(),
   }),
 }));
 
@@ -166,6 +167,10 @@ function createBaseWorkspaceResult() {
     updateFilesystem: vi.fn(),
     syncToolCatalog: vi.fn(),
     appendReportEffects: vi.fn(),
+    reports: [] as WorkspaceReportV1[],
+    reportSummaries: [],
+    selectCurrentReport: vi.fn(),
+    currentReportId: null as string | null,
     currentReport: null as WorkspaceReportV1 | null,
     workspaceStateMetadata: baseWorkspaceStateMetadata,
     workspaces,
@@ -235,6 +240,86 @@ describe("capability page quick views", () => {
     expect(container.textContent).toContain("Current report");
     expect(container.textContent).toContain("demo");
     expect(container.textContent).not.toContain("Workspace artifacts");
+  });
+
+  it("shows a dedicated Reports tab with workspace-backed report selection and preview", async () => {
+    const selectCurrentReport = vi.fn();
+    const boardReport: WorkspaceReportV1 = {
+      version: "v1",
+      report_id: "board-report",
+      title: "Board revenue report",
+      created_at: "2026-03-20T10:00:00.000Z",
+      updated_at: "2026-03-20T10:05:00.000Z",
+      slides: [
+        {
+          id: "slide-1",
+          created_at: "2026-03-20T10:00:00.000Z",
+          title: "Regional performance",
+          layout: "1x1",
+          panels: [
+            {
+              id: "panel-1",
+              type: "narrative",
+              title: "Summary",
+              markdown: "West leads the quarter.",
+            },
+          ],
+        },
+      ],
+    };
+    const opsReport: WorkspaceReportV1 = {
+      version: "v1",
+      report_id: "ops-report",
+      title: "Operations review",
+      created_at: "2026-03-20T09:00:00.000Z",
+      updated_at: "2026-03-20T09:10:00.000Z",
+      slides: [
+        {
+          id: "slide-2",
+          created_at: "2026-03-20T09:05:00.000Z",
+          title: "Fulfillment",
+          layout: "1x1",
+          panels: [
+            {
+              id: "panel-2",
+              type: "narrative",
+              title: "Takeaway",
+              markdown: "Cycle time improved.",
+            },
+          ],
+        },
+      ],
+    };
+
+    mockUseCapabilityFileWorkspace.mockReturnValue({
+      ...createBaseWorkspaceResult(),
+      activeWorkspaceTab: "reports",
+      files: [reportFile],
+      reports: [boardReport, opsReport],
+      currentReport: boardReport,
+      currentReportId: "board-report",
+      selectCurrentReport,
+    });
+
+    await act(async () => {
+      root.render(<ReportFoundryPage />);
+    });
+
+    expect(container.textContent).toContain("Reports");
+    expect(container.textContent).toContain("Board revenue report");
+    expect(container.textContent).toContain("Operations review");
+    expect(container.textContent).toContain("West leads the quarter.");
+
+    const opsButton = container.querySelector(
+      "[data-testid='report-agent-reports-browser-report-ops-report']",
+    ) as HTMLButtonElement | null;
+    expect(opsButton).not.toBeNull();
+
+    await act(async () => {
+      opsButton?.click();
+    });
+
+    expect(selectCurrentReport).toHaveBeenCalledWith("ops-report");
   });
 
   it("shows the CSV quick view and keeps the helper column visible even when it is empty", async () => {
@@ -331,6 +416,13 @@ describe("capability page quick views", () => {
 
     mockUseCapabilityFileWorkspace.mockReturnValue({
       ...createBaseWorkspaceResult(),
+      files: [
+        {
+          ...reportFile,
+          id: "source-csv",
+          name: "revenue_slice.csv",
+        },
+      ],
       artifacts: [chartArtifact],
       activeWorkspaceTab: "agent",
     });
@@ -342,9 +434,134 @@ describe("capability page quick views", () => {
     expect(container.querySelector("[data-testid='chart-agent-quick-view']")).not.toBeNull();
     expect(container.textContent).toContain("Saved charts");
     expect(container.textContent).toContain("Plan plan-1");
-    expect(container.textContent).toContain("Source source-csv");
+    expect(container.textContent).toContain("Source revenue_slice.csv");
     const chartImage = container.querySelector("img") as HTMLImageElement | null;
     expect(chartImage?.getAttribute("src")).toContain("data:image/png;base64,chart-preview");
+  });
+
+  it("keeps the same workspace-backed helper UI on CSV, Chart, and PDF demo tabs", async () => {
+    const csvArtifact: ShellWorkspaceArtifact = {
+      entryId: "derived-csv-entry",
+      path: "/artifacts/data/revenue_slice.csv",
+      createdAt: "2026-03-20T11:00:00.000Z",
+      source: "demo",
+      producerKey: "artifacts",
+      producerLabel: "Artifacts",
+      file: {
+        ...reportFile,
+        id: "derived-csv",
+        name: "revenue_slice.csv",
+      },
+    };
+    const chartArtifact: ShellWorkspaceArtifact = {
+      entryId: "chart-entry",
+      path: "/artifacts/charts/revenue-plan.json",
+      createdAt: "2026-03-20T12:00:00.000Z",
+      source: "demo",
+      producerKey: "artifacts",
+      producerLabel: "Artifacts",
+      file: {
+        id: "chart-file",
+        name: "revenue-plan.json",
+        kind: "other",
+        extension: "json",
+        mime_type: "application/json",
+        byte_size: 512,
+        text_content: JSON.stringify(
+          {
+            version: "v1",
+            chart_plan_id: "plan-1",
+            file_id: "source-csv",
+            title: "Revenue by segment",
+            chart: { type: "bar" },
+            image_data_url: "data:image/png;base64,chart-preview",
+          },
+          null,
+          2,
+        ),
+      },
+    };
+    const indexArtifact: ShellWorkspaceArtifact = {
+      entryId: "smart-split-index",
+      path: "/artifacts/pdf/board_packet.md",
+      createdAt: "2026-03-20T13:00:00.000Z",
+      source: "demo",
+      producerKey: "artifacts",
+      producerLabel: "Artifacts",
+      file: {
+        id: "smart-split-index-file",
+        name: "board_packet.md",
+        kind: "other",
+        extension: "md",
+        mime_type: "text/markdown",
+        byte_size: 200,
+        text_content: "# Board packet\n\n- [Executive summary](exec-summary.pdf)\n",
+      },
+    };
+    const splitPdfArtifact: ShellWorkspaceArtifact = {
+      entryId: "split-pdf-entry",
+      path: "/artifacts/pdf/exec-summary.pdf",
+      createdAt: "2026-03-20T13:00:01.000Z",
+      source: "demo",
+      producerKey: "artifacts",
+      producerLabel: "Artifacts",
+      file: {
+        id: "split-pdf-file",
+        name: "exec-summary.pdf",
+        kind: "pdf",
+        extension: "pdf",
+        mime_type: "application/pdf",
+        byte_size: 240,
+        page_count: 3,
+        bytes_base64: "JVBERi0xLjQK",
+      },
+    };
+
+    mockUseCapabilityFileWorkspace.mockReturnValue({
+      ...createBaseWorkspaceResult(),
+      activeWorkspaceTab: "demo",
+      artifacts: [csvArtifact],
+    });
+
+    await act(async () => {
+      root.render(<CsvAgentPage />);
+    });
+
+    expect(container.querySelector("[data-testid='csv-agent-quick-view']")).not.toBeNull();
+    expect(container.textContent).toContain("CSV results");
+
+    mockUseCapabilityFileWorkspace.mockReturnValue({
+      ...createBaseWorkspaceResult(),
+      activeWorkspaceTab: "demo",
+      files: [
+        {
+          ...reportFile,
+          id: "source-csv",
+          name: "revenue_slice.csv",
+        },
+      ],
+      artifacts: [chartArtifact],
+    });
+
+    await act(async () => {
+      root.render(<ChartAgentPage />);
+    });
+
+    expect(container.querySelector("[data-testid='chart-agent-quick-view']")).not.toBeNull();
+    expect(container.textContent).toContain("Saved charts");
+
+    mockUseCapabilityFileWorkspace.mockReturnValue({
+      ...createBaseWorkspaceResult(),
+      activeWorkspaceTab: "demo",
+      artifacts: [indexArtifact, splitPdfArtifact],
+    });
+
+    await act(async () => {
+      root.render(<PdfAgentPage />);
+    });
+
+    expect(container.querySelector("[data-testid='pdf-agent-quick-view']")).not.toBeNull();
+    expect(container.textContent).toContain("Smart splits");
   });
 
   it("shows smart split indexes and lets index links select matching PDFs", async () => {

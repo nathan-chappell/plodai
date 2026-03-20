@@ -59,7 +59,7 @@ export function buildReportAgentClientToolCatalog(
     ),
     buildToolDefinition(
       "create_report",
-      "Create a new structured report in the shared workspace and make it available for follow-on updates.",
+      "Create a new structured report in the shared workspace only when no suitable active report exists or the user explicitly wants a separate one.",
       createReportToolSchema,
     ),
     buildToolDefinition(

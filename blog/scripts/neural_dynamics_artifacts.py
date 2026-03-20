@@ -51,6 +51,8 @@ ACCURACY_EVAL_LENGTHS: tuple[int, ...] = (10, 20, 30, 50)
 DEFAULT_PHASE_EPOCHS = 40
 DEFAULT_TRAIN_SAMPLES = 128
 DEFAULT_TEST_SAMPLES = 32
+DEFAULT_MLP_STORY_SEED = 7
+DEFAULT_RNN_STORY_SEED = 1337
 DEFAULT_RNN_LR_START = 0.0015
 DEFAULT_RNN_LR_END = 0.0002
 
@@ -1177,6 +1179,7 @@ def render_rnn_assets(
         f"{result.model_title}: final eval10={final_metrics.eval_10_acc:.3f}, eval20={final_metrics.eval_20_acc:.3f}, eval30={final_metrics.eval_30_acc:.3f}, eval50={final_metrics.eval_50_acc:.3f}"
     )
     return {
+        "seed": result.seed,
         "model_mode": result.model_mode,
         "language": result.language,
         "accept_anchor": result.accept_anchor,
@@ -1228,7 +1231,9 @@ def generate_artifacts(
     *,
     target: Literal["all", "mlp", "precision", "rnn"],
     output_dir: Path,
-    seed: int,
+    seed: int | None,
+    mlp_seed: int | None,
+    rnn_seed: int | None,
     mlp_epochs: int,
     mlp_batch_size: int,
     mlp_shape: str,
@@ -1243,6 +1248,16 @@ def generate_artifacts(
     render_mlp = render_mlp or render_mlp_assets
     render_precision = render_precision or render_precision_assets
     render_rnn = render_rnn or render_rnn_assets
+    resolved_mlp_seed = (
+        mlp_seed
+        if mlp_seed is not None
+        else seed if seed is not None else DEFAULT_MLP_STORY_SEED
+    )
+    resolved_rnn_seed = (
+        rnn_seed
+        if rnn_seed is not None
+        else seed if seed is not None else DEFAULT_RNN_STORY_SEED
+    )
     if clean:
         log_progress(f"cleaning output directory {output_dir}")
         clean_output_dir(output_dir)
@@ -1250,13 +1265,17 @@ def generate_artifacts(
     log_progress(f"starting generation for target={target} in {output_dir}")
     manifest: dict[str, object] = {
         "article": ARTICLE_SLUG,
-        "seed": seed,
         "output_dir": str(output_dir),
+        "seed": {
+            "shared": seed,
+            "mlp": resolved_mlp_seed,
+            "rnn": resolved_rnn_seed,
+        },
     }
     if target in {"all", "mlp"}:
         manifest["mlp"] = render_mlp(
             output_dir=output_dir,
-            seed=seed,
+            seed=resolved_mlp_seed,
             mlp_epochs=mlp_epochs,
             mlp_batch_size=mlp_batch_size,
             mlp_shape=mlp_shape,
@@ -1266,7 +1285,7 @@ def generate_artifacts(
     if target in {"all", "rnn"}:
         manifest["rnn"] = render_rnn(
             output_dir=output_dir,
-            seed=seed,
+            seed=resolved_rnn_seed,
             phase_epochs=rnn_phase_epochs,
             train_samples=rnn_train_samples,
             test_samples=rnn_test_samples,
@@ -1288,7 +1307,18 @@ def generate(
         DEFAULT_OUTPUT_DIR,
         help="Directory where article-facing assets should be written.",
     ),
-    seed: int = typer.Option(7, help="Random seed."),
+    seed: int | None = typer.Option(
+        None,
+        help="Shared fallback seed. If omitted, the MLP and RNN use their own publication seeds.",
+    ),
+    mlp_seed: int | None = typer.Option(
+        None,
+        help=f"Seed for the MLP story. Defaults to {DEFAULT_MLP_STORY_SEED} unless --seed is supplied.",
+    ),
+    rnn_seed: int | None = typer.Option(
+        None,
+        help=f"Seed for the RNN story. Defaults to {DEFAULT_RNN_STORY_SEED} unless --seed is supplied.",
+    ),
     mlp_epochs: int = typer.Option(400, help="Training epochs for the MLP."),
     mlp_batch_size: int = typer.Option(64, help="Mini-batch size for the MLP."),
     mlp_shape: str = typer.Option(
@@ -1316,6 +1346,8 @@ def generate(
         target=target,
         output_dir=output_dir,
         seed=seed,
+        mlp_seed=mlp_seed,
+        rnn_seed=rnn_seed,
         mlp_epochs=mlp_epochs,
         mlp_batch_size=mlp_batch_size,
         mlp_shape=mlp_shape,

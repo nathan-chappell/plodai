@@ -3,15 +3,17 @@ import { useCallback, useEffect, useMemo, useReducer } from "react";
 import {
   buildWorkspaceBootstrapMetadata,
   ensureWorkspaceContractFilesystem,
+  listWorkspaceReports,
   readWorkspaceAppState,
   readWorkspaceReport,
   readWorkspaceReportIndex,
+  setWorkspaceCurrentReport,
   syncWorkspaceToolCatalog,
   updateWorkspaceAppState,
   updateWorkspaceCurrentGoal,
 } from "../../lib/workspace-contract";
 import type { CapabilityWorkspaceSnapshot } from "../../lib/workspace-store";
-import type { ExecutionMode } from "../../types/analysis";
+import type { ExecutionMode, WorkspaceStateReportSummary } from "../../types/analysis";
 import type { WorkspaceBootstrapMetadata, WorkspaceReportV1 } from "../../types/workspace-contract";
 import type { CapabilityWorkspaceContext } from "../types";
 
@@ -23,6 +25,14 @@ type ContractUiState = {
 type ContractAction =
   | { type: "ready" }
   | { type: "migrated" };
+
+function normalizeWorkspaceTab(
+  tab: string | null | undefined,
+  allowedTabs: string[],
+  defaultTab: string,
+): string {
+  return tab && allowedTabs.includes(tab) ? tab : defaultTab;
+}
 
 function reducer(state: ContractUiState, action: ContractAction): ContractUiState {
   switch (action.type) {
@@ -40,6 +50,7 @@ function migrateLegacySnapshot(
     capabilityTitle: string;
     defaultGoal: string;
     defaultTab: string;
+    allowedTabs: string[];
     defaultExecutionMode: ExecutionMode;
     toolNames?: string[];
     legacySnapshot: CapabilityWorkspaceSnapshot | null;
@@ -63,9 +74,14 @@ function migrateLegacySnapshot(
       if (legacy.investigationBrief && !appState?.current_goal) {
         nextFilesystem = updateWorkspaceCurrentGoal(nextFilesystem, legacy.investigationBrief);
       }
-      if (legacy.activeWorkspaceTab && appState?.active_workspace_tab !== legacy.activeWorkspaceTab) {
+      const legacyWorkspaceTab = normalizeWorkspaceTab(
+        legacy.activeWorkspaceTab,
+        options.allowedTabs,
+        options.defaultTab,
+      );
+      if (legacyWorkspaceTab && appState?.active_workspace_tab !== legacyWorkspaceTab) {
         nextFilesystem = updateWorkspaceAppState(nextFilesystem, {
-          active_workspace_tab: legacy.activeWorkspaceTab,
+          active_workspace_tab: legacyWorkspaceTab,
         });
       }
       if (legacy.executionMode && appState?.execution_mode !== legacy.executionMode) {
@@ -90,6 +106,7 @@ export function useWorkspaceContract(options: {
   capabilityTitle: string;
   defaultGoal: string;
   defaultTab: string;
+  allowedTabs: string[];
   defaultExecutionMode: ExecutionMode;
   toolNames?: string[];
   legacySnapshot: CapabilityWorkspaceSnapshot | null;
@@ -100,6 +117,7 @@ export function useWorkspaceContract(options: {
   });
 
   const filesystem = options.workspace.getState().filesystem;
+  const allowedTabsKey = options.allowedTabs.join("|");
   const toolNamesKey = (options.toolNames ?? []).join("|");
 
   useEffect(() => {
@@ -111,6 +129,7 @@ export function useWorkspaceContract(options: {
     options.defaultExecutionMode,
     options.defaultGoal,
     options.defaultTab,
+    allowedTabsKey,
     options.legacySnapshot,
     options.workspace.activePrefix,
     options.workspace.updateFilesystem,
@@ -129,6 +148,18 @@ export function useWorkspaceContract(options: {
     const reportId = appState?.current_report_id ?? reportIndex?.current_report_id;
     return reportId ? readWorkspaceReport(filesystem, reportId) : null;
   }, [appState, filesystem, reportIndex]);
+  const reports = useMemo(() => listWorkspaceReports(filesystem), [filesystem]);
+  const reportSummaries = useMemo<WorkspaceStateReportSummary[]>(
+    () =>
+      reports.map((report) => ({
+        report_id: report.report_id,
+        title: report.title,
+        item_count: report.slides.length,
+        slide_count: report.slides.length,
+        updated_at: report.updated_at ?? null,
+      })),
+    [reports],
+  );
   const bootstrapMetadata = useMemo<WorkspaceBootstrapMetadata>(
     () => buildWorkspaceBootstrapMetadata(filesystem),
     [filesystem],
@@ -156,20 +187,33 @@ export function useWorkspaceContract(options: {
     );
   }, [options.capabilityId, options.workspace.updateFilesystem]);
 
+  const selectCurrentReport = useCallback((reportId: string) => {
+    options.workspace.updateFilesystem((filesystem) =>
+      setWorkspaceCurrentReport(filesystem, reportId),
+    );
+  }, [options.workspace.updateFilesystem]);
+
   return {
     ready: uiState.ready,
     migrated: uiState.migrated,
     bootstrapMetadata,
     appState,
     reportIndex,
+    reports,
+    reportSummaries,
     currentReport,
     investigationBrief: appState?.current_goal ?? options.defaultGoal,
     setInvestigationBrief,
-    activeWorkspaceTab: appState?.active_workspace_tab ?? options.defaultTab,
+    activeWorkspaceTab: normalizeWorkspaceTab(
+      appState?.active_workspace_tab,
+      options.allowedTabs,
+      options.defaultTab,
+    ),
     setActiveWorkspaceTab,
     executionMode: appState?.execution_mode ?? options.defaultExecutionMode,
     setExecutionMode,
     syncToolCatalog,
+    selectCurrentReport,
     currentReportId:
       appState?.current_report_id ?? reportIndex?.current_report_id ?? null,
     reportIds: reportIndex?.report_ids ?? [],

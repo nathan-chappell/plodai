@@ -309,7 +309,8 @@ export function useWorkspaceSurface(options: {
   } = useWorkspaceStore();
   const fallbackPrefix = useMemo(() => defaultPrefix(options.defaultCwdPath), [options.defaultCwdPath]);
   const [activePrefix, setActivePrefix] = useState(fallbackPrefix);
-  const [hydrated, setHydrated] = useState(false);
+  const [activeSurfaceTab, setActiveSurfaceTab] = useState<string | null>(null);
+  const [hydratedWorkspaceId, setHydratedWorkspaceId] = useState<string | null>(null);
   const stateRef = useRef({
     activePrefix: fallbackPrefix,
     cwdPath: fallbackPrefix,
@@ -323,9 +324,10 @@ export function useWorkspaceSurface(options: {
   });
 
   useEffect(() => {
-    setHydrated(false);
+    setHydratedWorkspaceId(null);
     if (!currentUserId) {
       setActivePrefix(fallbackPrefix);
+      setActiveSurfaceTab(null);
       return;
     }
 
@@ -338,13 +340,16 @@ export function useWorkspaceSurface(options: {
       }
 
       setActivePrefix(storedState?.active_prefix ?? fallbackPrefix);
-      setHydrated(true);
+      setActiveSurfaceTab(storedState?.active_tab ?? null);
+      setHydratedWorkspaceId(selectedWorkspaceId);
     })();
 
     return () => {
       cancelled = true;
     };
   }, [currentUserId, fallbackPrefix, options.surfaceKey, selectedWorkspaceId]);
+
+  const surfaceHydrated = hydratedWorkspaceId === selectedWorkspaceId;
 
   const resolvedFilesystem = useMemo(
     () => filesystemsByWorkspaceId[selectedWorkspaceId] ?? createWorkspaceFilesystem(),
@@ -383,17 +388,25 @@ export function useWorkspaceSurface(options: {
   }, [entries, files, resolvedFilesystem, safeActivePrefix, workspaceContext]);
 
   useEffect(() => {
-    if (!currentUserId || !hydrated) {
+    if (!currentUserId || !surfaceHydrated) {
       return;
     }
     const timeoutId = window.setTimeout(() => {
       void saveWorkspaceSurfaceState(currentUserId, selectedWorkspaceId, {
         surface_key: options.surfaceKey,
         active_prefix: safeActivePrefix,
+        active_tab: activeSurfaceTab,
       });
     }, 120);
     return () => window.clearTimeout(timeoutId);
-  }, [currentUserId, hydrated, options.surfaceKey, safeActivePrefix, selectedWorkspaceId]);
+  }, [
+    activeSurfaceTab,
+    currentUserId,
+    options.surfaceKey,
+    safeActivePrefix,
+    selectedWorkspaceId,
+    surfaceHydrated,
+  ]);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -407,7 +420,7 @@ export function useWorkspaceSurface(options: {
       fileCount: files.length,
       detail: {
         filesystemHydrated,
-        surfaceHydrated: hydrated,
+        surfaceHydrated,
         selectedWorkspaceId,
         selectedWorkspaceKind: selectedWorkspace.kind,
       },
@@ -417,12 +430,12 @@ export function useWorkspaceSurface(options: {
     entries.length,
     files.length,
     filesystemHydrated,
-    hydrated,
     options.surfaceKey,
     safeActivePrefix,
     selectedWorkspace.id,
     selectedWorkspace.kind,
     selectedWorkspaceId,
+    surfaceHydrated,
   ]);
 
   const syncState = useCallback(
@@ -594,13 +607,14 @@ export function useWorkspaceSurface(options: {
     filesystem: resolvedFilesystem,
     breadcrumbs,
     workspaceContext,
-    hydrated: filesystemHydrated && hydrated,
+    hydrated: filesystemHydrated && surfaceHydrated,
     filesystemHydrated,
-    surfaceHydrated: hydrated,
+    surfaceHydrated,
     workspaces,
     selectedWorkspaceId,
     selectedWorkspaceName: selectedWorkspace.name,
     selectedWorkspaceKind: selectedWorkspace.kind,
+    activeSurfaceTab,
     appendFiles,
     replaceFiles,
     handleSelectFiles,
@@ -616,5 +630,6 @@ export function useWorkspaceSurface(options: {
     clearWorkspace: () => clearWorkspace(selectedWorkspaceId),
     activateDemoWorkspace,
     restorePreviousWorkspace,
+    setActiveSurfaceTab,
   };
 }

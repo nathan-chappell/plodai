@@ -25,7 +25,6 @@ import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import { MetaText } from "../app/styles";
-import type { ClientEffect } from "../types/analysis";
 import type {
   ShellWorkspaceArtifact,
   ShellWorkspaceRegistration,
@@ -40,8 +39,6 @@ import {
   CapabilityTabButton,
   CapabilityTitle,
   ReportChatColumn,
-  ReportEffectCard,
-  ReportEffectsPanel,
   ReportWorkspaceColumn,
   ReportWorkspaceLayout,
 } from "./styles";
@@ -51,10 +48,6 @@ type PdfAgentTab = "agent" | "demo";
 const DEFAULT_STATUS = "Load PDF files to start carving bounded page ranges.";
 const DEFAULT_BRIEF =
   "Inspect the available PDFs, keep page selections bounded, and split them into the most useful sub-documents.";
-
-function isPdfEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "pdf_smart_split_completed" }> {
-  return effect.type === "pdf_smart_split_completed";
-}
 
 function isPdfIndexArtifact(artifact: ShellWorkspaceArtifact): boolean {
   return (
@@ -231,7 +224,6 @@ export function PdfAgentPage({
     setActiveWorkspaceTab,
     executionMode,
     setExecutionMode,
-    reportEffects,
     setReportEffects,
     handleFiles,
     handleRemoveEntry,
@@ -291,11 +283,13 @@ export function PdfAgentPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
+    prepareDemoRun,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     capabilityId: pdfAgentCapability.id,
     ready: workspaceHydrated,
     buildDemoScenario: buildPdfAgentDemoScenario,
+    files,
     setExecutionMode,
     setFiles,
     setStatus,
@@ -425,20 +419,14 @@ export function PdfAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            {reportEffects.filter(isPdfEffect).length ? (
-              <ReportEffectsPanel data-testid="pdf-agent-demo-effects">
-                {reportEffects.filter(isPdfEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.archiveFileId}-${index}`} data-testid="pdf-agent-demo-pdf-effect">
-                    <h3>Smart split: {effect.sourceFileName}</h3>
-                    <MetaText>{effect.markdown}</MetaText>
-                    <MetaText>Archive ready: {effect.archiveFileName}</MetaText>
-                    <MetaText>
-                      Outputs: {effect.entries.map((entry) => `${entry.title} (${entry.startPage}-${entry.endPage})`).join(", ")}
-                    </MetaText>
-                  </ReportEffectCard>
-                ))}
-              </ReportEffectsPanel>
-            ) : null}
+            <CapabilityQuickView
+              title="Smart splits"
+              description="Review saved smart split bundles and preview their index or extracted PDFs."
+              emptyMessage="Saved smart split bundles will appear here once the PDF agent creates them."
+              groups={pdfQuickViewGroups}
+              renderPreview={renderPdfQuickViewPreview}
+              dataTestId="pdf-agent-quick-view"
+            />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <CapabilityDemoPane
@@ -453,6 +441,7 @@ export function PdfAgentPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              onPrepareDemoRun={prepareDemoRun}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>

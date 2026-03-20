@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import styled from "styled-components";
 
 import { useAppState } from "../app/context";
-import { MetaText } from "../app/styles";
 import { AuthPanel } from "../components/AuthPanel";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
-import { hasDemoScenarioNotes } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
+import { openWorkspaceFileInNewTab } from "../lib/workspace-artifacts";
 import {
   bindClientToolsForBundle,
   buildCapabilityBundleForRoot,
@@ -34,7 +33,6 @@ import {
   CapabilityHeader,
   CapabilityHeroRow,
   CapabilityMetaText,
-  CapabilityNoteList,
   CapabilityPanel,
   CapabilitySectionHeader,
   CapabilitySectionTitle,
@@ -47,7 +45,7 @@ import {
   ReportWorkspaceLayout,
 } from "./styles";
 
-type ReportAgentTab = "report" | "demo";
+type ReportAgentTab = "report" | "reports" | "demo";
 
 const DEFAULT_STATUS = "Load local files to begin a report-led investigation.";
 const DEFAULT_BRIEF =
@@ -59,46 +57,90 @@ function isClientChartSpec(value: Record<string, unknown>): value is ClientChart
 
 function resolveReportChartRows(
   files: LocalWorkspaceFile[],
-  fileId: string | null | undefined,
+  panel: Extract<ReportSlidePanelV1, { type: "chart" }>,
 ) {
-  if (!fileId) {
-    return [];
-  }
-  const file = files.find((candidate) => candidate.id === fileId);
+  const file = resolveReportChartSourceFile(files, panel);
   return file && (file.kind === "csv" || file.kind === "json") ? file.rows : [];
 }
 
-function DemoNotesPanel({
-  scenario,
-}: {
-  scenario: ReturnType<typeof useDemoScenario>["scenario"];
-}) {
-  if (!hasDemoScenarioNotes(scenario)) {
+function readChartSourceFileId(file: LocalWorkspaceFile | null): string | null {
+  if (file?.kind !== "other" || !file.text_content) {
     return null;
   }
+  try {
+    const parsed = JSON.parse(file.text_content) as {
+      file_id?: unknown;
+    };
+    return typeof parsed.file_id === "string" ? parsed.file_id : null;
+  } catch {
+    return null;
+  }
+}
 
-  return (
-    <CapabilityPanel data-testid="report-agent-demo-notes">
-      <CapabilitySectionHeader>
-        <CapabilitySectionTitle>Demo notes</CapabilitySectionTitle>
-        <CapabilityMetaText>Reference notes for the scripted walkthrough.</CapabilityMetaText>
-      </CapabilitySectionHeader>
-      {scenario?.expectedOutcomes?.length ? (
-        <CapabilityNoteList>
-          {scenario.expectedOutcomes.map((outcome, index) => (
-            <li key={`expected-${index}`}>{outcome}</li>
-          ))}
-        </CapabilityNoteList>
-      ) : null}
-      {scenario?.notes?.length ? (
-        <CapabilityNoteList>
-          {scenario.notes.map((note, index) => (
-            <li key={`note-${index}`}>{note}</li>
-          ))}
-        </CapabilityNoteList>
-      ) : null}
-    </CapabilityPanel>
-  );
+function resolveReportChartSourceFile(
+  files: LocalWorkspaceFile[],
+  panel: Extract<ReportSlidePanelV1, { type: "chart" }>,
+): LocalWorkspaceFile | null {
+  const directMatch = files.find((candidate) => candidate.id === panel.file_id) ?? null;
+  if (directMatch && (directMatch.kind === "csv" || directMatch.kind === "json")) {
+    return directMatch;
+  }
+
+  const sourceFileIdFromDirectMatch = readChartSourceFileId(directMatch);
+  if (sourceFileIdFromDirectMatch) {
+    const sourceFromDirectMatch =
+      files.find((candidate) => candidate.id === sourceFileIdFromDirectMatch) ?? null;
+    if (sourceFromDirectMatch) {
+      return sourceFromDirectMatch;
+    }
+  }
+
+  const chartArtifactMatch =
+    files.find((candidate) => {
+      if (candidate.kind !== "other" || !candidate.text_content) {
+        return false;
+      }
+      try {
+        const parsed = JSON.parse(candidate.text_content) as {
+          chart_plan_id?: unknown;
+          file_id?: unknown;
+        };
+        return (
+          parsed &&
+          typeof parsed.chart_plan_id === "string" &&
+          parsed.chart_plan_id === panel.chart_plan_id &&
+          typeof parsed.file_id === "string"
+        );
+      } catch {
+        return false;
+      }
+    }) ?? null;
+
+  const sourceFileIdFromArtifact = readChartSourceFileId(chartArtifactMatch);
+  if (sourceFileIdFromArtifact) {
+    const sourceFromArtifact =
+      files.find((candidate) => candidate.id === sourceFileIdFromArtifact) ?? null;
+    if (sourceFromArtifact) {
+      return sourceFromArtifact;
+    }
+  }
+
+  return directMatch;
+}
+
+function formatReportTimestamp(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function CurrentReportPanelCard({
@@ -121,8 +163,9 @@ function CurrentReportPanelCard({
     );
   }
 
-  const rows = resolveReportChartRows(files, panel.file_id);
+  const rows = resolveReportChartRows(files, panel);
   const chartSpec = isClientChartSpec(panel.chart) ? panel.chart : null;
+  const sourceFile = resolveReportChartSourceFile(files, panel);
 
   return (
     <CurrentReportPanelCardShell data-testid={`${dataTestIdBase}-chart`}>
@@ -140,9 +183,20 @@ function CurrentReportPanelCard({
           This chart is saved in the current report, but its preview is not available yet.
         </CapabilityMetaText>
       )}
-      <CapabilityMetaText>
-        Source file: {panel.file_id || "unknown"}.
-      </CapabilityMetaText>
+      <CurrentReportSourceRow>
+        <CapabilityMetaText>
+          Source file: {sourceFile?.name ?? panel.file_id ?? "unknown"}.
+        </CapabilityMetaText>
+        {sourceFile ? (
+          <CurrentReportInlineLink
+            data-testid={`${dataTestIdBase}-open-source`}
+            onClick={() => openWorkspaceFileInNewTab(sourceFile)}
+            type="button"
+          >
+            Open source
+          </CurrentReportInlineLink>
+        ) : null}
+      </CurrentReportSourceRow>
     </CurrentReportPanelCardShell>
   );
 }
@@ -201,49 +255,103 @@ export function CurrentReportPanel({
 }) {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const slides = currentReport?.slides ?? [];
+  const previousReportIdRef = useRef<string | null>(currentReport?.report_id ?? null);
+  const previousSlideCountRef = useRef(slides.length);
 
   useEffect(() => {
+    if (previousReportIdRef.current === (currentReport?.report_id ?? null)) {
+      return;
+    }
+    previousReportIdRef.current = currentReport?.report_id ?? null;
+    previousSlideCountRef.current = slides.length;
     setActiveSlideIndex(0);
-  }, [currentReport?.report_id]);
+  }, [currentReport?.report_id, slides.length]);
 
   useEffect(() => {
+    const previousSlideCount = previousSlideCountRef.current;
     if (!slides.length) {
       if (activeSlideIndex !== 0) {
         setActiveSlideIndex(0);
       }
+      previousSlideCountRef.current = 0;
       return;
     }
     if (activeSlideIndex >= slides.length) {
       setActiveSlideIndex(slides.length - 1);
+      previousSlideCountRef.current = slides.length;
+      return;
     }
+    if (
+      slides.length > previousSlideCount &&
+      previousSlideCount > 0 &&
+      activeSlideIndex === previousSlideCount - 1
+    ) {
+      setActiveSlideIndex(slides.length - 1);
+    }
+    previousSlideCountRef.current = slides.length;
   }, [activeSlideIndex, slides.length]);
 
   const activeSlide = slides[activeSlideIndex] ?? null;
   const canMoveBackward = activeSlideIndex > 0;
   const canMoveForward = activeSlideIndex < slides.length - 1;
+  const updatedLabel = formatReportTimestamp(currentReport?.updated_at);
+  const activeSlideLabel = activeSlide ? `${activeSlideIndex + 1} / ${slides.length}` : "No slide";
 
   return (
-    <CapabilityPanel data-testid={dataTestIdBase}>
-      <CapabilitySectionHeader>
+    <CurrentReportPanelShell data-testid={dataTestIdBase}>
+      <CurrentReportHeaderRow>
         <CapabilitySectionTitle>Current report</CapabilitySectionTitle>
-        <CapabilityMetaText>
-          {currentReport
-            ? `${currentReport.title} is in view with ${currentReport.slides.length} slide${
-                currentReport.slides.length === 1 ? "" : "s"
-              }.`
-            : "The active report will appear here as the report agent assembles it."}
-        </CapabilityMetaText>
-      </CapabilitySectionHeader>
+      </CurrentReportHeaderRow>
 
-      {currentReport ? (
-        <CurrentReportTitle data-testid={`${dataTestIdBase}-title`}>
-          {currentReport.title}
-        </CurrentReportTitle>
-      ) : null}
+      <CurrentReportInfoGrid>
+        <CurrentReportInfoCard>
+          <CurrentReportInfoLabel>Report</CurrentReportInfoLabel>
+          <CurrentReportInfoValue data-testid={`${dataTestIdBase}-title`}>
+            {currentReport?.title ?? "No active report"}
+          </CurrentReportInfoValue>
+          <CurrentReportInfoSubvalue>
+            {currentReport?.report_id ?? "The report agent will create or reuse one here."}
+          </CurrentReportInfoSubvalue>
+        </CurrentReportInfoCard>
+        <CurrentReportInfoCard>
+          <CurrentReportInfoLabel>Updated</CurrentReportInfoLabel>
+          <CurrentReportInfoValue>{updatedLabel ?? "Not yet saved"}</CurrentReportInfoValue>
+          <CurrentReportInfoSubvalue>
+            Workspace-backed report state
+          </CurrentReportInfoSubvalue>
+        </CurrentReportInfoCard>
+        <CurrentReportInfoCard>
+          <CurrentReportInfoLabel>Slides</CurrentReportInfoLabel>
+          <CurrentReportInfoValue>
+            {currentReport?.slides.length ?? 0}
+          </CurrentReportInfoValue>
+          <CurrentReportInfoSubvalue>
+            {currentReport
+              ? `${currentReport.slides.length === 1 ? "Saved slide" : "Saved slides"}`
+              : "No saved slides yet"}
+          </CurrentReportInfoSubvalue>
+        </CurrentReportInfoCard>
+        <CurrentReportInfoCard>
+          <CurrentReportInfoLabel>In view</CurrentReportInfoLabel>
+          <CurrentReportInfoValue data-testid={`${dataTestIdBase}-slide-counter`}>
+            {activeSlideLabel}
+          </CurrentReportInfoValue>
+          <CurrentReportInfoSubvalue>
+            {activeSlide ? activeSlide.layout.toUpperCase() : "Waiting for the first report update"}
+          </CurrentReportInfoSubvalue>
+        </CurrentReportInfoCard>
+      </CurrentReportInfoGrid>
 
       {activeSlide ? (
-        <CurrentReportCarousel data-testid={`${dataTestIdBase}-carousel`}>
-          <CurrentReportCarouselHeader>
+        <CurrentReportFrame data-testid={`${dataTestIdBase}-carousel`}>
+          <CurrentReportSurface>
+            <CurrentReportSlide
+              slide={activeSlide}
+              files={files}
+              dataTestIdBase={`${dataTestIdBase}-slide-${activeSlideIndex}`}
+            />
+          </CurrentReportSurface>
+          <CurrentReportCarouselFooter>
             <CurrentReportCarouselControls>
               <CurrentReportNavButton
                 data-testid={`${dataTestIdBase}-previous-slide`}
@@ -262,21 +370,221 @@ export function CurrentReportPanel({
                 Next
               </CurrentReportNavButton>
             </CurrentReportCarouselControls>
-            <CurrentReportSlideCounter data-testid={`${dataTestIdBase}-slide-counter`}>
-              {activeSlideIndex + 1} / {slides.length}
-            </CurrentReportSlideCounter>
-          </CurrentReportCarouselHeader>
-          <CurrentReportSlide
-            slide={activeSlide}
-            files={files}
-            dataTestIdBase={`${dataTestIdBase}-slide-${activeSlideIndex}`}
-          />
-        </CurrentReportCarousel>
+          </CurrentReportCarouselFooter>
+        </CurrentReportFrame>
       ) : (
-        <CapabilityMetaText data-testid={`${dataTestIdBase}-empty`}>
-          {emptyMessage}
-        </CapabilityMetaText>
+        <CurrentReportSurface $empty data-testid={`${dataTestIdBase}-empty`}>
+          <CurrentReportEmptyTitle>No saved slide yet</CurrentReportEmptyTitle>
+          <CurrentReportEmptyMeta>{emptyMessage}</CurrentReportEmptyMeta>
+        </CurrentReportSurface>
       )}
+    </CurrentReportPanelShell>
+  );
+}
+
+type ReportBrowserSelection = {
+  reportId: string;
+  slideId: string | null;
+};
+
+function sortReportsForBrowser(
+  reports: WorkspaceReportV1[],
+  currentReportId: string | null,
+): WorkspaceReportV1[] {
+  return [...reports].sort((left, right) => {
+    if (left.report_id === currentReportId) {
+      return -1;
+    }
+    if (right.report_id === currentReportId) {
+      return 1;
+    }
+    const leftUpdated = Date.parse(left.updated_at ?? left.created_at);
+    const rightUpdated = Date.parse(right.updated_at ?? right.created_at);
+    if (!Number.isNaN(leftUpdated) && !Number.isNaN(rightUpdated) && leftUpdated !== rightUpdated) {
+      return rightUpdated - leftUpdated;
+    }
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function ReportBrowserPanel({
+  reports,
+  currentReportId,
+  files,
+  onSelectCurrentReport,
+  dataTestIdBase,
+}: {
+  reports: WorkspaceReportV1[];
+  currentReportId: string | null;
+  files: LocalWorkspaceFile[];
+  onSelectCurrentReport: (reportId: string) => void;
+  dataTestIdBase: string;
+}) {
+  const sortedReports = useMemo(
+    () => sortReportsForBrowser(reports, currentReportId),
+    [currentReportId, reports],
+  );
+  const [selection, setSelection] = useState<ReportBrowserSelection | null>(null);
+
+  useEffect(() => {
+    if (!sortedReports.length) {
+      if (selection !== null) {
+        setSelection(null);
+      }
+      return;
+    }
+    const fallbackReportId =
+      (currentReportId && sortedReports.some((report) => report.report_id === currentReportId)
+        ? currentReportId
+        : sortedReports[0]?.report_id) ?? null;
+    if (!fallbackReportId) {
+      return;
+    }
+    if (!selection) {
+      setSelection({ reportId: fallbackReportId, slideId: null });
+      return;
+    }
+    const selectedReport = sortedReports.find((report) => report.report_id === selection.reportId);
+    if (!selectedReport) {
+      setSelection({ reportId: fallbackReportId, slideId: null });
+      return;
+    }
+    if (selection.slideId && !selectedReport.slides.some((slide) => slide.id === selection.slideId)) {
+      setSelection({ reportId: selectedReport.report_id, slideId: null });
+    }
+  }, [currentReportId, selection, sortedReports]);
+
+  const selectedReport = useMemo(
+    () =>
+      selection
+        ? sortedReports.find((report) => report.report_id === selection.reportId) ?? null
+        : null,
+    [selection, sortedReports],
+  );
+  const previewSlide = useMemo(() => {
+    if (!selectedReport) {
+      return null;
+    }
+    if (selection?.slideId) {
+      return selectedReport.slides.find((slide) => slide.id === selection.slideId) ?? null;
+    }
+    return selectedReport.slides[0] ?? null;
+  }, [selectedReport, selection?.slideId]);
+
+  return (
+    <CapabilityPanel data-testid={dataTestIdBase}>
+      <CapabilitySectionHeader>
+        <CapabilitySectionTitle>Reports</CapabilitySectionTitle>
+        <CapabilityMetaText>
+          Browse saved workspace reports, inspect their slides, and choose which report stays active.
+        </CapabilityMetaText>
+      </CapabilitySectionHeader>
+      <ReportBrowserLayout>
+        <ReportBrowserTree data-testid={`${dataTestIdBase}-tree`}>
+          {sortedReports.length ? (
+            sortedReports.map((report) => {
+              const reportSelected =
+                selection?.reportId === report.report_id && selection.slideId === null;
+              const reportUpdatedLabel = formatReportTimestamp(report.updated_at ?? report.created_at);
+              return (
+                <ReportBrowserGroup key={report.report_id}>
+                  <ReportBrowserRow
+                    data-current={String(currentReportId === report.report_id)}
+                    data-selected={String(reportSelected)}
+                    data-testid={`${dataTestIdBase}-report-${report.report_id}`}
+                    onClick={() => {
+                      setSelection({ reportId: report.report_id, slideId: null });
+                      onSelectCurrentReport(report.report_id);
+                    }}
+                    type="button"
+                  >
+                    <ReportBrowserRowMain>
+                      <ReportBrowserRowTitle>{report.title}</ReportBrowserRowTitle>
+                      <ReportBrowserRowMeta>
+                        <span>{report.slides.length} slide{report.slides.length === 1 ? "" : "s"}</span>
+                        {reportUpdatedLabel ? <span>{reportUpdatedLabel}</span> : null}
+                      </ReportBrowserRowMeta>
+                    </ReportBrowserRowMain>
+                    {currentReportId === report.report_id ? (
+                      <ReportBrowserCurrentBadge>Current</ReportBrowserCurrentBadge>
+                    ) : null}
+                  </ReportBrowserRow>
+                  {report.slides.length ? (
+                    <ReportBrowserSlideList>
+                      {report.slides.map((slide, slideIndex) => {
+                        const slideSelected =
+                          selection?.reportId === report.report_id &&
+                          selection.slideId === slide.id;
+                        return (
+                          <ReportBrowserSlideRow
+                            key={slide.id}
+                            data-selected={String(slideSelected)}
+                            data-testid={`${dataTestIdBase}-slide-${report.report_id}-${slide.id}`}
+                            onClick={() => {
+                              setSelection({ reportId: report.report_id, slideId: slide.id });
+                              onSelectCurrentReport(report.report_id);
+                            }}
+                            type="button"
+                          >
+                            <span>{slideIndex + 1}.</span>
+                            <span>{slide.title}</span>
+                          </ReportBrowserSlideRow>
+                        );
+                      })}
+                    </ReportBrowserSlideList>
+                  ) : (
+                    <ReportBrowserEmptyGroup>No slides yet.</ReportBrowserEmptyGroup>
+                  )}
+                </ReportBrowserGroup>
+              );
+            })
+          ) : (
+            <ReportBrowserEmptyState>
+              Saved reports will appear here as soon as the report agent creates them.
+            </ReportBrowserEmptyState>
+          )}
+        </ReportBrowserTree>
+        <ReportBrowserPreview data-testid={`${dataTestIdBase}-preview`}>
+          {selectedReport ? (
+            <>
+              <ReportBrowserPreviewHeader>
+                <div>
+                  <ReportBrowserPreviewTitle data-testid={`${dataTestIdBase}-preview-title`}>
+                    {selectedReport.title}
+                  </ReportBrowserPreviewTitle>
+                  <ReportBrowserPreviewMeta>
+                    <span>{selectedReport.report_id}</span>
+                    <span>{selectedReport.slides.length} slide{selectedReport.slides.length === 1 ? "" : "s"}</span>
+                    {formatReportTimestamp(selectedReport.updated_at ?? selectedReport.created_at) ? (
+                      <span>
+                        Updated {formatReportTimestamp(selectedReport.updated_at ?? selectedReport.created_at)}
+                      </span>
+                    ) : null}
+                  </ReportBrowserPreviewMeta>
+                </div>
+                {currentReportId === selectedReport.report_id ? (
+                  <ReportBrowserCurrentBadge>Active report</ReportBrowserCurrentBadge>
+                ) : null}
+              </ReportBrowserPreviewHeader>
+              {previewSlide ? (
+                <CurrentReportSlide
+                  slide={previewSlide}
+                  files={files}
+                  dataTestIdBase={`${dataTestIdBase}-preview-slide`}
+                />
+              ) : (
+                <ReportBrowserEmptyState>
+                  This report exists in the workspace, but it does not have any saved slides yet.
+                </ReportBrowserEmptyState>
+              )}
+            </>
+          ) : (
+            <ReportBrowserEmptyState>
+              Select a report to inspect its saved slide preview.
+            </ReportBrowserEmptyState>
+          )}
+        </ReportBrowserPreview>
+      </ReportBrowserLayout>
     </CapabilityPanel>
   );
 }
@@ -317,6 +625,8 @@ export function ReportFoundryPage({
     updateFilesystem,
     syncToolCatalog,
     appendReportEffects,
+    reports,
+    selectCurrentReport,
     currentReport,
     workspaceStateMetadata,
     workspaces,
@@ -332,7 +642,7 @@ export function ReportFoundryPage({
     defaultStatus: DEFAULT_STATUS,
     defaultBrief: DEFAULT_BRIEF,
     defaultTab: "report",
-    allowedTabs: ["report", "demo"],
+    allowedTabs: ["report", "reports", "demo"],
   });
   const capabilityWorkspace = useMemo(
     () => ({
@@ -365,11 +675,13 @@ export function ReportFoundryPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
+    prepareDemoRun,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     capabilityId: reportAgentCapability.id,
     ready: workspaceHydrated,
     buildDemoScenario: buildReportAgentDemoScenario,
+    files,
     setExecutionMode,
     setFiles,
     setStatus,
@@ -489,11 +801,39 @@ export function ReportFoundryPage({
         </ReportWorkspaceLayout>
       ) : null}
 
+      {activeWorkspaceTab === "reports" ? (
+        <ReportWorkspaceLayout>
+          <ReportWorkspaceColumn>
+            <ReportBrowserPanel
+              reports={reports}
+              currentReportId={currentReport?.report_id ?? null}
+              files={files}
+              onSelectCurrentReport={selectCurrentReport}
+              dataTestIdBase="report-agent-reports-browser"
+            />
+          </ReportWorkspaceColumn>
+          <ReportChatColumn>
+            <ChatKitPane
+              capabilityBundle={capabilityBundle}
+              enabled
+              files={files}
+              workspaceState={workspaceStateMetadata}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
+              investigationBrief={investigationBrief}
+              clientTools={clientTools}
+              onEffects={appendReportEffects}
+              onFilesAdded={appendFiles}
+              greeting={reportAgentCapability.chatkitLead}
+              composerPlaceholder={reportAgentCapability.chatkitPlaceholder}
+            />
+          </ReportChatColumn>
+        </ReportWorkspaceLayout>
+      ) : null}
+
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <DemoNotesPanel scenario={demoScenario} />
-
             <CurrentReportPanel
               currentReport={currentReport}
               files={files}
@@ -514,6 +854,7 @@ export function ReportFoundryPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              onPrepareDemoRun={prepareDemoRun}
               showChatKitHeader={false}
             />
           </ReportChatColumn>
@@ -523,29 +864,37 @@ export function ReportFoundryPage({
   );
 }
 
-const CurrentReportTitle = styled.strong`
-  display: block;
-  margin-bottom: 0.72rem;
-  font-size: 0.95rem;
-  line-height: 1.2;
+const CurrentReportHeaderRow = styled(CapabilitySectionHeader)`
+  gap: 0.1rem;
 `;
 
-const CurrentReportCarousel = styled.div`
-  display: grid;
-  gap: 0.78rem;
-`;
-
-const CurrentReportCarouselHeader = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+const CurrentReportPanelShell = styled(CapabilityPanel)`
+  min-height: 100%;
+  height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
 `;
 
 const CurrentReportCarouselControls = styled.div`
   display: inline-flex;
   gap: 0.35rem;
+`;
+
+const CurrentReportFrame = styled.div`
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.52rem;
+`;
+
+const CurrentReportCarouselFooter = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  padding-top: 0.12rem;
 `;
 
 const CurrentReportNavButton = styled.button`
@@ -565,21 +914,17 @@ const CurrentReportNavButton = styled.button`
   }
 `;
 
-const CurrentReportSlideCounter = styled.div`
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-`;
-
 const CurrentReportSlideShell = styled.section`
   display: grid;
   gap: 0.72rem;
 `;
 
 const CurrentReportSlideHeader = styled.div`
-  display: grid;
-  gap: 0.18rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 0.55rem;
 `;
 
 const CurrentReportSlideTitle = styled.h3`
@@ -604,6 +949,81 @@ const CurrentReportSlideGrid = styled.div<{ $columns: string }>`
   }
 `;
 
+const CurrentReportInfoGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.68rem;
+
+  @media (max-width: 920px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+`;
+
+const CurrentReportInfoCard = styled.div`
+  min-width: 0;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.52rem 0.62rem;
+  display: grid;
+  gap: 0.1rem;
+`;
+
+const CurrentReportInfoLabel = styled.div`
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+`;
+
+const CurrentReportInfoValue = styled.div`
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.18;
+  min-width: 0;
+  overflow-wrap: anywhere;
+`;
+
+const CurrentReportInfoSubvalue = styled.div`
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+`;
+
+const CurrentReportSurface = styled.div<{ $empty?: boolean }>`
+  min-height: 0;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.82rem;
+  display: grid;
+  height: 100%;
+  align-content: start;
+  gap: 0.72rem;
+  ${({ $empty }) =>
+    $empty
+      ? ""
+      : `
+    overflow: auto;
+  `}
+`;
+
+const CurrentReportEmptyTitle = styled.strong`
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.2;
+`;
+
+const CurrentReportEmptyMeta = styled.div`
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.42;
+  max-width: 52ch;
+`;
+
 const CurrentReportPanelCardShell = styled.article`
   border: 1px solid rgba(31, 41, 55, 0.08);
   border-radius: var(--radius-lg);
@@ -612,6 +1032,26 @@ const CurrentReportPanelCardShell = styled.article`
   display: grid;
   gap: 0.58rem;
   min-width: 0;
+`;
+
+const CurrentReportSourceRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 0.7rem;
+`;
+
+const CurrentReportInlineLink = styled.button`
+  border: 0;
+  background: none;
+  color: var(--accent-deep);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0;
+  cursor: pointer;
 `;
 
 const CurrentReportPanelHeading = styled.h4`
@@ -666,4 +1106,155 @@ const CurrentReportChartImage = styled.img`
   border-radius: var(--radius-md);
   border: 1px solid rgba(31, 41, 55, 0.08);
   background: rgba(255, 255, 255, 0.88);
+`;
+
+const ReportBrowserLayout = styled.div`
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 0.72rem;
+  min-height: 0;
+
+  @media (max-width: 900px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+`;
+
+const ReportBrowserTree = styled.div`
+  display: grid;
+  gap: 0.5rem;
+  min-height: 0;
+  max-height: min(70vh, 760px);
+  overflow: auto;
+  padding-right: 0.08rem;
+`;
+
+const ReportBrowserGroup = styled.div`
+  display: grid;
+  gap: 0.22rem;
+`;
+
+const ReportBrowserRow = styled.button`
+  width: 100%;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.58rem 0.68rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.55rem;
+  text-align: left;
+  cursor: pointer;
+
+  &[data-selected="true"] {
+    border-color: rgba(201, 111, 59, 0.28);
+    background: rgba(248, 238, 228, 0.96);
+  }
+`;
+
+const ReportBrowserRowMain = styled.span`
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+`;
+
+const ReportBrowserRowTitle = styled.span`
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.18;
+`;
+
+const ReportBrowserRowMeta = styled.span`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+`;
+
+const ReportBrowserCurrentBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.42rem;
+  background: rgba(201, 111, 59, 0.12);
+  color: var(--accent-deep);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+`;
+
+const ReportBrowserSlideList = styled.div`
+  display: grid;
+  gap: 0.14rem;
+  padding-left: 0.6rem;
+`;
+
+const ReportBrowserSlideRow = styled.button`
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.26rem 0.34rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.4rem;
+  text-align: left;
+  cursor: pointer;
+
+  &[data-selected="true"] {
+    background: rgba(255, 255, 255, 0.78);
+    color: var(--ink);
+  }
+`;
+
+const ReportBrowserEmptyGroup = styled.div`
+  padding-left: 0.94rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+`;
+
+const ReportBrowserPreview = styled.section`
+  min-height: 0;
+  max-height: min(70vh, 760px);
+  overflow: auto;
+  padding-right: 0.08rem;
+  display: grid;
+  align-content: start;
+  gap: 0.72rem;
+`;
+
+const ReportBrowserPreviewHeader = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+`;
+
+const ReportBrowserPreviewTitle = styled.h4`
+  margin: 0;
+  font-size: 0.96rem;
+  line-height: 1.16;
+`;
+
+const ReportBrowserPreviewMeta = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  margin-top: 0.16rem;
+`;
+
+const ReportBrowserEmptyState = styled.div`
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
 `;

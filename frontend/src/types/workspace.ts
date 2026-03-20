@@ -48,6 +48,7 @@ export type WorkspaceRegistry = {
 export type WorkspaceSurfaceState = {
   surface_key: string;
   active_prefix: string;
+  active_tab: string | null;
 };
 
 export type WorkspaceBreadcrumb = {

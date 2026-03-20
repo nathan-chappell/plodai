@@ -494,7 +494,14 @@ export async function saveWorkspaceSurfaceState(
 
     store.put({
       key: surfaceStateKey(userId, workspaceId, state.surface_key),
-      value: { ...state, active_prefix: normalizePathPrefix(state.active_prefix) },
+      value: {
+        ...state,
+        active_prefix: normalizePathPrefix(state.active_prefix),
+        active_tab:
+          typeof state.active_tab === "string" && state.active_tab.trim()
+            ? state.active_tab.trim()
+            : null,
+      },
     } satisfies WorkspaceSurfaceStateRecord);
   });
 }

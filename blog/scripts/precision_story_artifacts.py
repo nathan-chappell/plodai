@@ -11,7 +11,10 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.collections import PatchCollection
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 
 from blog.scripts.artifact_common import (
     DEFAULT_OUTPUT_DIR,
@@ -27,7 +30,6 @@ from blog.scripts.artifact_common import (
     write_matplotlib_figure,
 )
 
-from PIL import Image, ImageDraw
 import typer
 
 
@@ -41,11 +43,10 @@ PRECISION_COUNT_BITS = 6
 PRECISION_INITIAL_LEFT_STACK = "0" * (PRECISION_COUNT_BITS - 1)
 PRECISION_INITIAL_RIGHT_STACK = "0"
 PRECISION_ZOOM_DEPTHS: tuple[int, int] = (2, 6)
-PRECISION_DUST_BACKGROUND = "#f6f7f3"
-PRECISION_DUST_FILL = "#bae6fd"
-PRECISION_DUST_BORDER = "#0f766e"
-PRECISION_PATH_COLOR = "#6b5448"
-PRECISION_MARKER_COLOR = "#314a66"
+PRECISION_DUST_FILL = "#193143"
+PRECISION_DUST_BORDER = "#355666"
+PRECISION_PATH_COLOR = "#d1b296"
+PRECISION_MARKER_COLOR = "#dfe8f2"
 PRECISION_GUIDE_INK = "#c8d0d8"
 PRECISION_TEXT_INK = STATIC_TEXT_INK
 PRECISION_SUBTEXT_INK = STATIC_SECONDARY_INK
@@ -281,65 +282,55 @@ def cantor_intervals(depth: int) -> tuple[tuple[float, float], ...]:
     return intervals
 
 
-def render_cantor_dust_image(
-    *,
-    depth: int,
-    size: int,
-    x_range: tuple[float, float],
-    y_range: tuple[float, float],
-) -> Image.Image:
-    image = Image.new("RGBA", (size, size), (246, 247, 243, 255))
-    pixels = image.load()
-    for row in range(size):
-        mix = row / max(1, size - 1)
-        red = int(246 - (6 * mix))
-        green = int(247 - (4 * mix))
-        blue = int(243 + (10 * mix))
-        for col in range(size):
-            pixels[col, row] = (red, green, blue, 255)
-    draw = ImageDraw.Draw(image)
-    x_min, x_max = x_range
-    y_min, y_max = y_range
-    x_span = max(1e-12, x_max - x_min)
-    y_span = max(1e-12, y_max - y_min)
-    for layer_depth in range(1, depth + 1):
-        intervals = cantor_intervals(layer_depth)
-        fill_alpha = 28 + (layer_depth * 10)
-        outline_alpha = 40 + (layer_depth * 20)
-        fill = (186, 230, 253, min(148, fill_alpha))
-        outline = (15, 118, 110, min(210, outline_alpha))
-        for x0, x1 in intervals:
-            if x1 <= x_min or x0 >= x_max:
-                continue
-            clipped_x0 = max(x0, x_min)
-            clipped_x1 = min(x1, x_max)
-            for y0, y1 in intervals:
-                if y1 <= y_min or y0 >= y_max:
-                    continue
-                clipped_y0 = max(y0, y_min)
-                clipped_y1 = min(y1, y_max)
-                pixel_x0 = int(math.floor(((clipped_x0 - x_min) / x_span) * size))
-                pixel_x1 = int(math.ceil(((clipped_x1 - x_min) / x_span) * size))
-                pixel_y0 = int(math.floor(((y_max - clipped_y1) / y_span) * size))
-                pixel_y1 = int(math.ceil(((y_max - clipped_y0) / y_span) * size))
-                draw.rectangle(
-                    [
-                        pixel_x0,
-                        pixel_y0,
-                        max(pixel_x0 + 1, pixel_x1),
-                        max(pixel_y0 + 1, pixel_y1),
-                    ],
-                    fill=fill,
-                    outline=outline,
-                )
+def stack_cover_interval(stack: str, *, depth: int) -> tuple[float, float]:
+    prefix = stack[:depth]
+    if not prefix:
+        return 0.0, 1.0
+    lower = encode_binary_cantor_stack(prefix)
+    width = 4.0 ** (-len(prefix))
+    return lower, lower + width
+
+
+def state_lies_within_depth_cover(
+    state: PrecisionStoryState, *, depth: int, tolerance: float = 1e-12
+) -> bool:
+    left_lower, left_upper = stack_cover_interval(state.left_stack, depth=depth)
+    right_lower, right_upper = stack_cover_interval(state.right_stack, depth=depth)
+    return (
+        left_lower - tolerance <= state.x_left <= left_upper + tolerance
+        and right_lower - tolerance <= state.x_right <= right_upper + tolerance
+    )
+
+
+def add_cantor_scaffold(axis: Axes, *, depths: tuple[int, ...] = (1, 2, 3, 4)) -> None:
+    for layer_depth in depths:
+        rectangles = [
+            Rectangle((x0, y0), x1 - x0, y1 - y0)
+            for x0, x1 in cantor_intervals(layer_depth)
+            for y0, y1 in cantor_intervals(layer_depth)
+        ]
+        collection = PatchCollection(
+            rectangles,
+            facecolor="none",
+            edgecolor=PRECISION_DUST_BORDER,
+            linewidth=0.45 - (0.06 * min(layer_depth, 3)),
+            alpha=max(0.12, 0.24 - (0.04 * layer_depth)),
+            zorder=0,
+        )
+        axis.add_collection(collection)
     for grid_fraction in (0.25, 0.5, 0.75):
-        grid_x = int(round(((grid_fraction - x_min) / x_span) * size))
-        grid_y = int(round(((y_max - grid_fraction) / y_span) * size))
-        if 0 <= grid_x < size:
-            draw.line([(grid_x, 0), (grid_x, size)], fill=(148, 163, 184, 36), width=1)
-        if 0 <= grid_y < size:
-            draw.line([(0, grid_y), (size, grid_y)], fill=(148, 163, 184, 36), width=1)
-    return image
+        axis.axvline(
+            grid_fraction,
+            color=(0.57, 0.64, 0.72, 0.12),
+            linewidth=0.55,
+            zorder=0,
+        )
+        axis.axhline(
+            grid_fraction,
+            color=(0.57, 0.64, 0.72, 0.12),
+            linewidth=0.55,
+            zorder=0,
+        )
 
 
 def build_precision_story_payload() -> PrecisionStoryPayload:
@@ -400,31 +391,6 @@ def precision_step_color_map(
     }
 
 
-def visible_tape_window(
-    state: PrecisionStoryState,
-    *,
-    left_context: int = 4,
-    right_context: int = 5,
-) -> tuple[str, int, bool, bool]:
-    tape = state.left_stack[::-1] + state.right_stack
-    head_index = len(state.left_stack)
-    start = max(0, head_index - left_context)
-    end = min(len(tape), head_index + right_context + 1)
-    return tape[start:end], head_index - start, start > 0, end < len(tape)
-
-
-def visible_tape_window_plain(state: PrecisionStoryState) -> str:
-    bits, head_index, has_left_more, has_right_more = visible_tape_window(state)
-    tokens: list[str] = []
-    if has_left_more:
-        tokens.append("...")
-    for index, bit in enumerate(bits):
-        tokens.append(f"[{bit}]" if index == head_index else bit)
-    if has_right_more:
-        tokens.append("...")
-    return "".join(tokens)
-
-
 def _state_for_count(payload: PrecisionStoryPayload, count: int) -> PrecisionStoryState:
     milestone_index = PRECISION_MILESTONE_COUNTS.index(count)
     return payload.states[payload.milestone_step_indexes[milestone_index]]
@@ -451,9 +417,9 @@ def _first_state_after_step(
     return payload.states[-1]
 
 
-def _precision_label_specs(
+def _precision_marker_states(
     payload: PrecisionStoryPayload,
-) -> tuple[tuple[PrecisionStoryState, str], ...]:
+) -> tuple[tuple[str, str, PrecisionStoryState], ...]:
     carry_state = _carry_state_before_count(payload, 8)
     return_state = _first_state_after_step(
         payload,
@@ -461,18 +427,10 @@ def _precision_label_specs(
         operation_label="return R",
     )
     return (
-        (
-            payload.states[0],
-            "start\n" + visible_tape_window_plain(payload.states[0]),
-        ),
-        (
-            carry_state,
-            "carry L\n000111 => 001000\n" + visible_tape_window_plain(carry_state),
-        ),
-        (
-            return_state,
-            "return R\nhead sweeps back\n" + visible_tape_window_plain(return_state),
-        ),
+        ("start", "s", payload.states[0]),
+        ("carry", "o", carry_state),
+        ("return", "D", return_state),
+        ("final", "X", payload.states[-1]),
     )
 
 
@@ -539,65 +497,56 @@ def build_precision_story_figure(payload: PrecisionStoryPayload) -> Figure:
     style_static_axis(axis)
     style_static_axis(lag_axis)
 
-    main_image = render_cantor_dust_image(
-        depth=payload.dust_depth,
-        size=1400,
-        x_range=(0.0, 1.0),
-        y_range=(0.0, 1.0),
-    )
-    axis.imshow(main_image, extent=(0.0, 1.0, 0.0, 1.0), origin="lower", zorder=0)
+    add_cantor_scaffold(axis)
     xs = [state.x_left for state in payload.states]
     ys = [state.x_right for state in payload.states]
-    axis.plot(xs, ys, color=(1.0, 1.0, 1.0, 0.82), linewidth=2.6, zorder=2)
-    axis.plot(xs, ys, color=PRECISION_PATH_COLOR, linewidth=1.12, zorder=3)
+    axis.plot(
+        xs,
+        ys,
+        color=PRECISION_PATH_COLOR,
+        linewidth=0.86,
+        alpha=0.96,
+        zorder=3,
+    )
 
-    milestone_offsets = (
-        (0.07, 0.05),
-        (-0.11, 0.07),
-        (0.09, -0.08),
-    )
-    label_specs = _precision_label_specs(payload)
-    milestone_states = [state for state, _text in label_specs]
-    milestone_labels = [text for _state, text in label_specs]
-    axis.scatter(
-        [state.x_left for state in milestone_states],
-        [state.x_right for state in milestone_states],
-        s=26,
-        color=PRECISION_MARKER_COLOR,
-        edgecolors="white",
-        linewidths=0.50,
-        zorder=4,
-    )
-    for state, text, (dx, dy) in zip(
-        milestone_states, milestone_labels, milestone_offsets, strict=True
-    ):
-        label_x = min(0.96, max(0.04, state.x_left + dx))
-        label_y = min(0.96, max(0.04, state.x_right + dy))
-        axis.annotate(
-            text,
-            xy=(state.x_left, state.x_right),
-            xytext=(label_x, label_y),
-            textcoords="data",
-            ha="left" if dx >= 0 else "right",
-            va="center",
-            fontsize=7.8,
-            color=PRECISION_TEXT_INK,
-            fontfamily=FONT_STACK,
-            bbox={
-                "boxstyle": "round,pad=0.16",
-                "facecolor": "#e8edf3",
-                "edgecolor": "#cfd8e1",
-                "linewidth": 0.65,
-            },
-            arrowprops={
-                "arrowstyle": "-",
-                "linewidth": 0.5,
-                "color": (0.39, 0.46, 0.57, 0.48),
-                "shrinkA": 3,
-                "shrinkB": 3,
-            },
-            zorder=6,
+    milestone_specs = list(_precision_marker_states(payload))
+    legend_handles = []
+    legend_labels = []
+    for label, marker, state in milestone_specs:
+        axis.scatter(
+            [state.x_left],
+            [state.x_right],
+            s=32 if label != "final" else 42,
+            marker=marker,
+            color=PRECISION_MARKER_COLOR,
+            edgecolors=PRECISION_PATH_COLOR,
+            linewidths=0.62,
+            zorder=4,
         )
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker=marker,
+                linestyle="",
+                markerfacecolor=PRECISION_MARKER_COLOR,
+                markeredgecolor=PRECISION_PATH_COLOR,
+                markeredgewidth=0.62,
+                markersize=5.5 if label != "final" else 6.2,
+            )
+        )
+        legend_labels.append(label)
+    axis.legend(
+        legend_handles,
+        legend_labels,
+        frameon=False,
+        fontsize=7.1,
+        labelcolor=PRECISION_SUBTEXT_INK,
+        loc="upper right",
+        borderpad=0.1,
+        handletextpad=0.4,
+        handlelength=0.8,
+    )
 
     lag_colors = ("#314a66", "#6b7b8b", "#8a705f")
     all_distances = [
@@ -707,7 +656,7 @@ def render_precision_assets(*, output_dir: Path) -> dict[str, object]:
         "step_labels": list(payload.step_labels),
         "lag_distance_lags": [summary.lag for summary in payload.lag_summaries],
         "milestone_step_indexes": list(payload.milestone_step_indexes),
-        "label_mode": "minimal_head_aware_callouts",
+        "label_mode": "milestone_markers_only",
     }
 
 

@@ -677,6 +677,21 @@ export function createWorkspaceReport(
   };
 }
 
+export function setWorkspaceCurrentReport(
+  filesystem: WorkspaceFilesystem,
+  reportId: string,
+): WorkspaceFilesystem {
+  const normalizedReportId = normalizeReportId(reportId);
+  const reportIndex = readWorkspaceReportIndex(filesystem) ?? buildDefaultReportIndex();
+  const reportExists =
+    reportIndex.report_ids.includes(normalizedReportId) ||
+    readWorkspaceReport(filesystem, normalizedReportId) !== null;
+  if (!reportExists) {
+    return filesystem;
+  }
+  return ensureTrackedReport(filesystem, normalizedReportId);
+}
+
 export function writeAgentsFile(
   filesystem: WorkspaceFilesystem,
   markdown: string,

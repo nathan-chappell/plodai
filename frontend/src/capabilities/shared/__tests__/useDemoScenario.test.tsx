@@ -41,11 +41,13 @@ const DEMO_SCENARIO: CapabilityDemoScenario = {
 function DemoScenarioHarness({
   buildDemoScenario,
   ready = true,
+  initialFiles = [],
 }: {
   buildDemoScenario: () => CapabilityDemoScenario | Promise<CapabilityDemoScenario>;
   ready?: boolean;
+  initialFiles?: LocalWorkspaceFile[];
 }) {
-  const [files, setFiles] = useState<LocalWorkspaceFile[]>([]);
+  const [files, setFiles] = useState<LocalWorkspaceFile[]>(initialFiles);
   const [status, setStatus] = useState("");
   const [reportEffects, setReportEffects] = useState<ClientEffect[]>([
     {
@@ -60,6 +62,7 @@ function DemoScenarioHarness({
     capabilityId: "csv-agent",
     ready,
     buildDemoScenario,
+    files,
     setFiles: (nextFiles) => {
       setFiles(nextFiles);
     },
@@ -152,5 +155,29 @@ describe("useDemoScenario", () => {
     expect(hydratedHost?.dataset.loading).toBe("false");
     expect(hydratedHost?.dataset.scenario).toBe(DEMO_SCENARIO.id);
     expect(hydratedHost?.dataset.fileCount).toBe("1");
+  });
+
+  it("keeps an already seeded demo workspace intact instead of reseeding it on mount", async () => {
+    const buildDemoScenario = vi.fn(async () => DEMO_SCENARIO);
+
+    await act(async () => {
+      root.render(
+        <DemoScenarioHarness
+          buildDemoScenario={buildDemoScenario}
+          initialFiles={[DEMO_FILE]}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    });
+
+    const host = container.firstElementChild as HTMLElement | null;
+    expect(buildDemoScenario).toHaveBeenCalledTimes(1);
+    expect(host?.dataset.fileCount).toBe("1");
+    expect(host?.dataset.mode).toBe("interactive");
+    expect(host?.dataset.reportEffects).toBe("1");
+    expect(host?.dataset.status).toBe("");
   });
 });

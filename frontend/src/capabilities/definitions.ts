@@ -11,6 +11,7 @@ export const reportAgentCapability: CapabilityDefinition = {
   chatkitPlaceholder: "Tell the report agent what you want investigated or what report you need, and it will take it from there",
   tabs: [
     { id: "report", label: "Report" },
+    { id: "reports", label: "Reports" },
     { id: "demo", label: "Demo" },
   ],
 };

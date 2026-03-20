@@ -119,7 +119,13 @@ describe("CurrentReportPanel", () => {
     });
 
     expect(container.textContent).toContain("Current report");
+    expect(container.textContent).toContain("Report");
+    expect(container.textContent).toContain("Updated");
+    expect(container.textContent).toContain("Slides");
+    expect(container.textContent).toContain("In view");
     expect(container.textContent).toContain("Board revenue report");
+    expect(container.textContent).toContain("Source file: sales.csv.");
+    expect(container.textContent).toContain("Open source");
     const chartImage = container.querySelector(
       "[data-testid='report-agent-demo-current-report-slide-0-panel-0-chart-image']",
     );
@@ -248,6 +254,80 @@ describe("CurrentReportPanel", () => {
     expect(container.textContent).toContain("2 / 2");
     expect(container.textContent).toContain("Narrative summary");
     expect(container.textContent).toContain("West outperformed East");
+  });
+
+  it("follows a newly appended slide when the viewer is already on the last slide", async () => {
+    const initialReport: WorkspaceReportV1 = {
+      version: "v1",
+      report_id: "board-report",
+      title: "Board revenue report",
+      created_at: "2026-03-19T10:00:00.000Z",
+      updated_at: "2026-03-19T10:00:00.000Z",
+      slides: [
+        {
+          id: "slide-1",
+          created_at: "2026-03-19T10:00:00.000Z",
+          title: "Regional performance",
+          layout: "1x1",
+          panels: [
+            {
+              id: "narrative-panel-1",
+              type: "narrative",
+              title: "Summary",
+              markdown: "West leads.",
+            },
+          ],
+        },
+      ],
+    };
+
+    await act(async () => {
+      root.render(
+        <CurrentReportPanel
+          currentReport={initialReport}
+          files={[salesFile]}
+          emptyMessage="No report slides yet."
+          dataTestIdBase="report-agent-follow-append"
+        />,
+      );
+    });
+
+    const appendedReport: WorkspaceReportV1 = {
+      ...initialReport,
+      updated_at: "2026-03-19T10:05:00.000Z",
+      slides: [
+        ...initialReport.slides,
+        {
+          id: "slide-2",
+          created_at: "2026-03-19T10:05:00.000Z",
+          title: "New summary",
+          layout: "1x1",
+          panels: [
+            {
+              id: "narrative-panel-2",
+              type: "narrative",
+              title: "Takeaway",
+              markdown: "The latest slide stays in view.",
+            },
+          ],
+        },
+      ],
+    };
+
+    await act(async () => {
+      root.render(
+        <CurrentReportPanel
+          currentReport={appendedReport}
+          files={[salesFile]}
+          emptyMessage="No report slides yet."
+          dataTestIdBase="report-agent-follow-append"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("2 / 2");
+    expect(container.textContent).toContain("New summary");
+    expect(container.textContent).toContain("The latest slide stays in view.");
   });
 
   it("shows the empty message when no current report is available yet", async () => {

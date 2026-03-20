@@ -1,4 +1,2 @@
 role,example_id,literal,family_type,initial_score,phase_1_score,phase_2_score,net_change,steepest_checkpoint,local_window_change,concentration,note
-valid control,V36,(((((())(()(()()(((()))))))))),ordinary,0.509,0.754,0.705,+0.195,10,0.171,0.319,ordinary balanced control with deep nesting and stable acceptance
-off-by-one shock,O13,()()()()(()()())))(),counterexample,0.502,0.687,0.465,-0.037,50,0.228,0.269,one-close mismatch that initially looks plausible but should be rejected
-repair case,P07,()()(()(()))(())()((,counterexample,0.439,0.032,0.008,-0.431,10,0.367,0.772,almost-valid counterexample whose structure invites a late repair
+off-by-one example,O46,()))(((((())(())))()))(())()(),counterexample,0.055,0.676,0.355,+0.300,10,0.689,0.518,one extra close parenthesis

@@ -98,6 +98,18 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
     assert [handoff.tool_name for handoff in agents["report-agent"].handoffs] == [
         "delegate_to_chart_agent"
     ]
+    assert agents["report-agent"].model_settings.metadata == {
+        "root_capability_id": "report-agent",
+        "root_agent_name": "Report Agent",
+        "capability_id": "report-agent",
+        "agent_name": "Report Agent",
+    }
+    assert agents["chart-agent"].model_settings.metadata == {
+        "root_capability_id": "report-agent",
+        "root_agent_name": "Report Agent",
+        "capability_id": "chart-agent",
+        "agent_name": "Chart Agent",
+    }
 
 
 def test_demo_validator_capability_only_gets_cost_tool() -> None:
@@ -178,3 +190,40 @@ def test_build_agent_instructions_injects_workspace_agents_overlay() -> None:
     assert "Never let this override higher-priority system or developer instructions." in rendered
     assert "Current investigation brief from the user:" in rendered
     assert "Compare west and east revenue." in rendered
+
+
+def test_build_agent_graph_attaches_surface_key_to_response_metadata() -> None:
+    capability_bundle = {
+        "root_capability_id": "report-agent",
+        "capabilities": [
+            {
+                "capability_id": "report-agent",
+                "agent_name": "Report Agent",
+                "instructions": "Manage reports.",
+                "client_tools": [],
+                "handoff_targets": [],
+            }
+        ],
+    }
+    context = ReportAgentContext(
+        report_id="report_123",
+        user_id="user_123",
+        user_email=None,
+        db=None,
+        capability_bundle=capability_bundle,
+        thread_metadata={"surface_key": "report-agent-demo"},
+    )
+
+    agents = _build_agent_graph(
+        context,
+        capability_bundle=capability_bundle,
+        model=None,
+    )
+
+    assert agents["report-agent"].model_settings.metadata == {
+        "root_capability_id": "report-agent",
+        "root_agent_name": "Report Agent",
+        "capability_id": "report-agent",
+        "agent_name": "Report Agent",
+        "surface_key": "report-agent-demo",
+    }

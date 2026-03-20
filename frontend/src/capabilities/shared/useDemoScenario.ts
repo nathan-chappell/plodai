@@ -35,15 +35,31 @@ export function useDemoScenario(options: {
   capabilityId: string;
   ready?: boolean;
   buildDemoScenario: () => CapabilityDemoScenario | Promise<CapabilityDemoScenario>;
+  files: LocalWorkspaceFile[];
   setFiles: (files: LocalWorkspaceFile[]) => void;
   setStatus: (value: string) => void;
   setReportEffects: (value: ClientEffect[]) => void;
   setExecutionMode: (value: ExecutionMode) => void;
 }) {
-  const { active, capabilityId, ready = true, buildDemoScenario, setExecutionMode, setFiles, setReportEffects, setStatus } = options;
+  const {
+    active,
+    capabilityId,
+    ready = true,
+    buildDemoScenario,
+    files,
+    setExecutionMode,
+    setFiles,
+    setReportEffects,
+    setStatus,
+  } = options;
   const [scenario, setScenario] = useState<CapabilityDemoScenario | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const hasScenarioSeed = useEffectEvent((nextScenario: CapabilityDemoScenario) => {
+    const workspaceFileIds = new Set(files.map((file) => file.id));
+    return nextScenario.workspaceSeed.every((file) => workspaceFileIds.has(file.id));
+  });
 
   const applyScenario = useEffectEvent((nextScenario: CapabilityDemoScenario) => {
     devLogger.demoState({
@@ -73,6 +89,23 @@ export function useDemoScenario(options: {
       error: message,
       scenarioId: scenario?.id ?? null,
     });
+  });
+
+  const prepareDemoRun = useEffectEvent(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const nextScenario = await resolveDemoScenario(buildDemoScenario);
+      setScenario(nextScenario);
+      applyScenario(nextScenario);
+      return nextScenario;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to prepare the demo scenario.";
+      applyScenarioError(message);
+      return null;
+    } finally {
+      setLoading(false);
+    }
   });
 
   useEffect(() => {
@@ -109,7 +142,10 @@ export function useDemoScenario(options: {
         if (cancelled) {
           return;
         }
-        applyScenario(nextScenario);
+        setScenario(nextScenario);
+        if (!hasScenarioSeed(nextScenario)) {
+          applyScenario(nextScenario);
+        }
       } catch (error) {
         if (cancelled) {
           return;
@@ -132,5 +168,6 @@ export function useDemoScenario(options: {
     scenario,
     loading,
     error,
+    prepareDemoRun,
   };
 }

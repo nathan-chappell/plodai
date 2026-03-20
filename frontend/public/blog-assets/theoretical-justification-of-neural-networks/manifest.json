@@ -1,8 +1,13 @@
 {
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
-  "seed": 7,
   "output_dir": "frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "seed": {
+    "shared": null,
+    "mlp": 7,
+    "rnn": 1337
+  },
   "mlp": {
+    "seed": 7,
     "files": [
       "mlp-sine-story.svg"
     ],
@@ -281,9 +286,10 @@
       127,
       234
     ],
-    "label_mode": "minimal_head_aware_callouts"
+    "label_mode": "milestone_markers_only"
   },
   "rnn": {
+    "seed": 1337,
     "model_mode": "phased_torch_rnn",
     "language": "balanced_parentheses",
     "accept_anchor": [
@@ -499,15 +505,15 @@
     "final_metrics": {
       "epoch": 80,
       "phase": "Phase 2: introduce counterexamples",
-      "train_loss": 0.905193396314378,
-      "train_acc": 0.6328125,
-      "eval_10_acc": 0.84375,
-      "eval_20_acc": 0.84375,
-      "eval_30_acc": 0.8125,
-      "eval_50_acc": 0.8125,
-      "off_by_one_acc": 0.03125,
+      "train_loss": 0.7625104696747464,
+      "train_acc": 0.703125,
+      "eval_10_acc": 0.65625,
+      "eval_20_acc": 0.71875,
+      "eval_30_acc": 0.75,
+      "eval_50_acc": 0.78125,
+      "off_by_one_acc": 0.125,
       "valid_prefix_acc": 1.0,
-      "balanced_invalid_acc": 0.8125
+      "balanced_invalid_acc": 0.84375
     },
     "files": [
       "rnn-training-story.svg",
@@ -521,74 +527,17 @@
     "report_style": "restrained_academic_print",
     "report_layout": "trace_panels_plus_transition_field",
     "story_plot_sampling": "curated_watchlist_plus_balanced_background",
-    "story_plot_probe_count": 99,
+    "story_plot_probe_count": 97,
     "story_value_transform": "boundary_emphasized_probability_nonlinear",
     "figure_background": "dark_slate",
-    "selection_rule": "Valid control: longer held-out balanced string with clear nested structure, preferring high depth, low drift, and correct acceptance throughout; off-by-one shock: longer held-out off-by-one counterexample with the strongest move toward correct rejection, preferring actual boundary crossings; repair case: held-out valid-prefix or balanced-invalid example with large change near the decision boundary, preferring visibly almost-valid structure.",
+    "selection_rule": "Off-by-one example: longer held-out off-by-one counterexample with the strongest move toward correct rejection, preferring actual boundary crossings; ordinary support: longer held-out balanced string with clear nested structure, preferring high depth, low drift, and correct acceptance throughout; near-boundary support: chosen separately from the held-out pool for assessment only, using boundary distance, flips, and local change rather than visual prominence.",
     "representative_probes": [
       {
-        "role": "valid control",
-        "note": "ordinary balanced control with deep nesting and stable acceptance",
+        "role": "off-by-one example",
+        "note": "one extra close parenthesis",
         "probe": {
-          "label": "V36",
-          "text": "(((((())(()(()()(((())))))))))",
-          "probe_kind": "valid",
-          "actual_valid": true,
-          "family_type": "ordinary",
-          "epochs": [
-            0,
-            10,
-            20,
-            30,
-            40,
-            50,
-            60,
-            70,
-            80
-          ],
-          "probabilities": [
-            0.5092394340401196,
-            0.6797741366770795,
-            0.782671222070181,
-            0.7159726463030162,
-            0.7544630297794795,
-            0.653294345442119,
-            0.690676107441229,
-            0.6892731051139646,
-            0.7045742094465439
-          ],
-          "correctness": [
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true
-          ],
-          "phase_scores": [
-            0.5092394340401196,
-            0.7544630297794795,
-            0.7045742094465439
-          ],
-          "net_change": 0.1953347754064243,
-          "total_variation": 0.5338753002700041,
-          "max_step_checkpoint": 10,
-          "max_step_change": 0.1705347026369599,
-          "local_window_change": 0.1705347026369599,
-          "concentration": 0.3194279685737719,
-          "min_boundary_distance": 0.00923943404011962,
-          "flip_epochs": []
-        }
-      },
-      {
-        "role": "off-by-one shock",
-        "note": "one-close mismatch that initially looks plausible but should be rejected",
-        "probe": {
-          "label": "O13",
-          "text": "()()()()(()()())))()",
+          "label": "O46",
+          "text": "()))(((((())(())))()))(())()()",
           "probe_kind": "off_by_one",
           "actual_valid": false,
           "family_type": "counterexample",
@@ -604,122 +553,60 @@
             80
           ],
           "probabilities": [
-            0.5017321782406772,
-            0.7020478134372369,
-            0.8103731227806594,
-            0.711920314641059,
-            0.6867245575351993,
-            0.48345075617772537,
-            0.428205869867981,
-            0.4786999981975303,
-            0.4646334376984842
+            0.055122707173662064,
+            0.7441430265098935,
+            0.7819157743580393,
+            0.7645601889233737,
+            0.6764732204337665,
+            0.5521534989804509,
+            0.3898154099517846,
+            0.26765375830029375,
+            0.3554893994228359
           ],
           "correctness": [
-            false,
-            false,
-            false,
-            false,
-            false,
             true,
+            false,
+            false,
+            false,
+            false,
+            false,
             true,
             true,
             true
           ],
           "phase_scores": [
-            0.5017321782406772,
-            0.6867245575351993,
-            0.4646334376984842
+            0.055122707173662064,
+            0.6764732204337665,
+            0.3554893994228359
           ],
-          "net_change": -0.037098740542192976,
-          "total_variation": 0.7553688862812561,
-          "max_step_checkpoint": 50,
-          "max_step_change": 0.20327380135747397,
-          "local_window_change": 0.2284695584633336,
-          "concentration": 0.26910534051542395,
-          "min_boundary_distance": 0.0017321782406771735,
-          "flip_epochs": [
-            50
-          ]
-        }
-      },
-      {
-        "role": "repair case",
-        "note": "almost-valid counterexample whose structure invites a late repair",
-        "probe": {
-          "label": "P07",
-          "text": "()()(()(()))(())()((",
-          "probe_kind": "valid_prefix",
-          "actual_valid": false,
-          "family_type": "counterexample",
-          "epochs": [
-            0,
-            10,
-            20,
-            30,
-            40,
-            50,
-            60,
-            70,
-            80
-          ],
-          "probabilities": [
-            0.43863135628950467,
-            0.07207286829678969,
-            0.09235525755555866,
-            0.04378448715445551,
-            0.031893697146355246,
-            0.011061491087952237,
-            0.0072701923889360665,
-            0.008956573990400167,
-            0.007938554271811062
-          ],
-          "correctness": [
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true
-          ],
-          "phase_scores": [
-            0.43863135628950467,
-            0.031893697146355246,
-            0.007938554271811062
-          ],
-          "net_change": -0.4306928020176936,
-          "total_variation": 0.4746303437381597,
+          "net_change": 0.30036669224917384,
+          "total_variation": 1.3288907243646648,
           "max_step_checkpoint": 10,
-          "max_step_change": 0.36655848799271495,
-          "local_window_change": 0.36655848799271495,
-          "concentration": 0.7723031045712809,
-          "min_boundary_distance": 0.06136864371049533,
-          "flip_epochs": []
+          "max_step_change": 0.6890203193362314,
+          "local_window_change": 0.6890203193362314,
+          "concentration": 0.5184928351920345,
+          "min_boundary_distance": 0.05215349898045085,
+          "flip_epochs": [
+            10,
+            60
+          ]
         }
       }
     ],
     "watchlist_mode": "curated_long_held_out_plus_balanced_background",
     "curated_probe_roles": [
-      "valid control",
-      "off-by-one shock",
-      "repair case"
+      "off-by-one example"
     ],
     "curated_probe_texts": [
-      "(((((())(()(()()(((())))))))))",
-      "()()()()(()()())))()",
-      "()()(()(()))(())()(("
+      "()))(((((())(())))()))(())()()"
     ],
     "curated_probe_notes": [
-      "ordinary balanced control with deep nesting and stable acceptance",
-      "one-close mismatch that initially looks plausible but should be rejected",
-      "almost-valid counterexample whose structure invites a late repair"
+      "one extra close parenthesis"
     ],
     "background_probe_count": 96,
     "trace_panel_background_mode": "held_out_state_cloud_plus_endpoints",
     "trace_marker_mode": "start_end_only",
-    "transition_classification": "gradual",
+    "transition_classification": "absent",
     "summary_table_files": [
       "rnn-transition-summary.csv"
     ],
@@ -730,18 +617,18 @@
       "rnn-transition-assessment.md"
     ],
     "boundary_family_labels": [
-      "V11",
-      "O31",
-      "V20",
-      "V26",
-      "P14",
-      "O14",
+      "V27",
+      "V28",
+      "V21",
       "O22",
+      "B19",
       "V32",
+      "P20",
+      "V5",
       "V18",
       "P30",
-      "V9",
-      "V4"
+      "O7",
+      "O15"
     ],
     "phase_behavior": [
       {
@@ -759,26 +646,26 @@
           80
         ],
         "values": [
-          0.7578125,
-          0.8203125,
-          0.8203125,
-          0.8203125,
-          0.8203125,
-          0.8203125,
-          0.84375,
-          0.828125,
-          0.828125
+          0.5,
+          0.71875,
+          0.75,
+          0.765625,
+          0.7734375,
+          0.78125,
+          0.734375,
+          0.6953125,
+          0.7265625
         ],
         "phase_scores": [
-          0.7578125,
-          0.8203125,
-          0.828125
+          0.5,
+          0.7734375,
+          0.7265625
         ],
-        "net_change": 0.0703125,
-        "total_variation": 0.1015625,
+        "net_change": 0.2265625,
+        "total_variation": 0.3984375,
         "max_step_checkpoint": 10,
-        "max_step_change": 0.0625,
-        "concentration": 0.6153846153846154
+        "max_step_change": 0.21875,
+        "concentration": 0.5490196078431373
       },
       {
         "label": "counterexample family",
@@ -795,26 +682,26 @@
           80
         ],
         "values": [
+          1.0,
+          0.59375,
+          0.5625,
+          0.59375,
           0.6041666666666666,
-          0.5625,
-          0.5625,
-          0.5729166666666666,
-          0.5625,
-          0.6041666666666666,
-          0.6354166666666666,
-          0.625,
-          0.6145833333333334
+          0.6145833333333334,
+          0.65625,
+          0.6875,
+          0.65625
         ],
         "phase_scores": [
+          1.0,
           0.6041666666666666,
-          0.5625,
-          0.6145833333333334
+          0.65625
         ],
-        "net_change": 0.01041666666666674,
-        "total_variation": 0.15624999999999978,
+        "net_change": -0.34375,
+        "total_variation": 0.59375,
         "max_step_checkpoint": 10,
-        "max_step_change": 0.04166666666666663,
-        "concentration": 0.26666666666666683
+        "max_step_change": 0.40625,
+        "concentration": 0.6842105263157895
       },
       {
         "label": "near-boundary probe family",
@@ -832,11 +719,11 @@
         ],
         "values": [
           0.5,
-          0.5833333333333334,
-          0.5833333333333334,
           0.5,
           0.5,
-          0.5833333333333334,
+          0.5,
+          0.5,
+          0.5,
           0.5,
           0.5,
           0.5
@@ -847,23 +734,23 @@
           0.5
         ],
         "net_change": 0.0,
-        "total_variation": 0.3333333333333335,
+        "total_variation": 0.0,
         "max_step_checkpoint": 10,
-        "max_step_change": 0.08333333333333337,
-        "concentration": 0.25
+        "max_step_change": 0.0,
+        "concentration": 0.0
       }
     ],
     "assessment": {
-      "classification": "gradual",
+      "classification": "absent",
       "measured_facts": [
-        "The representative counterexample O13 changes by -0.037 in p(valid), with its steepest checkpoint-to-checkpoint move ending at epoch 50.",
-        "The ordinary probe V36 changes by +0.195 overall and has total variation 0.534.",
-        "The near-boundary probe P07 comes within 0.061 of the decision boundary and flips at epochs [].",
-        "Across the whole probe pool, mean counterexample step size is 0.278 versus 0.192 for ordinary probes."
+        "The representative counterexample O46 changes by +0.300 in p(valid), with its steepest checkpoint-to-checkpoint move ending at epoch 10.",
+        "The ordinary probe V36 changes by +0.689 overall and has total variation 1.140.",
+        "The near-boundary probe O02 comes within 0.004 of the decision boundary and flips at epochs [10, 70, 80].",
+        "Across the whole probe pool, mean counterexample step size is 0.329 versus 0.583 for ordinary probes."
       ],
       "interpretation": [
         "A bifurcation-like interpretation is warranted only if counterexample change is concentrated into a narrow checkpoint window and clearly exceeds the ordinary-family background drift.",
-        "On these measurements the transition is classified as gradual.",
+        "On these measurements the transition is classified as absent.",
         "The classification is driven by the concentration of counterexample changes and their separation from ordinary-probe movement, not by the appearance of the plot alone."
       ],
       "uncertainty": [

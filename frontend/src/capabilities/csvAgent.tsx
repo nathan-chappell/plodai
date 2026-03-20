@@ -8,7 +8,6 @@ import {
 } from "../components/CapabilityQuickView";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
-import { DatasetChart } from "../components/DatasetChart";
 import {
   bindClientToolsForBundle,
   buildCapabilityBundleForRoot,
@@ -23,7 +22,6 @@ import type {
   ShellWorkspaceArtifact,
   ShellWorkspaceRegistration,
 } from "./types";
-import type { ClientEffect } from "../types/analysis";
 import {
   CapabilityPage,
   CapabilityEyebrow,
@@ -34,8 +32,6 @@ import {
   CapabilityTabButton,
   CapabilityTitle,
   ReportChatColumn,
-  ReportEffectCard,
-  ReportEffectsPanel,
   ReportWorkspaceColumn,
   ReportWorkspaceLayout,
 } from "./styles";
@@ -45,10 +41,6 @@ type CsvAgentTab = "agent" | "demo";
 const DEFAULT_STATUS = "Load CSV files to start using the CSV agent.";
 const DEFAULT_BRIEF =
   "Inspect the available CSVs, use safe aggregate queries, materialize reusable result artifacts, and hand off to charting when useful.";
-
-function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "chart_rendered" }> {
-  return effect.type === "chart_rendered";
-}
 
 function buildCsvQuickViewGroups(
   artifacts: ShellWorkspaceArtifact[],
@@ -91,7 +83,6 @@ export function CsvAgentPage({
     setActiveWorkspaceTab,
     executionMode,
     setExecutionMode,
-    reportEffects,
     setReportEffects,
     handleFiles,
     handleRemoveEntry,
@@ -151,11 +142,13 @@ export function CsvAgentPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
+    prepareDemoRun,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     capabilityId: csvAgentCapability.id,
     ready: workspaceHydrated,
     buildDemoScenario: buildCsvAgentDemoScenario,
+    files,
     setExecutionMode,
     setFiles,
     setStatus,
@@ -284,15 +277,13 @@ export function CsvAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            {reportEffects.filter(isChartEffect).length ? (
-              <ReportEffectsPanel data-testid="csv-agent-demo-effects">
-                {reportEffects.filter(isChartEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`} data-testid="csv-agent-demo-chart-effect">
-                    <DatasetChart spec={effect.chart} rows={effect.rows} />
-                  </ReportEffectCard>
-                ))}
-              </ReportEffectsPanel>
-            ) : null}
+            <CapabilityQuickView
+              title="CSV results"
+              description="Review reusable CSV and JSON outputs from the current workspace."
+              emptyMessage="Materialized CSV and JSON results will appear here as the agent creates them."
+              groups={csvQuickViewGroups}
+              dataTestId="csv-agent-quick-view"
+            />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <CapabilityDemoPane
@@ -307,6 +298,7 @@ export function CsvAgentPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              onPrepareDemoRun={prepareDemoRun}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>

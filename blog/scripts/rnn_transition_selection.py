@@ -23,6 +23,8 @@ class CuratedProbeBundle:
     selected: tuple[SelectedTrajectory, ...]
     background: tuple[ProbeTrajectoryMetrics, ...]
     all_trajectories: tuple[ProbeTrajectoryMetrics, ...]
+    ordinary_reference: ProbeTrajectoryMetrics
+    boundary_reference: ProbeTrajectoryMetrics
     watchlist_mode: str
 
 
@@ -44,12 +46,12 @@ class _SyntheticResult:
 
 def representative_selection_rule() -> str:
     return (
-        "Valid control: longer held-out balanced string with clear nested structure, "
-        "preferring high depth, low drift, and correct acceptance throughout; "
-        "off-by-one shock: longer held-out off-by-one counterexample with the strongest move "
+        "Off-by-one example: longer held-out off-by-one counterexample with the strongest move "
         "toward correct rejection, preferring actual boundary crossings; "
-        "repair case: held-out valid-prefix or balanced-invalid example with large change near "
-        "the decision boundary, preferring visibly almost-valid structure."
+        "ordinary support: longer held-out balanced string with clear nested structure, "
+        "preferring high depth, low drift, and correct acceptance throughout; "
+        "near-boundary support: chosen separately from the held-out pool for assessment only, "
+        "using boundary distance, flips, and local change rather than visual prominence."
     )
 
 
@@ -259,43 +261,24 @@ def build_curated_probe_bundle(
         ),
     )[0]
 
-    repair_candidates = [
-        probe
-        for probe in trajectories
-        if probe.probe_kind in {PHASE_KIND_VALID_PREFIX, PHASE_KIND_BALANCED_INVALID}
-    ]
-    repair_case = sorted(
-        repair_candidates,
-        key=lambda probe: (
-            not probe.correctness[-1],
-            probe.probe_kind != PHASE_KIND_VALID_PREFIX,
-            -bool(probe.flip_epochs),
-            -probe.local_window_change,
-            probe.min_boundary_distance,
-            -len(probe.text),
-            probe.text,
-        ),
-    )[0]
-
     selected = (
         SelectedTrajectory(
-            role="valid control",
-            note="ordinary balanced control with deep nesting and stable acceptance",
-            trajectory=valid_control,
-        ),
-        SelectedTrajectory(
-            role="off-by-one shock",
-            note="one-close mismatch that initially looks plausible but should be rejected",
+            role="off-by-one example",
+            note="one extra close parenthesis",
             trajectory=off_by_one,
-        ),
-        SelectedTrajectory(
-            role="repair case",
-            note="almost-valid counterexample whose structure invites a late repair",
-            trajectory=repair_case,
         ),
     )
 
     selected_labels = {item.trajectory.label for item in selected}
+    boundary_reference = sorted(
+        [probe for probe in trajectories if probe.label not in selected_labels],
+        key=lambda probe: (
+            -len(probe.flip_epochs),
+            probe.min_boundary_distance,
+            -probe.local_window_change,
+            probe.text,
+        ),
+    )[0]
     per_family: dict[str, list[ProbeTrajectoryMetrics]] = {
         "valid": [],
         PHASE_KIND_OFF_BY_ONE: [],
@@ -328,5 +311,7 @@ def build_curated_probe_bundle(
         selected=selected,
         background=tuple(background),
         all_trajectories=tuple(trajectories),
+        ordinary_reference=valid_control,
+        boundary_reference=boundary_reference,
         watchlist_mode=watchlist_mode(),
     )

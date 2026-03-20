@@ -34,13 +34,14 @@ from blog.scripts.rnn_transition_selection import SelectedTrajectory
 
 
 BOUNDARY_EMPHASIS_K = 20.0
+TRACE_VIEW_ROTATION_DEGREES = 10.0
 MAIN_INK = STATIC_MAIN_INK
 SECONDARY_INK = STATIC_SECONDARY_INK
 ACCENT_INK = STATIC_ACCENT_INK
 GUIDE_INK = STATIC_GUIDE_INK
 SPINE_INK = STATIC_SPINE_INK
 BACKGROUND_FIELD_INK = STATIC_FIELD_INK
-TRACE_COLORS = ("#7fc97f", "#f2c46d", "#dd6b5f")
+TRACE_COLORS = ("#dd6b5f",)
 ACCEPT_FILL = (0.51, 0.65, 0.54, 0.15)
 ACCEPT_EDGE = "#78b97c"
 PROBABILITY_CMAP = LinearSegmentedColormap.from_list(
@@ -171,7 +172,7 @@ def _label_endpoints(
         adjusted[index] = min(adjusted[index], adjusted[index + 1] - minimum_gap)
     for adjusted_y, (y_value, item) in zip(adjusted, ordered, strict=True):
         ax.annotate(
-            item.role,
+            _endpoint_role_label(item),
             xy=(x_value, y_value),
             xytext=(x_value + 2.8, adjusted_y),
             textcoords="data",
@@ -204,15 +205,17 @@ def _fit_oblique_projection(
     components = right_vectors[:3, :]
     variance = singular_values.square()
     explained = variance[:3] / variance.sum().clamp(min=1e-12)
-    oblique = torch.tensor(
+    theta = math.radians(TRACE_VIEW_ROTATION_DEGREES)
+    yaw = torch.tensor(
         [
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [0.28, 0.18],
+            [math.cos(theta), 0.0, -math.sin(theta)],
+            [0.0, 1.0, 0.0],
+            [math.sin(theta), 0.0, math.cos(theta)],
         ],
         dtype=torch.float32,
     )
-    basis = components.T @ oblique
+    projection = yaw[:, :2]
+    basis = components.T @ projection
     return mean, basis, tuple(float(value.item()) for value in explained)
 
 
@@ -412,51 +415,143 @@ def _trace_endpoint_color(curve: TraceCurve2D) -> str:
     return "#da695e"
 
 
-def _draw_probe_identification_block(
-    fig: Figure, *, selected: tuple[SelectedTrajectory, ...]
+def _endpoint_role_label(item: SelectedTrajectory) -> str:
+    phase_1_correct = bool(item.trajectory.correctness[2])
+    phase_2_correct = bool(item.trajectory.correctness[-1])
+    if phase_1_correct and phase_2_correct:
+        suffix = "stable"
+    elif (not phase_1_correct) and phase_2_correct:
+        suffix = "corrected"
+    elif phase_1_correct and (not phase_2_correct):
+        suffix = "regressed"
+    else:
+        suffix = "misclassified"
+    return f"{item.role} ({suffix})"
+
+
+def _probe_status_note(item: SelectedTrajectory) -> str:
+    phase_1_correct = bool(item.trajectory.correctness[2])
+    phase_2_correct = bool(item.trajectory.correctness[-1])
+    if phase_1_correct and phase_2_correct:
+        return "correct at both phase endpoints"
+    if (not phase_1_correct) and phase_2_correct:
+        return "wrong after phase 1, corrected after phase 2"
+    if phase_1_correct and (not phase_2_correct):
+        return "correct after phase 1, wrong after phase 2"
+    return "misclassified at both phase endpoints"
+
+
+def _draw_probe_identification_panel(
+    ax: Axes, *, selected: tuple[SelectedTrajectory, ...]
 ) -> None:
-    block_positions = (0.08, 0.39, 0.70)
-    for x_pos, color, item in zip(block_positions, TRACE_COLORS, selected, strict=True):
-        fig.text(
-            x_pos,
-            0.482,
+    ax.set_facecolor(STATIC_PANEL_BG)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    ax.text(
+        0.0,
+        0.98,
+        "Watched probe",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        **font_kwargs(size=10.0, color=STATIC_TEXT_INK),
+    )
+    ax.scatter(
+        [0.02],
+        [0.84],
+        transform=ax.transAxes,
+        s=26,
+        marker="s",
+        facecolors=(1.0, 1.0, 1.0, 0.10),
+        edgecolors=(1.0, 1.0, 1.0, 0.95),
+        linewidths=0.82,
+        clip_on=False,
+    )
+    ax.text(
+        0.08,
+        0.84,
+        "start",
+        transform=ax.transAxes,
+        ha="left",
+        va="center",
+        **font_kwargs(size=8.0, color=STATIC_SECONDARY_INK),
+    )
+    ax.scatter(
+        [0.36],
+        [0.84],
+        transform=ax.transAxes,
+        s=34,
+        facecolors="#dfe8f2",
+        edgecolors=(1.0, 1.0, 1.0, 0.95),
+        linewidths=0.82,
+        clip_on=False,
+    )
+    ax.text(
+        0.42,
+        0.84,
+        "end",
+        transform=ax.transAxes,
+        ha="left",
+        va="center",
+        **font_kwargs(size=8.0, color=STATIC_SECONDARY_INK),
+    )
+
+    y_positions = (0.56,) if len(selected) == 1 else (0.66, 0.34)
+    for y_pos, color, item in zip(y_positions, TRACE_COLORS, selected, strict=True):
+        ax.add_line(
+            Line2D(
+                [0.0, 0.12],
+                [y_pos, y_pos],
+                transform=ax.transAxes,
+                color=color,
+                linewidth=1.4,
+                solid_capstyle="round",
+            )
+        )
+        ax.text(
+            0.16,
+            y_pos + 0.06,
             item.role,
+            transform=ax.transAxes,
             ha="left",
-            va="top",
-            **font_kwargs(size=8.6, color=STATIC_TEXT_INK),
+            va="center",
+            **font_kwargs(size=8.9, color=STATIC_TEXT_INK),
             bbox={
-                "boxstyle": "round,pad=0.22",
+                "boxstyle": "round,pad=0.20",
                 "facecolor": STATIC_PANEL_BG,
                 "edgecolor": "#33414e",
                 "linewidth": 0.8,
             },
         )
-        fig.add_artist(
-            Line2D(
-                [x_pos, x_pos + 0.03],
-                [0.493, 0.493],
-                transform=fig.transFigure,
-                color=color,
-                linewidth=1.4,
-                solid_capstyle="round",
-                zorder=8,
-            )
-        )
-        fig.text(
-            x_pos,
-            0.458,
+        ax.text(
+            0.16,
+            y_pos - 0.01,
             item.trajectory.text,
+            transform=ax.transAxes,
             ha="left",
-            va="top",
-            **font_kwargs(size=8.2, color=STATIC_SECONDARY_INK),
+            va="center",
+            **font_kwargs(size=8.1, color=STATIC_SECONDARY_INK),
         )
-        fig.text(
-            x_pos,
-            0.436,
-            item.note,
+        ax.text(
+            0.16,
+            y_pos - 0.12,
+            _probe_status_note(item),
+            transform=ax.transAxes,
             ha="left",
-            va="top",
+            va="center",
             **font_kwargs(size=7.7, color=STATIC_SECONDARY_INK),
+        )
+        ax.text(
+            0.16,
+            y_pos - 0.22,
+            item.note,
+            transform=ax.transAxes,
+            ha="left",
+            va="center",
+            **font_kwargs(size=7.6, color=STATIC_SECONDARY_INK),
         )
 
 
@@ -500,8 +595,8 @@ def _draw_trace_panel(ax: Axes, panel: TracePanel2D) -> None:
             norm=PROBABILITY_NORM,
             s=22,
             alpha=0.95,
-            linewidths=0.22,
-            edgecolors=(1.0, 1.0, 1.0, 0.18),
+            linewidths=0.0,
+            edgecolors="none",
             zorder=3,
         )
         legend_x = (0.62, 0.73, 0.84)
@@ -522,8 +617,8 @@ def _draw_trace_panel(ax: Axes, panel: TracePanel2D) -> None:
                 transform=ax.transAxes,
                 s=18,
                 color=PROBABILITY_CMAP(PROBABILITY_NORM(value)),
-                edgecolors=(1.0, 1.0, 1.0, 0.45),
-                linewidths=0.25,
+                edgecolors="none",
+                linewidths=0.0,
                 zorder=7,
                 clip_on=False,
             )
@@ -545,20 +640,20 @@ def _draw_trace_panel(ax: Axes, panel: TracePanel2D) -> None:
         ax.scatter(
             [xs[0]],
             [ys[0]],
-            s=24,
+            s=38,
             marker="s",
             facecolors=(1.0, 1.0, 1.0, 0.12),
             edgecolors=(1.0, 1.0, 1.0, 0.95),
-            linewidths=0.82,
+            linewidths=1.0,
             zorder=5,
         )
         ax.scatter(
             [xs[-1]],
             [ys[-1]],
-            s=40,
+            s=58,
             facecolors=_trace_endpoint_color(curve),
             edgecolors=(1.0, 1.0, 1.0, 0.95),
-            linewidths=0.82,
+            linewidths=1.0,
             zorder=6,
         )
     ax.set_xlim(*panel.x_range)
@@ -582,18 +677,27 @@ def build_transition_figure(
         background=background,
     )
 
-    fig = plt.figure(figsize=(12.0, 7.7))
+    fig = plt.figure(figsize=(13.1, 7.7))
     fig.patch.set_facecolor(STATIC_FIGURE_BG)
-    grid = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.95], hspace=0.44, wspace=0.16)
+    grid = fig.add_gridspec(
+        2,
+        3,
+        height_ratios=[1.0, 0.95],
+        width_ratios=[1.0, 1.0, 0.78],
+        hspace=0.32,
+        wspace=0.18,
+    )
     trace_axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
+    info_ax = fig.add_subplot(grid[0, 2])
     line_ax = fig.add_subplot(grid[1, :])
 
     for axis, panel in zip(trace_axes, trace_panels, strict=True):
         _draw_trace_panel(axis, panel)
+    _draw_probe_identification_panel(info_ax, selected=selected)
 
     _style_axis(line_ax)
     line_ax.set_title(
-        "Watched probe probabilities across checkpoints",
+        "Off-by-one example across checkpoints",
         loc="left",
         **font_kwargs(size=10.5, color=STATIC_TEXT_INK),
         pad=8,
@@ -639,7 +743,7 @@ def build_transition_figure(
         _boundary_emphasis_transform(0.45),
         _boundary_emphasis_transform(0.55),
         color="#16301f",
-        alpha=0.08,
+        alpha=0.04,
         zorder=0,
     )
     line_ax.axhline(
@@ -656,7 +760,7 @@ def build_transition_figure(
         alpha=0.65,
         zorder=1,
     )
-    line_ax.set_xlim(min(epochs), max(epochs) + 18)
+    line_ax.set_xlim(min(epochs), max(epochs) + 22)
     line_ax.set_ylim(0.0, 1.0)
     tick_probs = (0.0, 0.25, 0.45, 0.5, 0.55, 0.75, 1.0)
     line_ax.set_yticks([_boundary_emphasis_transform(value) for value in tick_probs])
@@ -677,8 +781,7 @@ def build_transition_figure(
         ha="left",
         **font_kwargs(size=12.0, color=STATIC_TEXT_INK),
     )
-    _draw_probe_identification_block(fig, selected=selected)
-    fig.subplots_adjust(left=0.07, right=0.972, top=0.88, bottom=0.12)
+    fig.subplots_adjust(left=0.07, right=0.975, top=0.88, bottom=0.12)
     return fig
 
 

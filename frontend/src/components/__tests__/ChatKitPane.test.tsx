@@ -431,6 +431,49 @@ describe("ChatKitHarness auto-scroll", () => {
     expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
   });
 
+  it("runs a one-shot follow-up action after the main quick action response ends", async () => {
+    await renderPane("", {
+      quickActions: [
+        {
+          label: "Run demo",
+          prompt: "Run the scripted walkthrough.",
+          followUp: {
+            label: "Demo validation",
+            prompt: "Validate the completed demo.",
+          },
+        },
+      ],
+      showChatKitHeader: false,
+    });
+
+    const sendUserMessage = latestChatKitApi?.sendUserMessage as ReturnType<typeof vi.fn> | undefined;
+    const runDemoButton = container.querySelector(
+      "[data-testid='chatkit-quick-action-run-demo']",
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      runDemoButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(sendUserMessage).toHaveBeenNthCalledWith(1, {
+      text: "Run the scripted walkthrough.",
+      model: "lightweight",
+      newThread: true,
+    });
+
+    await act(async () => {
+      latestHandlers?.onThreadChange?.({ threadId: "thread_demo" });
+      latestHandlers?.onResponseStart?.();
+      latestHandlers?.onResponseEnd?.();
+    });
+
+    expect(sendUserMessage).toHaveBeenNthCalledWith(2, {
+      text: "Validate the completed demo.",
+      model: "lightweight",
+      newThread: false,
+    });
+  });
+
   it("keeps the run mode toggle and feedback together in the top row and disables both while a run is active", async () => {
     await renderPane("", {
       showChatKitHeader: false,

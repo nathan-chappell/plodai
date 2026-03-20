@@ -12,7 +12,6 @@ import {
 } from "../components/CapabilityQuickView";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
-import { DatasetChart } from "../components/DatasetChart";
 import {
   bindClientToolsForBundle,
   buildCapabilityBundleForRoot,
@@ -23,7 +22,7 @@ import { buildChartAgentDemoScenario } from "./chart-agent/demo";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
-import type { ClientEffect } from "../types/analysis";
+import type { LocalWorkspaceFile } from "../types/report";
 import type {
   ShellWorkspaceArtifact,
   ShellWorkspaceRegistration,
@@ -39,8 +38,6 @@ import {
   CapabilityTabButton,
   CapabilityTitle,
   ReportChatColumn,
-  ReportEffectCard,
-  ReportEffectsPanel,
   ReportWorkspaceColumn,
   ReportWorkspaceLayout,
 } from "./styles";
@@ -50,10 +47,6 @@ type ChartAgentTab = "agent" | "demo";
 const DEFAULT_STATUS = "Load CSV or JSON chartable artifacts to start using the Chart agent.";
 const DEFAULT_BRIEF =
   "Inspect chartable artifacts, make a chart plan first, and render the clearest visual explanation possible.";
-
-function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { type: "chart_rendered" }> {
-  return effect.type === "chart_rendered";
-}
 
 function buildChartQuickViewGroups(
   artifacts: ShellWorkspaceArtifact[],
@@ -74,29 +67,38 @@ function buildChartQuickViewGroups(
   ];
 }
 
-function renderChartQuickViewPreview(args: CapabilityQuickViewRenderArgs) {
-  const savedChart = parseSavedChartArtifact(args.selectedArtifact.file);
-  if (!savedChart) {
-    return renderDefaultCapabilityQuickViewPreview(args);
-  }
-  return (
-    <>
-      <ChartPreviewMetaRow>
-        <ChartPreviewMetaChip>
-          {savedChart.chartPlanId ? `Plan ${savedChart.chartPlanId}` : "Saved chart"}
-        </ChartPreviewMetaChip>
-        <ChartPreviewMetaChip>
-          {savedChart.fileId ? `Source ${savedChart.fileId}` : "Source file unavailable"}
-        </ChartPreviewMetaChip>
-      </ChartPreviewMetaRow>
-      {renderDefaultCapabilityQuickViewPreview(args)}
-      {!savedChart.imageDataUrl ? (
-        <CapabilityMetaText>
-          This chart artifact is saved in the workspace, but it does not have an inline image yet.
-        </CapabilityMetaText>
-      ) : null}
-    </>
-  );
+function buildRenderChartQuickViewPreview(files: LocalWorkspaceFile[]) {
+  return function renderChartQuickViewPreview(args: CapabilityQuickViewRenderArgs) {
+    const savedChart = parseSavedChartArtifact(args.selectedArtifact.file);
+    if (!savedChart) {
+      return renderDefaultCapabilityQuickViewPreview(args);
+    }
+    const sourceFile = savedChart.fileId
+      ? files.find((candidate) => candidate.id === savedChart.fileId) ?? null
+      : null;
+    return (
+      <>
+        <ChartPreviewMetaRow>
+          <ChartPreviewMetaChip>
+            {savedChart.chartPlanId ? `Plan ${savedChart.chartPlanId}` : "Saved chart"}
+          </ChartPreviewMetaChip>
+          <ChartPreviewMetaChip>
+            {sourceFile
+              ? `Source ${sourceFile.name}`
+              : savedChart.fileId
+                ? `Source ${savedChart.fileId}`
+                : "Source file unavailable"}
+          </ChartPreviewMetaChip>
+        </ChartPreviewMetaRow>
+        {renderDefaultCapabilityQuickViewPreview(args)}
+        {!savedChart.imageDataUrl ? (
+          <CapabilityMetaText>
+            This chart artifact is saved in the workspace, but it does not have an inline image yet.
+          </CapabilityMetaText>
+        ) : null}
+      </>
+    );
+  };
 }
 
 export function ChartAgentPage({
@@ -118,7 +120,6 @@ export function ChartAgentPage({
     setActiveWorkspaceTab,
     executionMode,
     setExecutionMode,
-    reportEffects,
     setReportEffects,
     handleFiles,
     handleRemoveEntry,
@@ -178,11 +179,13 @@ export function ChartAgentPage({
     scenario: demoScenario,
     loading: demoLoading,
     error: demoError,
+    prepareDemoRun,
   } = useDemoScenario({
     active: activeWorkspaceTab === "demo",
     capabilityId: chartAgentCapability.id,
     ready: workspaceHydrated,
     buildDemoScenario: buildChartAgentDemoScenario,
+    files,
     setExecutionMode,
     setFiles,
     setStatus,
@@ -250,6 +253,10 @@ export function ChartAgentPage({
     () => buildChartQuickViewGroups(artifacts),
     [artifacts],
   );
+  const renderChartPreview = useMemo(
+    () => buildRenderChartQuickViewPreview(files),
+    [files],
+  );
 
   return (
     <CapabilityPage>
@@ -286,7 +293,7 @@ export function ChartAgentPage({
               description="Preview charts already rendered into the current workspace."
               emptyMessage="Rendered chart artifacts will appear here as the Chart agent saves them."
               groups={chartQuickViewGroups}
-              renderPreview={renderChartQuickViewPreview}
+              renderPreview={renderChartPreview}
               dataTestId="chart-agent-quick-view"
             />
           </ReportWorkspaceColumn>
@@ -312,15 +319,14 @@ export function ChartAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            {reportEffects.filter(isChartEffect).length ? (
-              <ReportEffectsPanel data-testid="chart-agent-demo-effects">
-                {reportEffects.filter(isChartEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`} data-testid="chart-agent-demo-chart-effect">
-                    <DatasetChart spec={effect.chart} rows={effect.rows} />
-                  </ReportEffectCard>
-                ))}
-              </ReportEffectsPanel>
-            ) : null}
+            <CapabilityQuickView
+              title="Saved charts"
+              description="Preview charts already rendered into the current workspace."
+              emptyMessage="Rendered chart artifacts will appear here as the Chart agent saves them."
+              groups={chartQuickViewGroups}
+              renderPreview={renderChartPreview}
+              dataTestId="chart-agent-quick-view"
+            />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <CapabilityDemoPane
@@ -335,6 +341,7 @@ export function ChartAgentPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              onPrepareDemoRun={prepareDemoRun}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>

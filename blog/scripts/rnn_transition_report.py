@@ -138,9 +138,9 @@ def render_rnn_transition_report(
     )
     assessment = assess_transition(
         assessment_metrics,
-        representative_counterexample=curated.selected[1].trajectory,
-        representative_ordinary=curated.selected[0].trajectory,
-        representative_boundary=curated.selected[2].trajectory,
+        representative_counterexample=curated.selected[0].trajectory,
+        representative_ordinary=curated.ordinary_reference,
+        representative_boundary=curated.boundary_reference,
     )
     selection_rows = summary_table_rows(curated.selected)
     assessment_text = {

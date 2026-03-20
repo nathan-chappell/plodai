@@ -1,11 +1,16 @@
 import { useEffect } from "react";
+import styled from "styled-components";
 
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
-import { ChatKitPaneMeta } from "./styles";
+import { MetaText, sectionPanelCss } from "../app/styles";
 import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
 import type { ClientEffect, ExecutionMode, WorkspaceState } from "../types/analysis";
 import { devLogger } from "../lib/dev-logging";
 import type { LocalWorkspaceFile } from "../types/report";
+import {
+  buildDemoValidatorCapabilityBundle,
+  buildDemoValidatorPrompt,
+} from "../capabilities/shared/demoValidator";
 
 export function hasDemoScenarioNotes(scenario: CapabilityDemoScenario | null): boolean {
   return Boolean(scenario?.expectedOutcomes?.length || scenario?.notes?.length);
@@ -23,6 +28,7 @@ export function CapabilityDemoPane({
   clientTools,
   onEffects,
   onFilesAdded,
+  onPrepareDemoRun,
   showScenarioNotes = true,
   showChatKitHeader = true,
 }: {
@@ -37,6 +43,7 @@ export function CapabilityDemoPane({
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
+  onPrepareDemoRun?: () => Promise<unknown> | void;
   showScenarioNotes?: boolean;
   showChatKitHeader?: boolean;
 }) {
@@ -71,6 +78,13 @@ export function CapabilityDemoPane({
           label: "Run demo",
           prompt: scenario.initialPrompt,
           model: scenario.model,
+          beforeRun: onPrepareDemoRun,
+          followUp: {
+            label: "Demo validation",
+            prompt: buildDemoValidatorPrompt(scenario),
+            model: scenario.model,
+            capabilityBundle: buildDemoValidatorCapabilityBundle(),
+          },
         },
       ]
     : undefined;
@@ -78,15 +92,15 @@ export function CapabilityDemoPane({
   return (
     <>
       {showScenarioNotes && hasDemoScenarioNotes(scenario) ? (
-        <section data-testid="capability-demo-notes">
-          <strong>Demo notes</strong>
+        <DemoNotesCard data-testid="capability-demo-notes">
+          <DemoNotesTitle>Demo notes</DemoNotesTitle>
           {scenario?.expectedOutcomes?.length ? (
-            <ChatKitPaneMeta>{scenario.expectedOutcomes.join(" ")}</ChatKitPaneMeta>
+            <DemoNotesMeta>{scenario.expectedOutcomes.join(" ")}</DemoNotesMeta>
           ) : null}
           {scenario?.notes?.length ? (
-            <ChatKitPaneMeta>{scenario.notes.join(" ")}</ChatKitPaneMeta>
+            <DemoNotesMeta>{scenario.notes.join(" ")}</DemoNotesMeta>
           ) : null}
-        </section>
+        </DemoNotesCard>
       ) : null}
 
       <ChatKitPane
@@ -116,3 +130,23 @@ export function CapabilityDemoPane({
     </>
   );
 }
+
+const DemoNotesCard = styled.section`
+  ${sectionPanelCss("0.9rem", "0.42rem")};
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(250, 245, 238, 0.92)),
+    var(--panel);
+`;
+
+const DemoNotesTitle = styled.strong`
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.15;
+`;
+
+const DemoNotesMeta = styled(MetaText)`
+  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+  font-size: 0.82rem;
+  line-height: 1.5;
+`;

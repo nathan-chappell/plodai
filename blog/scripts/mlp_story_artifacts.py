@@ -336,6 +336,7 @@ def render_mlp_assets(
     )
     plt.close(figure)
     return {
+        "seed": seed,
         "files": files,
         "published_shape": list(run.hidden_layers),
         "selected_epochs": selected_epochs,
