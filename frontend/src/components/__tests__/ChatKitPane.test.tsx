@@ -128,8 +128,8 @@ import {
   csvAgentCapability,
   pdfAgentCapability,
   reportAgentCapability,
+  workspaceAgentCapability,
 } from "../../capabilities/definitions";
-import type { ExecutionMode } from "../../types/analysis";
 import type { LocalWorkspaceFile } from "../../types/report";
 
 function setScrollMetrics(
@@ -183,7 +183,7 @@ const files: LocalWorkspaceFile[] = [
 ];
 
 const workspaceContext = {
-  path_prefix: "/report-agent/",
+  workspace_id: "workspace-default",
   referenced_item_ids: ["file_csv"],
 } as const;
 
@@ -194,7 +194,10 @@ const workspaceState = {
     {
       id: "file_csv",
       name: "sales.csv",
-      path: "/report-agent/sales.csv",
+      bucket: "uploaded",
+      producer_key: "uploaded",
+      producer_label: "Uploaded",
+      source: "uploaded" as const,
       kind: "csv" as const,
       extension: "csv",
       row_count: 1,
@@ -238,18 +241,13 @@ describe("ChatKitHarness auto-scroll", () => {
     vi.restoreAllMocks();
   });
 
-  async function renderHarness(
-    clientTools: CapabilityClientTool[] = [],
-    executionMode: ExecutionMode = "interactive",
-  ) {
+  async function renderHarness(clientTools: CapabilityClientTool[] = []) {
     await act(async () => {
       root.render(
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
           files={files}
           workspaceState={workspaceState}
-          executionMode={executionMode}
-          onExecutionModeChange={() => {}}
           investigationBrief=""
           clientTools={clientTools}
           onEffects={() => {}}
@@ -269,8 +267,6 @@ describe("ChatKitHarness auto-scroll", () => {
           enabled
           files={files}
           workspaceState={workspaceState}
-          executionMode="interactive"
-          onExecutionModeChange={() => {}}
           investigationBrief={investigationBrief}
           clientTools={[]}
           onEffects={() => {}}
@@ -339,21 +335,21 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(latestScrollTarget!.scrollTop).toBe(1000);
   });
 
-  it("disables built-in feedback actions and includes execution mode in metadata", async () => {
-    await renderHarness([], "batch");
+  it("disables built-in feedback actions and includes the investigation brief in metadata", async () => {
+    await renderHarness([]);
 
     expect(latestChatKitOptions?.threadItemActions).toEqual({ feedback: false });
     expect(
       buildChatKitRequestMetadata({
         capabilityBundle,
         workspaceState,
+        investigationBrief: "Render the chart before stopping.",
         threadOrigin: "interactive",
-        executionMode: "batch",
       }),
     ).toMatchObject({
+      investigation_brief: "Render the chart before stopping.",
       capability_bundle: capabilityBundle,
       workspace_state: workspaceState,
-      execution_mode: "batch",
       origin: "interactive",
     });
   });
@@ -398,6 +394,7 @@ describe("ChatKitHarness auto-scroll", () => {
 
   it("can receive compact ChatKit copy for all core capability surfaces", async () => {
     const capabilities = [
+      workspaceAgentCapability,
       reportAgentCapability,
       csvAgentCapability,
       chartAgentCapability,
@@ -418,7 +415,144 @@ describe("ChatKitHarness auto-scroll", () => {
     }
   });
 
-  it("renders quick actions, the run mode switch, and feedback together in the header row", async () => {
+  it("uses capability-level composer tools instead of raw client function names", async () => {
+    const bundleWithSpecialists: CapabilityBundle = {
+      root_capability_id: "workspace-agent",
+      capabilities: [
+        {
+          capability_id: "workspace-agent",
+          agent_name: "Workspace Agent",
+          instructions: "Route work.",
+          client_tools: [],
+          handoff_targets: [],
+        },
+        {
+          capability_id: "report-agent",
+          agent_name: "Report Agent",
+          instructions: "Build reports.",
+          client_tools: [
+            {
+              type: "function",
+              name: "append_report_slide",
+              description: "Append a report slide.",
+              parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+          ],
+          handoff_targets: [],
+        },
+        {
+          capability_id: "csv-agent",
+          agent_name: "CSV Agent",
+          instructions: "Analyze CSVs.",
+          client_tools: [
+            {
+              type: "function",
+              name: "create_csv_file",
+              description: "Create a CSV file.",
+              parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+              display: {
+                label: "Create CSV File",
+              },
+            },
+          ],
+          handoff_targets: [],
+        },
+        {
+          capability_id: "chart-agent",
+          agent_name: "Chart Agent",
+          instructions: "Render charts.",
+          client_tools: [
+            {
+              type: "function",
+              name: "render_chart_from_file",
+              description: "Render a chart.",
+              parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+          ],
+          handoff_targets: [],
+        },
+        {
+          capability_id: "pdf-agent",
+          agent_name: "PDF Agent",
+          instructions: "Inspect PDFs.",
+          client_tools: [
+            {
+              type: "function",
+              name: "inspect_pdf_file",
+              description: "Inspect a PDF.",
+              parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+          ],
+          handoff_targets: [],
+        },
+      ],
+    };
+
+    await renderPane("", {
+      capabilityBundle: bundleWithSpecialists,
+    });
+
+    const composer = latestChatKitOptions?.composer as
+      | {
+          tools?: Array<{
+            id: string;
+            label: string;
+            shortLabel?: string;
+            placeholderOverride?: string;
+            icon: string;
+          }>;
+        }
+      | undefined;
+
+    expect(composer?.tools).toEqual([
+      {
+        id: "report-agent",
+        label: "Report",
+        shortLabel: "Report",
+        placeholderOverride: "Use the report specialist for narrative investigations and saved slides.",
+        icon: "document",
+      },
+      {
+        id: "csv-agent",
+        label: "CSV",
+        shortLabel: "CSV",
+        placeholderOverride: "Use the CSV specialist for grouped queries and reusable data artifacts.",
+        icon: "analytics",
+      },
+      {
+        id: "chart-agent",
+        label: "Charts",
+        shortLabel: "Charts",
+        placeholderOverride: "Use the chart specialist to turn saved data artifacts into polished charts.",
+        icon: "chart",
+      },
+      {
+        id: "pdf-agent",
+        label: "PDF",
+        shortLabel: "PDF",
+        placeholderOverride: "Use the PDF specialist for inspection, extraction, and smart splits.",
+        icon: "document",
+      },
+    ]);
+  });
+
+  it("renders quick actions and feedback together in the header row", async () => {
     await renderPane("", {
       quickActions: [{ label: "Run demo", prompt: "Run the scripted walkthrough." }],
       showChatKitHeader: false,
@@ -427,20 +561,16 @@ describe("ChatKitHarness auto-scroll", () => {
     const controls = container.querySelector("[data-testid='chatkit-header-controls']");
     const buttonLabels = Array.from(controls?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim());
 
-    expect(buttonLabels).toEqual(["Run demo", "Interactive", "Batch", "Feedback"]);
+    expect(buttonLabels).toEqual(["Run demo", "Feedback"]);
     expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
   });
 
-  it("runs a one-shot follow-up action after the main quick action response ends", async () => {
+  it("runs a quick action without scheduling a synthetic follow-up turn", async () => {
     await renderPane("", {
       quickActions: [
         {
           label: "Run demo",
           prompt: "Run the scripted walkthrough.",
-          followUp: {
-            label: "Demo validation",
-            prompt: "Validate the completed demo.",
-          },
         },
       ],
       showChatKitHeader: false,
@@ -467,14 +597,10 @@ describe("ChatKitHarness auto-scroll", () => {
       latestHandlers?.onResponseEnd?.();
     });
 
-    expect(sendUserMessage).toHaveBeenNthCalledWith(2, {
-      text: "Validate the completed demo.",
-      model: "lightweight",
-      newThread: false,
-    });
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the run mode toggle and feedback together in the top row and disables both while a run is active", async () => {
+  it("keeps the feedback control in the top row and disables it while a run is active", async () => {
     await renderPane("", {
       showChatKitHeader: false,
     });
@@ -484,26 +610,19 @@ describe("ChatKitHarness auto-scroll", () => {
       latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
     });
 
-    const controls = container.querySelector("[data-testid='chatkit-execution-mode-controls']");
     const topRow = container.querySelector("[data-testid='chatkit-top-row']");
     const feedbackButton = container.querySelector("[data-testid='chatkit-provide-feedback']") as HTMLButtonElement | null;
-    const interactiveModeButton = container.querySelector(
-      "[data-testid='chatkit-execution-mode-interactive']",
-    ) as HTMLButtonElement | null;
 
-    expect(controls).not.toBeNull();
-    expect(topRow?.contains(controls)).toBe(true);
     expect(topRow?.contains(feedbackButton)).toBe(true);
     expect(feedbackButton?.textContent).toBe("Feedback");
     expect(feedbackButton?.title).toBe("Open the feedback flow for the latest assistant response in this thread.");
-    expect(interactiveModeButton?.disabled).toBe(false);
+    expect(feedbackButton?.disabled).toBe(false);
 
     await act(async () => {
       latestHandlers?.onResponseStart?.();
     });
 
     expect(feedbackButton?.disabled).toBe(true);
-    expect(interactiveModeButton?.disabled).toBe(true);
   });
 
   it("starts feedback flow directly from the labeled feedback button", async () => {
@@ -533,7 +652,7 @@ describe("ChatKitHarness auto-scroll", () => {
   it("does not send custom metadata actions from client tools while ChatKit is responding", async () => {
     const toolHandler = vi.fn(async () => ({
       workspace_context: {
-        path_prefix: "/report-agent/reports/",
+        workspace_id: "workspace-default",
         referenced_item_ids: ["file_csv"],
       },
     }));
@@ -575,7 +694,7 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(toolHandler).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       workspace_context: {
-        path_prefix: "/report-agent/reports/",
+        workspace_id: "workspace-default",
         referenced_item_ids: ["file_csv"],
       },
     });

@@ -46,7 +46,6 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
                 ],
                 "reports": [],
             },
-            "execution_mode": "batch",
         },
     )
     thread = ThreadMetadata(
@@ -57,7 +56,6 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
 
     runtime_state = resolve_thread_runtime_state(thread=thread, context=context)
 
-    assert runtime_state.metadata["execution_mode"] == "batch"
     assert (
         runtime_state.metadata["workspace_state"]["context"]["path_prefix"]
         == "/csv-agent/"

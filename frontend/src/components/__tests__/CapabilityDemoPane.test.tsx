@@ -10,18 +10,15 @@ import type { LocalWorkspaceFile } from "../../types/report";
 function MockChatKitPane({
   enabled,
   emptyMessage,
-  showExecutionModeControls,
   showChatKitHeader,
 }: {
   enabled: boolean;
   emptyMessage?: string;
-  showExecutionModeControls?: boolean;
   showChatKitHeader?: boolean;
 }) {
   return enabled ? (
     <div
       data-show-chatkit-header={String(showChatKitHeader)}
-      data-show-execution-mode-controls={String(showExecutionModeControls)}
       data-testid="mock-chatkit-mounted"
     >
       mock chatkit mounted
@@ -75,7 +72,6 @@ const scenario: CapabilityDemoScenario = {
   summary: "Run a lightweight CSV walkthrough.",
   initialPrompt: "Run the demo.",
   workspaceSeed: [demoSeedFile],
-  defaultExecutionMode: "batch",
 };
 
 describe("CapabilityDemoPane", () => {
@@ -106,8 +102,6 @@ describe("CapabilityDemoPane", () => {
           error={null}
           capabilityBundle={capabilityBundle}
           files={[]}
-          executionMode="batch"
-          onExecutionModeChange={() => {}}
           clientTools={[]}
           onEffects={() => {}}
         />,
@@ -128,8 +122,6 @@ describe("CapabilityDemoPane", () => {
           error={null}
           capabilityBundle={capabilityBundle}
           files={[]}
-          executionMode="batch"
-          onExecutionModeChange={() => {}}
           clientTools={[]}
           onEffects={() => {}}
         />,
@@ -147,8 +139,6 @@ describe("CapabilityDemoPane", () => {
           error={null}
           capabilityBundle={capabilityBundle}
           files={[demoSeedFile]}
-          executionMode="batch"
-          onExecutionModeChange={() => {}}
           clientTools={[]}
           onEffects={() => {}}
         />,
@@ -159,7 +149,7 @@ describe("CapabilityDemoPane", () => {
     expect(container.querySelector("[data-testid='mock-chatkit-mounted']")).not.toBeNull();
   });
 
-  it("can suppress inline demo notes without overriding the shared run-mode controls", async () => {
+  it("can suppress inline demo notes while preserving the shared ChatKit header settings", async () => {
     await act(async () => {
       root.render(
         <CapabilityDemoPane
@@ -172,8 +162,6 @@ describe("CapabilityDemoPane", () => {
           error={null}
           capabilityBundle={capabilityBundle}
           files={[demoSeedFile]}
-          executionMode="batch"
-          onExecutionModeChange={() => {}}
           clientTools={[]}
           onEffects={() => {}}
           showScenarioNotes={false}
@@ -184,7 +172,6 @@ describe("CapabilityDemoPane", () => {
 
     expect(container.textContent).not.toContain("Demo notes");
     const mounted = container.querySelector("[data-testid='mock-chatkit-mounted']");
-    expect(mounted?.getAttribute("data-show-execution-mode-controls")).toBe("undefined");
     expect(mounted?.getAttribute("data-show-chatkit-header")).toBe("false");
   });
 });

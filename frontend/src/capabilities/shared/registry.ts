@@ -1,13 +1,13 @@
 import type {
   CapabilityAgentSpec,
   CapabilityBundle,
-  CapabilityModule,
+  CapabilityRuntimeModule,
   CapabilityWorkspaceContext,
 } from "../types";
 
 export function buildCapabilityBundle(
   rootCapabilityId: string,
-  capabilityModules: CapabilityModule[],
+  capabilityModules: CapabilityRuntimeModule[],
   workspace: CapabilityWorkspaceContext,
 ): CapabilityBundle {
   const moduleByCapabilityId = new Map(

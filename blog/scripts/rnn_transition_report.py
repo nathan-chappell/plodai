@@ -155,7 +155,8 @@ def render_rnn_transition_report(
         render_transition_figure(
             result=result,
             selected=curated.selected,
-            background=curated.background,
+            local_neighbors=curated.local_neighbors,
+            global_background=curated.global_background,
             phase_spans=result.phase_spans,
             assessment=assessment,
             output_dir=output_dir,
@@ -199,8 +200,10 @@ def render_rnn_transition_report(
         "report_backend": "matplotlib",
         "report_style": "restrained_academic_print",
         "report_layout": "trace_panels_plus_transition_field",
-        "story_plot_sampling": "curated_watchlist_plus_balanced_background",
-        "story_plot_probe_count": len(curated.selected) + len(curated.background),
+        "story_plot_sampling": "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field",
+        "story_plot_probe_count": len(curated.selected)
+        + len(curated.local_neighbors)
+        + len(curated.global_background),
         "story_value_transform": "boundary_emphasized_probability_nonlinear",
         "figure_background": "dark_slate",
         "selection_rule": representative_selection_rule(),
@@ -216,7 +219,8 @@ def render_rnn_transition_report(
         "curated_probe_roles": [item.role for item in curated.selected],
         "curated_probe_texts": [item.trajectory.text for item in curated.selected],
         "curated_probe_notes": [item.note for item in curated.selected],
-        "background_probe_count": len(curated.background),
+        "local_neighbor_count": len(curated.local_neighbors),
+        "background_probe_count": len(curated.global_background),
         "trace_panel_background_mode": "held_out_state_cloud_plus_endpoints",
         "trace_marker_mode": "start_end_only",
         "transition_classification": assessment.classification,

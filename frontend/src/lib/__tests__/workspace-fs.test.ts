@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addWorkspaceArtifactsWithResult,
   addWorkspaceFilesWithResult,
   createWorkspaceFilesystem,
-  ensureDirectoryPath,
-  listDirectoryEntries,
-  normalizeAbsolutePath,
-  resolveWorkspacePath,
+  getWorkspaceContext,
+  listAllWorkspaceFileNodes,
+  removeWorkspaceEntry,
 } from "../workspace-fs";
 import type { LocalWorkspaceFile } from "../../types/report";
 
@@ -26,36 +26,85 @@ const SAMPLE_FILE: LocalWorkspaceFile = {
 };
 
 describe("workspace filesystem", () => {
-  it("normalizes root-safe absolute paths", () => {
-    expect(normalizeAbsolutePath("/reports/./2026")).toBe("/reports/2026");
-    expect(() => normalizeAbsolutePath("/../../escape")).toThrow("escape the root");
+  it("starts from an empty artifact catalog", () => {
+    const filesystem = createWorkspaceFilesystem();
+
+    expect(filesystem.artifacts_by_id).toEqual({});
+    expect(listAllWorkspaceFileNodes(filesystem)).toEqual([]);
   });
 
-  it("resolves relative paths from cwd", () => {
-    expect(resolveWorkspacePath("charts", "/reports")).toBe("/reports/charts");
-    expect(resolveWorkspacePath("../shared", "/reports/2026")).toBe("/reports/shared");
-  });
+  it("writes uploaded files into the uploaded bucket and dedupes sibling names", () => {
+    const first = addWorkspaceFilesWithResult(
+      createWorkspaceFilesystem(),
+      [SAMPLE_FILE],
+      "uploaded",
+      {
+        bucket: "uploaded",
+        producer_key: "uploaded",
+        producer_label: "Uploaded",
+      },
+    );
+    const second = addWorkspaceFilesWithResult(
+      first.filesystem,
+      [{ ...SAMPLE_FILE, id: "file-2" }],
+      "uploaded",
+      {
+        bucket: "uploaded",
+        producer_key: "uploaded",
+        producer_label: "Uploaded",
+      },
+    );
 
-  it("returns synthetic directories without persisting directory entries", () => {
-    const initial = createWorkspaceFilesystem();
-    const first = ensureDirectoryPath(initial, "/reports/2026");
-    const second = ensureDirectoryPath(first.filesystem, "/reports/2026");
-
-    expect(first.created).toBe(false);
-    expect(second.created).toBe(false);
-    expect(first.directory.id).toBe("dir:/reports/2026");
-    expect(second.directory.path).toBe("/reports/2026");
-    expect(listDirectoryEntries(second.filesystem, "/reports/2026")).toEqual([]);
-  });
-
-  it("writes uploaded files into the current directory and dedupes sibling names", () => {
-    const initial = ensureDirectoryPath(createWorkspaceFilesystem(), "/reports").filesystem;
-    const first = addWorkspaceFilesWithResult(initial, "/reports", [SAMPLE_FILE], "uploaded");
-    const second = addWorkspaceFilesWithResult(first.filesystem, "/reports", [SAMPLE_FILE], "uploaded");
-    const entryNames = listDirectoryEntries(second.filesystem, "/reports").map((entry) => entry.name);
+    const entryNames = listAllWorkspaceFileNodes(second.filesystem).map((entry) => entry.name);
 
     expect(first.files[0].name).toBe("sales.csv");
     expect(second.files[0].name).toBe("sales (2).csv");
     expect(entryNames).toEqual(["sales (2).csv", "sales.csv"]);
+  });
+
+  it("supports explicit artifact metadata for derived files", () => {
+    const result = addWorkspaceArtifactsWithResult(createWorkspaceFilesystem(), [
+      {
+        file: SAMPLE_FILE,
+        source: "derived",
+        bucket: "data",
+        producer_key: "csv-agent",
+        producer_label: "CSV Agent",
+      },
+    ]);
+
+    expect(listAllWorkspaceFileNodes(result.filesystem)).toEqual([
+      expect.objectContaining({
+        bucket: "data",
+        producer_key: "csv-agent",
+        producer_label: "CSV Agent",
+        source: "derived",
+        name: "sales.csv",
+      }),
+    ]);
+  });
+
+  it("removes artifacts cleanly and keeps workspace context in sync", () => {
+    const result = addWorkspaceFilesWithResult(
+      createWorkspaceFilesystem(),
+      [SAMPLE_FILE],
+      "demo",
+      {
+        bucket: "uploaded",
+        producer_key: "uploaded",
+        producer_label: "Uploaded",
+      },
+    );
+    const fileId = result.files[0]?.id ?? "";
+    const pruned = removeWorkspaceEntry(result.filesystem, fileId);
+
+    expect(getWorkspaceContext(result.filesystem, "demo")).toEqual({
+      workspace_id: "demo",
+      referenced_item_ids: [fileId],
+    });
+    expect(getWorkspaceContext(pruned, "demo")).toEqual({
+      workspace_id: "demo",
+      referenced_item_ids: [],
+    });
   });
 });

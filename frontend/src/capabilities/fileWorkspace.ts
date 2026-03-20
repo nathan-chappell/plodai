@@ -2,46 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppState } from "../app/context";
 import { useWorkspaceSurface } from "../app/workspace";
-import { listAllWorkspaceFileNodes } from "../lib/workspace-fs";
+import { listAllWorkspaceFileNodes, removeWorkspaceEntry } from "../lib/workspace-fs";
 import { loadCapabilityWorkspace, type CapabilityWorkspaceSnapshot } from "../lib/workspace-store";
-import type { ClientEffect, ExecutionMode } from "../types/analysis";
+import type { ClientEffect } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import { useWorkspaceContract } from "./shared/useWorkspaceContract";
 import {
   buildWorkspaceStateMetadata,
-  isVisibleWorkspaceStatePath,
+  pruneWorkspacePdfSmartSplitBundles,
+  readWorkspacePdfSmartSplitBundles,
   syncWorkspaceToolCatalog,
 } from "../lib/workspace-contract";
 import type { ShellWorkspaceArtifact } from "./types";
-import { capabilityDefinitions } from "./definitions";
-
-const producerLabelById = new Map(
-  capabilityDefinitions.map((capability) => [capability.id, capability.navLabel]),
-);
-
-function resolveArtifactProducer(path: string, source: ShellWorkspaceArtifact["source"]): {
-  producerKey: string;
-  producerLabel: string;
-} {
-  const segments = path.split("/").filter(Boolean);
-  const firstSegment = segments[0];
-  if (source === "uploaded" || firstSegment === "uploaded") {
-    return {
-      producerKey: "uploaded",
-      producerLabel: "Uploaded",
-    };
-  }
-  if (firstSegment && producerLabelById.has(firstSegment)) {
-    return {
-      producerKey: firstSegment,
-      producerLabel: producerLabelById.get(firstSegment) ?? firstSegment,
-    };
-  }
-  return {
-    producerKey: firstSegment ?? "workspace",
-    producerLabel: firstSegment ? firstSegment.replace(/-/g, " ") : "Workspace",
-  };
-}
 
 export function useCapabilityFileWorkspace(options: {
   capabilityId: string;
@@ -49,13 +21,11 @@ export function useCapabilityFileWorkspace(options: {
   defaultStatus: string;
   defaultBrief: string;
   defaultTab: string;
-  defaultExecutionMode?: ExecutionMode;
   allowedTabs: string[];
 }) {
   const { user } = useAppState();
   const workspace = useWorkspaceSurface({
     surfaceKey: options.capabilityId,
-    defaultCwdPath: `/${options.capabilityId}/`,
   });
   const allowedTabsKey = options.allowedTabs.join("|");
   const [status, setStatus] = useState(options.defaultStatus);
@@ -108,7 +78,6 @@ export function useCapabilityFileWorkspace(options: {
     allowedTabsKey,
     options.capabilityId,
     options.defaultBrief,
-    options.defaultExecutionMode,
     options.defaultStatus,
     options.defaultTab,
     user,
@@ -120,14 +89,12 @@ export function useCapabilityFileWorkspace(options: {
   );
   const contract = useWorkspaceContract({
     workspace: {
-      activePrefix: workspace.activePrefix,
-      cwdPath: workspace.cwdPath,
+      capabilityId: options.capabilityId,
+      capabilityTitle: options.capabilityTitle,
+      workspaceId: workspace.selectedWorkspaceId,
       files: workspace.files,
       entries: workspace.entries,
       workspaceContext: workspace.workspaceContext,
-      setActivePrefix: workspace.setActivePrefix,
-      createDirectory: workspace.createDirectory,
-      changeDirectory: workspace.changeDirectory,
       updateFilesystem: workspace.updateFilesystem,
       getState: workspace.getState,
     },
@@ -136,7 +103,6 @@ export function useCapabilityFileWorkspace(options: {
     defaultGoal: options.defaultBrief,
     defaultTab: options.defaultTab,
     allowedTabs: options.allowedTabs,
-    defaultExecutionMode: options.defaultExecutionMode ?? "interactive",
     legacySnapshot,
   });
 
@@ -260,10 +226,12 @@ export function useCapabilityFileWorkspace(options: {
   }, [workspace.replaceFiles]);
 
   const handleRemoveEntry = useCallback((entryId: string) => {
-    workspace.handleRemoveEntry(entryId);
+    workspace.updateFilesystem((filesystem) =>
+      pruneWorkspacePdfSmartSplitBundles(removeWorkspaceEntry(filesystem, entryId)),
+    );
     setReportEffects([]);
     setStatus("Removed the selected workspace entry.");
-  }, [workspace.handleRemoveEntry]);
+  }, [setReportEffects, setStatus, workspace.updateFilesystem]);
 
   const syncToolCatalog = useCallback((toolNames: string[]) => {
     workspace.updateFilesystem((filesystem) =>
@@ -281,36 +249,33 @@ export function useCapabilityFileWorkspace(options: {
   const artifacts = useMemo<ShellWorkspaceArtifact[]>(
     () =>
       listAllWorkspaceFileNodes(workspace.filesystem)
-        .filter((node) => isVisibleWorkspaceStatePath(node.path))
-        .map((node) => {
-          const producer = resolveArtifactProducer(node.path, node.source);
-          return {
-            entryId: node.id,
-            path: node.path,
-            createdAt: node.created_at,
-            source: node.source,
-            producerKey: producer.producerKey,
-            producerLabel: producer.producerLabel,
-            file: node.file,
-          };
-        }),
+        .map((node) => ({
+          entryId: node.id,
+          createdAt: node.created_at,
+          bucket: node.bucket,
+          source: node.source,
+          producerKey: node.producer_key,
+          producerLabel: node.producer_label,
+          file: node.file,
+        })),
+    [workspace.filesystem],
+  );
+  const smartSplitBundles = useMemo(
+    () => readWorkspacePdfSmartSplitBundles(workspace.filesystem),
     [workspace.filesystem],
   );
 
   const workspaceStateMetadata = buildWorkspaceStateMetadata(
     workspace.filesystem,
-    workspace.activePrefix,
+    workspace.selectedWorkspaceId,
   );
 
   return {
-    activePrefix: workspace.activePrefix,
-    cwdPath: workspace.cwdPath,
     filesystem: workspace.filesystem,
     entries: workspace.entries,
     files: workspace.files,
     workspaceContext: workspace.workspaceContext,
     workspaceHydrated: workspace.hydrated,
-    breadcrumbs: workspace.breadcrumbs,
     getState: workspace.getState,
     workspaces: workspace.workspaces,
     selectedWorkspaceId: workspace.selectedWorkspaceId,
@@ -322,14 +287,13 @@ export function useCapabilityFileWorkspace(options: {
     setFiles,
     appendFiles,
     artifacts,
+    smartSplitBundles,
     status,
     setStatus,
     investigationBrief: contract.investigationBrief,
     setInvestigationBrief: contract.setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
-    executionMode: contract.executionMode,
-    setExecutionMode: contract.setExecutionMode,
     reportEffects,
     setReportEffects,
     appendReportEffects,
@@ -344,9 +308,6 @@ export function useCapabilityFileWorkspace(options: {
     syncToolCatalog,
     handleFiles,
     handleRemoveEntry,
-    createDirectory: workspace.createDirectory,
-    changeDirectory: workspace.changeDirectory,
-    setActivePrefix: workspace.setActivePrefix,
     updateFilesystem: workspace.updateFilesystem,
   };
 }

@@ -14,6 +14,11 @@ import blog.scripts.neural_dynamics_artifacts as demo
 import blog.scripts.precision_story_artifacts as precision_story
 
 
+def _hamming_distance(left: str, right: str) -> int:
+    assert len(left) == len(right)
+    return sum(a != b for a, b in zip(left, right, strict=True))
+
+
 @pytest.fixture(scope="module")
 def small_rnn_result() -> demo.RNNExperimentResult:
     return demo.run_rnn_experiment(
@@ -84,13 +89,13 @@ def test_precision_story_figure_uses_matplotlib_layout_and_precision_annotations
     figure = demo.build_precision_story_figure(demo.build_precision_story_payload())
 
     assert isinstance(figure, Figure)
-    assert len(figure.axes) == 2
+    assert len(figure.axes) == 1
     assert figure._suptitle is not None
     axis_text = [text.get_text() for text in figure.axes[0].texts]
     assert "Binary counting sweep through Cantor dust" in figure._suptitle.get_text()
     assert axis_text == []
-    assert figure.axes[1].get_title(loc="left") == "Step distance by lag"
-    assert figure.axes[1].get_xlabel() == "Euclidean step distance"
+    assert figure.axes[0].get_xlabel() == "q(L) · left-stack coordinate"
+    assert figure.axes[0].get_ylabel() == "q(R) · right-stack coordinate"
 
 
 def test_article_uses_repo_relative_asset_links() -> None:
@@ -98,10 +103,10 @@ def test_article_uses_repo_relative_asset_links() -> None:
         "blog/15-03-2026-the-theoretical-justification-of-neural-networks/article.md"
     ).read_text(encoding="utf-8")
 
-    assert "../../frontend/public/blog-assets/theoretical-justification-of-neural-networks/mlp-sine-story.svg" in article
-    assert "../../frontend/public/blog-assets/theoretical-justification-of-neural-networks/stack-cantor-dust-story.svg" in article
-    assert "../../frontend/public/blog-assets/theoretical-justification-of-neural-networks/rnn-training-story.svg" in article
-    assert "](/blog-assets/theoretical-justification-of-neural-networks/" not in article
+    assert "./assets/mlp-sine-story.svg" in article
+    assert "./assets/stack-cantor-dust-story.svg" in article
+    assert "./assets/rnn-training-story.svg" in article
+    assert article.count("./assets/") == 3
 
 
 def test_story_probe_pool_uses_balanced_family_slice() -> None:
@@ -207,16 +212,30 @@ def test_curated_probe_bundle_uses_long_held_out_examples(
         "off-by-one example",
     ]
     assert bundle.ordinary_reference.actual_valid
-    assert len(bundle.background) == 96
+    assert len(bundle.local_neighbors) == 10
+    assert len(bundle.global_background) == 96
     assert all(len(item.trajectory.text) in {20, 30} for item in bundle.selected)
     assert all(
         item.trajectory.text not in small_rnn_result.training_texts
         for item in bundle.selected
     )
+    watched_text = bundle.selected[0].trajectory.text
+    assert all(
+        len(probe.text) == len(watched_text)
+        and _hamming_distance(probe.text, watched_text) == 1
+        for probe in bundle.local_neighbors
+    )
+    assert all(
+        probe.text not in small_rnn_result.training_texts
+        for probe in bundle.local_neighbors
+    )
     assert bundle.boundary_reference.label not in {
         item.trajectory.label for item in bundle.selected
     }
-    assert bundle.watchlist_mode == "curated_long_held_out_plus_balanced_background"
+    assert (
+        bundle.watchlist_mode
+        == "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field"
+    )
 
 
 def test_build_transition_figure_includes_trace_panels_and_endpoint_context(
@@ -255,7 +274,8 @@ def test_build_transition_figure_includes_trace_panels_and_endpoint_context(
     figure = build_transition_figure(
         result=small_rnn_result,
         selected=bundle.selected,
-        background=bundle.background,
+        local_neighbors=bundle.local_neighbors,
+        global_background=bundle.global_background,
         phase_spans=small_rnn_result.phase_spans,
         assessment=assessment,
     )
@@ -294,7 +314,11 @@ def test_render_rnn_transition_report_produces_static_report_bundle(
     assert manifest["report_layout"] == "trace_panels_plus_transition_field"
     assert manifest["transition_classification"] in {"abrupt", "gradual", "absent"}
     assert len(manifest["representative_probes"]) == 1
-    assert manifest["watchlist_mode"] == "curated_long_held_out_plus_balanced_background"
+    assert (
+        manifest["watchlist_mode"]
+        == "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field"
+    )
+    assert manifest["local_neighbor_count"] == 10
     assert manifest["background_probe_count"] == 96
     assert (
         manifest["trace_panel_background_mode"]
@@ -477,19 +501,26 @@ def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
     assert manifest["rnn"]["dynamics"] == "phased_resampled_counterexample_shocks"
     assert manifest["rnn"]["optimizer"] == "adamw"
     assert manifest["rnn"]["learning_rate_schedule"] == "phase_restart_cosine_decay"
-    assert manifest["rnn"]["story_plot_sampling"] == "curated_watchlist_plus_balanced_background"
-    assert manifest["rnn"]["story_plot_probe_count"] == 97
+    assert (
+        manifest["rnn"]["story_plot_sampling"]
+        == "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field"
+    )
+    assert manifest["rnn"]["story_plot_probe_count"] == 107
     assert manifest["rnn"]["report_backend"] == "matplotlib"
     assert manifest["rnn"]["report_layout"] == "trace_panels_plus_transition_field"
     assert manifest["rnn"]["story_value_transform"] == "boundary_emphasized_probability_nonlinear"
     assert manifest["rnn"]["figure_background"] == "dark_slate"
     assert len(manifest["rnn"]["representative_probes"]) == 1
-    assert manifest["rnn"]["watchlist_mode"] == "curated_long_held_out_plus_balanced_background"
+    assert (
+        manifest["rnn"]["watchlist_mode"]
+        == "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field"
+    )
     assert manifest["rnn"]["curated_probe_roles"] == [
         "off-by-one example",
     ]
     assert len(manifest["rnn"]["curated_probe_texts"]) == 1
     assert len(manifest["rnn"]["curated_probe_notes"]) == 1
+    assert manifest["rnn"]["local_neighbor_count"] == 10
     assert manifest["rnn"]["background_probe_count"] == 96
     assert (
         manifest["rnn"]["trace_panel_background_mode"]

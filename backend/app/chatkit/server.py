@@ -9,7 +9,6 @@ import random
 import re
 from hashlib import sha256
 from typing import Any, AsyncIterator, Literal, cast
-from uuid import uuid4
 
 from agents import Runner
 from chatkit.actions import Action
@@ -25,7 +24,6 @@ from chatkit.types import (
     SyncCustomActionResponse,
     ThreadItem,
     ThreadItemRemovedEvent,
-    ThreadItemReplacedEvent,
     ThreadMetadata,
     ThreadStreamEvent,
     TranscriptionResult,
@@ -55,18 +53,13 @@ from backend.app.chatkit.client_tools import (
     ClientToolResultPayload,
     coerce_client_tool_result,
 )
-from backend.app.chatkit.batch_continuation import (
-    build_batch_continuation_progress_text,
-    decide_batch_continuation,
-)
 from backend.app.chatkit.feedback_types import (
-    CancelFeedbackDetailsPayload,
-    ChatItemFeedbackRecord,
-    FeedbackOrigin,
-    SubmitFeedbackDetailsPayload,
+    CancelFeedbackSessionPayload,
+    SubmitFeedbackSessionPayload,
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
+    PendingFeedbackSession,
     ThreadMetadataPatch,
     merge_thread_metadata,
     parse_thread_metadata,
@@ -91,7 +84,6 @@ from backend.app.core.logging import (
     summarize_sequence_for_log,
 )
 from backend.app.db.session import get_db
-from backend.app.models.chatkit import ChatItemFeedback
 from backend.app.services.credit_service import CreditService
 
 logger = get_logger("chatkit.server")
@@ -104,7 +96,6 @@ MODEL_ALIASES = {
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
 MAX_AGENT_TURNS = 30
-MAX_BATCH_CONTINUATIONS = 3
 RATE_LIMIT_RETRY_PATTERN = re.compile(
     r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
     re.IGNORECASE,
@@ -140,16 +131,26 @@ def _format_cost_usd(value: float | None) -> str | None:
     return text or "0"
 
 
-def _usage_line(usage: object) -> str | None:
-    if not isinstance(usage, dict):
-        return None
-    return summarize_pairs_for_log(
-        (
-            ("input", usage.get("input_tokens", 0)),
-            ("output", usage.get("output_tokens", 0)),
-            ("cost_usd", _format_cost_usd(float(usage.get("cost_usd", 0.0)))),
+def _usage_line(usage: object, *, model: str | None = None) -> str | None:
+    fields: list[tuple[str, object]] = []
+    if model:
+        fields.append(("model", model))
+    if isinstance(usage, dict):
+        fields.extend(
+            (
+                ("input", usage.get("input_tokens", 0)),
+                ("output", usage.get("output_tokens", 0)),
+                ("cost_usd", _format_cost_usd(float(usage.get("cost_usd", 0.0)))),
+            )
         )
-    )
+    return summarize_pairs_for_log(fields)
+
+
+def _normalize_feedback_message(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 def _result_line(result: ClientToolResultPayload | None) -> str | None:
@@ -185,9 +186,11 @@ def _summarize_client_tool_result_for_log(
         summary["rows"] = len(rows)
     if isinstance(result.get("imageDataUrl") or result.get("image_data_url"), str):
         summary["has_image"] = True
-    path_prefix = result.get("path_prefix")
-    if isinstance(path_prefix, str) and path_prefix:
-        summary["path_prefix"] = path_prefix
+    workspace_context = result.get("workspace_context")
+    if isinstance(workspace_context, dict):
+        workspace_id = workspace_context.get("workspace_id")
+        if isinstance(workspace_id, str) and workspace_id:
+            summary["workspace_id"] = workspace_id
     file_input = result.get("file_input")
     if isinstance(file_input, dict):
         summary["has_file_input"] = True
@@ -465,6 +468,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "respond.start",
+            logs=_logs_link(conversation_id),
             context=_context_line(user_id=context.user_id, thread_id=thread.id),
             run=summarize_pairs_for_log(
                 (
@@ -475,7 +479,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 )
             ),
             dataset_ids=summarize_sequence_for_log(context.dataset_ids),
-            logs=_logs_link(conversation_id),
         )
 
         agent = build_registered_agent(context, model=requested_model)
@@ -484,7 +487,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         )
         max_retries = max(0, self.settings.openai_max_retries)
         next_agent_input = agent_input
-        continuation_count = 0
         final_response_id: str | None = None
         final_conversation_id = conversation_id
         updated_usage = typed_metadata.get("usage")
@@ -514,6 +516,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         self.logger,
                         logging.WARNING,
                         "respond.retry",
+                        logs=_logs_link(conversation_id),
                         context=_context_line(
                             user_id=context.user_id, thread_id=thread.id
                         ),
@@ -523,7 +526,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                                 ("delay_seconds", f"{retry_delay_seconds:.3f}"),
                             )
                         ),
-                        logs=_logs_link(conversation_id),
                         error=str(exc),
                     )
                     yield ProgressUpdateEvent(
@@ -602,7 +604,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         "openai_conversation_id": result_conversation_id,
                         "openai_previous_response_id": result_response_id,
                         "chart_cache": context.chart_cache,
-                        "execution_mode": context.execution_mode,
                         "usage": updated_usage,
                     },
                 ),
@@ -615,55 +616,15 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             final_conversation_id = result_conversation_id
             final_response_id = result_response_id
 
-            if context.execution_mode == "batch":
-                latest_assistant_text = await self._latest_assistant_message_text(
-                    thread.id,
-                    context,
-                )
-                if latest_assistant_text is None:
-                    break
-                decision = await decide_batch_continuation(
-                    capability_id=context.capability_id,
-                    investigation_brief=typed_metadata.get("investigation_brief"),
-                    latest_assistant_text=latest_assistant_text,
-                )
-                progress_text = build_batch_continuation_progress_text(decision)
-                if progress_text:
-                    yield ProgressUpdateEvent(text=progress_text)
-                if decision.should_continue:
-                    if continuation_count >= MAX_BATCH_CONTINUATIONS:
-                        yield ProgressUpdateEvent(
-                            text=(
-                                "Batch continuation stopped after reaching the safety cap "
-                                f"of {MAX_BATCH_CONTINUATIONS} follow-on runs."
-                            )
-                        )
-                        break
-                    continuation_count += 1
-                    next_agent_input = decision.next_input or ""
-                    log_event(
-                        self.logger,
-                        logging.INFO,
-                        "respond.batch_continue",
-                        context=_context_line(
-                            user_id=context.user_id, thread_id=thread.id
-                        ),
-                        logs=_logs_link(result_response_id, result_conversation_id),
-                        continuation_count=continuation_count,
-                        reason=decision.reason,
-                    )
-                    continue
-
             break
 
         log_event(
             self.logger,
             logging.INFO,
             "respond.end",
-            context=_context_line(user_id=context.user_id, thread_id=thread.id),
-            model=requested_model,
             logs=_logs_link(final_response_id, final_conversation_id),
-            usage=_usage_line(updated_usage),
+            context=_context_line(user_id=context.user_id, thread_id=thread.id),
+            usage=_usage_line(updated_usage, model=requested_model),
         )
 
     def _resolve_requested_model(
@@ -710,8 +671,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             self.logger,
             logging.INFO,
             "respond.conversation_created",
-            context=_context_line(user_id=context.user_id, thread_id=thread.id),
             logs=_logs_link(conversation.id),
+            context=_context_line(user_id=context.user_id, thread_id=thread.id),
         )
         return conversation.id
 
@@ -854,104 +815,14 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 return [item.id]
         return []
 
-    async def _latest_assistant_message_text(
-        self,
-        thread_id: str,
-        context: ReportAgentContext,
-        *,
-        limit: int = 20,
-    ) -> str | None:
-        recent_items = await self.store.load_thread_items(
-            thread_id,
-            after=None,
-            limit=limit,
-            order="desc",
-            context=context,
-        )
-        return self._extract_batch_continuation_assistant_text(recent_items.data)
-
     @staticmethod
-    def _extract_batch_continuation_assistant_text(
-        recent_items: list[ThreadItem],
-    ) -> str | None:
-        for item in recent_items:
-            if item.type == "client_tool_call":
-                return None
-            if item.type != "assistant_message":
-                continue
-            text = " ".join(
-                content.text.strip()
-                for content in item.content
-                if getattr(content, "text", "").strip()
-            ).strip()
-            return text or None
-        return None
-
-    async def create_feedback_draft(
-        self,
-        *,
-        thread_id: str,
-        item_ids: list[str],
-        context: ReportAgentContext,
-        kind: str | None = None,
-        label: str | None = None,
-        message: str | None = None,
-    ) -> ChatItemFeedbackRecord:
-        normalized_email = (
-            context.user_email.strip().lower()
-            if isinstance(context.user_email, str) and context.user_email.strip()
-            else None
-        )
-        origin = cast(
-            FeedbackOrigin,
-            context.thread_metadata.get("origin") or "interactive",
-        )
-        feedback = ChatItemFeedback(
-            id=f"fb_{uuid4().hex}",
-            thread_id=thread_id,
-            item_ids_json=list(item_ids),
-            user_email=normalized_email,
-            kind=kind if kind in {"positive", "negative"} else None,
-            label=label if label in {"ui", "tools", "behavior"} else None,
-            message=message.strip()
-            if isinstance(message, str) and message.strip()
-            else None,
-            origin=origin,
-        )
-        self.db.add(feedback)
-        await self.db.commit()
-        return ChatItemFeedbackRecord(
-            id=feedback.id,
-            thread_id=feedback.thread_id,
-            item_ids=list(feedback.item_ids_json),
-            user_email=feedback.user_email,
-            kind=feedback.kind,
-            label=feedback.label,
-            message=feedback.message,
-            origin=feedback.origin,
-        )
-
-    async def get_feedback_record(self, feedback_id: str) -> ChatItemFeedback | None:
-        return await self.db.get(ChatItemFeedback, feedback_id)
-
-    async def delete_feedback_record(self, feedback: ChatItemFeedback) -> None:
-        await self.db.delete(feedback)
-        await self.db.commit()
-
-    async def update_feedback_record(
-        self,
-        feedback: ChatItemFeedback,
-        payload: SubmitFeedbackDetailsPayload,
-    ) -> ChatItemFeedback:
-        feedback.kind = payload.kind
-        feedback.label = payload.label
-        feedback.message = (
-            payload.message.strip()
-            if payload.message and payload.message.strip()
-            else None
-        )
-        await self.db.commit()
-        return feedback
+    def _feedback_session_from_metadata(
+        metadata: object,
+    ) -> PendingFeedbackSession | None:
+        if not isinstance(metadata, dict):
+            return None
+        session = metadata.get("feedback_session")
+        return cast(PendingFeedbackSession, session) if isinstance(session, dict) else None
 
     def _collect_pending_items(
         self,
@@ -1006,84 +877,81 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
 
-        if action.type == "submit_feedback_details" and sender is not None:
-            payload = TypeAdapter(SubmitFeedbackDetailsPayload).validate_python(
+        if action.type == "submit_feedback_session" and sender is not None:
+            payload = TypeAdapter(SubmitFeedbackSessionPayload).validate_python(
                 action.payload or {}
             )
-            feedback = await self.get_feedback_record(payload.feedback_id)
-            if feedback is None:
-                yield ProgressUpdateEvent(text="Feedback draft was not found.")
+            current_metadata = parse_thread_metadata(thread.metadata)
+            session = self._feedback_session_from_metadata(current_metadata)
+            if session is None or session.get("session_id") != payload.session_id:
+                yield ProgressUpdateEvent(text="Feedback session was not found.")
                 return
-            await self.update_feedback_record(feedback, payload)
+            selected_option = _normalize_feedback_message(payload.selected_option)
+            message = _normalize_feedback_message(payload.message)
+            final_message = message
+            if final_message is None and selected_option in session["recommended_options"]:
+                final_message = selected_option
+            if final_message is None:
+                yield ProgressUpdateEvent(
+                    text="Choose one of the suggested notes or write a short feedback message before saving."
+                )
+                return
+            final_sentiment = payload.sentiment
+            if final_sentiment not in {"positive", "negative"}:
+                final_sentiment = session.get("inferred_sentiment")
+            if final_sentiment not in {"positive", "negative"}:
+                yield ProgressUpdateEvent(
+                    text="Choose Positive or Negative before saving feedback."
+                )
+                return
+            updated_session: PendingFeedbackSession = {
+                **session,
+                "message_draft": final_message,
+                "inferred_sentiment": final_sentiment,
+            }
+            merged_metadata = merge_thread_metadata(
+                current_metadata,
+                cast(ThreadMetadataPatch, {"feedback_session": updated_session}),
+            )
+            thread.metadata = dict(merged_metadata)
+            context.thread_metadata = merged_metadata
+            await self.store.save_thread(thread, context=context)
             log_event(
                 self.logger,
                 logging.INFO,
-                "feedback.submitted",
+                "feedback.confirmed",
                 context=_context_line(user_id=context.user_id, thread_id=thread.id),
                 feedback=summarize_pairs_for_log(
                     (
-                        ("id", feedback.id),
-                        ("kind", feedback.kind),
-                        ("label", feedback.label),
-                        ("origin", feedback.origin),
-                        (
-                            "item_ids",
-                            summarize_sequence_for_log(feedback.item_ids_json),
-                        ),
+                        ("session_id", payload.session_id),
+                        ("sentiment", final_sentiment),
+                        ("item_ids", summarize_sequence_for_log(session["item_ids"])),
                     )
                 ),
             )
-            yield ThreadItemReplacedEvent(
-                item=sender.model_copy(
-                    update={
-                        "widget": {
-                            "type": "Card",
-                            "size": "sm",
-                            "status": {
-                                "text": "Feedback saved",
-                                "icon": "check-circle",
-                            },
-                            "children": [
-                                {
-                                    "type": "Badge",
-                                    "label": "Feedback",
-                                    "color": "success",
-                                    "variant": "soft",
-                                    "pill": True,
-                                    "size": "sm",
-                                },
-                                {
-                                    "type": "Title",
-                                    "value": "Thanks for the feedback",
-                                    "size": "sm",
-                                },
-                                {
-                                    "type": "Caption",
-                                    "value": "The feedback agent saved your notes for this thread.",
-                                    "color": "secondary",
-                                    "size": "sm",
-                                },
-                            ],
-                        },
-                        "copy_text": "Feedback saved.",
-                    }
-                )
-            )
+            yield ThreadItemRemovedEvent(item_id=sender.id)
             return
 
-        if action.type == "cancel_feedback_details" and sender is not None:
-            payload = TypeAdapter(CancelFeedbackDetailsPayload).validate_python(
+        if action.type == "cancel_feedback_session" and sender is not None:
+            payload = TypeAdapter(CancelFeedbackSessionPayload).validate_python(
                 action.payload or {}
             )
-            feedback = await self.get_feedback_record(payload.feedback_id)
-            if feedback is not None:
-                await self.delete_feedback_record(feedback)
+            current_metadata = parse_thread_metadata(thread.metadata)
+            session = self._feedback_session_from_metadata(current_metadata)
+            if session is not None and session.get("session_id") == payload.session_id:
+                merged_metadata = merge_thread_metadata(
+                    current_metadata,
+                    cast(ThreadMetadataPatch, {"feedback_session": None}),
+                )
+                thread.metadata = dict(merged_metadata)
+                context.thread_metadata = merged_metadata
+                await self.store.save_thread(thread, context=context)
                 log_event(
                     self.logger,
                     logging.INFO,
                     "feedback.cancelled",
                     context=_context_line(user_id=context.user_id, thread_id=thread.id),
-                    feedback_id=payload.feedback_id,
+                    session_id=payload.session_id,
                 )
             yield ThreadItemRemovedEvent(item_id=sender.id)
             return

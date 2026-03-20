@@ -58,6 +58,104 @@ export type CapabilityQuickViewRenderArgs = {
   selectArtifact: (entryId: string) => void;
 };
 
+export type CapabilityQuickViewFact = {
+  key: string;
+  value: string;
+};
+
+function pluralize(count: number, label: string): string {
+  return `${count} ${label}${count === 1 ? "" : "s"}`;
+}
+
+function quickViewFileKindLabel(file: LocalWorkspaceFile): string {
+  switch (file.kind) {
+    case "csv":
+      return "CSV";
+    case "json":
+      return "JSON";
+    case "pdf":
+      return "PDF";
+    case "other":
+      return file.extension ? `${file.extension.toUpperCase()} file` : "File";
+  }
+}
+
+function artifactSourceLabel(
+  source: ShellWorkspaceArtifact["source"],
+): string {
+  switch (source) {
+    case "uploaded":
+      return "Uploaded file";
+    case "derived":
+      return "Derived artifact";
+    case "demo":
+      return "Demo artifact";
+  }
+}
+
+function dedupeCapabilityQuickViewFacts(
+  facts: CapabilityQuickViewFact[],
+): CapabilityQuickViewFact[] {
+  const seen = new Set<string>();
+  const deduped: CapabilityQuickViewFact[] = [];
+  for (const fact of facts) {
+    const value = fact.value.trim();
+    if (!value) {
+      continue;
+    }
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push({ ...fact, value });
+  }
+  return deduped;
+}
+
+export function buildCapabilityQuickViewFacts(
+  artifact: ShellWorkspaceArtifact,
+  options: {
+    extraFacts?: CapabilityQuickViewFact[];
+    includeSource?: boolean;
+  } = {},
+): CapabilityQuickViewFact[] {
+  const file = artifact.file;
+  const chartArtifact = parseSavedChartArtifact(file);
+  const facts: CapabilityQuickViewFact[] = [
+    {
+      key: "kind",
+      value: chartArtifact ? "Saved chart" : quickViewFileKindLabel(file),
+    },
+  ];
+
+  if (typeof file.byte_size === "number") {
+    facts.push({ key: "size", value: formatByteSize(file.byte_size) });
+  }
+
+  if (file.kind === "csv" || file.kind === "json") {
+    facts.push({ key: "rows", value: pluralize(file.row_count, "row") });
+    facts.push({
+      key: "columns",
+      value: pluralize(file.columns.length, "column"),
+    });
+  }
+
+  if (file.kind === "pdf") {
+    facts.push({ key: "pages", value: pluralize(file.page_count, "page") });
+  }
+
+  if (options.extraFacts?.length) {
+    facts.push(...options.extraFacts);
+  }
+
+  if (options.includeSource ?? true) {
+    facts.push({ key: "source", value: artifactSourceLabel(artifact.source) });
+  }
+
+  return dedupeCapabilityQuickViewFacts(facts);
+}
+
 export function summarizeQuickViewArtifactMeta(
   artifact: ShellWorkspaceArtifact,
 ): string {
@@ -158,18 +256,6 @@ export function renderDefaultCapabilityQuickViewPreview({
 
     return (
       <QuickPreviewSection>
-        <QuickPreviewSectionHeader>
-          <strong>Table preview</strong>
-          <MetaText>Showing captured preview rows for this CSV result.</MetaText>
-        </QuickPreviewSectionHeader>
-        <QuickPreviewMetaRow>
-          <QuickPreviewMetaChip>{file.row_count} rows</QuickPreviewMetaChip>
-          <QuickPreviewMetaChip>{file.columns.length} columns</QuickPreviewMetaChip>
-          <QuickPreviewMetaChip>
-            {file.numeric_columns.length} numeric
-          </QuickPreviewMetaChip>
-        </QuickPreviewMetaRow>
-        <MetaText>Columns: {file.columns.join(", ")}</MetaText>
         <QuickPreviewTableScroller>
           <QuickPreviewTable>
             <thead>
@@ -220,19 +306,9 @@ export function renderDefaultCapabilityQuickViewPreview({
   if (file.kind === "json") {
     return (
       <QuickPreviewSection>
-        <QuickPreviewSectionHeader>
-          <strong>JSON preview</strong>
-          <MetaText>
-            Showing the first {Math.min(file.row_count, JSON_PREVIEW_LIMIT)} rows.
-          </MetaText>
-        </QuickPreviewSectionHeader>
-        <QuickPreviewMetaRow>
-          <QuickPreviewMetaChip>{file.row_count} rows</QuickPreviewMetaChip>
-          <QuickPreviewMetaChip>{file.columns.length} columns</QuickPreviewMetaChip>
-          <QuickPreviewMetaChip>
-            {formatByteSize(file.byte_size ?? 0)}
-          </QuickPreviewMetaChip>
-        </QuickPreviewMetaRow>
+        <MetaText>
+          Showing the first {Math.min(file.row_count, JSON_PREVIEW_LIMIT)} rows.
+        </MetaText>
         <QuickPreviewCode>
           {JSON.stringify(file.rows.slice(0, JSON_PREVIEW_LIMIT), null, 2)}
         </QuickPreviewCode>
@@ -244,15 +320,9 @@ export function renderDefaultCapabilityQuickViewPreview({
     return (
       <QuickPreviewSection>
         <QuickPreviewSectionHeader>
-          <strong>PDF summary</strong>
+          <strong>PDF preview</strong>
           <MetaText>Open this PDF in a new tab for the full document.</MetaText>
         </QuickPreviewSectionHeader>
-        <QuickPreviewMetaRow>
-          <QuickPreviewMetaChip>{file.page_count} pages</QuickPreviewMetaChip>
-          <QuickPreviewMetaChip>
-            {formatByteSize(file.byte_size ?? 0)}
-          </QuickPreviewMetaChip>
-        </QuickPreviewMetaRow>
       </QuickPreviewSection>
     );
   }
@@ -260,13 +330,10 @@ export function renderDefaultCapabilityQuickViewPreview({
   if (file.text_content != null) {
     return (
       <QuickPreviewSection>
-        <QuickPreviewSectionHeader>
-          <strong>Text preview</strong>
-          <MetaText>
-            Showing the first{" "}
-            {Math.min(file.text_content.length, TEXT_PREVIEW_LIMIT)} characters.
-          </MetaText>
-        </QuickPreviewSectionHeader>
+        <MetaText>
+          Showing the first{" "}
+          {Math.min(file.text_content.length, TEXT_PREVIEW_LIMIT)} characters.
+        </MetaText>
         <QuickPreviewText>
           {file.text_content.slice(0, TEXT_PREVIEW_LIMIT)}
         </QuickPreviewText>
@@ -277,7 +344,7 @@ export function renderDefaultCapabilityQuickViewPreview({
   return (
     <QuickPreviewSection>
       <QuickPreviewSectionHeader>
-        <strong>Binary file</strong>
+        <strong>Preview unavailable</strong>
         <MetaText>Download this file to inspect it locally.</MetaText>
       </QuickPreviewSectionHeader>
     </QuickPreviewSection>
@@ -290,71 +357,47 @@ export function buildFolderRowsFromArtifacts(
     stripPrefixes?: string[];
   } = {},
 ): CapabilityQuickViewRow[] {
-  const root: TreeFolder = {
-    label: "root",
-    folders: new Map(),
-    files: [],
-  };
+  void options;
 
+  const groupEntries = new Map<string, ShellWorkspaceArtifact[]>();
   for (const artifact of artifacts) {
-    const relativeSegments = relativeArtifactSegments(
-      artifact.path,
-      options.stripPrefixes ?? [],
-    );
-    const folderSegments = relativeSegments.slice(0, -1);
-    let cursor = root;
-    for (const segment of folderSegments) {
-      const existing = cursor.folders.get(segment);
-      if (existing) {
-        cursor = existing;
-        continue;
-      }
-      const nextFolder: TreeFolder = {
-        label: segment,
-        folders: new Map(),
-        files: [],
-      };
-      cursor.folders.set(segment, nextFolder);
-      cursor = nextFolder;
-    }
-    cursor.files.push(artifact);
+    const key = `${artifact.bucket}:${artifact.producerKey}`;
+    const current = groupEntries.get(key) ?? [];
+    current.push(artifact);
+    groupEntries.set(key, current);
   }
 
-  function flatten(
-    folder: TreeFolder,
-    depth: number,
-    parentKey: string,
-  ): CapabilityQuickViewRow[] {
-    const rows: CapabilityQuickViewRow[] = [];
-    const folderEntries = Array.from(folder.folders.entries()).sort(
-      ([left], [right]) => left.localeCompare(right),
-    );
-    for (const [folderName, childFolder] of folderEntries) {
-      const key = `${parentKey}/${folderName}`;
+  const groups = Array.from(groupEntries.entries()).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  const showGroupHeaders = groups.length > 1;
+  const rows: CapabilityQuickViewRow[] = [];
+
+  for (const [groupKey, groupArtifacts] of groups) {
+    if (showGroupHeaders) {
+      const [bucket, producerKey] = groupKey.split(":");
+      const leadArtifact = groupArtifacts[0];
       rows.push({
         kind: "folder",
-        key,
-        label: childFolder.label,
-        depth,
+        key: `${groupKey}:header`,
+        label: `${leadArtifact.producerLabel} · ${bucketLabel(bucket)}`,
+        meta: producerKey,
       });
-      rows.push(...flatten(childFolder, depth + 1, key));
     }
-    const artifactRows = [...folder.files]
-      .sort(compareArtifacts)
-      .map(
+    rows.push(
+      ...groupArtifacts.sort(compareArtifacts).map(
         (artifact): CapabilityQuickViewArtifactRow => ({
           kind: "artifact",
           key: artifact.entryId,
           artifact,
-          depth,
+          depth: showGroupHeaders ? 1 : 0,
           meta: summarizeQuickViewArtifactMeta(artifact),
         }),
-      );
-    rows.push(...artifactRows);
-    return rows;
+      ),
+    );
   }
 
-  return flatten(root, 0, "root");
+  return rows;
 }
 
 export function PdfInlinePreview({
@@ -399,12 +442,6 @@ export function PdfInlinePreview({
             Open this split in a new tab to inspect the extracted pages.
           </MetaText>
         </QuickPreviewSectionHeader>
-        <QuickPreviewActionButton
-          onClick={() => openWorkspaceFileInNewTab(file)}
-          type="button"
-        >
-          Open PDF
-        </QuickPreviewActionButton>
       </QuickPreviewSection>
     );
   }
@@ -414,45 +451,36 @@ export function PdfInlinePreview({
       <QuickPreviewSectionHeader>
         <strong>PDF preview</strong>
         <MetaText>
-          If the embed does not load cleanly, open the PDF in a new tab.
+          If the embed does not load cleanly, open the PDF in a new tab.{" "}
+          <QuickPreviewInlineMeta>
+            {file.page_count} pages · {formatByteSize(file.byte_size ?? 0)}
+          </QuickPreviewInlineMeta>
         </MetaText>
       </QuickPreviewSectionHeader>
-      <QuickPreviewMetaRow>
-        <QuickPreviewMetaChip>{file.page_count} pages</QuickPreviewMetaChip>
-        <QuickPreviewMetaChip>
-          {formatByteSize(file.byte_size ?? 0)}
-        </QuickPreviewMetaChip>
-      </QuickPreviewMetaRow>
       <QuickPreviewIframe
         data-testid="capability-quick-view-pdf-iframe"
         onError={() => setFailed(true)}
         src={objectUrl}
         title={file.name}
       />
-      <QuickPreviewActionButton
-        onClick={() => openWorkspaceFileInNewTab(file)}
-        type="button"
-      >
-        Open PDF in new tab
-      </QuickPreviewActionButton>
     </QuickPreviewSection>
   );
 }
 
 export function CapabilityQuickView({
-  title,
-  description,
   emptyMessage,
   groups,
   dataTestId,
   renderPreview,
+  buildPreviewFacts,
 }: {
-  title: string;
-  description: string;
   emptyMessage: string;
   groups: CapabilityQuickViewGroup[];
   dataTestId?: string;
   renderPreview?: (args: CapabilityQuickViewRenderArgs) => ReactNode;
+  buildPreviewFacts?: (
+    artifact: ShellWorkspaceArtifact,
+  ) => CapabilityQuickViewFact[];
 }) {
   const artifactRows = useMemo(
     () =>
@@ -505,19 +533,56 @@ export function CapabilityQuickView({
         selectArtifact: setSelectedArtifactId,
       })
     : null;
+  const previewFacts = selectedRow
+    ? dedupeCapabilityQuickViewFacts(
+        buildPreviewFacts
+          ? buildPreviewFacts(selectedRow.artifact)
+          : buildCapabilityQuickViewFacts(selectedRow.artifact),
+      )
+    : [];
 
   return (
     <QuickViewPanel data-testid={dataTestId}>
-      <QuickViewHeader>
-        <div>
-          <QuickViewTitle>{title}</QuickViewTitle>
-          <MetaText>{description}</MetaText>
-        </div>
-      </QuickViewHeader>
       <QuickViewBody>
-        <QuickViewTreePane>
-          {artifactRows.length ? (
-            groups.map((group) => (
+        <QuickViewPreviewPane>
+          {selectedRow ? (
+            <>
+              <QuickViewPreviewHeader>
+                <QuickViewPreviewLead>
+                  <QuickViewPreviewTitle>
+                    Preview: {selectedRow.label ?? selectedRow.artifact.file.name}
+                  </QuickViewPreviewTitle>
+                  {previewFacts.length ? (
+                    <QuickViewPreviewSummary>
+                      {previewFacts.map((fact) => fact.value).join(" · ")}
+                    </QuickViewPreviewSummary>
+                  ) : null}
+                </QuickViewPreviewLead>
+                <QuickViewPreviewActions>
+                  <QuickPreviewActionButton
+                    onClick={() => openWorkspaceFileInNewTab(selectedRow.artifact.file)}
+                    type="button"
+                  >
+                    Open
+                  </QuickPreviewActionButton>
+                  <QuickPreviewActionButton
+                    onClick={() => downloadWorkspaceFile(selectedRow.artifact.file)}
+                    type="button"
+                  >
+                    Download
+                  </QuickPreviewActionButton>
+                </QuickViewPreviewActions>
+              </QuickViewPreviewHeader>
+              {preview}
+            </>
+          ) : (
+            <QuickViewEmptyState>{emptyMessage}</QuickViewEmptyState>
+          )}
+        </QuickViewPreviewPane>
+
+        {artifactRows.length ? (
+          <QuickViewTreePane>
+            {groups.map((group) => (
               <QuickViewGroup key={group.key}>
                 <QuickViewGroupLabel>{group.label}</QuickViewGroupLabel>
                 {group.rows.map((row) =>
@@ -551,43 +616,9 @@ export function CapabilityQuickView({
                   ),
                 )}
               </QuickViewGroup>
-            ))
-          ) : (
-            <QuickViewEmptyState>{emptyMessage}</QuickViewEmptyState>
-          )}
-        </QuickViewTreePane>
-
-        <QuickViewPreviewPane>
-          {selectedRow ? (
-            <>
-              <QuickViewPreviewHeader>
-                <div>
-                  <QuickViewPreviewTitle>
-                    {selectedRow.label ?? selectedRow.artifact.file.name}
-                  </QuickViewPreviewTitle>
-                  <MetaText>{selectedRow.artifact.path}</MetaText>
-                </div>
-                <QuickViewPreviewActions>
-                  <QuickPreviewActionButton
-                    onClick={() => openWorkspaceFileInNewTab(selectedRow.artifact.file)}
-                    type="button"
-                  >
-                    Open
-                  </QuickPreviewActionButton>
-                  <QuickPreviewActionButton
-                    onClick={() => downloadWorkspaceFile(selectedRow.artifact.file)}
-                    type="button"
-                  >
-                    Download
-                  </QuickPreviewActionButton>
-                </QuickViewPreviewActions>
-              </QuickViewPreviewHeader>
-              {preview}
-            </>
-          ) : (
-            <QuickViewEmptyState>{emptyMessage}</QuickViewEmptyState>
-          )}
-        </QuickViewPreviewPane>
+            ))}
+          </QuickViewTreePane>
+        ) : null}
       </QuickViewBody>
     </QuickViewPanel>
   );
@@ -598,9 +629,26 @@ function compareArtifacts(
   right: ShellWorkspaceArtifact,
 ): number {
   return (
-    left.file.name.localeCompare(right.file.name) ||
-    left.path.localeCompare(right.path)
+    left.bucket.localeCompare(right.bucket) ||
+    left.producerLabel.localeCompare(right.producerLabel) ||
+    right.createdAt.localeCompare(left.createdAt) ||
+    left.file.name.localeCompare(right.file.name)
   );
+}
+
+function bucketLabel(bucket: string): string {
+  switch (bucket) {
+    case "uploaded":
+      return "Uploads";
+    case "data":
+      return "Data";
+    case "chart":
+      return "Charts";
+    case "pdf":
+      return "PDF";
+    default:
+      return bucket;
+  }
 }
 
 function fileKindLabel(file: LocalWorkspaceFile): string {
@@ -616,65 +664,34 @@ function fileKindLabel(file: LocalWorkspaceFile): string {
   }
 }
 
-function relativeArtifactSegments(
-  path: string,
-  stripPrefixes: string[],
-): string[] {
-  const normalizedSegments = path.split("/").filter(Boolean);
-  for (const prefix of stripPrefixes) {
-    const prefixSegments = prefix.split("/").filter(Boolean);
-    const matchesPrefix = prefixSegments.every(
-      (segment, index) => normalizedSegments[index] === segment,
-    );
-    if (matchesPrefix) {
-      const remaining = normalizedSegments.slice(prefixSegments.length);
-      return remaining.length ? remaining : normalizedSegments;
-    }
-  }
-  return normalizedSegments;
-}
-
 const QuickViewPanel = styled.section`
   display: grid;
-  gap: 0.72rem;
+  gap: 0.6rem;
   min-height: 0;
-`;
-
-const QuickViewHeader = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.55rem;
-`;
-
-const QuickViewTitle = styled.h3`
-  margin: 0;
-  font-size: 1.05rem;
 `;
 
 const QuickViewBody = styled.div`
   display: grid;
-  gap: 0.72rem;
+  gap: 0.6rem;
   min-height: 0;
 `;
 
 const QuickViewTreePane = styled.section`
-  min-height: 220px;
-  max-height: 260px;
+  min-height: 150px;
+  max-height: 220px;
   overflow: auto;
-  border: 1px solid rgba(31, 41, 55, 0.1);
+  border: 1px solid rgba(31, 41, 55, 0.18);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.7);
-  padding: 0.78rem;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.6rem;
 `;
 
 const QuickViewGroup = styled.div`
   display: grid;
-  gap: 0.3rem;
+  gap: 0.18rem;
 
   & + & {
-    margin-top: 0.9rem;
+    margin-top: 0.72rem;
   }
 `;
 
@@ -688,18 +705,21 @@ const QuickViewGroupLabel = styled.div`
 
 const QuickViewFolderRow = styled.div`
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
   line-height: 1.2;
+  padding: 0.12rem 0;
 `;
 
 const QuickViewArtifactRow = styled.div<{ $selected: boolean }>`
-  border-radius: var(--radius-md);
+  border-radius: 12px;
   background: ${({ $selected }) =>
-    $selected ? "rgba(201, 111, 59, 0.12)" : "transparent"};
+    $selected ? "rgba(201, 111, 59, 0.1)" : "transparent"};
   border: 1px solid
     ${({ $selected }) =>
-      $selected ? "rgba(201, 111, 59, 0.24)" : "transparent"};
+      $selected ? "rgba(151, 72, 31, 0.34)" : "transparent"};
+  transition: border-color 160ms ease, background-color 160ms ease,
+    transform 160ms ease;
 `;
 
 const QuickViewArtifactButton = styled.button`
@@ -707,12 +727,17 @@ const QuickViewArtifactButton = styled.button`
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
-  padding: 0.5rem 0.45rem;
+  padding: 0.42rem 0.44rem;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
   text-align: left;
+  transition: transform 160ms ease;
+
+  &:hover {
+    transform: translateX(1px);
+  }
 `;
 
 const QuickViewArtifactLead = styled.div`
@@ -723,7 +748,7 @@ const QuickViewArtifactLead = styled.div`
 
 const QuickViewArtifactName = styled.div`
   min-width: 0;
-  font-size: 0.83rem;
+  font-size: 0.8rem;
   font-weight: 700;
   line-height: 1.2;
   overflow: hidden;
@@ -732,17 +757,21 @@ const QuickViewArtifactName = styled.div`
 `;
 
 const QuickViewArtifactMeta = styled(MetaText)`
-  font-size: 0.72rem;
+  font-size: 0.7rem;
 `;
 
 const QuickViewPreviewPane = styled.section`
   min-height: 280px;
-  border: 1px solid rgba(31, 41, 55, 0.1);
+  border: 1px solid rgba(31, 41, 55, 0.18);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.74);
-  padding: 0.9rem;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0.78rem;
   display: grid;
-  gap: 0.7rem;
+  align-content: start;
+  gap: 0.62rem;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.05);
+  transition: border-color 180ms ease, box-shadow 180ms ease,
+    transform 180ms ease;
 `;
 
 const QuickViewPreviewHeader = styled.div`
@@ -753,28 +782,50 @@ const QuickViewPreviewHeader = styled.div`
   gap: 0.6rem;
 `;
 
+const QuickViewPreviewLead = styled.div`
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  flex: 1 1 260px;
+`;
+
 const QuickViewPreviewTitle = styled.h4`
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   line-height: 1.2;
+`;
+
+const QuickViewPreviewSummary = styled(MetaText)`
+  font-size: 0.74rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 `;
 
 const QuickViewPreviewActions = styled.div`
   display: inline-flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  flex: 0 0 auto;
 `;
 
 const QuickPreviewActionButton = styled.button`
-  border: 1px solid rgba(31, 41, 55, 0.12);
+  border: 1px solid rgba(31, 41, 55, 0.16);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
   color: var(--ink);
-  padding: 0.42rem 0.72rem;
+  padding: 0.36rem 0.68rem;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 700;
   cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease,
+    transform 160ms ease;
+
+  &:hover {
+    background: rgba(250, 246, 239, 0.96);
+    border-color: rgba(31, 41, 55, 0.26);
+    transform: translateY(-1px);
+  }
 `;
 
 const QuickViewEmptyState = styled(MetaText)`
@@ -783,29 +834,12 @@ const QuickViewEmptyState = styled(MetaText)`
 
 const QuickPreviewSection = styled.div`
   display: grid;
-  gap: 0.55rem;
+  gap: 0.48rem;
 `;
 
 const QuickPreviewSectionHeader = styled.div`
   display: grid;
   gap: 0.15rem;
-`;
-
-const QuickPreviewMetaRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-`;
-
-const QuickPreviewMetaChip = styled.div`
-  display: inline-flex;
-  align-items: center;
-  padding: 0.22rem 0.52rem;
-  border-radius: 999px;
-  border: 1px solid rgba(31, 41, 55, 0.1);
-  background: rgba(255, 255, 255, 0.82);
-  font-size: 0.72rem;
-  font-weight: 700;
 `;
 
 const QuickPreviewImage = styled.img`
@@ -814,36 +848,37 @@ const QuickPreviewImage = styled.img`
   max-height: 320px;
   object-fit: contain;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(31, 41, 55, 0.08);
+  border: 1px solid rgba(31, 41, 55, 0.14);
   background: rgba(250, 247, 242, 0.88);
 `;
 
 const QuickPreviewTableScroller = styled.div`
   overflow: auto;
   max-height: 260px;
-  border: 1px solid rgba(31, 41, 55, 0.08);
+  border: 1px solid rgba(31, 41, 55, 0.16);
   border-radius: var(--radius-md);
 `;
 
 const QuickPreviewTable = styled.table`
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 `;
 
 const QuickPreviewTh = styled.th`
   position: sticky;
   top: 0;
-  padding: 0.55rem 0.65rem;
+  z-index: 1;
+  padding: 0.42rem 0.55rem;
   background: rgba(252, 248, 242, 0.98);
   color: var(--ink);
   text-align: left;
-  border-bottom: 1px solid rgba(31, 41, 55, 0.08);
+  border-bottom: 1px solid rgba(31, 41, 55, 0.14);
 `;
 
 const QuickPreviewTd = styled.td`
-  padding: 0.5rem 0.65rem;
-  border-bottom: 1px solid rgba(31, 41, 55, 0.06);
+  padding: 0.38rem 0.55rem;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.08);
   vertical-align: top;
 `;
 
@@ -856,15 +891,16 @@ const QuickPreviewPager = styled.div`
 `;
 
 const QuickPreviewPagerButton = styled.button`
-  border: 1px solid rgba(31, 41, 55, 0.12);
+  border: 1px solid rgba(31, 41, 55, 0.16);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.88);
   color: var(--ink);
-  padding: 0.38rem 0.7rem;
+  padding: 0.32rem 0.64rem;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   font-weight: 700;
   cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
 
   &:disabled {
     cursor: default;
@@ -877,12 +913,16 @@ const QuickPreviewCode = styled.pre`
   max-height: 260px;
   overflow: auto;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(31, 41, 55, 0.08);
+  border: 1px solid rgba(31, 41, 55, 0.16);
   background: rgba(20, 24, 31, 0.94);
   color: #eff8ff;
-  padding: 0.8rem 0.9rem;
-  font-size: 0.74rem;
+  padding: 0.72rem 0.82rem;
+  font-size: 0.72rem;
   line-height: 1.45;
+`;
+
+const QuickPreviewInlineMeta = styled.span`
+  white-space: nowrap;
 `;
 
 const QuickPreviewText = styled.pre`
@@ -890,11 +930,11 @@ const QuickPreviewText = styled.pre`
   max-height: 260px;
   overflow: auto;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(31, 41, 55, 0.08);
+  border: 1px solid rgba(31, 41, 55, 0.16);
   background: rgba(255, 255, 255, 0.78);
   color: var(--ink);
-  padding: 0.8rem 0.9rem;
-  font-size: 0.76rem;
+  padding: 0.72rem 0.82rem;
+  font-size: 0.74rem;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -903,7 +943,7 @@ const QuickPreviewText = styled.pre`
 const QuickPreviewIframe = styled.iframe`
   width: 100%;
   min-height: 360px;
-  border: 1px solid rgba(31, 41, 55, 0.1);
+  border: 1px solid rgba(31, 41, 55, 0.16);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.92);
 `;

@@ -140,6 +140,12 @@ export type CapabilityAgentSpecMetadata = {
     description: string;
     parameters: Record<string, unknown>;
     strict?: boolean;
+    display?: {
+      label?: string;
+      prominent_args?: string[];
+      omit_args?: string[];
+      arg_labels?: Record<string, string>;
+    };
   }>;
   handoff_targets: CapabilityHandoffTargetMetadata[];
 };
@@ -150,7 +156,6 @@ export type CapabilityBundleMetadata = {
 };
 
 export type FeedbackOrigin = "interactive" | "ui_integration_test";
-export type ExecutionMode = "interactive" | "batch";
 
 export type AppThreadMetadata = {
   title?: string;
@@ -163,7 +168,6 @@ export type AppThreadMetadata = {
   workspace_state?: WorkspaceState;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
-  execution_mode?: ExecutionMode;
   origin?: FeedbackOrigin;
 };
 
@@ -174,17 +178,16 @@ export type RunLocalQueryToolArgs = {
 };
 
 export type CreateCsvFileToolArgs = {
-  path: string;
+  filename: string;
   query_plan: QueryPlan;
 };
 
 export type CreateJsonFileToolArgs = {
-  path: string;
+  filename: string;
   query_plan: QueryPlan;
 };
 
 export type ListWorkspaceFilesToolArgs = {
-  prefix?: string;
   includeSamples?: boolean;
 };
 
@@ -195,7 +198,6 @@ export type GetPdfPageRangeToolArgs = {
 };
 
 export type ListLoadedDatasetsToolArgs = {
-  prefix?: string;
   includeSamples?: boolean;
 };
 
@@ -315,14 +317,17 @@ export type SmartSplitEntry = {
 };
 
 export type WorkspaceThreadContext = {
-  path_prefix: string;
+  workspace_id: string;
   referenced_item_ids: string[];
 };
 
 export type WorkspaceStateFileSummary = {
   id: string;
   name: string;
-  path: string;
+  bucket: "uploaded" | "data" | "chart" | "pdf";
+  producer_key: string;
+  producer_label: string;
+  source: "uploaded" | "derived" | "demo";
   kind: "csv" | "json" | "pdf" | "other";
   extension: string;
   mime_type?: string;

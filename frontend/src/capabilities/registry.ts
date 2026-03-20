@@ -3,6 +3,7 @@ import csvAgentModule from "./csv-agent";
 import feedbackAgentModule from "./feedback-agent";
 import pdfAgentModule from "./pdf-agent";
 import reportAgentModule from "./report-agent";
+import workspaceAgentModule from "./workspace-agent";
 import { buildCapabilityBundle } from "./shared/registry";
 import type {
   CapabilityBundle,
@@ -12,6 +13,7 @@ import type {
 } from "./types";
 
 export const capabilityModules: CapabilityModule[] = [
+  workspaceAgentModule,
   reportAgentModule,
   csvAgentModule,
   chartAgentModule,
@@ -64,7 +66,11 @@ export function bindClientToolsForBundle(
       throw new Error(`Unknown capability module: ${capability.capability_id}`);
     }
 
-    const nextTools = capabilityModule.bindClientTools(workspace);
+    const nextTools = capabilityModule.bindClientTools({
+      ...workspace,
+      capabilityId: capabilityModule.definition.id,
+      capabilityTitle: capabilityModule.definition.title,
+    });
     if (isPromiseLike(nextTools)) {
       throw new Error(
         `Async client tool binding is not supported for capability '${capability.capability_id}'.`,

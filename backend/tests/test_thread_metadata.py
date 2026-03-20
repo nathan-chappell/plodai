@@ -17,18 +17,21 @@ def test_parse_thread_metadata_filters_expected_fields() -> None:
                 "follow_on_tool_hints": ["run_aggregate_query"],
             },
             "chart_cache": {"chart-1": "data:image/png;base64,abc", 2: "bad"},
-            "surface_key": "/capabilities/report-agent",
+            "surface_key": "/workspace",
             "workspace_state": {
                 "version": "v1",
                 "context": {
-                    "path_prefix": "/report-agent/",
+                    "workspace_id": "workspace-default",
                     "referenced_item_ids": ["file-1"],
                 },
                 "files": [
                     {
                         "id": "file-1",
                         "name": "sales.csv",
-                        "path": "/report-agent/sales.csv",
+                        "bucket": "uploaded",
+                        "producer_key": "uploaded",
+                        "producer_label": "Uploaded",
+                        "source": "uploaded",
                         "kind": "csv",
                         "extension": "csv",
                         "row_count": 12,
@@ -52,17 +55,18 @@ def test_parse_thread_metadata_filters_expected_fields() -> None:
             },
             "openai_conversation_id": "conv_123",
             "openai_previous_response_id": "resp_456",
-            "execution_mode": "batch",
             "origin": "ui_integration_test",
-            "demo_validator_cost_snapshot": {
-                "thread_id": "thr_validator",
-                "scope": "before_current_turn",
-                "usage": {
-                    "input_tokens": 120,
-                    "output_tokens": 30,
-                    "cost_usd": 0.001234567,
-                    "ignored": True,
-                },
+            "feedback_session": {
+                "session_id": "fbs_123",
+                "item_ids": ["msg_123"],
+                "recommended_options": [
+                    "The chart never appeared.",
+                    "The explanation stopped too early.",
+                    "The result was strong overall.",
+                ],
+                "message_draft": "The chart never appeared.",
+                "inferred_sentiment": "negative",
+                "mode": "confirmation",
                 "ignored": True,
             },
             "usage": {
@@ -86,18 +90,21 @@ def test_parse_thread_metadata_filters_expected_fields() -> None:
             "follow_on_tool_hints": ["run_aggregate_query"],
         },
         "chart_cache": {"chart-1": "data:image/png;base64,abc"},
-        "surface_key": "/capabilities/report-agent",
+        "surface_key": "/workspace",
         "workspace_state": {
             "version": "v1",
             "context": {
-                "path_prefix": "/report-agent/",
+                "workspace_id": "workspace-default",
                 "referenced_item_ids": ["file-1"],
             },
             "files": [
                 {
                     "id": "file-1",
                     "name": "sales.csv",
-                    "path": "/report-agent/sales.csv",
+                    "bucket": "uploaded",
+                    "producer_key": "uploaded",
+                    "producer_label": "Uploaded",
+                    "source": "uploaded",
                     "kind": "csv",
                     "extension": "csv",
                     "row_count": 12,
@@ -120,16 +127,18 @@ def test_parse_thread_metadata_filters_expected_fields() -> None:
         },
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_456",
-        "execution_mode": "batch",
         "origin": "ui_integration_test",
-        "demo_validator_cost_snapshot": {
-            "thread_id": "thr_validator",
-            "scope": "before_current_turn",
-            "usage": {
-                "input_tokens": 120,
-                "output_tokens": 30,
-                "cost_usd": 0.00123457,
-            },
+        "feedback_session": {
+            "session_id": "fbs_123",
+            "item_ids": ["msg_123"],
+            "recommended_options": [
+                "The chart never appeared.",
+                "The explanation stopped too early.",
+                "The result was strong overall.",
+            ],
+            "message_draft": "The chart never appeared.",
+            "inferred_sentiment": "negative",
+            "mode": "confirmation",
         },
         "usage": {
             "input_tokens": 120,
@@ -144,26 +153,28 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
         {
             "title": "Initial",
             "investigation_brief": "Look for margin pressure.",
-            "surface_key": "/capabilities/csv-agent",
+            "surface_key": "/workspace",
             "openai_conversation_id": "conv_123",
-            "execution_mode": "interactive",
             "origin": "interactive",
         },
         {
             "title": "Updated",
             "investigation_brief": "Compare east and west performance.",
-            "surface_key": "/capabilities/report-agent",
+            "surface_key": "/workspace",
             "workspace_state": {
                 "version": "v1",
                 "context": {
-                    "path_prefix": "/report-agent/charts/",
+                    "workspace_id": "workspace-default",
                     "referenced_item_ids": ["chart-1"],
                 },
                 "files": [
                     {
                         "id": "chart-1",
                         "name": "revenue.json",
-                        "path": "/artifacts/data/revenue.json",
+                        "bucket": "data",
+                        "producer_key": "csv-agent",
+                        "producer_label": "CSV Agent",
+                        "source": "derived",
                         "kind": "json",
                         "extension": "json",
                     }
@@ -172,26 +183,40 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
                 "agents_markdown": "# AGENTS.md\n\nPrefer compact artifact names.",
             },
             "openai_previous_response_id": "resp_789",
-            "execution_mode": "batch",
             "origin": "ui_integration_test",
+            "feedback_session": {
+                "session_id": "fbs_789",
+                "item_ids": ["msg_789"],
+                "recommended_options": [
+                    "The tool was helpful.",
+                    "The tool failed to finish.",
+                    "The explanation needed more detail.",
+                ],
+                "message_draft": "The tool failed to finish.",
+                "inferred_sentiment": "negative",
+                "mode": "recommendations",
+            },
         },
     )
 
     assert merged == {
         "title": "Updated",
         "investigation_brief": "Compare east and west performance.",
-        "surface_key": "/capabilities/report-agent",
+        "surface_key": "/workspace",
         "workspace_state": {
             "version": "v1",
             "context": {
-                "path_prefix": "/report-agent/charts/",
+                "workspace_id": "workspace-default",
                 "referenced_item_ids": ["chart-1"],
             },
             "files": [
                 {
                     "id": "chart-1",
                     "name": "revenue.json",
-                    "path": "/artifacts/data/revenue.json",
+                    "bucket": "data",
+                    "producer_key": "csv-agent",
+                    "producer_label": "CSV Agent",
+                    "source": "derived",
                     "kind": "json",
                     "extension": "json",
                 }
@@ -201,6 +226,17 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
         },
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_789",
-        "execution_mode": "batch",
         "origin": "ui_integration_test",
+        "feedback_session": {
+            "session_id": "fbs_789",
+            "item_ids": ["msg_789"],
+            "recommended_options": [
+                "The tool was helpful.",
+                "The tool failed to finish.",
+                "The explanation needed more detail.",
+            ],
+            "message_draft": "The tool failed to finish.",
+            "inferred_sentiment": "negative",
+            "mode": "recommendations",
+        },
     }

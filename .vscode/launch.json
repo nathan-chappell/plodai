@@ -2,22 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: Debug Tests",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${file}",
-      "purpose": [
-        "debug-test"
-      ],
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
       "name": "Backend: Uvicorn",
       "type": "debugpy",
       "request": "launch",
       "justMyCode": false,
-      "module": "main"
+      "module": "main",
+      "subProcess": true,
+      "env": {
+        "DEV_RELOAD": "true"
+      }
     }
-  ],
+  ]
 }

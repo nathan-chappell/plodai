@@ -3,9 +3,9 @@ import type {
   ClientEffect,
   ClientToolCall,
   ClientToolName,
-  CreateReportToolArgs,
   CreateCsvFileToolArgs,
   CreateJsonFileToolArgs,
+  CreateReportToolArgs,
   DataRow,
   GetReportToolArgs,
   ListLoadedDatasetsToolArgs,
@@ -21,7 +21,6 @@ import { executeQueryPlan } from "./analysis";
 import { renderChartToDataUrl } from "./chart";
 import { parseCsvText } from "./csv";
 import { parseJsonText } from "./json";
-import { normalizeAbsolutePath, normalizePathPrefix, pathStartsWithPrefix, resolveWorkspacePath } from "./workspace-fs";
 import { rowsToCsv, rowsToJson } from "./workspace-files";
 
 export type LoadedDataset = LocalDataset;
@@ -31,15 +30,23 @@ export type ClientToolExecutionResult = {
   effects: ClientEffect[];
 };
 
-function filePathForDataset(dataset: LoadedDataset): string {
-  return normalizeAbsolutePath(`/${dataset.name}`);
+function buildWorkspaceContextPayload(
+  datasets: LoadedDataset[],
+): { workspace_id: string; referenced_item_ids: string[] } {
+  return {
+    workspace_id: "smoke",
+    referenced_item_ids: datasets.map((dataset) => dataset.id),
+  };
 }
 
 function summarizeDataset(dataset: LoadedDataset, includeSamples: boolean): Record<string, unknown> {
   return {
     id: dataset.id,
     name: dataset.name,
-    path: filePathForDataset(dataset),
+    bucket: "uploaded",
+    producer_key: "uploaded",
+    producer_label: "Uploaded",
+    source: "uploaded",
     kind: "csv",
     extension: "csv",
     row_count: dataset.row_count,
@@ -49,35 +56,14 @@ function summarizeDataset(dataset: LoadedDataset, includeSamples: boolean): Reco
   };
 }
 
-function listDatasetsByPrefix(
-  datasets: LoadedDataset[],
-  prefix: string | undefined,
-): LoadedDataset[] {
-  const normalizedPrefix = prefix?.trim() ? normalizePathPrefix(prefix) : "/";
-  return datasets.filter((dataset) => pathStartsWithPrefix(filePathForDataset(dataset), normalizedPrefix));
+function ensureCsvFilename(filename: string): string {
+  const requested = filename.trim() || "derived.csv";
+  return requested.toLowerCase().endsWith(".csv") ? requested : `${requested}.csv`;
 }
 
-function buildWorkspaceContextPayload(
-  datasets: LoadedDataset[],
-  prefix = "/",
-): { path_prefix: string; referenced_item_ids: string[] } {
-  const normalizedPrefix = normalizePathPrefix(prefix);
-  return {
-    path_prefix: normalizedPrefix,
-    referenced_item_ids: listDatasetsByPrefix(datasets, normalizedPrefix).map((dataset) => dataset.id),
-  };
-}
-
-function ensureCsvPath(path: string): string {
-  const trimmed = path.trim() || "derived.csv";
-  const resolvedPath = resolveWorkspacePath(trimmed, "/");
-  return resolvedPath.toLowerCase().endsWith(".csv") ? resolvedPath : `${resolvedPath}.csv`;
-}
-
-function ensureJsonPath(path: string): string {
-  const trimmed = path.trim() || "derived.json";
-  const resolvedPath = resolveWorkspacePath(trimmed, "/");
-  return resolvedPath.toLowerCase().endsWith(".json") ? resolvedPath : `${resolvedPath}.json`;
+function ensureJsonFilename(filename: string): string {
+  const requested = filename.trim() || "derived.json";
+  return requested.toLowerCase().endsWith(".json") ? requested : `${requested}.json`;
 }
 
 export async function executeClientTool<Name extends ClientToolName>(
@@ -87,14 +73,13 @@ export async function executeClientTool<Name extends ClientToolName>(
   switch (toolCall.name) {
     case "list_csv_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
-      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
-      const csvFiles = listDatasetsByPrefix(datasets, normalizedPrefix).map((dataset) =>
+      const csvFiles = datasets.map((dataset) =>
         summarizeDataset(dataset, args.includeSamples ?? true),
       );
       return {
         payload: {
-          path_prefix: normalizedPrefix,
-          workspace_context: buildWorkspaceContextPayload(datasets, normalizedPrefix),
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
           csv_files: csvFiles,
           files: csvFiles,
         },
@@ -103,14 +88,13 @@ export async function executeClientTool<Name extends ClientToolName>(
     }
     case "list_chartable_files": {
       const args = toolCall.arguments as ListWorkspaceFilesToolArgs;
-      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
-      const chartableFiles = listDatasetsByPrefix(datasets, normalizedPrefix).map((dataset) =>
+      const chartableFiles = datasets.map((dataset) =>
         summarizeDataset(dataset, args.includeSamples ?? true),
       );
       return {
         payload: {
-          path_prefix: normalizedPrefix,
-          workspace_context: buildWorkspaceContextPayload(datasets, normalizedPrefix),
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
           chartable_files: chartableFiles,
           files: chartableFiles,
         },
@@ -121,8 +105,8 @@ export async function executeClientTool<Name extends ClientToolName>(
       void (toolCall.arguments as ListWorkspaceFilesToolArgs);
       return {
         payload: {
-          path_prefix: "/",
-          workspace_context: buildWorkspaceContextPayload(datasets, "/"),
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
           pdf_files: [],
           files: [],
         },
@@ -147,15 +131,17 @@ export async function executeClientTool<Name extends ClientToolName>(
       const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
       const csvText = rowsToCsv(result.rows);
       const preview = parseCsvText(csvText);
-      const targetPath = ensureCsvPath(args.path);
       return {
         payload: {
-          path_prefix: "/",
-          workspace_context: buildWorkspaceContextPayload(datasets, "/"),
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
           created_file: {
             id: "smoke-csv",
-            name: targetPath.split("/").filter(Boolean).at(-1) ?? "derived.csv",
-            path: targetPath,
+            name: ensureCsvFilename(args.filename),
+            bucket: "data",
+            producer_key: "smoke",
+            producer_label: "Smoke",
+            source: "derived",
             kind: "csv",
             extension: "csv",
             row_count: preview.rowCount,
@@ -174,15 +160,17 @@ export async function executeClientTool<Name extends ClientToolName>(
       const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
       const jsonText = rowsToJson(result.rows);
       const preview = parseJsonText(jsonText);
-      const targetPath = ensureJsonPath(args.path);
       return {
         payload: {
-          path_prefix: "/",
-          workspace_context: buildWorkspaceContextPayload(datasets, "/"),
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
           created_file: {
             id: "smoke-json",
-            name: targetPath.split("/").filter(Boolean).at(-1) ?? "derived.json",
-            path: targetPath,
+            name: ensureJsonFilename(args.filename),
+            bucket: "data",
+            producer_key: "smoke",
+            producer_label: "Smoke",
+            source: "derived",
             kind: "json",
             extension: "json",
             row_count: preview.rowCount,

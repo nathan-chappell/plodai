@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
 
+import { setBase64CodecForTests } from "../base64";
 import {
   base64ToUint8Array,
   buildSmartSplitPlan,
@@ -8,6 +9,7 @@ import {
   extractPdfPageRangeFromBytes,
   inspectPdfBytes,
   smartSplitPdfBytes,
+  uint8ArrayToBase64,
 } from "../pdf";
 
 async function buildPdf(pageCount: number): Promise<Uint8Array> {
@@ -19,9 +21,24 @@ async function buildPdf(pageCount: number): Promise<Uint8Array> {
 }
 
 describe("pdf helpers", () => {
+  afterEach(() => {
+    setBase64CodecForTests(null);
+  });
+
   it("inspects page counts", async () => {
     const bytes = await buildPdf(4);
     await expect(inspectPdfBytes(bytes)).resolves.toMatchObject({ pageCount: 4 });
+  });
+
+  it("routes base64 conversion through the injected codec override", () => {
+    const decode = vi.fn((base64: string) => new Uint8Array([base64.length, 7]));
+    const encode = vi.fn((bytes: Uint8Array) => `encoded:${bytes.length}`);
+    setBase64CodecForTests({ decode, encode });
+
+    expect(base64ToUint8Array("demo")).toEqual(new Uint8Array([4, 7]));
+    expect(uint8ArrayToBase64(new Uint8Array([1, 2, 3]))).toBe("encoded:3");
+    expect(decode).toHaveBeenCalledWith("demo");
+    expect(encode).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
   });
 
   it("extracts an inclusive sub-range and returns a reusable base64 payload", async () => {

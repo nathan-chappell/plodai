@@ -13,7 +13,7 @@ import {
   updateWorkspaceCurrentGoal,
 } from "../../lib/workspace-contract";
 import type { CapabilityWorkspaceSnapshot } from "../../lib/workspace-store";
-import type { ExecutionMode, WorkspaceStateReportSummary } from "../../types/analysis";
+import type { WorkspaceStateReportSummary } from "../../types/analysis";
 import type { WorkspaceBootstrapMetadata, WorkspaceReportV1 } from "../../types/workspace-contract";
 import type { CapabilityWorkspaceContext } from "../types";
 
@@ -51,7 +51,6 @@ function migrateLegacySnapshot(
     defaultGoal: string;
     defaultTab: string;
     allowedTabs: string[];
-    defaultExecutionMode: ExecutionMode;
     toolNames?: string[];
     legacySnapshot: CapabilityWorkspaceSnapshot | null;
   },
@@ -62,9 +61,7 @@ function migrateLegacySnapshot(
       capabilityTitle: options.capabilityTitle,
       defaultGoal: options.defaultGoal,
       activeWorkspaceTab: options.defaultTab,
-      executionMode: options.defaultExecutionMode,
       toolNames: options.toolNames ?? [],
-      prefixBySurface: { [options.capabilityId]: workspace.activePrefix },
     });
 
     const legacy = options.legacySnapshot;
@@ -82,11 +79,6 @@ function migrateLegacySnapshot(
       if (legacyWorkspaceTab && appState?.active_workspace_tab !== legacyWorkspaceTab) {
         nextFilesystem = updateWorkspaceAppState(nextFilesystem, {
           active_workspace_tab: legacyWorkspaceTab,
-        });
-      }
-      if (legacy.executionMode && appState?.execution_mode !== legacy.executionMode) {
-        nextFilesystem = updateWorkspaceAppState(nextFilesystem, {
-          execution_mode: legacy.executionMode,
         });
       }
     }
@@ -107,7 +99,6 @@ export function useWorkspaceContract(options: {
   defaultGoal: string;
   defaultTab: string;
   allowedTabs: string[];
-  defaultExecutionMode: ExecutionMode;
   toolNames?: string[];
   legacySnapshot: CapabilityWorkspaceSnapshot | null;
 }) {
@@ -126,12 +117,10 @@ export function useWorkspaceContract(options: {
   }, [
     options.capabilityId,
     options.capabilityTitle,
-    options.defaultExecutionMode,
     options.defaultGoal,
     options.defaultTab,
     allowedTabsKey,
     options.legacySnapshot,
-    options.workspace.activePrefix,
     options.workspace.updateFilesystem,
     toolNamesKey,
   ]);
@@ -175,12 +164,6 @@ export function useWorkspaceContract(options: {
     );
   }, [options.workspace.updateFilesystem]);
 
-  const setExecutionMode = useCallback((nextMode: ExecutionMode) => {
-    options.workspace.updateFilesystem((filesystem) =>
-      updateWorkspaceAppState(filesystem, { execution_mode: nextMode }),
-    );
-  }, [options.workspace.updateFilesystem]);
-
   const syncToolCatalog = useCallback((toolNames: string[]) => {
     options.workspace.updateFilesystem((filesystem) =>
       syncWorkspaceToolCatalog(filesystem, options.capabilityId, toolNames),
@@ -210,8 +193,6 @@ export function useWorkspaceContract(options: {
       options.defaultTab,
     ),
     setActiveWorkspaceTab,
-    executionMode: appState?.execution_mode ?? options.defaultExecutionMode,
-    setExecutionMode,
     syncToolCatalog,
     selectCurrentReport,
     currentReportId:

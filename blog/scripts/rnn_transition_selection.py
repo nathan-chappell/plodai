@@ -21,7 +21,8 @@ class SelectedTrajectory:
 @dataclass(frozen=True, kw_only=True)
 class CuratedProbeBundle:
     selected: tuple[SelectedTrajectory, ...]
-    background: tuple[ProbeTrajectoryMetrics, ...]
+    local_neighbors: tuple[ProbeTrajectoryMetrics, ...]
+    global_background: tuple[ProbeTrajectoryMetrics, ...]
     all_trajectories: tuple[ProbeTrajectoryMetrics, ...]
     ordinary_reference: ProbeTrajectoryMetrics
     boundary_reference: ProbeTrajectoryMetrics
@@ -56,7 +57,7 @@ def representative_selection_rule() -> str:
 
 
 def watchlist_mode() -> str:
-    return "curated_long_held_out_plus_balanced_background"
+    return "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field"
 
 
 def select_representative_trajectories(
@@ -190,8 +191,9 @@ def _candidate_pool(
     return tuple(probes)
 
 
-def _held_out_probe_trajectories(
+def _probe_trajectories_for_probes(
     result: ResultLike,
+    probes: tuple[_SyntheticProbe, ...],
     *,
     is_valid_fn: Callable[[str], bool],
 ) -> tuple[ProbeTrajectoryMetrics, ...]:
@@ -201,7 +203,8 @@ def _held_out_probe_trajectories(
         load_model_parameters,
     )
 
-    probes = _candidate_pool(result)
+    if not probes:
+        return ()
     model = PhasedTorchRNN()
     model.eval()
     texts = [probe.text for probe in probes]
@@ -219,11 +222,85 @@ def _held_out_probe_trajectories(
     return build_probe_trajectories(synthetic_result, is_valid_fn=is_valid_fn)
 
 
+def _held_out_probe_trajectories(
+    result: ResultLike,
+    *,
+    is_valid_fn: Callable[[str], bool],
+) -> tuple[ProbeTrajectoryMetrics, ...]:
+    return _probe_trajectories_for_probes(
+        result,
+        _candidate_pool(result),
+        is_valid_fn=is_valid_fn,
+    )
+
+
+def _classify_probe_kind(text: str) -> str:
+    from blog.scripts.neural_dynamics_artifacts import (
+        INVALID_KIND_RANDOM,
+        PHASE_KIND_BALANCED_INVALID,
+        PHASE_KIND_OFF_BY_ONE,
+        PHASE_KIND_VALID_PREFIX,
+        is_balanced_invalid,
+        is_balanced_parentheses,
+        is_off_by_one_invalid,
+        is_valid_prefix_invalid,
+    )
+
+    if is_balanced_parentheses(text):
+        return "valid"
+    if is_off_by_one_invalid(text):
+        return PHASE_KIND_OFF_BY_ONE
+    if is_valid_prefix_invalid(text):
+        return PHASE_KIND_VALID_PREFIX
+    if is_balanced_invalid(text):
+        return PHASE_KIND_BALANCED_INVALID
+    return INVALID_KIND_RANDOM
+
+
+def _single_flip_neighbor_probes(
+    *,
+    watched_text: str,
+    exclude_texts: set[str],
+) -> tuple[_SyntheticProbe, ...]:
+    seen = set(exclude_texts)
+    probes: list[_SyntheticProbe] = []
+    for index, char in enumerate(watched_text, start=1):
+        flipped = ")" if char == "(" else "("
+        candidate = watched_text[: index - 1] + flipped + watched_text[index:]
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        label = f"N{len(probes) + 1:02d}"
+        probes.append(
+            _SyntheticProbe(
+                label=label,
+                text=candidate,
+                probe_kind=_classify_probe_kind(candidate),
+                short_label=label,
+            )
+        )
+    return tuple(probes)
+
+
+def _trajectory_distance(
+    probe: ProbeTrajectoryMetrics, reference: ProbeTrajectoryMetrics
+) -> float:
+    return float(
+        sum(
+            abs(left - right)
+            for left, right in zip(
+                probe.probabilities, reference.probabilities, strict=True
+            )
+        )
+    )
+
+
 def build_curated_probe_bundle(
     result: ResultLike,
     *,
     is_valid_fn: Callable[[str], bool],
     background_per_family: int = 24,
+    local_neighbor_count: int = 10,
 ) -> CuratedProbeBundle:
     from blog.scripts.neural_dynamics_artifacts import (
         PHASE_KIND_BALANCED_INVALID,
@@ -307,9 +384,31 @@ def build_curated_probe_bundle(
         )
         background.extend(ordered[: min(background_per_family, len(ordered))])
 
+    local_neighbor_candidates = _probe_trajectories_for_probes(
+        result,
+        _single_flip_neighbor_probes(
+            watched_text=off_by_one.text,
+            exclude_texts=set(getattr(result, "training_texts")) | {off_by_one.text},
+        ),
+        is_valid_fn=is_valid_fn,
+    )
+    local_neighbors = tuple(
+        sorted(
+            local_neighbor_candidates,
+            key=lambda probe: (
+                _trajectory_distance(probe, off_by_one),
+                probe.min_boundary_distance,
+                -probe.local_window_change,
+                abs(probe.probabilities[-1] - off_by_one.probabilities[-1]),
+                probe.text,
+            ),
+        )[: min(local_neighbor_count, len(local_neighbor_candidates))]
+    )
+
     return CuratedProbeBundle(
         selected=selected,
-        background=tuple(background),
+        local_neighbors=local_neighbors,
+        global_background=tuple(background),
         all_trajectories=tuple(trajectories),
         ordinary_reference=valid_control,
         boundary_reference=boundary_reference,

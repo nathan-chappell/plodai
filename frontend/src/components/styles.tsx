@@ -144,14 +144,17 @@ export const SignInSecondaryActionButton = styled.button`
   padding: 0.72rem 1rem;
 `;
 
-export const AccountCard = styled(CardSection)`
+export const AccountCard = styled(CardSection)<{ $blend?: boolean }>`
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.35rem 0.9rem;
   align-self: start;
-  padding: 0.42rem 0.62rem;
+  padding: ${({ $blend }) => ($blend ? "0" : "0.42rem 0.62rem")};
   border-radius: 18px;
+  border-color: ${({ $blend }) => ($blend ? "transparent" : "var(--line)")};
+  background: ${({ $blend }) => ($blend ? "transparent" : "var(--panel)")};
+  box-shadow: ${({ $blend }) => ($blend ? "none" : "var(--shadow)")};
 
   @media (max-width: 980px) {
     grid-template-columns: 1fr;
@@ -1086,26 +1089,37 @@ export const ChatKitPaneStatusRow = styled.div`
 `;
 
 export const ChatKitPaneStatusActions = styled.div`
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.45rem;
   min-width: 0;
-  flex: 1 1 360px;
-  flex-wrap: wrap;
+  width: 100%;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+
+  @media (max-width: 760px) {
+    flex-wrap: wrap;
+  }
 `;
 
 export const ChatKitPaneStatusText = styled(OverlayMetaText)<{ $light?: boolean }>`
   margin: 0;
-  flex: 1 1 220px;
+  flex: 1 1 auto;
   min-width: 0;
+  margin-left: auto;
   text-align: right;
   color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.72)")};
   font-size: 0.8rem;
   line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
   @media (max-width: 760px) {
+    order: 3;
     flex-basis: 100%;
     text-align: left;
+    white-space: normal;
   }
 `;
 
@@ -1183,6 +1197,12 @@ export const ChatKitPaneEmpty = styled.div`
 
 export const ChatKitPaneToolbar = styled(WrapRow)`
   gap: 0.35rem;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+
+  @media (max-width: 760px) {
+    flex-wrap: wrap;
+  }
 `;
 
 export const ChatKitPaneToolbarButton = styled.button`
@@ -1196,6 +1216,10 @@ export const ChatKitPaneToolbarButton = styled.button`
   font-size: 0.84rem;
   line-height: 1;
   cursor: pointer;
+`;
+
+export const ChatKitPaneFeedbackButton = styled(ChatKitPaneToolbarButton)`
+  flex: 0 0 auto;
 `;
 
 export const ChatKitPaneModeRow = styled.div<{ $light?: boolean }>`

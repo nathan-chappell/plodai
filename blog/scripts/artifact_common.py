@@ -13,10 +13,9 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 ARTICLE_SLUG = "15-03-2026-the-theoretical-justification-of-neural-networks"
 DEFAULT_OUTPUT_DIR = (
     REPO_ROOT
-    / "frontend"
-    / "public"
-    / "blog-assets"
-    / "theoretical-justification-of-neural-networks"
+    / "blog"
+    / ARTICLE_SLUG
+    / "assets"
 )
 STATIC_FONT_STACK = ["Ubuntu", "DejaVu Sans", "Liberation Sans"]
 STATIC_FIGURE_BG = "#0a0f13"

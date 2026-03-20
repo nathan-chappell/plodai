@@ -30,24 +30,9 @@ const WritingPage = lazy(async () => {
   return { default: module.WritingPage };
 });
 
-const ReportFoundryPage = lazy(async () => {
-  const module = await import("./capabilities/reportFoundry");
-  return { default: module.ReportFoundryPage };
-});
-
-const CsvAgentPage = lazy(async () => {
-  const module = await import("./capabilities/csvAgent");
-  return { default: module.CsvAgentPage };
-});
-
-const ChartAgentPage = lazy(async () => {
-  const module = await import("./capabilities/chartAgent");
-  return { default: module.ChartAgentPage };
-});
-
-const PdfAgentPage = lazy(async () => {
-  const module = await import("./capabilities/pdfAgent");
-  return { default: module.PdfAgentPage };
+const WorkspaceAgentPage = lazy(async () => {
+  const module = await import("./capabilities/workspaceAgent");
+  return { default: module.WorkspaceAgentPage };
 });
 
 const AdminUsersPage = lazy(async () => {
@@ -57,10 +42,7 @@ const AdminUsersPage = lazy(async () => {
 });
 
 const capabilityPages: Record<string, LazyExoticComponent<CapabilityPageComponent>> = {
-  "report-agent": ReportFoundryPage,
-  "csv-agent": CsvAgentPage,
-  "chart-agent": ChartAgentPage,
-  "pdf-agent": PdfAgentPage,
+  "workspace-agent": WorkspaceAgentPage,
   "admin-users": AdminUsersPage,
 };
 
@@ -75,7 +57,9 @@ function RouteLoadingState({ label }: { label: string }) {
 
 function filterCapabilities(role: "admin" | "user") {
   return allCapabilityDefinitions.filter((capability) =>
-    capability.tabs.some((tab) => (tab.visible ? tab.visible({ role }) : true)),
+    capability.showInSidebar !== false &&
+    (capability.tabs.length === 0 ||
+      capability.tabs.some((tab) => (tab.visible ? tab.visible({ role }) : true))),
   );
 }
 
@@ -166,7 +150,7 @@ export function App() {
           {!activeCapability ? (
             <AppEmptyState>
               <strong>Unknown route</strong>
-              <AppEmptyMetaText>Pick one of the registered capabilities from the shell navigation.</AppEmptyMetaText>
+              <AppEmptyMetaText>Open the workspace or admin tools from the shell navigation.</AppEmptyMetaText>
             </AppEmptyState>
           ) : null}
           {activeCapability && ActiveCapabilityPage ? (

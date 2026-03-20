@@ -50,21 +50,40 @@ export function buildPdfAgentClientToolCatalog(
       "list_pdf_files",
       "List PDF files from the shared workspace, including lightweight metadata and tiny familiarization samples when requested.",
       includeSamplesSchema,
+      {
+        label: "List PDF Files",
+        omit_args: ["includeSamples"],
+      },
     ),
     buildToolDefinition(
       "inspect_pdf_file",
       "Inspect a PDF locally, returning page count, outline or bookmark hints, and page-level structure summaries.",
       withPdfFileIdEnum(inspectPdfFileToolSchema, workspace),
+      {
+        label: "Inspect PDF File",
+        prominent_args: ["file_id", "max_pages"],
+        arg_labels: { file_id: "file", max_pages: "max" },
+      },
     ),
     buildToolDefinition(
       "get_pdf_page_range",
-      "Extract an inclusive page range from a PDF file, add the derived sub-PDF at an explicit workspace path, and return it as a file input payload.",
+      "Extract an inclusive page range from a PDF file, add the derived sub-PDF to the workspace, and return it as a file input payload.",
       withPdfFileIdEnum(getPdfPageRangeToolSchema, workspace),
+      {
+        label: "Get PDF Page Range",
+        prominent_args: ["file_id", "start_page", "end_page"],
+        arg_labels: { file_id: "file", start_page: "from", end_page: "to" },
+      },
     ),
     buildToolDefinition(
       "smart_split_pdf",
-      "Inspect a PDF locally, propose a useful split, create titled sub-PDFs plus index.md, and add a ZIP archive at explicit workspace paths.",
+      "Inspect a PDF locally, propose a useful split, create titled sub-PDFs plus index.md, and add a ZIP archive to the workspace.",
       withPdfFileIdEnum(smartSplitPdfToolSchema, workspace),
+      {
+        label: "Smart Split PDF",
+        prominent_args: ["file_id", "goal"],
+        arg_labels: { file_id: "file", goal: "goal" },
+      },
     ),
   ];
 }

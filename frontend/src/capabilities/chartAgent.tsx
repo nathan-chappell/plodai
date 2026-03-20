@@ -1,14 +1,13 @@
 import { useEffect, useMemo } from "react";
-import styled from "styled-components";
 
 import { AuthPanel } from "../components/AuthPanel";
 import {
+  buildCapabilityQuickViewFacts,
   buildFolderRowsFromArtifacts,
   CapabilityQuickView,
   parseSavedChartArtifact,
-  renderDefaultCapabilityQuickViewPreview,
+  type CapabilityQuickViewFact,
   type CapabilityQuickViewGroup,
-  type CapabilityQuickViewRenderArgs,
 } from "../components/CapabilityQuickView";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
@@ -16,7 +15,7 @@ import {
   bindClientToolsForBundle,
   buildCapabilityBundleForRoot,
   listCapabilityBundleToolNames,
-} from "./registry";
+} from "./runtime-registry";
 import { chartAgentCapability } from "./definitions";
 import { buildChartAgentDemoScenario } from "./chart-agent/demo";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
@@ -27,7 +26,6 @@ import type {
   ShellWorkspaceArtifact,
   ShellWorkspaceRegistration,
 } from "./types";
-import { CapabilityMetaText } from "./styles";
 import {
   CapabilityPage,
   CapabilityEyebrow,
@@ -52,7 +50,6 @@ function buildChartQuickViewGroups(
   artifacts: ShellWorkspaceArtifact[],
 ): CapabilityQuickViewGroup[] {
   const relevantArtifacts = artifacts.filter((artifact) =>
-    artifact.path.startsWith("/artifacts/charts/") &&
     parseSavedChartArtifact(artifact.file) !== null,
   );
 
@@ -60,44 +57,30 @@ function buildChartQuickViewGroups(
     {
       key: "saved-charts",
       label: "Saved charts",
-      rows: buildFolderRowsFromArtifacts(relevantArtifacts, {
-        stripPrefixes: ["/artifacts/charts/"],
-      }),
+      rows: buildFolderRowsFromArtifacts(relevantArtifacts),
     },
   ];
 }
 
-function buildRenderChartQuickViewPreview(files: LocalWorkspaceFile[]) {
-  return function renderChartQuickViewPreview(args: CapabilityQuickViewRenderArgs) {
-    const savedChart = parseSavedChartArtifact(args.selectedArtifact.file);
-    if (!savedChart) {
-      return renderDefaultCapabilityQuickViewPreview(args);
+function buildChartQuickViewFacts(files: LocalWorkspaceFile[]) {
+  return function buildPreviewFacts(
+    artifact: ShellWorkspaceArtifact,
+  ): CapabilityQuickViewFact[] {
+    const savedChart = parseSavedChartArtifact(artifact.file);
+    const extraFacts: CapabilityQuickViewFact[] = [];
+
+    if (savedChart?.fileId) {
+      const sourceFile =
+        files.find((candidate) => candidate.id === savedChart.fileId) ?? null;
+      extraFacts.push({
+        key: "linked-source",
+        value: sourceFile
+          ? `Source ${sourceFile.name}`
+          : `Source ${savedChart.fileId}`,
+      });
     }
-    const sourceFile = savedChart.fileId
-      ? files.find((candidate) => candidate.id === savedChart.fileId) ?? null
-      : null;
-    return (
-      <>
-        <ChartPreviewMetaRow>
-          <ChartPreviewMetaChip>
-            {savedChart.chartPlanId ? `Plan ${savedChart.chartPlanId}` : "Saved chart"}
-          </ChartPreviewMetaChip>
-          <ChartPreviewMetaChip>
-            {sourceFile
-              ? `Source ${sourceFile.name}`
-              : savedChart.fileId
-                ? `Source ${savedChart.fileId}`
-                : "Source file unavailable"}
-          </ChartPreviewMetaChip>
-        </ChartPreviewMetaRow>
-        {renderDefaultCapabilityQuickViewPreview(args)}
-        {!savedChart.imageDataUrl ? (
-          <CapabilityMetaText>
-            This chart artifact is saved in the workspace, but it does not have an inline image yet.
-          </CapabilityMetaText>
-        ) : null}
-      </>
-    );
+
+    return buildCapabilityQuickViewFacts(artifact, { extraFacts });
   };
 }
 
@@ -107,8 +90,6 @@ export function ChartAgentPage({
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
-    activePrefix,
-    cwdPath,
     entries,
     files,
     setFiles,
@@ -118,14 +99,9 @@ export function ChartAgentPage({
     investigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
-    executionMode,
-    setExecutionMode,
     setReportEffects,
     handleFiles,
     handleRemoveEntry,
-    createDirectory,
-    changeDirectory,
-    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
@@ -150,18 +126,16 @@ export function ChartAgentPage({
   });
   const capabilityWorkspace = useMemo(
     () => ({
-      activePrefix,
-      cwdPath,
+      capabilityId: chartAgentCapability.id,
+      capabilityTitle: chartAgentCapability.title,
+      workspaceId: selectedWorkspaceId,
       entries,
       files,
       workspaceContext,
-      setActivePrefix,
-      createDirectory,
-      changeDirectory,
       updateFilesystem,
       getState,
     }),
-    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
+    [entries, files, getState, selectedWorkspaceId, updateFilesystem, workspaceContext],
   );
   const capabilityBundle = useMemo(
     () => buildCapabilityBundleForRoot(chartAgentCapability.id, capabilityWorkspace),
@@ -186,7 +160,6 @@ export function ChartAgentPage({
     ready: workspaceHydrated,
     buildDemoScenario: buildChartAgentDemoScenario,
     files,
-    setExecutionMode,
     setFiles,
     setStatus,
     setReportEffects,
@@ -253,8 +226,8 @@ export function ChartAgentPage({
     () => buildChartQuickViewGroups(artifacts),
     [artifacts],
   );
-  const renderChartPreview = useMemo(
-    () => buildRenderChartQuickViewPreview(files),
+  const buildChartFacts = useMemo(
+    () => buildChartQuickViewFacts(files),
     [files],
   );
 
@@ -268,7 +241,7 @@ export function ChartAgentPage({
             Build polished charts from explicit CSV and JSON artifacts with a deliberate plan-first workflow.
           </CapabilitySubhead>
         </CapabilityHeader>
-        <AuthPanel mode="account" heading="Account" />
+        <AuthPanel mode="account" heading="Account" blendWithShell />
       </CapabilityHeroRow>
 
       <CapabilityTabBar>
@@ -289,11 +262,9 @@ export function ChartAgentPage({
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
             <CapabilityQuickView
-              title="Saved charts"
-              description="Preview charts already rendered into the current workspace."
               emptyMessage="Rendered chart artifacts will appear here as the Chart agent saves them."
               groups={chartQuickViewGroups}
-              renderPreview={renderChartPreview}
+              buildPreviewFacts={buildChartFacts}
               dataTestId="chart-agent-quick-view"
             />
           </ReportWorkspaceColumn>
@@ -303,8 +274,6 @@ export function ChartAgentPage({
               enabled
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={appendReportEffects}
@@ -320,11 +289,9 @@ export function ChartAgentPage({
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
             <CapabilityQuickView
-              title="Saved charts"
-              description="Preview charts already rendered into the current workspace."
               emptyMessage="Rendered chart artifacts will appear here as the Chart agent saves them."
               groups={chartQuickViewGroups}
-              renderPreview={renderChartPreview}
+              buildPreviewFacts={buildChartFacts}
               dataTestId="chart-agent-quick-view"
             />
           </ReportWorkspaceColumn>
@@ -336,8 +303,6 @@ export function ChartAgentPage({
               capabilityBundle={capabilityBundle}
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
@@ -349,20 +314,3 @@ export function ChartAgentPage({
     </CapabilityPage>
   );
 }
-
-const ChartPreviewMetaRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-`;
-
-const ChartPreviewMetaChip = styled.div`
-  display: inline-flex;
-  align-items: center;
-  padding: 0.22rem 0.52rem;
-  border-radius: 999px;
-  border: 1px solid rgba(31, 41, 55, 0.1);
-  background: rgba(255, 255, 255, 0.82);
-  font-size: 0.72rem;
-  font-weight: 700;
-`;

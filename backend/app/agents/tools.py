@@ -2,6 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any, Literal, Mapping, Sequence, cast
 from uuid import uuid4
 
@@ -12,16 +13,18 @@ from chatkit.types import ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.widgets import (
-    build_feedback_capture_copy_text,
-    build_feedback_capture_widget,
+    build_feedback_saved_copy_text,
+    build_feedback_saved_widget,
+    build_feedback_session_copy_text,
+    build_feedback_session_widget,
     build_plan_copy_text,
     build_plan_widget,
     build_tool_trace_copy_text,
     build_tool_trace_widget,
+    format_tool_label,
 )
 from backend.app.chatkit.feedback_types import ChatItemFeedbackRecord, FeedbackOrigin
-from backend.app.chatkit.metadata import AgentPlan
-from backend.app.chatkit.usage import empty_usage_totals
+from backend.app.chatkit.metadata import AgentPlan, PendingFeedbackSession
 from backend.app.core.logging import (
     get_logger,
     log_event,
@@ -35,9 +38,6 @@ from backend.app.models.chatkit import ChatItemFeedback
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
-DEMO_VALIDATOR_CAPABILITY_ID = "demo-validator-agent"
-DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY = "demo_validator_cost_snapshot"
-DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX = "DEMO_VALIDATOR_COST_SNAPSHOT "
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -269,6 +269,7 @@ def get_client_tool_names(
 def _tool_summary_from_query_plan(query_plan: Mapping[str, object]) -> list[str]:
     return [
         f"Dataset: {query_plan.get('dataset_id') or 'unknown'}",
+        f"Filters: {len(cast(list[object], query_plan.get('filters') or []))}",
         f"Group by: {len(cast(list[object], query_plan.get('group_by') or []))}",
         f"Aggregates: {len(cast(list[object], query_plan.get('aggregates') or []))}",
         *(
@@ -277,6 +278,218 @@ def _tool_summary_from_query_plan(query_plan: Mapping[str, object]) -> list[str]
             else []
         ),
     ]
+
+
+def _summarize_tool_argument_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return summarize_for_log(cleaned, limit=72) if cleaned else None
+    if isinstance(value, Mapping):
+        key_summary = summarize_mapping_keys_for_log(cast(Mapping[str, object], value))
+        return f"keys={key_summary}" if key_summary else "object"
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        return f"{len(value)} item{'s' if len(value) != 1 else ''}"
+    return summarize_for_log(value, limit=48)
+
+
+def _generic_tool_argument_lines(arguments: Mapping[str, object]) -> list[str]:
+    lines: list[str] = []
+    sorted_keys = sorted(arguments.keys())
+    for key in sorted_keys[:4]:
+        preview = _summarize_tool_argument_value(arguments.get(key))
+        if preview is None:
+            continue
+        lines.append(f"{key}: {preview}")
+    remaining_fields = max(0, len(sorted_keys) - 4)
+    if remaining_fields:
+        suffix = "" if remaining_fields == 1 else "s"
+        lines.append(f"+{remaining_fields} more field{suffix}")
+    return lines
+
+
+def _basename(path: str) -> str:
+    name = PurePosixPath(path).name
+    return name or path
+
+
+def _tool_trace_target(tool_name: str, arguments: Mapping[str, object]) -> str | None:
+    if tool_name in {"create_csv_file", "create_json_file"}:
+        path = arguments.get("path")
+        if isinstance(path, str) and path.strip():
+            return _basename(path.strip())
+
+    if tool_name == "create_report":
+        title = arguments.get("title")
+        if isinstance(title, str) and title.strip():
+            return summarize_for_log(title.strip(), limit=56)
+        report_id = arguments.get("report_id")
+        if isinstance(report_id, str) and report_id.strip():
+            return report_id.strip()
+
+    if tool_name == "append_report_slide":
+        raw_slide = arguments.get("slide")
+        if isinstance(raw_slide, Mapping):
+            slide_title = raw_slide.get("title")
+            if isinstance(slide_title, str) and slide_title.strip():
+                return summarize_for_log(slide_title.strip(), limit=56)
+        report_id = arguments.get("report_id")
+        if isinstance(report_id, str) and report_id.strip():
+            return report_id.strip()
+
+    if tool_name == "render_chart_from_file":
+        chart_plan = arguments.get("chart_plan")
+        if isinstance(chart_plan, Mapping):
+            chart_title = chart_plan.get("title")
+            if isinstance(chart_title, str) and chart_title.strip():
+                return summarize_for_log(chart_title.strip(), limit=56)
+        file_id = arguments.get("file_id")
+        if isinstance(file_id, str) and file_id.strip():
+            return file_id.strip()
+
+    if tool_name == "run_aggregate_query":
+        query_plan = arguments.get("query_plan")
+        if isinstance(query_plan, Mapping):
+            dataset_id = query_plan.get("dataset_id")
+            if isinstance(dataset_id, str) and dataset_id.strip():
+                return dataset_id.strip()
+
+    for key in ("report_id", "slide_id", "file_id", "chart_plan_id"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return None
+
+
+def _tool_trace_title(tool_name: str, arguments: Mapping[str, object]) -> str:
+    label = format_tool_label(tool_name)
+    target = _tool_trace_target(tool_name, arguments)
+    return f"{label}({target})" if target else label
+
+
+def _tool_display_spec(
+    tool_definition: Mapping[str, Any],
+) -> Mapping[str, object] | None:
+    raw_display = tool_definition.get("display")
+    return raw_display if isinstance(raw_display, Mapping) else None
+
+
+def _resolve_argument_path(
+    arguments: Mapping[str, object],
+    path: str,
+) -> object | None:
+    segments = [segment.strip() for segment in path.split(".") if segment.strip()]
+    current: object = arguments
+    for segment in segments:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(segment)
+    return current
+
+
+def _display_arg_label(
+    path: str,
+    arg_labels: Mapping[str, object] | None,
+) -> str:
+    if arg_labels:
+        raw_label = arg_labels.get(path)
+        if isinstance(raw_label, str) and raw_label.strip():
+            return raw_label.strip()
+    return path.split(".")[-1]
+
+
+def _format_invocation_argument(
+    path: str,
+    arguments: Mapping[str, object],
+    *,
+    arg_labels: Mapping[str, object] | None = None,
+) -> str | None:
+    value = _resolve_argument_path(arguments, path)
+    preview = _summarize_tool_argument_value(value)
+    if preview is None:
+        return None
+    return f"{_display_arg_label(path, arg_labels)}={preview}"
+
+
+def _default_invocation_argument_paths(
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> list[str]:
+    target = _tool_trace_target(tool_name, arguments)
+    if target:
+        return []
+    return sorted(arguments.keys())[:2]
+
+
+def _format_tool_invocation(
+    tool_name: str,
+    arguments: Mapping[str, object],
+    *,
+    tool_definition: Mapping[str, Any] | None = None,
+) -> str:
+    label = format_tool_label(tool_name)
+    display = _tool_display_spec(tool_definition or {})
+    if display:
+        raw_label = display.get("label")
+        if isinstance(raw_label, str) and raw_label.strip():
+            label = raw_label.strip()
+
+    target = _tool_trace_target(tool_name, arguments)
+    raw_prominent_args = display.get("prominent_args") if display else None
+    prominent_args = [
+        item.strip()
+        for item in raw_prominent_args
+        if isinstance(item, str) and item.strip()
+    ] if isinstance(raw_prominent_args, Sequence) and not isinstance(raw_prominent_args, str) else []
+    raw_omit_args = display.get("omit_args") if display else None
+    omit_args = {
+        item.strip()
+        for item in raw_omit_args
+        if isinstance(item, str) and item.strip()
+    } if isinstance(raw_omit_args, Sequence) and not isinstance(raw_omit_args, str) else set()
+    raw_arg_labels = display.get("arg_labels") if display else None
+    arg_labels = raw_arg_labels if isinstance(raw_arg_labels, Mapping) else None
+
+    if prominent_args:
+        rendered_args = [
+            rendered
+            for path in prominent_args
+            if path not in omit_args
+            if (
+                rendered := _format_invocation_argument(
+                    path,
+                    arguments,
+                    arg_labels=arg_labels,
+                )
+            )
+            is not None
+        ]
+    else:
+        rendered_args = [
+            rendered
+            for path in _default_invocation_argument_paths(tool_name, arguments)
+            if path not in omit_args
+            if (
+                rendered := _format_invocation_argument(
+                    path,
+                    arguments,
+                    arg_labels=arg_labels,
+                )
+            )
+            is not None
+        ]
+
+    if rendered_args:
+        return f"{label}({', '.join(rendered_args)})"
+    if target:
+        return f"{label}({target})"
+    return f"{label}()"
 
 
 def _summarize_client_tool_request(
@@ -290,35 +503,37 @@ def _summarize_client_tool_request(
             details.append(f"Prefix: {prefix.strip()}")
         include_samples = arguments.get("includeSamples")
         label = (
-            "CSV workspace listing"
+            "Local CSV workspace scan"
             if tool_name == "list_csv_files"
-            else "PDF workspace listing"
+            else "Local PDF workspace scan"
             if tool_name == "list_pdf_files"
-            else "chartable workspace listing"
+            else "Local chartable artifact scan"
         )
         if include_samples is True:
-            return (f"Queued a {label} with samples.", details)
-        return (f"Queued a {label}.", details)
+            details.append("Samples: included")
+        return (label, details)
 
     if tool_name == "list_reports":
-        return ("Queued a report listing request.", [])
+        return ("Report index lookup", [])
 
     if tool_name == "get_report":
         return (
-            "Queued a report read.",
+            "Structured report read",
             [f"Report: {arguments.get('report_id') or 'unknown'}"],
         )
 
     if tool_name == "create_report":
         details = []
         if isinstance(arguments.get("title"), str) and arguments["title"].strip():
-            details.append(f"Title: {arguments['title'].strip()}")
+            details.append(
+                f"Title: {summarize_for_log(arguments['title'].strip(), limit=72)}"
+            )
         if (
             isinstance(arguments.get("report_id"), str)
             and arguments["report_id"].strip()
         ):
             details.append(f"Requested id: {arguments['report_id'].strip()}")
-        return ("Queued a report creation.", details)
+        return ("Structured report creation", details)
 
     if tool_name == "append_report_slide":
         details = [f"Report: {arguments.get('report_id') or 'unknown'}"]
@@ -326,12 +541,14 @@ def _summarize_client_tool_request(
         if isinstance(raw_slide, Mapping):
             details.append(f"Layout: {raw_slide.get('layout') or 'unknown'}")
             if isinstance(raw_slide.get("title"), str) and raw_slide["title"].strip():
-                details.append(f"Title: {raw_slide['title'].strip()}")
-        return ("Queued a report slide append.", details)
+                details.append(
+                    f"Title: {summarize_for_log(raw_slide['title'].strip(), limit=72)}"
+                )
+        return ("Report slide append", details)
 
     if tool_name == "remove_report_slide":
         return (
-            "Queued a report slide removal.",
+            "Report slide removal",
             [
                 f"Report: {arguments.get('report_id') or 'unknown'}",
                 f"Slide: {arguments.get('slide_id') or 'unknown'}",
@@ -340,7 +557,7 @@ def _summarize_client_tool_request(
 
     if tool_name == "inspect_chartable_file_schema":
         return (
-            "Queued a chartable schema inspection.",
+            "Chartable schema inspection",
             [f"File: {arguments.get('file_id') or 'unknown'}"],
         )
 
@@ -348,11 +565,11 @@ def _summarize_client_tool_request(
         details = [f"File: {arguments.get('file_id') or 'unknown'}"]
         if isinstance(arguments.get("max_pages"), int):
             details.append(f"Max pages: {arguments['max_pages']}")
-        return ("Queued a PDF inspection.", details)
+        return ("PDF inspection", details)
 
     if tool_name == "get_pdf_page_range":
         return (
-            "Queued a PDF page extraction.",
+            "PDF page extraction",
             [
                 f"File: {arguments.get('file_id') or 'unknown'}",
                 f"Pages: {arguments.get('start_page') or '?'}-{arguments.get('end_page') or '?'}",
@@ -362,14 +579,16 @@ def _summarize_client_tool_request(
     if tool_name == "smart_split_pdf":
         details = [f"File: {arguments.get('file_id') or 'unknown'}"]
         if isinstance(arguments.get("goal"), str) and arguments["goal"].strip():
-            details.append(f"Goal: {arguments['goal'].strip()}")
-        return ("Queued a smart PDF split.", details)
+            details.append(
+                f"Goal: {summarize_for_log(arguments['goal'].strip(), limit=72)}"
+            )
+        return ("Smart PDF split", details)
 
     if tool_name == "run_aggregate_query":
         query_plan = arguments.get("query_plan")
         if isinstance(query_plan, Mapping):
             return (
-                "Queued a grouped aggregate query.",
+                "Grouped aggregate query",
                 _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)),
             )
 
@@ -380,7 +599,12 @@ def _summarize_client_tool_request(
             details.extend(
                 _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan))
             )
-        return ("Queued a derived artifact build.", details)
+        return (
+            "Derived CSV artifact"
+            if tool_name == "create_csv_file"
+            else "Derived JSON artifact",
+            details,
+        )
 
     if tool_name == "render_chart_from_file":
         chart_plan = arguments.get("chart_plan")
@@ -391,35 +615,25 @@ def _summarize_client_tool_request(
             details.append(f"X key: {arguments['x_key']}")
         if isinstance(arguments.get("y_key"), str) and arguments["y_key"].strip():
             details.append(f"Y key: {arguments['y_key']}")
-        return ("Queued a chart render.", details)
+        if isinstance(arguments.get("series_key"), str) and arguments["series_key"].strip():
+            details.append(f"Series key: {arguments['series_key']}")
+        return ("Client chart render", details)
 
-    argument_fields = ", ".join(sorted(arguments.keys())) if arguments else "none"
+    generic_details = _generic_tool_argument_lines(arguments)
     return (
-        "Queued for client-side execution.",
-        [f"Argument fields: {argument_fields}"],
+        format_tool_label(tool_name),
+        generic_details or ["No parameters"],
     )
-
-
-def _get_thread_usage_snapshot(context: ReportAgentContext) -> dict[str, int | float]:
-    usage = empty_usage_totals()
-    raw_usage = context.thread_metadata.get("usage")
-    if isinstance(raw_usage, Mapping):
-        usage["input_tokens"] = int(raw_usage.get("input_tokens", 0))
-        usage["output_tokens"] = int(raw_usage.get("output_tokens", 0))
-        usage["cost_usd"] = round(float(raw_usage.get("cost_usd", 0.0)), 8)
-    return usage
 
 
 async def _stream_tool_trace_widget(
     ctx: ChatKitToolContext,
     tool_name: str,
-    summary: str,
-    details: Sequence[str] | None = None,
+    invocation: str,
 ) -> None:
-    clean_details = [detail.strip() for detail in details or [] if detail.strip()]
     await ctx.context.stream_widget(
-        build_tool_trace_widget(tool_name, summary, clean_details),
-        copy_text=build_tool_trace_copy_text(tool_name, summary, clean_details),
+        build_tool_trace_widget(tool_name, invocation),
+        copy_text=build_tool_trace_copy_text(tool_name, invocation),
     )
 
 
@@ -442,6 +656,36 @@ def _normalized_feedback_origin(context: ReportAgentContext) -> FeedbackOrigin:
     if origin in {"interactive", "ui_integration_test"}:
         return cast(FeedbackOrigin, origin)
     return "interactive"
+
+
+def _normalize_feedback_message(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _normalize_feedback_options(value: Sequence[str]) -> list[str]:
+    cleaned = [_normalize_feedback_message(item) for item in value]
+    options = [item for item in cleaned if item is not None]
+    if len(options) != 3:
+        raise ValueError(
+            "recommended_options must contain exactly three non-empty draft statements."
+        )
+    return options
+
+
+def _normalized_user_email(context: ReportAgentContext) -> str | None:
+    if isinstance(context.user_email, str) and context.user_email.strip():
+        return context.user_email.strip().lower()
+    return None
+
+
+def _current_feedback_session(
+    context: ReportAgentContext,
+) -> PendingFeedbackSession | None:
+    session = context.thread_metadata.get("feedback_session")
+    return cast(PendingFeedbackSession, session) if isinstance(session, dict) else None
 
 
 def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool:
@@ -484,15 +728,14 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
                 )
             ),
         )
-        trace_summary, trace_details = _summarize_client_tool_request(
-            tool_name,
-            arguments,
-        )
         await _stream_tool_trace_widget(
             ctx,
             tool_name,
-            trace_summary,
-            trace_details,
+            _format_tool_invocation(
+                tool_name,
+                arguments,
+                tool_definition=tool_definition,
+            ),
         )
         client_tool_call = ClientToolCall(name=tool_name, arguments=arguments)
         ctx.context.client_tool_call = client_tool_call
@@ -544,8 +787,7 @@ def build_agent_tools(
         await _stream_tool_trace_widget(
             ctx,
             "name_current_thread",
-            "Updated the thread title.",
-            [f"Title: {cleaned_title}"],
+            f"Name Current Thread(title={summarize_for_log(cleaned_title, limit=72)})",
         )
         result = {
             "thread_title": cleaned_title,
@@ -634,146 +876,163 @@ def build_agent_tools(
             "report_id": request_context.report_id,
         }
 
-    @function_tool(name_override="get_current_thread_cost")
-    async def get_current_thread_cost_tool(
-        ctx: ChatKitToolContext,
-    ) -> dict[str, object]:
-        """Validator pricing tool. Returns the pre-response thread usage totals; copy usage.cost_usd exactly into COST_USD."""
-        request_context = ctx.context.request_context
-        usage = _get_thread_usage_snapshot(request_context)
-        result = {
-            "thread_id": ctx.context.thread.id,
-            "scope": "before_current_turn",
-            "usage": usage,
-        }
-        _log_tool_start(
-            request_context,
-            "get_current_thread_cost",
-            scope="before_current_turn",
-            usage=summarize_pairs_for_log(
-                (
-                    ("input", usage["input_tokens"]),
-                    ("output", usage["output_tokens"]),
-                    ("cost_usd", usage["cost_usd"]),
-                )
-            ),
-        )
-        request_context.thread_metadata[DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY] = (
-            result
-        )
-        await ctx.context.stream(
-            ProgressUpdateEvent(
-                text=f"{DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX}{json.dumps(result, ensure_ascii=True)}"
-            )
-        )
-        ctx.context.thread.metadata = {
-            **dict(ctx.context.thread.metadata),
-            DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY: result,
-        }
-        _log_tool_end(
-            request_context,
-            "get_current_thread_cost",
-            thread_id=ctx.context.thread.id,
-            usage=summarize_pairs_for_log(
-                (
-                    ("input", usage["input_tokens"]),
-                    ("output", usage["output_tokens"]),
-                    ("cost_usd", usage["cost_usd"]),
-                )
-            ),
-        )
-        return result
-
-    if capability_id == DEMO_VALIDATOR_CAPABILITY_ID:
-        return [get_current_thread_cost_tool]
-
     tools.extend([name_current_thread_tool, make_plan_tool])
 
     if capability_id == "feedback-agent":
 
-        @function_tool(name_override="start_feedback_capture_for_latest_response")
-        async def start_feedback_capture_for_latest_response_tool(
+        @function_tool(name_override="get_feedback")
+        async def get_feedback_tool(
             ctx: ChatKitToolContext,
-            kind: Literal["positive", "negative"] | None = None,
-            label: Literal["ui", "tools", "behavior"] | None = None,
-            message: str | None = None,
+            recommended_options: list[str],
+            inferred_sentiment: Literal["positive", "negative"] | None = None,
+            explicit_feedback: str | None = None,
         ) -> dict[str, object]:
-            """Create a feedback draft for the latest assistant response and show a feedback widget in the thread."""
+            """Present a feedback widget for the latest assistant response, then wait for the user to confirm it."""
             request_context = ctx.context.request_context
             item_ids = await _latest_assistant_item_ids(ctx)
             if not item_ids:
                 raise ValueError(
                     "There is no assistant response in this thread yet to attach feedback to."
                 )
-            cleaned_message = (
-                message.strip()
-                if isinstance(message, str) and message.strip()
-                else None
+            cleaned_options = _normalize_feedback_options(recommended_options)
+            cleaned_feedback = _normalize_feedback_message(explicit_feedback)
+            session: PendingFeedbackSession = {
+                "session_id": f"fbs_{uuid4().hex}",
+                "item_ids": item_ids,
+                "recommended_options": cleaned_options,
+                "message_draft": cleaned_feedback,
+                "inferred_sentiment": inferred_sentiment,
+                "mode": "confirmation" if cleaned_feedback else "recommendations",
+            }
+            request_context.thread_metadata["feedback_session"] = session
+            ctx.context.thread.metadata = dict(request_context.thread_metadata)
+            _log_tool_start(
+                request_context,
+                "get_feedback",
+                session=summarize_pairs_for_log(
+                    (
+                        ("id", session["session_id"]),
+                        ("items", summarize_sequence_for_log(item_ids)),
+                        ("mode", session["mode"]),
+                        ("sentiment", inferred_sentiment),
+                    )
+                ),
+            )
+            await ctx.context.stream(
+                ProgressUpdateEvent(
+                    text=(
+                        "Opening a feedback confirmation form for the latest assistant response."
+                        if cleaned_feedback
+                        else "Opening a structured feedback form for the latest assistant response."
+                    )
+                )
+            )
+            await ctx.context.stream_widget(
+                build_feedback_session_widget(session),
+                copy_text=build_feedback_session_copy_text(session),
+            )
+            _log_tool_end(
+                request_context,
+                "get_feedback",
+                session=summarize_pairs_for_log(
+                    (
+                        ("id", session["session_id"]),
+                        ("items", summarize_sequence_for_log(item_ids)),
+                    )
+                ),
+            )
+            return {
+                "session_id": session["session_id"],
+                "thread_id": ctx.context.thread.id,
+                "item_ids": item_ids,
+                "status": "waiting_for_user",
+                "message": "The user has been presented a feedback widget; wait for a response.",
+            }
+
+        @function_tool(name_override="send_feedback")
+        async def send_feedback_tool(
+            ctx: ChatKitToolContext,
+            message: str,
+            sentiment: Literal["positive", "negative"],
+            item_ids: list[str] | None = None,
+            thread_id: str | None = None,
+        ) -> dict[str, object]:
+            """Persist confirmed feedback for the current thread, linked to the latest assistant response by default."""
+            request_context = ctx.context.request_context
+            cleaned_message = _normalize_feedback_message(message)
+            if cleaned_message is None:
+                raise ValueError("message must be a non-empty string.")
+            session = _current_feedback_session(request_context)
+            target_item_ids = [
+                item.strip()
+                for item in item_ids or []
+                if isinstance(item, str) and item.strip()
+            ]
+            if not target_item_ids and session is not None:
+                target_item_ids = list(session["item_ids"])
+            if not target_item_ids:
+                target_item_ids = await _latest_assistant_item_ids(ctx)
+            if not target_item_ids:
+                raise ValueError(
+                    "There is no assistant response available to attach feedback to."
+                )
+            target_thread_id = (
+                thread_id.strip()
+                if isinstance(thread_id, str) and thread_id.strip()
+                else ctx.context.thread.id
             )
             feedback = ChatItemFeedback(
                 id=f"fb_{uuid4().hex}",
-                thread_id=ctx.context.thread.id,
-                item_ids_json=item_ids,
-                user_email=(
-                    request_context.user_email.strip().lower()
-                    if isinstance(request_context.user_email, str)
-                    and request_context.user_email.strip()
-                    else None
-                ),
-                kind=kind,
-                label=label,
+                thread_id=target_thread_id,
+                item_ids_json=target_item_ids,
+                user_email=_normalized_user_email(request_context),
+                kind=sentiment,
+                label=None,
                 message=cleaned_message,
                 origin=_normalized_feedback_origin(request_context),
             )
             request_context.db.add(feedback)
             await request_context.db.commit()
+            request_context.thread_metadata.pop("feedback_session", None)
+            ctx.context.thread.metadata = dict(request_context.thread_metadata)
             record = ChatItemFeedbackRecord(
                 id=feedback.id,
                 thread_id=feedback.thread_id,
                 item_ids=list(feedback.item_ids_json),
                 user_email=feedback.user_email,
                 kind=feedback.kind,
-                label=feedback.label,
                 message=feedback.message,
                 origin=feedback.origin,
             )
             _log_tool_start(
                 request_context,
-                "start_feedback_capture_for_latest_response",
+                "send_feedback",
                 feedback=summarize_pairs_for_log(
                     (
-                        ("items", summarize_sequence_for_log(item_ids)),
-                        ("kind", kind),
-                        ("label", label),
+                        ("thread", target_thread_id),
+                        ("sentiment", sentiment),
+                        ("items", summarize_sequence_for_log(target_item_ids)),
                     )
                 ),
             )
-            await ctx.context.stream(
-                ProgressUpdateEvent(
-                    text="Opening a structured feedback form for the latest assistant response."
-                )
-            )
             await ctx.context.stream_widget(
-                build_feedback_capture_widget(record),
-                copy_text=build_feedback_capture_copy_text(record),
+                build_feedback_saved_widget(record),
+                copy_text=build_feedback_saved_copy_text(record),
             )
             _log_tool_end(
                 request_context,
-                "start_feedback_capture_for_latest_response",
+                "send_feedback",
                 feedback=summarize_pairs_for_log(
                     (
                         ("id", feedback.id),
-                        ("items", summarize_sequence_for_log(item_ids)),
+                        ("thread", target_thread_id),
+                        ("sentiment", sentiment),
                     )
                 ),
             )
-            return {
-                "feedback_id": feedback.id,
-                "thread_id": feedback.thread_id,
-                "item_ids": item_ids,
-            }
+            return record.model_dump(mode="json")
 
-        tools.append(start_feedback_capture_for_latest_response_tool)
+        tools.extend([get_feedback_tool, send_feedback_tool])
 
     for tool_name in tool_names:
         tool_definition = registered_tool_map.get(tool_name)

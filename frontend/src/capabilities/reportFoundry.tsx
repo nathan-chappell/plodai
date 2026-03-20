@@ -12,7 +12,7 @@ import {
   bindClientToolsForBundle,
   buildCapabilityBundleForRoot,
   listCapabilityBundleToolNames,
-} from "./registry";
+} from "./runtime-registry";
 import { reportAgentCapability } from "./definitions";
 import { buildReportAgentDemoScenario } from "./report-agent/demo";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
@@ -50,6 +50,27 @@ type ReportAgentTab = "report" | "reports" | "demo";
 const DEFAULT_STATUS = "Load local files to begin a report-led investigation.";
 const DEFAULT_BRIEF =
   "Investigate the attached files, hand off to the right specialist when needed, and build a useful report progressively.";
+
+export function resolveReportDemoWorkspaceMeta({
+  loading,
+  error,
+  title,
+}: {
+  loading: boolean;
+  error: string | null;
+  title?: string | null;
+}): string {
+  if (loading) {
+    return "Loading curated report demo scenario.";
+  }
+  if (error) {
+    return `Unable to load curated demo scenario: ${error}`;
+  }
+  if (title?.trim()) {
+    return `Curated scenario loaded: ${title.trim()}.`;
+  }
+  return "Curated demo scenario ready.";
+}
 
 function isClientChartSpec(value: Record<string, unknown>): value is ClientChartSpec {
   return "type" in value && "title" in value && "label_key" in value && "series" in value;
@@ -600,8 +621,6 @@ export function ReportFoundryPage({
   }
 
   const {
-    activePrefix,
-    cwdPath,
     entries,
     files,
     appendFiles,
@@ -610,15 +629,10 @@ export function ReportFoundryPage({
     investigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
-    executionMode,
-    setExecutionMode,
     setReportEffects,
     handleFiles,
     handleRemoveEntry,
     setFiles,
-    createDirectory,
-    changeDirectory,
-    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
@@ -646,18 +660,16 @@ export function ReportFoundryPage({
   });
   const capabilityWorkspace = useMemo(
     () => ({
-      activePrefix,
-      cwdPath,
+      capabilityId: reportAgentCapability.id,
+      capabilityTitle: reportAgentCapability.title,
+      workspaceId: selectedWorkspaceId,
       entries,
       files,
       workspaceContext,
-      setActivePrefix,
-      createDirectory,
-      changeDirectory,
       updateFilesystem,
       getState,
     }),
-    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
+    [entries, files, getState, selectedWorkspaceId, updateFilesystem, workspaceContext],
   );
   const capabilityBundle = useMemo(
     () => buildCapabilityBundleForRoot(reportAgentCapability.id, capabilityWorkspace),
@@ -682,7 +694,6 @@ export function ReportFoundryPage({
     ready: workspaceHydrated,
     buildDemoScenario: buildReportAgentDemoScenario,
     files,
-    setExecutionMode,
     setFiles,
     setStatus,
     setReportEffects,
@@ -755,7 +766,7 @@ export function ReportFoundryPage({
             Lead an investigation, hand off to specialists when needed, and assemble a narrative report over local files.
           </CapabilitySubhead>
         </CapabilityHeader>
-        <AuthPanel mode="account" heading="Account" />
+        <AuthPanel mode="account" heading="Account" blendWithShell />
       </CapabilityHeroRow>
 
       <CapabilityTabBar>
@@ -788,8 +799,6 @@ export function ReportFoundryPage({
               enabled
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={appendReportEffects}
@@ -818,8 +827,6 @@ export function ReportFoundryPage({
               enabled
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={appendReportEffects}
@@ -849,8 +856,6 @@ export function ReportFoundryPage({
               capabilityBundle={capabilityBundle}
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}

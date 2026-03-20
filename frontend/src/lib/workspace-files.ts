@@ -1,6 +1,7 @@
 import { parseCsvPreview } from "./csv";
 import { parseJsonPreview } from "./json";
-import { inspectPdfBytes, uint8ArrayToBase64 } from "./pdf";
+import { encodeBytesToBase64 } from "./base64";
+import { inspectPdfBytes } from "./pdf";
 import type {
   LocalChartableFile,
   LocalDataset,
@@ -57,7 +58,7 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
       ...baseFields,
       kind: "pdf",
       page_count: preview.pageCount,
-      bytes_base64: uint8ArrayToBase64(bytes),
+      bytes_base64: encodeBytesToBase64(bytes),
     } satisfies LocalPdfFile;
   }
 

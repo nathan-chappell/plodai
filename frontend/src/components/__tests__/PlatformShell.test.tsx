@@ -13,20 +13,20 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 const capabilities: CapabilityDefinition[] = [
   {
-    id: "csv-agent",
-    path: "/capabilities/csv-agent",
-    navLabel: "CSV Agent",
-    title: "CSV Agent",
-    eyebrow: "Capability",
-    description: "Structured CSV analysis and chartable artifact creation.",
-    chatkitLead: "Perform queries and make slices of CSV files.",
-    chatkitPlaceholder: "Ask the CSV agent to inspect schemas, run aggregates, or materialize CSV and JSON results",
-    tabs: [{ id: "agent", label: "Agent" }],
+    id: "workspace-agent",
+    path: "/workspace",
+    navLabel: "Workspace",
+    title: "Workspace",
+    eyebrow: "Workspace",
+    description: "Shared chat-led workspace.",
+    chatkitLead: "Investigate local files.",
+    chatkitPlaceholder: "Ask the workspace to inspect local files",
+    tabs: [],
   },
 ];
 
 const workspaceRegistration: ShellWorkspaceRegistration = {
-  capabilityId: "csv-agent",
+  capabilityId: "workspace-agent",
   title: "Workspace artifacts",
   description: "Artifacts for the active capability.",
   artifacts: [],
@@ -68,12 +68,12 @@ describe("PlatformShell", () => {
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  it("removes browse/theme sidebar sections and keeps a lowercase workspace utility entry", async () => {
+  it("uses workspace-first shell copy and a files utility entry", async () => {
     await act(async () => {
       root.render(
         <PlatformShell
           capabilities={capabilities}
-          activeCapabilityId="csv-agent"
+          activeCapabilityId="workspace-agent"
           onSelectCapability={() => {}}
           workspaceRegistration={workspaceRegistration}
           workspaceModalOpen={false}
@@ -87,6 +87,7 @@ describe("PlatformShell", () => {
 
     expect(container.textContent).not.toContain("Browse");
     expect(container.textContent).not.toContain("Theme");
-    expect(container.querySelector("[data-testid='workspace-nav-button']")?.textContent).toContain("workspace");
+    expect(container.textContent).toContain("Analysis Workspace");
+    expect(container.querySelector("[data-testid='workspace-nav-button']")?.textContent).toContain("files");
   });
 });

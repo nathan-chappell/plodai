@@ -1,15 +1,18 @@
 import type { WorkspaceState, WorkspaceStateFileSummary } from "../types/analysis";
+import type { PdfSmartSplitBundleView, PdfSmartSplitEntryView } from "../capabilities/types";
 import type { LocalOtherFile, LocalWorkspaceFile } from "../types/report";
 import type {
+  AgentsFileSummary,
+  ReportItemV1,
+  ReportSlidePanelV1,
+  ReportSlideV1,
+  WorkspaceAppStateV1,
   WorkspaceBootstrapMetadata,
   WorkspaceIndexV1,
-  WorkspaceAppStateV1,
+  WorkspacePdfSmartSplitRegistryV1,
   WorkspaceReportIndexV1,
   WorkspaceReportV1,
   WorkspaceToolCatalogV1,
-  ReportItemV1,
-  ReportSlideV1,
-  ReportSlidePanelV1,
 } from "../types/workspace-contract";
 import {
   buildDefaultAgentsFileContent,
@@ -18,158 +21,21 @@ import {
   buildDefaultWorkspaceIndex,
   buildDefaultWorkspaceReport,
   buildDefaultWorkspaceToolCatalog,
-  buildReportPath,
   normalizeReportId,
-  WORKSPACE_AGENTS_PATH,
-  WORKSPACE_APP_STATE_PATH,
-  WORKSPACE_CHART_ARTIFACTS_DIR,
   WORKSPACE_CONTRACT_VERSION,
-  WORKSPACE_DATA_ARTIFACTS_DIR,
-  WORKSPACE_INDEX_PATH,
-  WORKSPACE_PDF_ARTIFACTS_DIR,
-  WORKSPACE_REPORTS_DIR,
-  WORKSPACE_REPORT_INDEX_PATH,
-  WORKSPACE_SYSTEM_DIR,
-  WORKSPACE_TOOL_CATALOG_PATH,
-  type AgentsFileSummary,
+  type WorkspaceArtifactBucket,
 } from "../types/workspace-contract";
 import {
-  addWorkspaceFilesAtPathsWithResult,
-  findWorkspaceFileNodeByPath,
+  addWorkspaceArtifactsWithResult,
+  findWorkspaceFileNodeById,
   getWorkspaceContext,
   listAllWorkspaceFileNodes,
-  normalizeAbsolutePath,
-  removeWorkspaceFileByPath,
-  removeWorkspacePrefix,
-  resolveWorkspacePath,
 } from "./workspace-fs";
 import { summarizeWorkspaceFiles } from "./workspace-files";
 import type { WorkspaceFileNode, WorkspaceFilesystem } from "../types/workspace";
 
-type WorkspaceStructuredDoc =
-  | WorkspaceAppStateV1
-  | WorkspaceReportIndexV1
-  | WorkspaceReportV1
-  | WorkspaceToolCatalogV1
-  | WorkspaceIndexV1;
-
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function buildTextFile(path: string, text: string): LocalOtherFile {
-  const name = path.split("/").filter(Boolean).at(-1) ?? "untitled.txt";
-  return {
-    id: crypto.randomUUID(),
-    name,
-    kind: "other",
-    extension: name.includes(".") ? name.split(".").at(-1) ?? "" : "",
-    mime_type: name.endsWith(".json") ? "application/json" : "text/markdown",
-    byte_size: new TextEncoder().encode(text).length,
-    text_content: text,
-  };
-}
-
-function findFileNodeByPath(
-  filesystem: WorkspaceFilesystem,
-  path: string,
-): WorkspaceFileNode | null {
-  return findWorkspaceFileNodeByPath(filesystem, path);
-}
-
-function listAllFileNodes(filesystem: WorkspaceFilesystem): WorkspaceFileNode[] {
-  return listAllWorkspaceFileNodes(filesystem);
-}
-
-function upsertTextFile(
-  filesystem: WorkspaceFilesystem,
-  path: string,
-  text: string,
-  source: WorkspaceFileNode["source"],
-): WorkspaceFilesystem {
-  const normalizedPath = normalizeAbsolutePath(path);
-  const filename = normalizedPath.split("/").filter(Boolean).at(-1) ?? "untitled";
-  const existing = findFileNodeByPath(filesystem, normalizedPath);
-  if (
-    existing?.file.kind === "other" &&
-    existing.file.text_content === text &&
-    existing.file.name === filename
-  ) {
-    return filesystem;
-  }
-  const baseFile = buildTextFile(normalizedPath, text);
-  const nextFile: LocalWorkspaceFile = {
-    ...baseFile,
-    id: existing?.file.id ?? baseFile.id,
-    name: filename,
-  };
-  return addWorkspaceFilesAtPathsWithResult(
-    filesystem,
-    [
-      {
-        path: normalizedPath,
-        file: nextFile,
-        source: existing?.source ?? source,
-        createdAt: existing?.created_at ?? nowIso(),
-      },
-    ],
-  ).filesystem;
-}
-
-function removeFileByPath(
-  filesystem: WorkspaceFilesystem,
-  path: string,
-): WorkspaceFilesystem {
-  return removeWorkspaceFileByPath(filesystem, path);
-}
-
-function readTextFile(filesystem: WorkspaceFilesystem, path: string): string | null {
-  const node = findFileNodeByPath(filesystem, path);
-  if (!node) {
-    return null;
-  }
-  return node.file.kind === "other" && typeof node.file.text_content === "string"
-    ? node.file.text_content
-    : null;
-}
-
-function parseRawJsonDocument(
-  filesystem: WorkspaceFilesystem,
-  path: string,
-): unknown | null {
-  const text = readTextFile(filesystem, path);
-  if (!text) {
-    return null;
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function parseJsonDocument<T extends WorkspaceStructuredDoc>(
-  filesystem: WorkspaceFilesystem,
-  path: string,
-): T | null {
-  const text = readTextFile(filesystem, path);
-  if (!text) {
-    return null;
-  }
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return null;
-  }
-}
-
-function writeJsonDocument(
-  filesystem: WorkspaceFilesystem,
-  path: string,
-  value: WorkspaceStructuredDoc,
-  source: WorkspaceFileNode["source"] = "derived",
-): WorkspaceFilesystem {
-  return upsertTextFile(filesystem, path, JSON.stringify(value, null, 2), source);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -180,6 +46,140 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function normalizePdfSmartSplitEntry(
+  value: unknown,
+): PdfSmartSplitEntryView | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const fileId = asString(record.fileId);
+  const name = asString(record.name);
+  const title = asString(record.title);
+  const startPage =
+    typeof record.startPage === "number" ? record.startPage : null;
+  const endPage = typeof record.endPage === "number" ? record.endPage : null;
+  const pageCount =
+    typeof record.pageCount === "number" ? record.pageCount : null;
+  return fileId &&
+    name &&
+    title &&
+    startPage !== null &&
+    endPage !== null &&
+    pageCount !== null
+    ? {
+        fileId,
+        name,
+        title,
+        startPage,
+        endPage,
+        pageCount,
+      }
+    : null;
+}
+
+function normalizePdfSmartSplitBundle(
+  value: unknown,
+): PdfSmartSplitBundleView | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const id = asString(record.id);
+  const createdAt = asString(record.createdAt);
+  const sourceFileId = asString(record.sourceFileId);
+  const sourceFileName = asString(record.sourceFileName);
+  const entries = Array.isArray(record.entries)
+    ? record.entries
+        .map((entry) => normalizePdfSmartSplitEntry(entry))
+        .filter(
+          (entry): entry is PdfSmartSplitEntryView => entry !== null,
+        )
+    : [];
+  return id && createdAt && sourceFileId && sourceFileName
+    ? {
+        id,
+        createdAt,
+        sourceFileId,
+        sourceFileName,
+        archiveFileId: asString(record.archiveFileId) ?? undefined,
+        archiveFileName: asString(record.archiveFileName) ?? undefined,
+        indexFileId: asString(record.indexFileId) ?? undefined,
+        indexFileName: asString(record.indexFileName) ?? undefined,
+        entries,
+      }
+    : null;
+}
+
+function normalizePdfSmartSplitRegistry(
+  value: unknown,
+): WorkspacePdfSmartSplitRegistryV1 | null {
+  const record = asRecord(value);
+  if (!record || record.version !== WORKSPACE_CONTRACT_VERSION) {
+    return null;
+  }
+  const bundles = Array.isArray(record.bundles)
+    ? record.bundles
+        .map((bundle) => normalizePdfSmartSplitBundle(bundle))
+        .filter(
+          (bundle): bundle is PdfSmartSplitBundleView => bundle !== null,
+        )
+    : [];
+  return {
+    version: WORKSPACE_CONTRACT_VERSION,
+    bundles: sortPdfSmartSplitBundles(bundles),
+  };
+}
+
+function sortPdfSmartSplitBundles(
+  bundles: PdfSmartSplitBundleView[],
+): PdfSmartSplitBundleView[] {
+  return [...bundles].sort(
+    (left, right) => right.createdAt.localeCompare(left.createdAt),
+  );
+}
+
+function prunePdfSmartSplitBundlesForFilesystem(
+  filesystem: WorkspaceFilesystem,
+  bundles: PdfSmartSplitBundleView[],
+): PdfSmartSplitBundleView[] {
+  const fileIds = new Set(
+    listAllWorkspaceFileNodes(filesystem).map((fileNode) => fileNode.file.id),
+  );
+
+  return sortPdfSmartSplitBundles(
+    bundles
+      .map((bundle) => {
+        if (!fileIds.has(bundle.sourceFileId)) {
+          return null;
+        }
+        const entries = bundle.entries.filter((entry) =>
+          fileIds.has(entry.fileId),
+        );
+        if (!entries.length) {
+          return null;
+        }
+        const nextBundle: PdfSmartSplitBundleView = {
+          id: bundle.id,
+          createdAt: bundle.createdAt,
+          sourceFileId: bundle.sourceFileId,
+          sourceFileName: bundle.sourceFileName,
+          entries,
+        };
+        if (bundle.archiveFileId && fileIds.has(bundle.archiveFileId)) {
+          nextBundle.archiveFileId = bundle.archiveFileId;
+          nextBundle.archiveFileName = bundle.archiveFileName;
+        }
+        if (bundle.indexFileId && fileIds.has(bundle.indexFileId)) {
+          nextBundle.indexFileId = bundle.indexFileId;
+          nextBundle.indexFileName = bundle.indexFileName;
+        }
+        return nextBundle;
+      })
+      .filter((bundle): bundle is PdfSmartSplitBundleView => bundle !== null),
+  );
 }
 
 function normalizeLegacyReportItem(value: unknown): ReportItemV1 | null {
@@ -492,34 +492,52 @@ function updateAgentsObjectiveText(markdown: string, nextGoal: string): string {
   return `${before}\n${safeGoal}${after}`;
 }
 
+function withFilesystemPatch(
+  filesystem: WorkspaceFilesystem,
+  patch: Partial<WorkspaceFilesystem>,
+): WorkspaceFilesystem {
+  return {
+    ...filesystem,
+    ...patch,
+  };
+}
+
+function bucketForTextArtifact(bucket?: WorkspaceArtifactBucket): WorkspaceArtifactBucket {
+  return bucket ?? "data";
+}
+
 export function readWorkspaceAppState(
   filesystem: WorkspaceFilesystem,
 ): WorkspaceAppStateV1 | null {
-  return parseJsonDocument<WorkspaceAppStateV1>(filesystem, WORKSPACE_APP_STATE_PATH);
+  return filesystem.app_state;
 }
 
 export function readWorkspaceReportIndex(
   filesystem: WorkspaceFilesystem,
 ): WorkspaceReportIndexV1 | null {
-  return parseJsonDocument<WorkspaceReportIndexV1>(
-    filesystem,
-    WORKSPACE_REPORT_INDEX_PATH,
-  );
+  return filesystem.report_index;
 }
 
 export function readWorkspaceToolCatalog(
   filesystem: WorkspaceFilesystem,
 ): WorkspaceToolCatalogV1 | null {
-  return parseJsonDocument<WorkspaceToolCatalogV1>(
-    filesystem,
-    WORKSPACE_TOOL_CATALOG_PATH,
-  );
+  return filesystem.tool_catalog;
 }
 
 export function readWorkspaceIndex(
   filesystem: WorkspaceFilesystem,
 ): WorkspaceIndexV1 | null {
-  return parseJsonDocument<WorkspaceIndexV1>(filesystem, WORKSPACE_INDEX_PATH);
+  return filesystem.workspace_index;
+}
+
+export function readWorkspacePdfSmartSplitBundles(
+  filesystem: WorkspaceFilesystem,
+): PdfSmartSplitBundleView[] {
+  const registry = normalizePdfSmartSplitRegistry(filesystem.pdf_smart_splits);
+  if (!registry) {
+    return [];
+  }
+  return prunePdfSmartSplitBundlesForFilesystem(filesystem, registry.bundles);
 }
 
 export function readWorkspaceReport(
@@ -527,7 +545,7 @@ export function readWorkspaceReport(
   reportId: string,
 ): WorkspaceReportV1 | null {
   return normalizeWorkspaceReport(
-    parseRawJsonDocument(filesystem, buildReportPath(reportId)),
+    filesystem.reports_by_id[normalizeReportId(reportId)] ?? null,
   );
 }
 
@@ -544,48 +562,93 @@ export function listWorkspaceReports(
 export function writeWorkspaceAppState(
   filesystem: WorkspaceFilesystem,
   state: WorkspaceAppStateV1,
-  source: WorkspaceFileNode["source"] = "derived",
 ): WorkspaceFilesystem {
-  return writeJsonDocument(filesystem, WORKSPACE_APP_STATE_PATH, state, source);
+  return withFilesystemPatch(filesystem, { app_state: state });
 }
 
 export function writeWorkspaceReportIndex(
   filesystem: WorkspaceFilesystem,
   index: WorkspaceReportIndexV1,
-  source: WorkspaceFileNode["source"] = "derived",
 ): WorkspaceFilesystem {
-  return writeJsonDocument(filesystem, WORKSPACE_REPORT_INDEX_PATH, index, source);
+  return withFilesystemPatch(filesystem, { report_index: index });
 }
 
 export function writeWorkspaceToolCatalog(
   filesystem: WorkspaceFilesystem,
   catalog: WorkspaceToolCatalogV1,
-  source: WorkspaceFileNode["source"] = "derived",
 ): WorkspaceFilesystem {
-  return writeJsonDocument(filesystem, WORKSPACE_TOOL_CATALOG_PATH, catalog, source);
+  return withFilesystemPatch(filesystem, { tool_catalog: catalog });
 }
 
 export function writeWorkspaceIndex(
   filesystem: WorkspaceFilesystem,
   index: WorkspaceIndexV1,
-  source: WorkspaceFileNode["source"] = "derived",
 ): WorkspaceFilesystem {
-  return writeJsonDocument(filesystem, WORKSPACE_INDEX_PATH, index, source);
+  return withFilesystemPatch(filesystem, { workspace_index: index });
+}
+
+export function writeWorkspacePdfSmartSplitBundles(
+  filesystem: WorkspaceFilesystem,
+  bundles: PdfSmartSplitBundleView[],
+): WorkspaceFilesystem {
+  return withFilesystemPatch(filesystem, {
+    pdf_smart_splits: {
+      version: WORKSPACE_CONTRACT_VERSION,
+      bundles: sortPdfSmartSplitBundles(bundles),
+    },
+  });
+}
+
+export function upsertWorkspacePdfSmartSplitBundle(
+  filesystem: WorkspaceFilesystem,
+  bundle: PdfSmartSplitBundleView,
+): WorkspaceFilesystem {
+  const currentBundles = readWorkspacePdfSmartSplitBundles(filesystem);
+  return writeWorkspacePdfSmartSplitBundles(
+    filesystem,
+    [
+      bundle,
+      ...currentBundles.filter((currentBundle) => currentBundle.id !== bundle.id),
+    ],
+  );
+}
+
+export function pruneWorkspacePdfSmartSplitBundles(
+  filesystem: WorkspaceFilesystem,
+): WorkspaceFilesystem {
+  const registry = normalizePdfSmartSplitRegistry(filesystem.pdf_smart_splits);
+  if (!registry) {
+    return filesystem;
+  }
+  const prunedBundles = prunePdfSmartSplitBundlesForFilesystem(
+    filesystem,
+    registry.bundles,
+  );
+  const currentSerialized = JSON.stringify(sortPdfSmartSplitBundles(registry.bundles));
+  const nextSerialized = JSON.stringify(sortPdfSmartSplitBundles(prunedBundles));
+  if (currentSerialized === nextSerialized) {
+    return filesystem;
+  }
+  return writeWorkspacePdfSmartSplitBundles(filesystem, prunedBundles);
 }
 
 export function writeWorkspaceReport(
   filesystem: WorkspaceFilesystem,
   report: WorkspaceReportV1,
-  source: WorkspaceFileNode["source"] = "derived",
 ): WorkspaceFilesystem {
-  return writeJsonDocument(filesystem, buildReportPath(report.report_id), report, source);
+  return withFilesystemPatch(filesystem, {
+    reports_by_id: {
+      ...filesystem.reports_by_id,
+      [normalizeReportId(report.report_id)]: report,
+    },
+  });
 }
 
 function syncWorkspaceReportState(
   filesystem: WorkspaceFilesystem,
   reportIndex: WorkspaceReportIndexV1,
 ): WorkspaceFilesystem {
-  let nextFilesystem = writeWorkspaceReportIndex(filesystem, reportIndex, "derived");
+  let nextFilesystem = writeWorkspaceReportIndex(filesystem, reportIndex);
   const appState = readWorkspaceAppState(nextFilesystem) ?? buildDefaultWorkspaceAppState();
   nextFilesystem = writeWorkspaceAppState(
     nextFilesystem,
@@ -594,7 +657,6 @@ function syncWorkspaceReportState(
       version: WORKSPACE_CONTRACT_VERSION,
       current_report_id: reportIndex.current_report_id,
     },
-    "derived",
   );
   nextFilesystem = writeWorkspaceIndex(
     nextFilesystem,
@@ -602,7 +664,6 @@ function syncWorkspaceReportState(
       report_ids: reportIndex.report_ids,
       current_report_id: reportIndex.current_report_id,
     }),
-    "derived",
   );
   return nextFilesystem;
 }
@@ -642,7 +703,6 @@ function ensureTrackedReport(
     nextFilesystem = writeWorkspaceReport(
       nextFilesystem,
       buildDefaultWorkspaceReport({ reportId: normalizedReportId }),
-      "derived",
     );
   }
   return syncWorkspaceReportState(nextFilesystem, nextReportIndex);
@@ -665,7 +725,7 @@ export function createWorkspaceReport(
     reportId: nextReportId,
     title: options.title.trim() || "Untitled report",
   });
-  let nextFilesystem = writeWorkspaceReport(filesystem, report, "derived");
+  let nextFilesystem = writeWorkspaceReport(filesystem, report);
   nextFilesystem = syncWorkspaceReportState(nextFilesystem, {
     ...reportIndex,
     report_ids: [...reportIndex.report_ids, nextReportId],
@@ -695,18 +755,40 @@ export function setWorkspaceCurrentReport(
 export function writeAgentsFile(
   filesystem: WorkspaceFilesystem,
   markdown: string,
-  source: WorkspaceFileNode["source"] = "derived",
 ): WorkspaceFilesystem {
-  return upsertTextFile(filesystem, WORKSPACE_AGENTS_PATH, markdown, source);
+  return withFilesystemPatch(filesystem, { agents_markdown: markdown });
 }
 
 export function writeWorkspaceTextFile(
   filesystem: WorkspaceFilesystem,
-  path: string,
+  filename: string,
   text: string,
   source: WorkspaceFileNode["source"] = "derived",
+  options: {
+    bucket?: WorkspaceArtifactBucket;
+    producer_key?: string;
+    producer_label?: string;
+  } = {},
 ): WorkspaceFilesystem {
-  return upsertTextFile(filesystem, path, text, source);
+  const trimmedName = filename.trim() || "note.txt";
+  const nextFile: LocalOtherFile = {
+    id: crypto.randomUUID(),
+    name: trimmedName,
+    kind: "other",
+    extension: trimmedName.includes(".") ? trimmedName.split(".").at(-1) ?? "" : "",
+    mime_type: trimmedName.endsWith(".json") ? "application/json" : "text/plain",
+    byte_size: new TextEncoder().encode(text).length,
+    text_content: text,
+  };
+  return addWorkspaceArtifactsWithResult(filesystem, [
+    {
+      file: nextFile,
+      source,
+      bucket: bucketForTextArtifact(options.bucket),
+      producer_key: options.producer_key,
+      producer_label: options.producer_label,
+    },
+  ]).filesystem;
 }
 
 export function buildWorkspaceBootstrapMetadata(
@@ -714,11 +796,9 @@ export function buildWorkspaceBootstrapMetadata(
 ): WorkspaceBootstrapMetadata {
   const appState = readWorkspaceAppState(filesystem);
   const reportIndex = readWorkspaceReportIndex(filesystem);
-  const agentsText = readTextFile(filesystem, WORKSPACE_AGENTS_PATH);
   const agentsFile: AgentsFileSummary = {
-    path: WORKSPACE_AGENTS_PATH,
-    present: Boolean(agentsText),
-    text: agentsText,
+    present: Boolean(filesystem.agents_markdown),
+    text: filesystem.agents_markdown,
   };
   return {
     contract_version: WORKSPACE_CONTRACT_VERSION,
@@ -730,39 +810,26 @@ export function buildWorkspaceBootstrapMetadata(
   };
 }
 
-export function isVisibleWorkspaceStatePath(path: string): boolean {
-  if (path === WORKSPACE_AGENTS_PATH) {
-    return false;
-  }
-  if (path.startsWith(`${WORKSPACE_SYSTEM_DIR}/`)) {
-    return false;
-  }
-  if (path.startsWith(`${WORKSPACE_REPORTS_DIR}/`)) {
-    return false;
-  }
-  return true;
-}
-
 export function buildWorkspaceStateMetadata(
   filesystem: WorkspaceFilesystem,
-  pathPrefix: string,
+  workspaceId: string,
 ): WorkspaceState {
   const appState = readWorkspaceAppState(filesystem);
   const reportIndex = readWorkspaceReportIndex(filesystem);
-  const agentsText = readTextFile(filesystem, WORKSPACE_AGENTS_PATH);
-  const visibleFileNodes = listAllFileNodes(filesystem).filter((fileNode) =>
-    isVisibleWorkspaceStatePath(fileNode.path),
-  );
+  const visibleFileNodes = listAllWorkspaceFileNodes(filesystem);
 
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    context: getWorkspaceContext(filesystem, pathPrefix),
+    context: getWorkspaceContext(filesystem, workspaceId),
     files: visibleFileNodes.map((fileNode) => {
       const summary = summarizeWorkspaceFiles([fileNode.file], { includeSamples: true })[0];
       return {
         id: String(summary.id),
         name: String(summary.name),
-        path: fileNode.path,
+        bucket: fileNode.bucket,
+        producer_key: fileNode.producer_key,
+        producer_label: fileNode.producer_label,
+        source: fileNode.source,
         kind: summary.kind as WorkspaceStateFileSummary["kind"],
         extension: String(summary.extension),
         mime_type:
@@ -775,7 +842,7 @@ export function buildWorkspaceStateMetadata(
           ? (summary.columns as string[])
           : undefined,
         numeric_columns: Array.isArray(summary.numeric_columns)
-          ? (summary.numeric_columns as string[])
+          ? (summary.numeric_columns as WorkspaceStateFileSummary["numeric_columns"])
           : undefined,
         sample_rows: Array.isArray(summary.sample_rows)
           ? (summary.sample_rows as WorkspaceStateFileSummary["sample_rows"])
@@ -794,7 +861,7 @@ export function buildWorkspaceStateMetadata(
     current_report_id:
       appState?.current_report_id ?? reportIndex?.current_report_id ?? null,
     current_goal: appState?.current_goal ?? null,
-    agents_markdown: agentsText ?? null,
+    agents_markdown: filesystem.agents_markdown ?? null,
   };
 }
 
@@ -805,9 +872,7 @@ export function ensureWorkspaceContractFilesystem(
     capabilityTitle: string;
     defaultGoal: string;
     activeWorkspaceTab: string;
-    executionMode: "interactive" | "batch";
     toolNames?: string[];
-    prefixBySurface?: Record<string, string>;
   },
 ): WorkspaceFilesystem {
   let nextFilesystem = filesystem;
@@ -817,9 +882,7 @@ export function ensureWorkspaceContractFilesystem(
     buildDefaultWorkspaceAppState({
       active_capability_id: options.capabilityId,
       active_workspace_tab: options.activeWorkspaceTab,
-      execution_mode: options.executionMode,
       current_goal: options.defaultGoal,
-      current_prefix_by_surface: options.prefixBySurface ?? {},
     });
 
   let reportIndex = readWorkspaceReportIndex(nextFilesystem) ?? buildDefaultReportIndex();
@@ -836,7 +899,7 @@ export function ensureWorkspaceContractFilesystem(
       report_ids: [defaultReport.report_id],
       current_report_id: defaultReport.report_id,
     };
-    nextFilesystem = writeWorkspaceReport(nextFilesystem, defaultReport, "derived");
+    nextFilesystem = writeWorkspaceReport(nextFilesystem, defaultReport);
   }
 
   const currentReportId = reportIndex.current_report_id;
@@ -844,7 +907,6 @@ export function ensureWorkspaceContractFilesystem(
     nextFilesystem = writeWorkspaceReport(
       nextFilesystem,
       buildDefaultWorkspaceReport({ reportId: currentReportId }),
-      "derived",
     );
   }
 
@@ -854,24 +916,18 @@ export function ensureWorkspaceContractFilesystem(
     active_capability_id: options.capabilityId,
     active_workspace_tab:
       appState.active_workspace_tab ?? options.activeWorkspaceTab,
-    execution_mode: appState.execution_mode ?? options.executionMode,
     current_goal: appState.current_goal ?? options.defaultGoal,
     current_report_id: appState.current_report_id ?? reportIndex.current_report_id,
-    current_prefix_by_surface: {
-      ...(appState.current_prefix_by_surface ?? {}),
-      ...(options.prefixBySurface ?? {}),
-    },
   };
 
-  nextFilesystem = writeWorkspaceAppState(nextFilesystem, appState, "derived");
-  nextFilesystem = writeWorkspaceReportIndex(nextFilesystem, reportIndex, "derived");
+  nextFilesystem = writeWorkspaceAppState(nextFilesystem, appState);
+  nextFilesystem = writeWorkspaceReportIndex(nextFilesystem, reportIndex);
   nextFilesystem = writeWorkspaceIndex(
     nextFilesystem,
     buildDefaultWorkspaceIndex({
       report_ids: reportIndex.report_ids,
       current_report_id: reportIndex.current_report_id,
     }),
-    "derived",
   );
   nextFilesystem = writeWorkspaceToolCatalog(
     nextFilesystem,
@@ -879,17 +935,15 @@ export function ensureWorkspaceContractFilesystem(
       capability_id: options.capabilityId,
       tool_names: options.toolNames ?? [],
     }),
-    "derived",
   );
 
-  if (!readTextFile(nextFilesystem, WORKSPACE_AGENTS_PATH)) {
+  if (!nextFilesystem.agents_markdown) {
     nextFilesystem = writeAgentsFile(
       nextFilesystem,
       buildDefaultAgentsFileContent({
         capabilityTitle: options.capabilityTitle,
         currentGoal: appState.current_goal ?? options.defaultGoal,
       }),
-      "derived",
     );
   }
 
@@ -907,12 +961,7 @@ export function updateWorkspaceAppState(
       ...current,
       ...patch,
       version: WORKSPACE_CONTRACT_VERSION,
-      current_prefix_by_surface: {
-        ...current.current_prefix_by_surface,
-        ...(patch.current_prefix_by_surface ?? {}),
-      },
     },
-    "derived",
   );
 }
 
@@ -923,14 +972,13 @@ export function updateWorkspaceCurrentGoal(
   const nextFilesystem = updateWorkspaceAppState(filesystem, {
     current_goal: goal.trim() || null,
   });
-  const existingAgents = readTextFile(nextFilesystem, WORKSPACE_AGENTS_PATH);
+  const existingAgents = nextFilesystem.agents_markdown;
   if (!existingAgents) {
     return nextFilesystem;
   }
   return writeAgentsFile(
     nextFilesystem,
     updateAgentsObjectiveText(existingAgents, goal),
-    "derived",
   );
 }
 
@@ -951,7 +999,6 @@ export function replaceWorkspaceReportSlides(
       slides,
       updated_at: nowIso(),
     },
-    "derived",
   );
 }
 
@@ -975,7 +1022,6 @@ export function appendWorkspaceReportSlides(
       slides: [...current.slides, ...slides],
       updated_at: nowIso(),
     },
-    "derived",
   );
 }
 
@@ -996,7 +1042,6 @@ export function removeWorkspaceReportSlide(
       slides: current.slides.filter((slide) => slide.id !== slideId),
       updated_at: nowIso(),
     },
-    "derived",
   );
 }
 
@@ -1011,41 +1056,40 @@ export function syncWorkspaceToolCatalog(
       capability_id: capabilityId,
       tool_names: toolNames,
     }),
-    "derived",
   );
 }
 
-export function buildArtifactTargetPath(
-  artifactKind: "data" | "chart" | "pdf",
-  filename: string,
-): string {
-  const baseDir =
-    artifactKind === "data"
-      ? WORKSPACE_DATA_ARTIFACTS_DIR
-      : artifactKind === "chart"
-        ? WORKSPACE_CHART_ARTIFACTS_DIR
-        : WORKSPACE_PDF_ARTIFACTS_DIR;
-  return resolveWorkspacePath(filename, baseDir);
-}
-
 export function listGlobalWorkspaceFiles(filesystem: WorkspaceFilesystem): LocalWorkspaceFile[] {
-  return listAllFileNodes(filesystem).map((node) => node.file);
+  return listAllWorkspaceFileNodes(filesystem).map((node) => node.file);
 }
 
 export function listGlobalWorkspaceFileNodes(
   filesystem: WorkspaceFilesystem,
 ): WorkspaceFileNode[] {
-  return listAllFileNodes(filesystem);
+  return listAllWorkspaceFileNodes(filesystem);
 }
 
-export function removeWorkspacePath(
+export function buildArtifactFilename(
+  filename: string,
+  fallback: string,
+): string {
+  const trimmed = filename.trim();
+  return trimmed || fallback;
+}
+
+export function buildCreatedFileSummaryById(
   filesystem: WorkspaceFilesystem,
-  path: string,
-): WorkspaceFilesystem {
-  const normalizedPath = normalizeAbsolutePath(path);
-  const hasExactFile = Boolean(findFileNodeByPath(filesystem, normalizedPath));
-  if (hasExactFile) {
-    return removeFileByPath(filesystem, normalizedPath);
+  fileId: string,
+): Record<string, unknown> {
+  const node = findWorkspaceFileNodeById(filesystem, fileId);
+  if (!node) {
+    throw new Error(`Expected workspace artifact for file ${fileId}.`);
   }
-  return removeWorkspacePrefix(filesystem, `${normalizedPath}/`);
+  return {
+    ...summarizeWorkspaceFiles([node.file], { includeSamples: true })[0],
+    bucket: node.bucket,
+    producer_key: node.producer_key,
+    producer_label: node.producer_label,
+    source: node.source,
+  };
 }

@@ -5,7 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceInventoryPane } from "../WorkspaceInventoryPane";
-import type { ShellWorkspaceArtifact } from "../../capabilities/types";
+import type {
+  PdfSmartSplitBundleView,
+  ShellWorkspaceArtifact,
+} from "../../capabilities/types";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -74,6 +77,25 @@ const workspaces = [
   },
 ];
 
+const smartSplitBundles: PdfSmartSplitBundleView[] = [
+  {
+    id: "bundle-1",
+    createdAt: "2026-03-20T12:00:00.000Z",
+    sourceFileId: "source-pdf",
+    sourceFileName: "quarterly_packet_demo.pdf",
+    entries: [
+      {
+        fileId: "data-csv",
+        name: "data.csv",
+        title: "Executive summary",
+        startPage: 1,
+        endPage: 2,
+        pageCount: 2,
+      },
+    ],
+  },
+];
+
 describe("WorkspaceInventoryPane", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -138,6 +160,9 @@ describe("WorkspaceInventoryPane", () => {
     expect(container.textContent).toContain("Uploaded");
     expect(container.textContent).toContain("data.csv");
     expect(container.textContent).toContain("Table preview");
+    expect(container.textContent).not.toContain("Showing captured preview rows for this CSV artifact.");
+    expect(container.textContent).not.toContain("numeric");
+    expect(container.textContent).not.toContain("Columns:");
     expect(container.textContent).toContain("quarter");
     expect(container.textContent).toContain("revenue");
 
@@ -145,6 +170,15 @@ describe("WorkspaceInventoryPane", () => {
     expect(container.querySelector("[data-testid='workspace-preview-pane']")).not.toBeNull();
     expect(container.textContent).not.toContain("Active prefix");
     expect(container.textContent).not.toContain("Focus another prefix");
+  });
+
+  it("shows smart split bundles as the primary tree and keeps raw files secondary", async () => {
+    await renderPane({ smartSplitBundles });
+
+    expect(container.textContent).toContain("Smart split bundles");
+    expect(container.textContent).toContain("quarterly_packet_demo.pdf");
+    expect(container.textContent).toContain("Executive summary");
+    expect(container.textContent).toContain("Convenience output files");
   });
 
   it("calls remove with the selected artifact entry id", async () => {

@@ -7,18 +7,17 @@ from typing import Annotated
 import typer
 from sqlalchemy import select
 
-from backend.app.chatkit.feedback_types import FeedbackKind, FeedbackLabel, FeedbackOrigin
+from backend.app.chatkit.feedback_types import FeedbackKind, FeedbackOrigin
 from backend.app.db.session import AsyncSessionLocal
 from backend.app.models.chatkit import ChatItemFeedback, ChatThread
 
 app = typer.Typer(help="Inspect structured ChatKit feedback captured in the client workspace.")
 
 
-@app.command()
-def list(
+@app.command(name="list")
+def list_feedback(
     email_contains: Annotated[str | None, typer.Option("--email-contains")] = None,
     kind: Annotated[FeedbackKind | None, typer.Option("--kind")] = None,
-    label: Annotated[FeedbackLabel | None, typer.Option("--label")] = None,
     origin: Annotated[FeedbackOrigin | None, typer.Option("--origin")] = None,
     thread_id: Annotated[str | None, typer.Option("--thread-id")] = None,
     has_message: Annotated[bool | None, typer.Option("--has-message/--no-has-message")] = None,
@@ -28,7 +27,6 @@ def list(
         _list_feedback(
             email_contains=email_contains,
             kind=kind,
-            label=label,
             origin=origin,
             thread_id=thread_id,
             has_message=has_message,
@@ -37,8 +35,8 @@ def list(
     )
 
 
-@app.command()
-def thread(thread_id: str) -> None:
+@app.command(name="thread")
+def show_thread(thread_id: str) -> None:
     asyncio.run(_show_thread_feedback(thread_id))
 
 
@@ -46,7 +44,6 @@ async def _list_feedback(
     *,
     email_contains: str | None,
     kind: FeedbackKind | None,
-    label: FeedbackLabel | None,
     origin: FeedbackOrigin | None,
     thread_id: str | None,
     has_message: bool | None,
@@ -60,8 +57,6 @@ async def _list_feedback(
             query = query.where(ChatItemFeedback.user_email.ilike(f"%{email_contains.strip().lower()}%"))
         if kind is not None:
             query = query.where(ChatItemFeedback.kind == kind)
-        if label is not None:
-            query = query.where(ChatItemFeedback.label == label)
         if origin is not None:
             query = query.where(ChatItemFeedback.origin == origin)
         if thread_id:
@@ -86,7 +81,6 @@ async def _list_feedback(
                     feedback.thread_id,
                     title or "Untitled thread",
                     feedback.kind or "draft",
-                    feedback.label or "-",
                     feedback.origin,
                     feedback.user_email or "-",
                     ",".join(feedback.item_ids_json) or "-",
@@ -117,7 +111,6 @@ async def _show_thread_feedback(thread_id: str) -> None:
         typer.echo(f"  created: {_format_datetime(feedback.created_at)}")
         typer.echo(f"  email: {feedback.user_email or '-'}")
         typer.echo(f"  kind: {feedback.kind or 'draft'}")
-        typer.echo(f"  label: {feedback.label or '-'}")
         typer.echo(f"  origin: {feedback.origin}")
         typer.echo(f"  item_ids: {', '.join(feedback.item_ids_json) or '-'}")
         typer.echo(f"  message: {feedback.message or '-'}")

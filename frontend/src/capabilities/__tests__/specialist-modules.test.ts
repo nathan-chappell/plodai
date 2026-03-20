@@ -8,26 +8,23 @@ import { createWorkspaceFilesystem } from "../../lib/workspace-fs";
 
 function createWorkspace(): CapabilityWorkspaceContext {
   return {
-    activePrefix: "/workspace/",
-    cwdPath: "/workspace/",
+    capabilityId: "workspace-agent",
+    capabilityTitle: "Workspace",
+    workspaceId: "workspace-default",
     files: [],
     entries: [],
     workspaceContext: {
-      path_prefix: "/workspace/",
+      workspace_id: "workspace-default",
       referenced_item_ids: [],
     },
-    setActivePrefix: () => {},
-    createDirectory: (path: string) => path,
-    changeDirectory: (path: string) => path,
     updateFilesystem: () => {},
     getState: () => ({
-      activePrefix: "/workspace/",
-      cwdPath: "/workspace/",
+      workspaceId: "workspace-default",
       files: [],
       entries: [],
       filesystem: createWorkspaceFilesystem(),
       workspaceContext: {
-        path_prefix: "/workspace/",
+        workspace_id: "workspace-default",
         referenced_item_ids: [],
       },
     }),

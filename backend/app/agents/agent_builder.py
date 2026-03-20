@@ -11,6 +11,10 @@ from backend.app.agents.tools import (
     describe_tool_signature,
     get_client_tool_names,
 )
+from backend.app.agents.widgets import (
+    build_handoff_trace_copy_text,
+    build_handoff_trace_widget,
+)
 from backend.app.chatkit.metadata import CapabilityAgentSpec, CapabilityBundle
 from backend.app.core.logging import get_logger, log_event
 
@@ -29,14 +33,25 @@ Important operating rules:
 6. Ask clarifying questions only when missing information, permissions, or tool availability would materially change the result.
 """.strip()
 
-BATCH_MODE_INSTRUCTIONS = """
-Execution mode: batch.
 
-In batch mode, complete as much of the task as possible without engaging the user in back-and-forth.
-- Infer reasonable defaults when the next step is obvious from the request and current workspace context.
-- Prefer executing the strongest sensible next action over asking for confirmation.
-- Stop only when you are genuinely blocked by missing data, permissions, or unavailable capabilities.
-""".strip()
+def _build_handoff_callback(
+    *,
+    source_agent_name: str,
+    target_agent_name: str,
+):
+    async def _on_handoff(run_context) -> None:
+        await run_context.context.stream_widget(
+            build_handoff_trace_widget(
+                source_agent_name=source_agent_name,
+                target_agent_name=target_agent_name,
+            ),
+            copy_text=build_handoff_trace_copy_text(
+                source_agent_name=source_agent_name,
+                target_agent_name=target_agent_name,
+            ),
+        )
+
+    return _on_handoff
 
 
 def _build_agent_instructions(
@@ -72,9 +87,6 @@ def _build_agent_instructions(
                 ]
             )
         )
-    if context.is_batch_mode:
-        sections.append(BATCH_MODE_INSTRUCTIONS)
-
     return prompt_with_handoff_instructions("\n\n".join(sections))
 
 
@@ -144,10 +156,17 @@ def _build_agent_graph(
         capability["capability_id"]: capability
         for capability in capability_bundle.get("capabilities", [])
     }
+    tool_stop_overrides: dict[str, list[str]] = {
+        "feedback-agent": ["get_feedback", "send_feedback"],
+    }
 
     for capability_id, capability_spec in capability_specs.items():
         client_tools = capability_spec.get("client_tools", [])
         tool_names = get_client_tool_names(client_tools)
+        stop_at_tool_names = [
+            *tool_names,
+            *tool_stop_overrides.get(capability_id, []),
+        ]
         compiled_tools = list(
             build_agent_tools(
                 context,
@@ -196,7 +215,7 @@ def _build_agent_graph(
                 capability_spec=capability_spec,
             ),
             handoffs=[],
-            tool_use_behavior={"stop_at_tool_names": tool_names},
+            tool_use_behavior={"stop_at_tool_names": stop_at_tool_names},
         )
 
     for capability_id, capability_spec in capability_specs.items():
@@ -206,6 +225,12 @@ def _build_agent_graph(
                 agent=agents_by_capability_id[target["capability_id"]],
                 tool_name_override=target["tool_name"],
                 tool_description_override=target["description"],
+                on_handoff=_build_handoff_callback(
+                    source_agent_name=capability_spec["agent_name"],
+                    target_agent_name=agents_by_capability_id[
+                        target["capability_id"]
+                    ].name,
+                ),
             )
             for target in capability_spec.get("handoff_targets", [])
             if target["capability_id"] in agents_by_capability_id

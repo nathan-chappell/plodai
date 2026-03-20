@@ -80,13 +80,15 @@ const demoFile: LocalWorkspaceFile = {
 function WorkspaceSurfaceHarness() {
   const workspace = useWorkspaceSurface({
     surfaceKey: "csv-agent",
-    defaultCwdPath: "/csv-agent",
   });
 
   useEffect(() => {
     function handleRun() {
       workspace.updateFilesystem((filesystem) =>
-        writeWorkspaceTextFile(filesystem, "/csv-agent/meta/notes.txt", "meta", "derived"),
+        writeWorkspaceTextFile(filesystem, "notes.txt", "meta", "derived", {
+          producer_key: "csv-agent",
+          producer_label: "CSV Agent",
+        }),
       );
       workspace.appendFiles([demoFile], "demo");
     }
@@ -100,7 +102,10 @@ function WorkspaceSurfaceHarness() {
   return (
     <div
       data-files={workspace.files.map((file) => file.id).join(",")}
-      data-items={Object.keys(workspace.filesystem.files_by_path).sort().join("|")}
+      data-items={Object.values(workspace.filesystem.artifacts_by_id)
+        .map((entry) => entry.name)
+        .sort()
+        .join("|")}
       data-hydrated={String(workspace.hydrated)}
       data-surface-hydrated={String(workspace.surfaceHydrated)}
     />
@@ -174,7 +179,7 @@ describe("WorkspaceProvider", () => {
     expect(saveWorkspaceFilesystem).toHaveBeenCalledWith(
       user.id,
       "default",
-      expect.objectContaining({ files_by_path: expect.any(Object) }),
+      expect.objectContaining({ artifacts_by_id: expect.any(Object) }),
     );
     expect(saveWorkspaceRegistry).toHaveBeenCalledTimes(1);
   });
@@ -216,7 +221,7 @@ describe("WorkspaceProvider", () => {
     });
 
     expect(harness?.dataset.files).toContain("demo-csv");
-    expect(harness?.dataset.items).toContain("/csv-agent/demo.csv");
-    expect(harness?.dataset.items).toContain("/csv-agent/meta/notes.txt");
+    expect(harness?.dataset.items).toContain("demo.csv");
+    expect(harness?.dataset.items).toContain("notes.txt");
   });
 });

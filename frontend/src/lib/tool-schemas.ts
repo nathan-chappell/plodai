@@ -254,10 +254,6 @@ export const clientChartSpecSchema: JsonSchema = {
 export const includeSamplesSchema: JsonSchema = {
   type: "object",
   properties: {
-    prefix: {
-      type: "string",
-      description: "Optional absolute path prefix used to scope the listing.",
-    },
     includeSamples: {
       type: "boolean",
       description: "Whether to include tiny familiarization samples.",
@@ -296,40 +292,40 @@ export const compactRunAggregateQueryToolSchema: JsonSchema = {
 export const createCsvFileToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    path: { type: "string" },
+    filename: { type: "string" },
     query_plan: queryPlanSchema,
   },
-  required: ["path", "query_plan"],
+  required: ["filename", "query_plan"],
   additionalProperties: false,
 };
 
 export const compactCreateCsvFileToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    path: { type: "string" },
+    filename: { type: "string" },
     query_plan: compactAggregateQueryPlanSchema,
   },
-  required: ["path", "query_plan"],
+  required: ["filename", "query_plan"],
   additionalProperties: false,
 };
 
 export const createJsonFileToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    path: { type: "string" },
+    filename: { type: "string" },
     query_plan: queryPlanSchema,
   },
-  required: ["path", "query_plan"],
+  required: ["filename", "query_plan"],
   additionalProperties: false,
 };
 
 export const compactCreateJsonFileToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    path: { type: "string" },
+    filename: { type: "string" },
     query_plan: compactAggregateQueryPlanSchema,
   },
-  required: ["path", "query_plan"],
+  required: ["filename", "query_plan"],
   additionalProperties: false,
 };
 

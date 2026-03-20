@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ShellWorkspaceArtifact } from "../types";
+import type { PdfSmartSplitBundleView, ShellWorkspaceArtifact } from "../types";
 import type { LocalWorkspaceFile } from "../../types/report";
 import type { WorkspaceReportV1 } from "../../types/workspace-contract";
 
@@ -135,12 +135,11 @@ function createBaseWorkspaceResult() {
     setFiles: vi.fn(),
     appendFiles: vi.fn(),
     artifacts: [] as ShellWorkspaceArtifact[],
+    smartSplitBundles: [] as PdfSmartSplitBundleView[],
     setStatus: vi.fn(),
     investigationBrief: "",
     activeWorkspaceTab: "agent",
     setActiveWorkspaceTab: vi.fn(),
-    executionMode: "interactive" as const,
-    setExecutionMode: vi.fn(),
     reportEffects: [],
     setReportEffects: vi.fn(),
     handleFiles: vi.fn(async () => {}),
@@ -363,8 +362,17 @@ describe("capability page quick views", () => {
     });
 
     expect(container.querySelector("[data-testid='csv-agent-quick-view']")).not.toBeNull();
-    expect(container.textContent).toContain("CSV results");
-    expect(container.textContent).toContain("Table preview");
+    expect(container.textContent).toContain("CSV");
+    expect(container.textContent).toContain("96 B");
+    expect(container.textContent).toContain("2 rows");
+    expect(container.textContent).toContain("2 columns");
+    expect(container.textContent).toContain("Derived artifact");
+    expect(container.textContent).toContain("Preview");
+    expect(container.textContent).not.toContain("Showing captured preview rows for this CSV result.");
+    expect(container.textContent).not.toContain("numeric column");
+    expect(container.textContent).not.toContain("Columns:");
+    expect(container.textContent).not.toContain("Bucket");
+    expect(container.textContent).not.toContain("Producer");
     expect(container.textContent).toContain("segment");
     expect(container.textContent).toContain("revenue");
 
@@ -380,7 +388,7 @@ describe("capability page quick views", () => {
 
     expect(container.querySelector("[data-testid='csv-agent-quick-view']")).not.toBeNull();
     expect(container.textContent).toContain(
-      "Materialized CSV and JSON results will appear here as the agent creates them.",
+      "Saved CSV and JSON outputs will appear here as the agent creates them.",
     );
   });
 
@@ -433,8 +441,11 @@ describe("capability page quick views", () => {
 
     expect(container.querySelector("[data-testid='chart-agent-quick-view']")).not.toBeNull();
     expect(container.textContent).toContain("Saved charts");
+    expect(container.textContent).toContain("Saved chart");
+    expect(container.textContent).toContain("Derived artifact");
     expect(container.textContent).toContain("Plan plan-1");
     expect(container.textContent).toContain("Source revenue_slice.csv");
+    expect(container.textContent).not.toContain("Bucket");
     const chartImage = container.querySelector("img") as HTMLImageElement | null;
     expect(chartImage?.getAttribute("src")).toContain("data:image/png;base64,chart-preview");
   });
@@ -528,7 +539,8 @@ describe("capability page quick views", () => {
     });
 
     expect(container.querySelector("[data-testid='csv-agent-quick-view']")).not.toBeNull();
-    expect(container.textContent).toContain("CSV results");
+    expect(container.textContent).toContain("Demo artifact");
+    expect(container.textContent).toContain("Preview");
 
     mockUseCapabilityFileWorkspace.mockReturnValue({
       ...createBaseWorkspaceResult(),
@@ -549,11 +561,33 @@ describe("capability page quick views", () => {
 
     expect(container.querySelector("[data-testid='chart-agent-quick-view']")).not.toBeNull();
     expect(container.textContent).toContain("Saved charts");
+    expect(container.textContent).toContain("Demo artifact");
+    expect(container.textContent).toContain("Source revenue_slice.csv");
 
     mockUseCapabilityFileWorkspace.mockReturnValue({
       ...createBaseWorkspaceResult(),
       activeWorkspaceTab: "demo",
       artifacts: [indexArtifact, splitPdfArtifact],
+      smartSplitBundles: [
+        {
+          id: "bundle-1",
+          createdAt: "2026-03-20T13:00:02.000Z",
+          sourceFileId: "source-pdf",
+          sourceFileName: "board_packet.pdf",
+          indexFileId: "smart-split-index-file",
+          indexFileName: "board_packet.md",
+          entries: [
+            {
+              fileId: "split-pdf-file",
+              name: "exec-summary.pdf",
+              title: "Executive summary",
+              startPage: 1,
+              endPage: 3,
+              pageCount: 3,
+            },
+          ],
+        },
+      ],
     });
 
     await act(async () => {
@@ -562,6 +596,7 @@ describe("capability page quick views", () => {
 
     expect(container.querySelector("[data-testid='pdf-agent-quick-view']")).not.toBeNull();
     expect(container.textContent).toContain("Smart splits");
+    expect(container.textContent).toContain("Demo artifact");
   });
 
   it("shows smart split indexes and lets index links select matching PDFs", async () => {
@@ -605,6 +640,26 @@ describe("capability page quick views", () => {
     mockUseCapabilityFileWorkspace.mockReturnValue({
       ...createBaseWorkspaceResult(),
       artifacts: [indexArtifact, splitPdfArtifact],
+      smartSplitBundles: [
+        {
+          id: "bundle-1",
+          createdAt: "2026-03-20T13:00:02.000Z",
+          sourceFileId: "source-pdf",
+          sourceFileName: "board_packet.pdf",
+          indexFileId: "smart-split-index-file",
+          indexFileName: "board_packet.md",
+          entries: [
+            {
+              fileId: "split-pdf-file",
+              name: "exec-summary.pdf",
+              title: "Executive summary",
+              startPage: 1,
+              endPage: 3,
+              pageCount: 3,
+            },
+          ],
+        },
+      ],
       activeWorkspaceTab: "agent",
     });
 
@@ -613,10 +668,22 @@ describe("capability page quick views", () => {
     });
 
     expect(container.querySelector("[data-testid='pdf-agent-quick-view']")).not.toBeNull();
-    expect(container.textContent).toContain("Smart split index");
+    expect(container.textContent).toContain("board_packet.pdf");
+    expect(container.textContent).toContain("Executive summary");
+    expect(container.textContent).toContain("Derived artifact");
+    expect(container.textContent).not.toContain("Bucket");
+
+    const indexButton = Array.from(container.querySelectorAll("button")).find((candidate) =>
+      candidate.textContent?.includes("Index"),
+    ) as HTMLButtonElement | undefined;
+    expect(indexButton).toBeDefined();
+
+    await act(async () => {
+      indexButton?.click();
+    });
 
     const linkButton = Array.from(container.querySelectorAll("button")).find((candidate) =>
-      candidate.textContent?.includes("Executive summary"),
+      candidate.textContent?.trim() === "Executive summary",
     ) as HTMLButtonElement | undefined;
     expect(linkButton).toBeDefined();
 

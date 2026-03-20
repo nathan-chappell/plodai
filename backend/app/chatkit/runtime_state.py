@@ -109,13 +109,6 @@ def build_runtime_metadata_patch(
     ):
         patch["workspace_state"] = request_workspace_state
 
-    request_execution_mode = request_metadata.get("execution_mode")
-    if (
-        request_execution_mode in {"interactive", "batch"}
-        and current_metadata.get("execution_mode") != request_execution_mode
-    ):
-        patch["execution_mode"] = request_execution_mode
-
     request_origin = request_metadata.get("origin")
     if request_origin and current_metadata.get("origin") != request_origin:
         patch["origin"] = request_origin

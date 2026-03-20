@@ -2,23 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
+import { getCapabilityDefinition } from "../capabilities/definitions";
 import {
-  buildFeedbackSummaryMessage,
+  buildFeedbackSubmissionPrompt,
   buildProvideFeedbackPrompt,
-  type FeedbackActionPayload,
+  type FeedbackSessionActionPayload,
   type FeedbackOrigin,
 } from "../lib/chatkit-feedback";
-import { buildThreadMetadataUpdateAction } from "../lib/thread-metadata";
 import { devLogger } from "../lib/dev-logging";
 import { findChatKitScrollTarget, isNearScrollBottom } from "../lib/chatkit-autoscroll";
 import type { CapabilityBundle, CapabilityClientTool } from "../capabilities/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
+  ChatKitPaneFeedbackButton,
   ChatKitPaneHarness,
   ChatKitPaneMeta,
-  ChatKitPaneModeButton,
-  ChatKitPaneModeRow,
   ChatKitPanePill,
   ChatKitPaneStatusActions,
   ChatKitPaneStatusRow,
@@ -32,7 +31,6 @@ import type {
   ClientEffect,
   ClientToolCall,
   ClientToolName,
-  ExecutionMode,
   WorkspaceState,
 } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
@@ -41,6 +39,11 @@ type ChatKitStarterPrompt = {
   label: string;
   prompt: string;
   icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle";
+};
+
+export type ActiveToolInvocation = {
+  name: string;
+  params: Record<string, unknown>;
 };
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
@@ -67,6 +70,67 @@ function formatToolLabel(tool: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function listBundleToolDefinitions(capabilityBundle: CapabilityBundle) {
+  const seen = new Set<string>();
+  const toolDefinitions: Array<CapabilityBundle["capabilities"][number]["client_tools"][number]> = [];
+
+  for (const capability of capabilityBundle.capabilities) {
+    for (const tool of capability.client_tools) {
+      if (seen.has(tool.name)) {
+        continue;
+      }
+      seen.add(tool.name);
+      toolDefinitions.push(tool);
+    }
+  }
+
+  return toolDefinitions;
+}
+
+type ComposerToolOption = {
+  id: string;
+  label: string;
+  icon: "cube" | "analytics" | "chart" | "document";
+  shortLabel?: string;
+  placeholderOverride?: string;
+};
+
+function listBundleComposerTools(capabilityBundle: CapabilityBundle): ComposerToolOption[] {
+  const capabilityComposerTools: Array<ComposerToolOption & { order: number }> = [];
+
+  for (const capability of capabilityBundle.capabilities) {
+    const definition = getCapabilityDefinition(capability.capability_id);
+    if (!definition?.showInComposer) {
+      continue;
+    }
+    capabilityComposerTools.push({
+      id: capability.capability_id,
+      label: definition.composerLabel ?? definition.title,
+      shortLabel: definition.composerShortLabel,
+      placeholderOverride: definition.composerPlaceholder ?? definition.chatkitPlaceholder,
+      icon: definition.composerIcon ?? "cube",
+      order: definition.composerOrder ?? Number.MAX_SAFE_INTEGER,
+    });
+  }
+
+  capabilityComposerTools.sort((left, right) => {
+    if (left.order !== right.order) {
+      return left.order - right.order;
+    }
+    return left.label.localeCompare(right.label);
+  });
+
+  if (capabilityComposerTools.length > 0) {
+    return capabilityComposerTools.map(({ order: _order, ...tool }) => tool);
+  }
+
+  return listBundleToolDefinitions(capabilityBundle).map((tool) => ({
+    id: tool.name as ClientToolName,
+    label: tool.display?.label ?? formatToolLabel(tool.name),
+    icon: toolIcon(tool.name as ClientToolName),
+  }));
 }
 
 function slugifyLabel(value: string): string {
@@ -132,34 +196,22 @@ export type ChatKitQuickAction = {
   prompt: string;
   model?: string;
   beforeRun?: () => Promise<unknown> | void;
-  followUp?: {
-    label: string;
-    prompt: string;
-    model?: string;
-    capabilityBundle?: CapabilityBundle;
-    threadOrigin?: FeedbackOrigin;
-  };
-};
-
-const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
-  interactive: "Interactive",
-  batch: "Batch",
 };
 
 export function buildChatKitRequestMetadata(options: {
   capabilityBundle: CapabilityBundle;
   workspaceState?: WorkspaceState;
+  investigationBrief?: string;
   threadOrigin: FeedbackOrigin;
-  executionMode: ExecutionMode;
 }): AppThreadMetadata {
   return {
+    investigation_brief: options.investigationBrief,
     surface_key:
       typeof window !== "undefined"
         ? window.location.pathname
         : options.capabilityBundle.root_capability_id,
     capability_bundle: options.capabilityBundle,
     workspace_state: options.workspaceState,
-    execution_mode: options.executionMode,
     origin: options.threadOrigin,
   };
 }
@@ -170,8 +222,6 @@ export function ChatKitHarness({
   capabilityBundle,
   files,
   workspaceState,
-  executionMode,
-  onExecutionModeChange,
   investigationBrief,
   onEffects,
   onFilesAdded,
@@ -185,14 +235,12 @@ export function ChatKitHarness({
   colorScheme = "dark",
   showDictation = true,
   surfaceMinHeight,
-  showExecutionModeControls = true,
   showChatKitHeader = true,
+  onToolActivity,
 }: {
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
   workspaceState?: WorkspaceState;
-  executionMode: ExecutionMode;
-  onExecutionModeChange: (mode: ExecutionMode) => void;
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
@@ -206,8 +254,8 @@ export function ChatKitHarness({
   colorScheme?: "dark" | "light";
   showDictation?: boolean;
   surfaceMinHeight?: number;
-  showExecutionModeControls?: boolean;
   showChatKitHeader?: boolean;
+  onToolActivity?: (activity: ActiveToolInvocation | null) => void;
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -223,19 +271,13 @@ export function ChatKitHarness({
   const scrollTargetRef = useRef<HTMLElement | null>(null);
   const cleanupScrollListenerRef = useRef<(() => void) | null>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
-  const lastExecutionModeRef = useRef<ExecutionMode | null>(null);
   const runningRef = useRef(false);
   const activeClientToolRef = useRef<string | null>(null);
   const finishStatusTimeoutRef = useRef<number | null>(null);
   const capabilityBundleRef = useRef(capabilityBundle);
   const workspaceStateRef = useRef(workspaceState);
+  const investigationBriefRef = useRef(investigationBrief);
   const threadOriginRef = useRef(threadOrigin);
-  const executionModeRef = useRef(executionMode);
-  const metadataCapabilityBundleOverrideRef = useRef<CapabilityBundle | null>(null);
-  const metadataThreadOriginOverrideRef = useRef<FeedbackOrigin | null>(null);
-  const pendingQuickActionFollowUpRef = useRef<ChatKitQuickAction["followUp"] | null>(null);
-  const pendingQuickActionFollowUpReadyRef = useRef(false);
-  const quickActionFollowUpInFlightRef = useRef(false);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -266,12 +308,12 @@ export function ChatKitHarness({
   }, [workspaceState]);
 
   useEffect(() => {
-    threadOriginRef.current = threadOrigin;
-  }, [threadOrigin]);
+    investigationBriefRef.current = investigationBrief;
+  }, [investigationBrief]);
 
   useEffect(() => {
-    executionModeRef.current = executionMode;
-  }, [executionMode]);
+    threadOriginRef.current = threadOrigin;
+  }, [threadOrigin]);
 
   function clearFinishStatusTimeout() {
     if (finishStatusTimeoutRef.current !== null && typeof window !== "undefined") {
@@ -294,73 +336,19 @@ export function ChatKitHarness({
     }, 180);
   }
 
-  async function maybeRunQuickActionFollowUp() {
-    const followUp = pendingQuickActionFollowUpRef.current;
-    if (
-      !followUp ||
-      !pendingQuickActionFollowUpReadyRef.current ||
-      quickActionFollowUpInFlightRef.current ||
-      !threadIdRef.current ||
-      runningRef.current ||
-      Boolean(activeClientToolRef.current)
-    ) {
-      return;
-    }
-
-    pendingQuickActionFollowUpRef.current = null;
-    pendingQuickActionFollowUpReadyRef.current = false;
-    quickActionFollowUpInFlightRef.current = true;
-    clearFinishStatusTimeout();
-    setStatus(`Starting ${followUp.label.toLowerCase()}.`);
-    metadataCapabilityBundleOverrideRef.current = followUp.capabilityBundle ?? null;
-    metadataThreadOriginOverrideRef.current = followUp.threadOrigin ?? null;
-    try {
-      await chatKitRef.current?.sendUserMessage({
-        text: followUp.prompt,
-        model: followUp.model ?? CHATKIT_DEFAULT_MODEL_ID,
-        newThread: false,
-      });
-    } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? `Unable to start ${followUp.label.toLowerCase()}: ${error.message}`
-          : `Unable to start ${followUp.label.toLowerCase()}.`,
-      );
-    } finally {
-      metadataCapabilityBundleOverrideRef.current = null;
-      metadataThreadOriginOverrideRef.current = null;
-      quickActionFollowUpInFlightRef.current = false;
-    }
-  }
-
   useEffect(() => {
     setChatKitMetadataGetter(() =>
       buildChatKitRequestMetadata({
-        capabilityBundle:
-          metadataCapabilityBundleOverrideRef.current ?? capabilityBundleRef.current,
+        capabilityBundle: capabilityBundleRef.current,
         workspaceState: workspaceStateRef.current,
-        threadOrigin:
-          metadataThreadOriginOverrideRef.current ?? threadOriginRef.current,
-        executionMode: executionModeRef.current,
+        investigationBrief: investigationBriefRef.current,
+        threadOrigin: threadOriginRef.current,
       }),
     );
     return () => {
       setChatKitMetadataGetter(null);
     };
   }, []);
-
-  useEffect(() => {
-    const previousMode = lastExecutionModeRef.current;
-    lastExecutionModeRef.current = executionMode;
-    if (!threadIdRef.current || previousMode === null || previousMode === executionMode) {
-      return;
-    }
-    void chatKitRef.current?.sendCustomAction(
-      buildThreadMetadataUpdateAction({
-        execution_mode: executionMode,
-      }),
-    );
-  }, [executionMode]);
 
   function resolveScrollTarget(): HTMLElement | null {
     const chatKitElement = chatKitRef.current?.ref.current;
@@ -410,17 +398,10 @@ export function ChatKitHarness({
     });
   }
 
-  const rootCapability = useMemo(
-    () =>
-      capabilityBundle.capabilities.find(
-        (capability) => capability.capability_id === capabilityBundle.root_capability_id,
-      ) ?? capabilityBundle.capabilities[0],
-    [capabilityBundle],
-  );
   const starterPrompts = useMemo(() => prompts ?? buildStarterPrompts(), [prompts]);
-  const chatKitTools = useMemo(
-    () => rootCapability.client_tools.map((tool) => tool.name as ClientToolName),
-    [rootCapability.client_tools],
+  const composerTools = useMemo(
+    () => listBundleComposerTools(capabilityBundle),
+    [capabilityBundle],
   );
   const options = useMemo<UseChatKitOptions>(
     () => ({
@@ -467,11 +448,13 @@ export function ChatKitHarness({
       widgets: {
         onAction: async (action, widgetItem) => {
           await chatKitRef.current?.sendCustomAction(action, widgetItem.id);
-          if (action.type !== "submit_feedback_details") {
+          if (action.type !== "submit_feedback_session") {
             return;
           }
           await chatKitRef.current?.sendUserMessage({
-            text: buildFeedbackSummaryMessage(action.payload as FeedbackActionPayload),
+            text: buildFeedbackSubmissionPrompt(
+              action.payload as FeedbackSessionActionPayload,
+            ),
             newThread: false,
           });
         },
@@ -488,10 +471,12 @@ export function ChatKitHarness({
           ...choice,
           default: choice.id === CHATKIT_DEFAULT_MODEL_ID,
         })),
-        tools: chatKitTools.map((tool) => ({
-          id: tool,
-          label: formatToolLabel(tool),
-          icon: toolIcon(tool),
+        tools: composerTools.map((tool) => ({
+          id: tool.id,
+          label: tool.label,
+          icon: tool.icon,
+          shortLabel: tool.shortLabel,
+          placeholderOverride: tool.placeholderOverride,
         })),
       },
       onReady: () => {
@@ -516,11 +501,6 @@ export function ChatKitHarness({
         runningRef.current = false;
         setRunning(false);
         scheduleScrollToBottom();
-        if (pendingQuickActionFollowUpRef.current) {
-          pendingQuickActionFollowUpReadyRef.current = true;
-          void maybeRunQuickActionFollowUp();
-          return;
-        }
         if (activeClientToolRef.current) {
           setStatus(`Running ${formatToolLabel(activeClientToolRef.current)} locally.`);
         } else {
@@ -539,9 +519,6 @@ export function ChatKitHarness({
         autoScrollEnabledRef.current = true;
         resolveScrollTarget();
         scheduleScrollToBottom(true);
-        if (pendingQuickActionFollowUpReadyRef.current) {
-          void maybeRunQuickActionFollowUp();
-        }
       },
       onThreadLoadEnd: () => {
         resolveScrollTarget();
@@ -555,6 +532,10 @@ export function ChatKitHarness({
         clearFinishStatusTimeout();
         activeClientToolRef.current = name;
         setActiveClientToolName(name);
+        onToolActivity?.({
+          name,
+          params: params as Record<string, unknown>,
+        });
         setStatus(`Running ${formatToolLabel(name)} locally.`);
         const startedAt = nowMs();
         let effectCount = 0;
@@ -616,6 +597,7 @@ export function ChatKitHarness({
             activeClientToolRef.current = null;
           }
           setActiveClientToolName((current) => (current === name ? null : current));
+          onToolActivity?.(null);
         }
       },
       onEffect: (event) => {
@@ -633,11 +615,10 @@ export function ChatKitHarness({
       },
     }),
     [
-      chatKitTools,
+      composerTools,
       colorScheme,
       composerPlaceholder,
       capabilityBundle.root_capability_id,
-      executionMode,
       files.length,
       greeting,
       headerTitle,
@@ -645,6 +626,7 @@ export function ChatKitHarness({
       showDictation,
       starterPrompts,
       threadOrigin,
+      onToolActivity,
     ],
   );
 
@@ -673,8 +655,6 @@ export function ChatKitHarness({
     const needsNewThread = !threadIdRef.current;
     setStatus(`Starting ${action.label.toLowerCase()}.`);
     await action.beforeRun?.();
-    pendingQuickActionFollowUpRef.current = action.followUp ?? null;
-    pendingQuickActionFollowUpReadyRef.current = false;
     await chatKit.sendUserMessage({
       text: action.prompt,
       model: action.model ?? CHATKIT_DEFAULT_MODEL_ID,
@@ -706,57 +686,33 @@ export function ChatKitHarness({
     <ChatKitPaneHarness>
       <ChatKitPaneStatusRow data-testid="chatkit-top-row">
         <ChatKitPaneStatusActions data-testid="chatkit-header-controls">
-          {(quickActions ?? []).length ? (
-            <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
-              {(quickActions ?? []).map((action) => (
-                <ChatKitPaneToolbarButton
-                  key={action.label}
-                  data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
-                  type="button"
-                  onClick={() => void handleQuickAction(action)}
-                  disabled={isBusy}
-                >
-                  {action.label}
-                </ChatKitPaneToolbarButton>
-              ))}
-            </ChatKitPaneToolbar>
-          ) : null}
-          {showExecutionModeControls ? (
-            <ChatKitPaneModeRow
-              $light={colorScheme === "light"}
-              aria-label="Run mode toggle"
-              data-testid="chatkit-execution-mode-controls"
+          <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
+            {(quickActions ?? []).map((action) => (
+              <ChatKitPaneToolbarButton
+                key={action.label}
+                data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
+                type="button"
+                onClick={() => void handleQuickAction(action)}
+                disabled={isBusy}
+              >
+                {action.label}
+              </ChatKitPaneToolbarButton>
+            ))}
+            <ChatKitPaneFeedbackButton
+              aria-label={FEEDBACK_ACTION_LABEL}
+              data-testid="chatkit-provide-feedback"
+              type="button"
+              onClick={() => void handleProvideFeedback()}
+              disabled={isBusy || !threadId}
+              title={feedbackActionTitle}
             >
-              {(["interactive", "batch"] as const).map((mode) => (
-                <ChatKitPaneModeButton
-                  key={mode}
-                  type="button"
-                  $active={executionMode === mode}
-                  $light={colorScheme === "light"}
-                  onClick={() => onExecutionModeChange(mode)}
-                  data-testid={`chatkit-execution-mode-${mode}`}
-                  disabled={isBusy}
-                  title={isBusy ? "Wait for the current run to finish before changing the run mode." : "Run mode"}
-                >
-                  {EXECUTION_MODE_LABELS[mode]}
-                </ChatKitPaneModeButton>
-              ))}
-            </ChatKitPaneModeRow>
-          ) : null}
-          <ChatKitPaneToolbarButton
-            aria-label={FEEDBACK_ACTION_LABEL}
-            data-testid="chatkit-provide-feedback"
-            type="button"
-            onClick={() => void handleProvideFeedback()}
-            disabled={isBusy || !threadId}
-            title={feedbackActionTitle}
-          >
-            {FEEDBACK_ACTION_LABEL}
-          </ChatKitPaneToolbarButton>
+              {FEEDBACK_ACTION_LABEL}
+            </ChatKitPaneFeedbackButton>
+          </ChatKitPaneToolbar>
+          <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
+            {status}
+          </ChatKitPaneStatusText>
         </ChatKitPaneStatusActions>
-        <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
-          {status}
-        </ChatKitPaneStatusText>
       </ChatKitPaneStatusRow>
       <ChatKitPaneSurface
         ref={surfaceRef}
@@ -775,8 +731,6 @@ export function ChatKitPane({
   enabled,
   files,
   workspaceState,
-  executionMode,
-  onExecutionModeChange,
   investigationBrief,
   clientTools,
   onEffects,
@@ -796,15 +750,13 @@ export function ChatKitPane({
   showPaneHeader = false,
   showDefaultModelMeta = false,
   surfaceMinHeight,
-  showExecutionModeControls = true,
   showChatKitHeader = true,
+  onToolActivity,
 }: {
   capabilityBundle: CapabilityBundle;
   enabled: boolean;
   files: LocalWorkspaceFile[];
   workspaceState?: WorkspaceState;
-  executionMode: ExecutionMode;
-  onExecutionModeChange: (mode: ExecutionMode) => void;
   investigationBrief: string;
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
@@ -824,8 +776,8 @@ export function ChatKitPane({
   showPaneHeader?: boolean;
   showDefaultModelMeta?: boolean;
   surfaceMinHeight?: number;
-  showExecutionModeControls?: boolean;
   showChatKitHeader?: boolean;
+  onToolActivity?: (activity: ActiveToolInvocation | null) => void;
 }) {
   const canInvestigate = enabled && (files.length > 0 || clientTools.length > 0);
   const resolvedMeta =
@@ -862,8 +814,6 @@ export function ChatKitPane({
           capabilityBundle={capabilityBundle}
           files={files}
           workspaceState={workspaceState}
-          executionMode={executionMode}
-          onExecutionModeChange={onExecutionModeChange}
           investigationBrief={investigationBrief}
           clientTools={clientTools}
           onEffects={onEffects}
@@ -877,8 +827,8 @@ export function ChatKitPane({
           colorScheme={colorScheme}
           showDictation={showDictation}
           surfaceMinHeight={surfaceMinHeight}
-          showExecutionModeControls={showExecutionModeControls}
           showChatKitHeader={showChatKitHeader}
+          onToolActivity={onToolActivity}
         />
       ) : (
         <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">

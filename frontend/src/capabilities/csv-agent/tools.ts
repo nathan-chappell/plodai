@@ -68,21 +68,40 @@ export function buildCsvAgentClientToolCatalog(
       "list_csv_files",
       "List CSV files from the shared workspace, including safe schema details, row counts, numeric columns, and tiny familiarization samples when requested.",
       includeSamplesSchema,
+      {
+        label: "List CSV Files",
+        omit_args: ["includeSamples"],
+      },
     ),
     buildToolDefinition(
       "run_aggregate_query",
       "Execute a validated aggregate query plan against the client-side CSV rows and return grouped or summary results.",
       runAggregateSchema,
+      {
+        label: "Run Aggregate Query",
+        prominent_args: ["query_plan.dataset_id"],
+        arg_labels: { "query_plan.dataset_id": "dataset" },
+      },
     ),
     buildToolDefinition(
       "create_csv_file",
-      "Run a validated query plan locally and materialize the result rows as a CSV artifact at the requested workspace path.",
+      "Run a validated query plan locally and materialize the result rows as a CSV artifact with the requested filename.",
       createCsvSchema,
+      {
+        label: "Create CSV File",
+        prominent_args: ["filename", "query_plan.dataset_id"],
+        arg_labels: { filename: "file", "query_plan.dataset_id": "dataset" },
+      },
     ),
     buildToolDefinition(
       "create_json_file",
-      "Run a validated query plan locally and materialize the result rows as a JSON artifact at the requested workspace path.",
+      "Run a validated query plan locally and materialize the result rows as a JSON artifact with the requested filename.",
       createJsonSchema,
+      {
+        label: "Create JSON File",
+        prominent_args: ["filename", "query_plan.dataset_id"],
+        arg_labels: { filename: "file", "query_plan.dataset_id": "dataset" },
+      },
     ),
   ];
 }

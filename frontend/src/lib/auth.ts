@@ -1,5 +1,5 @@
 export const SIGN_IN_PATH = "/sign-in";
-export const DEFAULT_AUTHENTICATED_PATH = "/capabilities/csv-agent";
+export const DEFAULT_AUTHENTICATED_PATH = "/workspace";
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 if (!clerkPublishableKey) {

@@ -1,8 +1,6 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-
+import { encodeBytesToBase64 } from "../../lib/base64";
 import { parseCsvText } from "../../lib/csv";
 import { parseJsonText } from "../../lib/json";
-import { uint8ArrayToBase64 } from "../../lib/pdf";
 import type { LocalDataset, LocalJsonFile, LocalPdfFile } from "../../types/report";
 
 export function buildCsvDemoFile(id: string, name: string, csvText: string): LocalDataset {
@@ -47,6 +45,7 @@ export async function buildPdfDemoFile(options: {
   name: string;
   pages: Array<{ title: string; body: string[] }>;
 }): Promise<LocalPdfFile> {
+  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
   const document = await PDFDocument.create();
   const titleFont = await document.embedFont(StandardFonts.HelveticaBold);
   const bodyFont = await document.embedFont(StandardFonts.Helvetica);
@@ -82,6 +81,6 @@ export async function buildPdfDemoFile(options: {
     byte_size: bytes.length,
     mime_type: "application/pdf",
     page_count: options.pages.length,
-    bytes_base64: uint8ArrayToBase64(bytes),
+    bytes_base64: encodeBytesToBase64(bytes),
   };
 }

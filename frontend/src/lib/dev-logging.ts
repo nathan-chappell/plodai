@@ -125,11 +125,10 @@ function summarizeClientToolArgs(args: unknown): Record<string, unknown> {
     fileId: typeof args.file_id === "string" ? args.file_id : undefined,
     chartPlanId: typeof args.chart_plan_id === "string" ? args.chart_plan_id : undefined,
     includeSamples: typeof args.includeSamples === "boolean" ? args.includeSamples : undefined,
-    prefix: typeof args.prefix === "string" ? args.prefix : undefined,
+    filename: typeof args.filename === "string" ? args.filename : undefined,
     maxPages: typeof args.max_pages === "number" ? args.max_pages : undefined,
     startPage: typeof args.start_page === "number" ? args.start_page : undefined,
     endPage: typeof args.end_page === "number" ? args.end_page : undefined,
-    hasPath: typeof args.path === "string" && args.path.length > 0 ? true : undefined,
     queryPlan: summarizeQueryPlan(args.query_plan),
     chartPlan: summarizeChartPlan(args.chart_plan),
   });

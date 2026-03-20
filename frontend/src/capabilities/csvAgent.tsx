@@ -12,7 +12,7 @@ import {
   bindClientToolsForBundle,
   buildCapabilityBundleForRoot,
   listCapabilityBundleToolNames,
-} from "./registry";
+} from "./runtime-registry";
 import { csvAgentCapability } from "./definitions";
 import { buildCsvAgentDemoScenario } from "./csv-agent/demo";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
@@ -49,17 +49,14 @@ function buildCsvQuickViewGroups(
     (artifact) =>
       artifact.source !== "uploaded" &&
       (artifact.file.kind === "csv" || artifact.file.kind === "json") &&
-      !artifact.path.startsWith("/reports/") &&
-      !artifact.path.startsWith("/artifacts/charts/"),
+      artifact.producerKey !== "chart-agent",
   );
 
   return [
     {
       key: "csv-results",
-      label: "Materialized results",
-      rows: buildFolderRowsFromArtifacts(relevantArtifacts, {
-        stripPrefixes: ["/artifacts/data/"],
-      }),
+      label: "Saved outputs",
+      rows: buildFolderRowsFromArtifacts(relevantArtifacts),
     },
   ];
 }
@@ -70,8 +67,6 @@ export function CsvAgentPage({
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
 }) {
   const {
-    activePrefix,
-    cwdPath,
     entries,
     files,
     setFiles,
@@ -81,14 +76,9 @@ export function CsvAgentPage({
     investigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
-    executionMode,
-    setExecutionMode,
     setReportEffects,
     handleFiles,
     handleRemoveEntry,
-    createDirectory,
-    changeDirectory,
-    setActivePrefix,
     workspaceContext,
     workspaceHydrated,
     getState,
@@ -113,18 +103,16 @@ export function CsvAgentPage({
   });
   const capabilityWorkspace = useMemo(
     () => ({
-      activePrefix,
-      cwdPath,
+      capabilityId: csvAgentCapability.id,
+      capabilityTitle: csvAgentCapability.title,
+      workspaceId: selectedWorkspaceId,
       entries,
       files,
       workspaceContext,
-      setActivePrefix,
-      createDirectory,
-      changeDirectory,
       updateFilesystem,
       getState,
     }),
-    [activePrefix, changeDirectory, createDirectory, cwdPath, entries, files, getState, setActivePrefix, updateFilesystem, workspaceContext],
+    [entries, files, getState, selectedWorkspaceId, updateFilesystem, workspaceContext],
   );
   const capabilityBundle = useMemo(
     () => buildCapabilityBundleForRoot(csvAgentCapability.id, capabilityWorkspace),
@@ -149,7 +137,6 @@ export function CsvAgentPage({
     ready: workspaceHydrated,
     buildDemoScenario: buildCsvAgentDemoScenario,
     files,
-    setExecutionMode,
     setFiles,
     setStatus,
     setReportEffects,
@@ -227,7 +214,7 @@ export function CsvAgentPage({
             Work directly with CSVs: inspect schemas, run safe aggregate queries, and create explicit chartable artifacts.
           </CapabilitySubhead>
         </CapabilityHeader>
-        <AuthPanel mode="account" heading="Account" />
+        <AuthPanel mode="account" heading="Account" blendWithShell />
       </CapabilityHeroRow>
 
       <CapabilityTabBar>
@@ -248,9 +235,7 @@ export function CsvAgentPage({
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
             <CapabilityQuickView
-              title="CSV results"
-              description="Review reusable CSV and JSON outputs from the current workspace."
-              emptyMessage="Materialized CSV and JSON results will appear here as the agent creates them."
+              emptyMessage="Saved CSV and JSON outputs will appear here as the agent creates them."
               groups={csvQuickViewGroups}
               dataTestId="csv-agent-quick-view"
             />
@@ -261,8 +246,6 @@ export function CsvAgentPage({
               enabled
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               investigationBrief={investigationBrief}
               clientTools={clientTools}
               onEffects={appendReportEffects}
@@ -278,9 +261,7 @@ export function CsvAgentPage({
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
             <CapabilityQuickView
-              title="CSV results"
-              description="Review reusable CSV and JSON outputs from the current workspace."
-              emptyMessage="Materialized CSV and JSON results will appear here as the agent creates them."
+              emptyMessage="Saved CSV and JSON outputs will appear here as the agent creates them."
               groups={csvQuickViewGroups}
               dataTestId="csv-agent-quick-view"
             />
@@ -293,8 +274,6 @@ export function CsvAgentPage({
               capabilityBundle={capabilityBundle}
               files={files}
               workspaceState={workspaceStateMetadata}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}

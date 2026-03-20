@@ -3,11 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.chatkit.feedback_types import (
-    FeedbackKind,
-    FeedbackLabel,
-    FeedbackOrigin,
-)
+from backend.app.chatkit.feedback_types import FeedbackKind, FeedbackOrigin
 from backend.app.db.session import Base
 
 
@@ -80,7 +76,7 @@ class ChatItemFeedback(Base):
     item_ids_json: Mapped[list[str]] = mapped_column(JSON, default_factory=list)
     user_email: Mapped[str | None] = mapped_column(Text, index=True, default=None)
     kind: Mapped[FeedbackKind | None] = mapped_column(Text, default=None)
-    label: Mapped[FeedbackLabel | None] = mapped_column(Text, default=None)
+    label: Mapped[str | None] = mapped_column(Text, default=None)
     message: Mapped[str | None] = mapped_column(Text, default=None)
     origin: Mapped[FeedbackOrigin] = mapped_column(Text, default="interactive")
     created_at: Mapped[datetime] = mapped_column(

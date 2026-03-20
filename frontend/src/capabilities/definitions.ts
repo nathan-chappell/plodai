@@ -1,5 +1,25 @@
 import type { CapabilityDefinition } from "./types";
 
+export const workspaceAgentCapability: CapabilityDefinition = {
+  id: "workspace-agent",
+  path: "/workspace",
+  navLabel: "Workspace",
+  title: "Workspace",
+  eyebrow: "Workspace",
+  description: "One shared chat-led workspace for files, tools, previews, and compact reporting.",
+  chatkitLead: "Investigate local files, use the right tool, and keep the latest useful output in view.",
+  chatkitPlaceholder: "Ask the workspace to inspect files, create artifacts, render charts, split PDFs, or update the report",
+  tabs: [],
+  showInSidebar: true,
+  showInComposer: false,
+  composerOrder: 0,
+  composerLabel: "Workspace",
+  composerShortLabel: "Workspace",
+  composerIcon: "cube",
+  composerPlaceholder: "Route work through the shared workspace and the right specialist.",
+  previewPriority: 0,
+};
+
 export const reportAgentCapability: CapabilityDefinition = {
   id: "report-agent",
   path: "/capabilities/report-agent",
@@ -14,6 +34,14 @@ export const reportAgentCapability: CapabilityDefinition = {
     { id: "reports", label: "Reports" },
     { id: "demo", label: "Demo" },
   ],
+  showInSidebar: false,
+  showInComposer: true,
+  composerOrder: 10,
+  composerLabel: "Report",
+  composerShortLabel: "Report",
+  composerIcon: "document",
+  composerPlaceholder: "Use the report specialist for narrative investigations and saved slides.",
+  previewPriority: 10,
 };
 
 export const csvAgentCapability: CapabilityDefinition = {
@@ -29,6 +57,14 @@ export const csvAgentCapability: CapabilityDefinition = {
     { id: "agent", label: "Agent" },
     { id: "demo", label: "Demo" },
   ],
+  showInSidebar: false,
+  showInComposer: true,
+  composerOrder: 20,
+  composerLabel: "CSV",
+  composerShortLabel: "CSV",
+  composerIcon: "analytics",
+  composerPlaceholder: "Use the CSV specialist for grouped queries and reusable data artifacts.",
+  previewPriority: 20,
 };
 
 export const chartAgentCapability: CapabilityDefinition = {
@@ -44,6 +80,14 @@ export const chartAgentCapability: CapabilityDefinition = {
     { id: "agent", label: "Agent" },
     { id: "demo", label: "Demo" },
   ],
+  showInSidebar: false,
+  showInComposer: true,
+  composerOrder: 30,
+  composerLabel: "Charts",
+  composerShortLabel: "Charts",
+  composerIcon: "chart",
+  composerPlaceholder: "Use the chart specialist to turn saved data artifacts into polished charts.",
+  previewPriority: 30,
 };
 
 export const pdfAgentCapability: CapabilityDefinition = {
@@ -59,6 +103,14 @@ export const pdfAgentCapability: CapabilityDefinition = {
     { id: "agent", label: "Agent" },
     { id: "demo", label: "Demo" },
   ],
+  showInSidebar: false,
+  showInComposer: true,
+  composerOrder: 40,
+  composerLabel: "PDF",
+  composerShortLabel: "PDF",
+  composerIcon: "document",
+  composerPlaceholder: "Use the PDF specialist for inspection, extraction, and smart splits.",
+  previewPriority: 40,
 };
 
 export const feedbackAgentCapability: CapabilityDefinition = {
@@ -71,6 +123,14 @@ export const feedbackAgentCapability: CapabilityDefinition = {
   chatkitLead: "Capture structured feedback about the active thread.",
   chatkitPlaceholder: "Ask the Feedback agent to record a precise issue, suggestion, or reaction",
   tabs: [{ id: "agent", label: "Agent" }],
+  showInSidebar: false,
+  showInComposer: false,
+  composerOrder: 90,
+  composerLabel: "Feedback",
+  composerShortLabel: "Feedback",
+  composerIcon: "cube",
+  composerPlaceholder: "Capture structured feedback about the current thread.",
+  previewPriority: 90,
 };
 
 export const adminUsersCapability: CapabilityDefinition = {
@@ -83,16 +143,41 @@ export const adminUsersCapability: CapabilityDefinition = {
   chatkitLead: "Manage access, activation, and credits.",
   chatkitPlaceholder: "Ask the admin workspace to review a user, credits, or activation state",
   tabs: [{ id: "users", label: "Users", visible: ({ role }) => role === "admin" }],
+  showInSidebar: true,
+  showInComposer: false,
+  composerOrder: 999,
+  composerLabel: "Admin",
+  composerShortLabel: "Admin",
+  composerIcon: "cube",
+  composerPlaceholder: "Review user access, activation, and credits.",
+  previewPriority: 999,
 };
 
-export const capabilityDefinitions: CapabilityDefinition[] = [
+export const runtimeCapabilityDefinitions: CapabilityDefinition[] = [
+  workspaceAgentCapability,
   reportAgentCapability,
   csvAgentCapability,
   chartAgentCapability,
   pdfAgentCapability,
+  feedbackAgentCapability,
+];
+
+export const capabilityDefinitions: CapabilityDefinition[] = [
+  workspaceAgentCapability,
 ];
 
 export const allCapabilityDefinitions: CapabilityDefinition[] = [
   ...capabilityDefinitions,
   adminUsersCapability,
 ];
+
+const capabilityDefinitionById = new Map(
+  [...runtimeCapabilityDefinitions, adminUsersCapability].map((capability) => [
+    capability.id,
+    capability,
+  ]),
+);
+
+export function getCapabilityDefinition(capabilityId: string): CapabilityDefinition | null {
+  return capabilityDefinitionById.get(capabilityId) ?? null;
+}

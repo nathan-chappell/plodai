@@ -10,7 +10,6 @@ import { buildChatKitRequestMetadata } from "../../components/ChatKitPane";
 import type {
   AppThreadMetadata,
   ClientEffect,
-  ExecutionMode,
   FeedbackOrigin,
   WorkspaceState,
 } from "../../types/analysis";
@@ -21,9 +20,8 @@ import {
   addWorkspaceFilesWithResult,
   createWorkspaceFilesystem,
   getWorkspaceContext,
-  listDirectoryEntries,
-  listDirectoryFiles,
-  normalizePathPrefix,
+  listAllWorkspaceFileNodes,
+  listAllWorkspaceFiles,
 } from "../workspace-fs";
 import {
   buildWorkspaceStateMetadata,
@@ -35,9 +33,6 @@ const FEEDBACK_AGENT_PRELUDE =
   "Reply with one short acknowledgement only so there is a latest assistant response available for a feedback test. Do not open the feedback widget yet.";
 const DEFAULT_LIVE_TEST_URL = "http://127.0.0.1:8000/chatkit";
 const DEFAULT_LIVE_TEST_BEARER_TOKEN = "banana-for-scale";
-const DEMO_VALIDATOR_CAPABILITY_ID = "demo-validator-agent";
-const DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY = "demo_validator_cost_snapshot";
-const DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX = "DEMO_VALIDATOR_COST_SNAPSHOT ";
 
 type LiveEvent = Record<string, unknown>;
 
@@ -45,10 +40,9 @@ type RuntimeStateSnapshot = {
   capabilityBundle: CapabilityBundle;
   clientTools: CapabilityClientTool[];
   workspaceState: WorkspaceState;
-  executionMode: ExecutionMode;
   files: LocalWorkspaceFile[];
   filesystem: WorkspaceFilesystem;
-  activePrefix: string;
+  workspaceId: string;
   effects: ClientEffect[];
 };
 
@@ -79,16 +73,31 @@ export type LiveEventDiagnostics = {
 
 export type LiveRequestMetadataSummary = {
   origin: FeedbackOrigin | null;
-  execution_mode: ExecutionMode | null;
+};
+
+export type LiveThreadCostSnapshot = {
+  scope: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+};
+
+export type LiveDemoValidationReply = {
+  passed: boolean;
+  summary: string;
+  chart_seen: boolean;
+  failures: string[];
+  cost_snapshot: LiveThreadCostSnapshot;
 };
 
 export type LiveWorkspaceSummary = {
-  active_prefix: string;
+  workspace_id: string;
   files: Array<{
     id: string;
     name: string;
     kind: string;
-    path: string;
+    bucket: string;
+    producer_key: string;
     row_count?: number;
     page_count?: number;
     columns?: string[];
@@ -106,6 +115,75 @@ export type LiveWorkspaceSummary = {
   } | null;
 };
 
+export function parseLiveDemoValidationReply({
+  text,
+  expectChart,
+  costSnapshot,
+}: {
+  text: string;
+  expectChart: boolean;
+  costSnapshot?: LiveThreadCostSnapshot;
+}): LiveDemoValidationReply {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length !== 5) {
+    throw new Error("Validator reply must contain exactly 5 non-empty lines.");
+  }
+
+  const [verdictLine, summaryLine, chartLine, failuresLine, costLine] = lines;
+  if (!verdictLine.startsWith("VERDICT: ")) {
+    throw new Error("Validator reply must start with VERDICT.");
+  }
+  if (!summaryLine.startsWith("SUMMARY: ")) {
+    throw new Error("Validator reply must include SUMMARY.");
+  }
+  if (!chartLine.startsWith("CHART_SEEN: ")) {
+    throw new Error("Validator reply must include CHART_SEEN.");
+  }
+  if (!failuresLine.startsWith("FAILURES: ")) {
+    throw new Error("Validator reply must include FAILURES.");
+  }
+  if (!costLine.startsWith("COST_USD: ")) {
+    throw new Error("Validator reply must include COST_USD.");
+  }
+
+  const verdict = verdictLine.slice("VERDICT: ".length).trim().toUpperCase();
+  const summary = summaryLine.slice("SUMMARY: ".length).trim();
+  const chartDetail = chartLine.slice("CHART_SEEN: ".length).trim();
+  const chart_seen = chartDetail.toUpperCase().startsWith("YES");
+  const chartReason = chartDetail.replace(/^(YES|NO)\s*-\s*/i, "").trim();
+  const failuresText = failuresLine.slice("FAILURES: ".length).trim();
+  const failures =
+    !failuresText || failuresText.toLowerCase() === "none"
+      ? []
+      : failuresText
+          .split(";")
+          .map((failure) => failure.trim())
+          .filter(Boolean);
+  if (expectChart && !chart_seen) {
+    failures.push(`Validator did not confirm chart evidence: ${chartReason}`);
+  }
+
+  const parsedCost = Number.parseFloat(costLine.slice("COST_USD: ".length).trim());
+  const cost_snapshot = costSnapshot ?? {
+    scope: "before_current_turn",
+    input_tokens: 0,
+    output_tokens: 0,
+    cost_usd: Number.isFinite(parsedCost) ? parsedCost : 0,
+  };
+
+  return {
+    passed: verdict === "PASS" && failures.length === 0,
+    summary,
+    chart_seen,
+    failures,
+    cost_snapshot,
+  };
+}
+
 export type LiveDeterministicChecks = {
   passed: boolean;
   failures: string[];
@@ -114,22 +192,6 @@ export type LiveDeterministicChecks = {
   tool_call_count: number;
   error_event_count: number;
   pending_tool_count: number;
-};
-
-export type LiveThreadCostSnapshot = {
-  scope: "before_current_turn";
-  input_tokens: number;
-  output_tokens: number;
-  cost_usd: number;
-};
-
-export type LiveDemoValidation = {
-  passed: boolean;
-  summary: string;
-  failures: string[];
-  chart_seen: boolean;
-  cost_snapshot: LiveThreadCostSnapshot;
-  raw_text: string;
 };
 
 export type LiveDemoRunResult = {
@@ -145,7 +207,6 @@ export type LiveDemoRunResult = {
   deterministicChecks: LiveDeterministicChecks;
   eventDiagnostics: LiveEventDiagnostics;
   requestMetadata: LiveRequestMetadataSummary;
-  validation: LiveDemoValidation;
 };
 
 type LiveConversationResult = {
@@ -184,7 +245,6 @@ type FinalizeCapabilityDemoRunOptions = {
   runtimeState: RuntimeStateGetter;
   conversation: LiveConversationResult;
   effects: ClientEffect[];
-  validation: LiveDemoValidation;
 };
 
 function getLiveTestConfig(): {
@@ -284,38 +344,28 @@ function buildCapabilityInvestigationBrief(
     ].join(" ");
   }
 
-  return scenario.summary;
-}
+  if (capabilityModule.definition.id === "csv-agent") {
+    return [
+      scenario.title,
+      "Complete exactly one csv-agent demo pass.",
+      "Use dataset_id demo-sales-fixture for the grouped revenue summary work and create exactly one reusable chartable artifact from it.",
+      "If you choose the chart path or produce a Chart Agent handoff, the run is not complete until render_chart_from_file has actually happened and chart evidence is visible in the thread.",
+      "A plan, inspection step, or handoff widget does not count as chart completion.",
+      "Do not say the chart is coming next unless the run is still actively moving toward a real render.",
+    ].join(" ");
+  }
 
-function buildDemoValidatorCapabilityBundle(): CapabilityBundle {
-  return {
-    root_capability_id: DEMO_VALIDATOR_CAPABILITY_ID,
-    capabilities: [
-      {
-        capability_id: DEMO_VALIDATOR_CAPABILITY_ID,
-        agent_name: "Demo Validator",
-        instructions: [
-          "You are the hidden validator for a completed live capability demo.",
-          "This turn is validation only. Do not continue the work, do not suggest next steps, and do not ask follow-up questions.",
-          "Use the existing same-thread conversation context to judge whether the demo actually completed the requested work.",
-          "If chart or image evidence is present in the thread, only answer CHART_SEEN: YES when you genuinely observed that evidence in the conversation context.",
-          "You have exactly one pricing tool: get_current_thread_cost.",
-          "Call get_current_thread_cost exactly once before your final answer.",
-          "Copy usage.cost_usd from that tool result verbatim into COST_USD.",
-          "Never invent, estimate, round differently, or substitute a fallback price.",
-          "If you skip the pricing tool, your answer is invalid.",
-          "Return exactly five lines and nothing else in this format:",
-          "VERDICT: PASS|FAIL",
-          "SUMMARY: ...",
-          "CHART_SEEN: YES|NO - ...",
-          "FAILURES: none | item 1 ; item 2",
-          "COST_USD: <decimal>",
-        ].join(" "),
-        client_tools: [],
-        handoff_targets: [],
-      },
-    ],
-  };
+  if (capabilityModule.definition.id === "feedback-agent") {
+    return [
+      scenario.title,
+      "Complete exactly one feedback-agent demo pass.",
+      "There is already a latest assistant response in the thread from the prelude turn.",
+      "Open the structured feedback widget on the next turn by calling get_feedback first.",
+      "Do not ask for plain-text feedback before the widget is shown.",
+    ].join(" ");
+  }
+
+  return scenario.summary;
 }
 
 function buildEventCounts(events: LiveEvent[]): Record<string, number> {
@@ -552,21 +602,18 @@ function buildEventDiagnostics(
 function buildRequestMetadataSummary(
   metadata: AppThreadMetadata | null,
 ): LiveRequestMetadataSummary {
-  const executionMode = metadata?.execution_mode;
   return {
     origin:
       metadata?.origin === "interactive" || metadata?.origin === "ui_integration_test"
         ? metadata.origin
         : null,
-    execution_mode:
-      executionMode === "interactive" || executionMode === "batch"
-        ? executionMode
-        : null,
   };
 }
 
 function createMutableCapabilityWorkspace(options: {
-  activePrefix: string;
+  capabilityId: string;
+  capabilityTitle: string;
+  workspaceId: string;
   seedFiles: LocalWorkspaceFile[];
 }): CapabilityWorkspaceContext & {
   appendFiles: (
@@ -574,64 +621,59 @@ function createMutableCapabilityWorkspace(options: {
     source?: "demo" | "derived",
   ) => LocalWorkspaceFile[];
   getFilesystem: () => WorkspaceFilesystem;
-  getActivePrefix: () => string;
+  getWorkspaceId: () => string;
 } {
-  let activePrefix = normalizePathPrefix(options.activePrefix);
+  const workspaceId = options.workspaceId;
   let filesystem = addWorkspaceFilesWithResult(
     createWorkspaceFilesystem(),
-    activePrefix,
     options.seedFiles,
     "demo",
+    {
+      bucket: "uploaded",
+      producer_key: "uploaded",
+      producer_label: "Uploaded",
+    },
   ).filesystem;
 
   return {
-    get activePrefix() {
-      return activePrefix;
-    },
-    get cwdPath() {
-      return activePrefix;
-    },
+    capabilityId: options.capabilityId,
+    capabilityTitle: options.capabilityTitle,
+    workspaceId,
     get files() {
-      return listDirectoryFiles(filesystem, activePrefix);
+      return listAllWorkspaceFiles(filesystem);
     },
     get entries() {
-      return listDirectoryEntries(filesystem, activePrefix);
+      return listAllWorkspaceFileNodes(filesystem);
     },
     get workspaceContext() {
-      return getWorkspaceContext(filesystem, activePrefix);
-    },
-    setActivePrefix(prefix) {
-      activePrefix = normalizePathPrefix(prefix);
-    },
-    createDirectory(path) {
-      return path;
-    },
-    changeDirectory(path) {
-      return path;
+      return getWorkspaceContext(filesystem, workspaceId);
     },
     updateFilesystem(updater) {
       filesystem = updater(filesystem);
     },
     getState() {
       return {
-        activePrefix,
-        cwdPath: activePrefix,
-        files: listDirectoryFiles(filesystem, activePrefix),
-        entries: listDirectoryEntries(filesystem, activePrefix),
+        workspaceId,
+        files: listAllWorkspaceFiles(filesystem),
+        entries: listAllWorkspaceFileNodes(filesystem),
         filesystem,
-        workspaceContext: getWorkspaceContext(filesystem, activePrefix),
+        workspaceContext: getWorkspaceContext(filesystem, workspaceId),
       };
     },
     appendFiles(files, source = "derived") {
-      const result = addWorkspaceFilesWithResult(filesystem, activePrefix, files, source);
+      const result = addWorkspaceFilesWithResult(filesystem, files, source, {
+        bucket: source === "demo" ? "uploaded" : undefined,
+        producer_key: source === "demo" ? "uploaded" : options.capabilityId,
+        producer_label: source === "demo" ? "Uploaded" : options.capabilityTitle,
+      });
       filesystem = result.filesystem;
       return result.files;
     },
     getFilesystem() {
       return filesystem;
     },
-    getActivePrefix() {
-      return activePrefix;
+    getWorkspaceId() {
+      return workspaceId;
     },
   };
 }
@@ -640,7 +682,6 @@ function buildCapabilityRuntimeGetter(
   capabilityModule: CapabilityModule,
   workspace: ReturnType<typeof createMutableCapabilityWorkspace>,
   effects: ClientEffect[],
-  executionMode: ExecutionMode,
 ): RuntimeStateGetter {
   return () => {
     const capabilityBundle = buildCapabilityBundleForRoot(
@@ -654,12 +695,11 @@ function buildCapabilityRuntimeGetter(
       clientTools,
       workspaceState: buildWorkspaceStateMetadata(
         state.filesystem,
-        state.activePrefix,
+        state.workspaceId,
       ),
-      executionMode,
       files: state.files,
       filesystem: state.filesystem,
-      activePrefix: state.activePrefix,
+      workspaceId: state.workspaceId,
       effects: [...effects],
     };
   };
@@ -842,12 +882,13 @@ function summarizeWorkspaceForLiveTest(
     ? readWorkspaceReport(current.filesystem, currentReportId)
     : null;
   return {
-    active_prefix: current.activePrefix,
+    workspace_id: current.workspaceId,
     files: current.workspaceState.files.map((file) => ({
       id: file.id,
       name: file.name,
       kind: file.kind,
-      path: file.path,
+      bucket: file.bucket,
+      producer_key: file.producer_key,
       row_count: file.row_count,
       page_count: file.page_count,
       columns: file.columns?.slice(0, 6),
@@ -862,225 +903,6 @@ function summarizeWorkspaceForLiveTest(
         }
       : null,
   };
-}
-
-function normalizeLiveThreadCostSnapshot(value: unknown): LiveThreadCostSnapshot | null {
-  const record = asRecord(value);
-  const usage = asRecord(record?.usage);
-  const inputTokens = numberOrNull(usage?.input_tokens);
-  const outputTokens = numberOrNull(usage?.output_tokens);
-  const costUsd = numberOrNull(usage?.cost_usd);
-  if (
-    record?.scope !== "before_current_turn" ||
-    inputTokens === null ||
-    outputTokens === null ||
-    costUsd === null
-  ) {
-    return null;
-  }
-  return {
-    scope: "before_current_turn",
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    cost_usd: costUsd,
-  };
-}
-
-function findLiveDemoValidatorCostSnapshot(events: LiveEvent[]): LiveThreadCostSnapshot | null {
-  for (const event of [...events].reverse()) {
-    if (
-      event.type === "progress_update" &&
-      typeof event.text === "string" &&
-      event.text.startsWith(DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX)
-    ) {
-      const rawSnapshot = event.text
-        .slice(DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX.length)
-        .trim();
-      try {
-        const snapshot = normalizeLiveThreadCostSnapshot(JSON.parse(rawSnapshot));
-        if (snapshot) {
-          return snapshot;
-        }
-      } catch {
-        // Ignore malformed progress payloads and keep scanning.
-      }
-    }
-    if (event.type !== "thread.updated" && event.type !== "thread.created") {
-      continue;
-    }
-    const thread = asRecord(event.thread);
-    const metadata = asRecord(thread?.metadata);
-    const snapshot = normalizeLiveThreadCostSnapshot(
-      metadata?.[DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY],
-    );
-    if (snapshot) {
-      return snapshot;
-    }
-  }
-  return null;
-}
-
-function formatValidationFileSummary(workspaceSummary: LiveWorkspaceSummary): string {
-  if (!workspaceSummary.files.length) {
-    return "none";
-  }
-  return workspaceSummary.files
-    .slice(0, 8)
-    .map((file) => `${file.name} (${file.kind})`)
-    .join(", ");
-}
-
-function formatValidationReportSummary(workspaceSummary: LiveWorkspaceSummary): string {
-  const currentReport = workspaceSummary.current_report;
-  if (!currentReport) {
-    return `reports=${workspaceSummary.reports.length}; current=none`;
-  }
-  const slideTitles =
-    currentReport.slides.map((slide) => slide.title).filter((title) => title.trim().length > 0).join(", ") ||
-    "untitled";
-  return `reports=${workspaceSummary.reports.length}; current=${currentReport.title}; slides=${currentReport.slide_count}; slide_titles=${slideTitles}`;
-}
-
-function buildLiveDemoValidationPrompt(options: {
-  scenario: CapabilityDemoScenario;
-  conversation: LiveConversationResult;
-  effects: ClientEffect[];
-  workspaceSummary: LiveWorkspaceSummary;
-}): string {
-  const toolNames = [...new Set(options.conversation.toolCalls.map((toolCall) => toolCall.name))];
-  const chartEffectPresent = options.effects.some((effect) => effect.type === "chart_rendered");
-  const expectedOutcomes =
-    options.scenario.expectedOutcomes && options.scenario.expectedOutcomes.length > 0
-      ? options.scenario.expectedOutcomes.join(" | ")
-      : "No explicit expected outcomes were provided.";
-  const finalAssistantPreview =
-    options.conversation.assistantMessages.at(-1)?.replace(/\s+/g, " ").trim().slice(0, 240) ??
-    "none";
-
-  return [
-    "Analyze the already-completed demo run in this same thread.",
-    "This is validation only. Do not continue the task, do not add more analysis work, and do not offer next steps.",
-    "Use the full same-thread conversation context, including any attached chart or image evidence already visible in the thread.",
-    "You have exactly one pricing tool available: get_current_thread_cost.",
-    "Call get_current_thread_cost exactly once before answering, then copy usage.cost_usd from that tool result verbatim into COST_USD.",
-    "Do not estimate, round differently, or substitute 0 unless the tool itself returned 0.",
-    "If you skip the tool call, your answer is invalid.",
-    "Price is part of the assessment, not an optional extra.",
-    "",
-    `SCENARIO_TITLE: ${options.scenario.title}`,
-    `SCENARIO_SUMMARY: ${options.scenario.summary}`,
-    `EXPECTED_OUTCOMES: ${expectedOutcomes}`,
-    "",
-    "RUN_SUMMARY:",
-    `tool_names: ${toolNames.join(", ") || "none"}`,
-    `effect_count: ${options.effects.length}`,
-    `chart_effect_present: ${chartEffectPresent ? "yes" : "no"}`,
-    `file_summary: ${formatValidationFileSummary(options.workspaceSummary)}`,
-    `report_summary: ${formatValidationReportSummary(options.workspaceSummary)}`,
-    `final_assistant_preview: ${finalAssistantPreview}`,
-    "",
-    "Return exactly these five lines and nothing else:",
-    "VERDICT: PASS|FAIL",
-    "SUMMARY: ...",
-    "CHART_SEEN: YES|NO - ...",
-    "FAILURES: none | item 1 ; item 2",
-    "COST_USD: <decimal>",
-  ].join("\n");
-}
-
-export function parseLiveDemoValidationReply(options: {
-  text: string;
-  expectChart: boolean;
-  costSnapshot?: LiveThreadCostSnapshot | null;
-}): LiveDemoValidation {
-  const normalizedText = options.text.trim();
-  const lines = normalizedText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length !== 5) {
-    throw new Error(
-      `Validator reply must contain exactly 5 non-empty lines, received ${lines.length}. Raw reply: ${normalizedText || "<empty>"}`,
-    );
-  }
-
-  const verdictMatch = /^VERDICT:\s*(PASS|FAIL)$/i.exec(lines[0]);
-  const summaryMatch = /^SUMMARY:\s*(.+)$/i.exec(lines[1]);
-  const chartMatch = /^CHART_SEEN:\s*(YES|NO)\s*-\s*(.+)$/i.exec(lines[2]);
-  const failuresMatch = /^FAILURES:\s*(.+)$/i.exec(lines[3]);
-  const costMatch = /^COST_USD:\s*(-?\d+(?:\.\d+)?)$/i.exec(lines[4]);
-
-  if (!verdictMatch || !summaryMatch || !chartMatch || !failuresMatch || !costMatch) {
-    throw new Error(`Validator reply did not match the required contract. Raw reply: ${normalizedText}`);
-  }
-
-  const verdict = verdictMatch[1].toUpperCase();
-  const summary = summaryMatch[1].trim();
-  const chartSeen = chartMatch[1].toUpperCase() === "YES";
-  const chartRationale = chartMatch[2].trim();
-  const rawFailures = failuresMatch[1].trim();
-  const reportedCostUsd = Number(costMatch[1]);
-  if (!Number.isFinite(reportedCostUsd)) {
-    throw new Error(`Validator reply included an invalid COST_USD value. Raw reply: ${normalizedText}`);
-  }
-  const costSnapshot =
-    options.costSnapshot ??
-    ({
-      scope: "before_current_turn",
-      input_tokens: 0,
-      output_tokens: 0,
-      cost_usd: reportedCostUsd,
-    } satisfies LiveThreadCostSnapshot);
-  if (
-    options.costSnapshot &&
-    Math.abs(reportedCostUsd - options.costSnapshot.cost_usd) > 0.00000001
-  ) {
-    throw new Error(
-      `Validator COST_USD ${reportedCostUsd} did not match expected pre-validation snapshot ${options.costSnapshot.cost_usd}. Raw reply: ${normalizedText}`,
-    );
-  }
-
-  const failures =
-    rawFailures.toLowerCase() === "none"
-      ? []
-      : rawFailures
-          .split(";")
-          .map((failure) => failure.trim())
-          .filter((failure) => failure.length > 0);
-
-  if (verdict === "FAIL" && failures.length === 0) {
-    failures.push("Validator returned FAIL without any listed failure reasons.");
-  }
-  if (options.expectChart && !chartSeen) {
-    failures.push(`Validator did not confirm chart evidence: ${chartRationale}`);
-  }
-  if (verdict === "PASS" && rawFailures.toLowerCase() !== "none") {
-    failures.push("Validator returned PASS but also reported failures.");
-  }
-
-  return {
-    passed: verdict === "PASS" && failures.length === 0,
-    summary,
-    failures,
-    chart_seen: chartSeen,
-    cost_snapshot: costSnapshot,
-    raw_text: normalizedText,
-  };
-}
-
-function assertLiveDemoValidationPassed(validation: LiveDemoValidation): void {
-  if (validation.passed) {
-    return;
-  }
-  throw new Error(
-    [
-      "Live demo validation failed.",
-      `Summary: ${validation.summary}`,
-      `Failures: ${validation.failures.join(" | ") || "none provided"}`,
-      `Raw reply: ${validation.raw_text || "<empty>"}`,
-    ].join("\n"),
-  );
 }
 
 function buildDeterministicChecks(
@@ -1115,69 +937,6 @@ function buildDeterministicChecks(
   };
 }
 
-async function runLiveDemoValidation(options: {
-  logScope: string;
-  scenario: CapabilityDemoScenario;
-  threadId: string;
-  runtimeState: RuntimeStateGetter;
-  mainConversation: LiveConversationResult;
-  effects: ClientEffect[];
-}): Promise<LiveDemoValidation> {
-  const workspaceSummary = summarizeWorkspaceForLiveTest(options.runtimeState);
-  const validatorBundle = buildDemoValidatorCapabilityBundle();
-  const validationConversation = await runLiveChatKitConversation({
-    logScope: `${options.logScope}:validator`,
-    prompts: [
-      {
-        text: buildLiveDemoValidationPrompt({
-          scenario: options.scenario,
-          conversation: options.mainConversation,
-          effects: options.effects,
-          workspaceSummary,
-        }),
-        model: options.scenario.model ?? "lightweight",
-      },
-    ],
-    initialThreadId: options.threadId,
-    buildMetadata: () => {
-      const current = options.runtimeState();
-      return {
-        ...buildChatKitRequestMetadata({
-          capabilityBundle: validatorBundle as never,
-          workspaceState: current.workspaceState,
-          threadOrigin: "ui_integration_test",
-          executionMode: current.executionMode,
-        }),
-      };
-    },
-    executeClientTool: async (name) => {
-      throw new Error(`Validator should not request client tools, received ${name}.`);
-    },
-  });
-
-  if (validationConversation.eventDiagnostics.error_events.length > 0) {
-    throw new Error(
-      `Validator turn emitted ChatKit errors: ${validationConversation.eventDiagnostics.error_events
-        .map((errorEvent) => errorEvent.message)
-        .join(" | ")}`,
-    );
-  }
-
-  const validatorReply = validationConversation.assistantMessages.at(-1);
-  if (!validatorReply) {
-    throw new Error("Validator turn did not produce a final assistant reply.");
-  }
-
-  const costSnapshot = findLiveDemoValidatorCostSnapshot(validationConversation.events);
-  const validation = parseLiveDemoValidationReply({
-    text: validatorReply,
-    expectChart: options.effects.some((effect) => effect.type === "chart_rendered"),
-    costSnapshot,
-  });
-  assertLiveDemoValidationPassed(validation);
-  return validation;
-}
-
 async function finalizeCapabilityDemoRun(
   options: FinalizeCapabilityDemoRunOptions,
 ): Promise<LiveDemoRunResult> {
@@ -1202,7 +961,6 @@ async function finalizeCapabilityDemoRun(
     deterministicChecks,
     eventDiagnostics: options.conversation.eventDiagnostics,
     requestMetadata: options.conversation.requestMetadata,
-    validation: options.validation,
   };
 
   logLiveTestStep(options.logScope, "test.end", {
@@ -1212,7 +970,6 @@ async function finalizeCapabilityDemoRun(
     widget_count: result.widgets.length,
     error_event_count: result.eventDiagnostics.error_events.length,
     deterministic_passed: result.deterministicChecks.passed,
-    validation_passed: result.validation.passed,
   });
 
   return result;
@@ -1232,16 +989,16 @@ export async function runCapabilityDemoScenario(
     });
 
     const effects: ClientEffect[] = [];
-    const executionMode = scenario.defaultExecutionMode ?? "batch";
     const workspace = createMutableCapabilityWorkspace({
-      activePrefix: `/${capabilityModule.definition.id}/`,
+      capabilityId: capabilityModule.definition.id,
+      capabilityTitle: capabilityModule.definition.title,
+      workspaceId: capabilityModule.definition.id,
       seedFiles: scenario.workspaceSeed,
     });
     const runtimeState = buildCapabilityRuntimeGetter(
       capabilityModule,
       workspace,
       effects,
-      executionMode,
     );
     const prompts = buildCapabilityDemoPrompts(capabilityModule, scenario);
     const investigationBrief = buildCapabilityInvestigationBrief(
@@ -1259,7 +1016,6 @@ export async function runCapabilityDemoScenario(
             capabilityBundle: current.capabilityBundle as never,
             workspaceState: current.workspaceState,
             threadOrigin: "ui_integration_test",
-            executionMode: current.executionMode,
           }),
           investigation_brief: investigationBrief,
         };
@@ -1274,14 +1030,6 @@ export async function runCapabilityDemoScenario(
           args,
         ),
     });
-    const validation = await runLiveDemoValidation({
-      logScope,
-      scenario,
-      threadId: conversation.threadId,
-      runtimeState,
-      mainConversation: conversation,
-      effects,
-    });
 
     return finalizeCapabilityDemoRun({
       logScope,
@@ -1290,7 +1038,6 @@ export async function runCapabilityDemoScenario(
       runtimeState,
       conversation,
       effects,
-      validation,
     });
   } finally {
     cleanupBroker();

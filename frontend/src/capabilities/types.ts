@@ -1,10 +1,9 @@
 import type { ComponentType } from "react";
 import type { ClientEffect } from "../types/analysis";
-import type { ExecutionMode } from "../types/analysis";
 import type { JsonSchema } from "../types/json-schema";
 import type { LocalWorkspaceFile } from "../types/report";
+import type { WorkspaceArtifactBucket } from "../types/workspace-contract";
 import type {
-  WorkspaceBreadcrumb,
   WorkspaceContext,
   WorkspaceDescriptor,
   WorkspaceFilesystem,
@@ -18,7 +17,21 @@ export type FunctionToolDefinition = {
   description: string;
   parameters: JsonSchema;
   strict?: boolean;
+  display?: ToolDisplaySpec;
 };
+
+export type ToolDisplaySpec = {
+  label?: string;
+  prominent_args?: string[];
+  omit_args?: string[];
+  arg_labels?: Record<string, string>;
+};
+
+export type ComposerToolIcon =
+  | "cube"
+  | "analytics"
+  | "chart"
+  | "document";
 
 export type ClientToolHandlerContext = {
   emitEffect: (effect: ClientEffect) => void;
@@ -61,6 +74,27 @@ export type CapabilityTab = {
   visible?: (params: { role: string }) => boolean;
 };
 
+export type PdfSmartSplitEntryView = {
+  fileId: string;
+  name: string;
+  title: string;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+};
+
+export type PdfSmartSplitBundleView = {
+  id: string;
+  createdAt: string;
+  sourceFileId: string;
+  sourceFileName: string;
+  archiveFileId?: string;
+  archiveFileName?: string;
+  indexFileId?: string;
+  indexFileName?: string;
+  entries: PdfSmartSplitEntryView[];
+};
+
 export type CapabilityDefinition = {
   id: string;
   path: string;
@@ -71,6 +105,14 @@ export type CapabilityDefinition = {
   chatkitLead: string;
   chatkitPlaceholder: string;
   tabs: CapabilityTab[];
+  showInSidebar?: boolean;
+  showInComposer?: boolean;
+  composerOrder?: number;
+  composerLabel?: string;
+  composerShortLabel?: string;
+  composerIcon?: ComposerToolIcon;
+  composerPlaceholder?: string;
+  previewPriority?: number;
 };
 
 export type ShellWorkspaceRegistration = {
@@ -78,6 +120,7 @@ export type ShellWorkspaceRegistration = {
   title: string;
   description: string;
   artifacts: ShellWorkspaceArtifact[];
+  smartSplitBundles?: PdfSmartSplitBundleView[];
   workspaces: WorkspaceDescriptor[];
   activeWorkspaceId: string;
   activeWorkspaceName: string;
@@ -94,8 +137,8 @@ export type ShellWorkspaceRegistration = {
 
 export type ShellWorkspaceArtifact = {
   entryId: string;
-  path: string;
   createdAt: string;
+  bucket: WorkspaceArtifactBucket;
   source: "uploaded" | "derived" | "demo";
   producerKey: string;
   producerLabel: string;
@@ -103,20 +146,17 @@ export type ShellWorkspaceArtifact = {
 };
 
 export type CapabilityWorkspaceContext = {
-  activePrefix: string;
-  cwdPath: string;
+  capabilityId: string;
+  capabilityTitle: string;
+  workspaceId: string;
   files: LocalWorkspaceFile[];
   entries: WorkspaceItem[];
   workspaceContext: WorkspaceContext;
-  setActivePrefix: (prefix: string) => void;
-  createDirectory: (path: string) => string;
-  changeDirectory: (path: string) => string;
   updateFilesystem: (
     updater: (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem,
   ) => void;
   getState: () => {
-    activePrefix: string;
-    cwdPath: string;
+    workspaceId: string;
     files: LocalWorkspaceFile[];
     entries: WorkspaceItem[];
     filesystem: WorkspaceFilesystem;
@@ -130,7 +170,6 @@ export type CapabilityDemoScenario = {
   summary: string;
   initialPrompt: string;
   workspaceSeed: LocalWorkspaceFile[];
-  defaultExecutionMode?: ExecutionMode;
   model?: string;
   expectedOutcomes?: string[];
   notes?: string[];
@@ -149,3 +188,8 @@ export type CapabilityModule = {
     onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
   }>;
 };
+
+export type CapabilityRuntimeModule = Pick<
+  CapabilityModule,
+  "definition" | "buildAgentSpec" | "bindClientTools"
+>;

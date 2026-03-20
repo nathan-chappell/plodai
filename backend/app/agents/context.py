@@ -10,7 +10,6 @@ from backend.app.chatkit.metadata import (
     CapabilityAgentSpec,
     CapabilityBundle,
     ClientToolDefinition,
-    ExecutionMode,
 )
 
 
@@ -120,15 +119,6 @@ class ReportAgentContext:
             if capability_spec is not None
             else []
         )
-
-    @property
-    def execution_mode(self) -> ExecutionMode:
-        mode = self.thread_metadata.get("execution_mode")
-        return mode if mode in {"interactive", "batch"} else "interactive"
-
-    @property
-    def is_batch_mode(self) -> bool:
-        return self.execution_mode == "batch"
 
     @property
     def workspace_agents_markdown(self) -> str | None:

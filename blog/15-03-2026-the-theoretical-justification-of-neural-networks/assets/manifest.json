@@ -1,6 +1,6 @@
 {
   "article": "15-03-2026-the-theoretical-justification-of-neural-networks",
-  "output_dir": "frontend/public/blog-assets/theoretical-justification-of-neural-networks",
+  "output_dir": "blog/15-03-2026-the-theoretical-justification-of-neural-networks/assets",
   "seed": {
     "shared": null,
     "mlp": 7,
@@ -526,8 +526,8 @@
     "report_backend": "matplotlib",
     "report_style": "restrained_academic_print",
     "report_layout": "trace_panels_plus_transition_field",
-    "story_plot_sampling": "curated_watchlist_plus_balanced_background",
-    "story_plot_probe_count": 97,
+    "story_plot_sampling": "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field",
+    "story_plot_probe_count": 107,
     "story_value_transform": "boundary_emphasized_probability_nonlinear",
     "figure_background": "dark_slate",
     "selection_rule": "Off-by-one example: longer held-out off-by-one counterexample with the strongest move toward correct rejection, preferring actual boundary crossings; ordinary support: longer held-out balanced string with clear nested structure, preferring high depth, low drift, and correct acceptance throughout; near-boundary support: chosen separately from the held-out pool for assessment only, using boundary distance, flips, and local change rather than visual prominence.",
@@ -593,7 +593,7 @@
         }
       }
     ],
-    "watchlist_mode": "curated_long_held_out_plus_balanced_background",
+    "watchlist_mode": "corrected_off_by_one_single_flip_neighborhood_plus_faint_global_field",
     "curated_probe_roles": [
       "off-by-one example"
     ],
@@ -603,6 +603,7 @@
     "curated_probe_notes": [
       "one extra close parenthesis"
     ],
+    "local_neighbor_count": 10,
     "background_probe_count": 96,
     "trace_panel_background_mode": "held_out_state_cloud_plus_endpoints",
     "trace_marker_mode": "start_end_only",

@@ -81,9 +81,9 @@ export function PlatformShell({
           <PlatformSidebar>
             <PlatformSidebarHeader $collapsed={collapsed}>
               <PlatformBrandBlock $collapsed={collapsed}>
-                <PlatformEyebrow>Capability Platform</PlatformEyebrow>
+                <PlatformEyebrow>Analysis Workspace</PlatformEyebrow>
                 <PlatformTitle>AI Portfolio</PlatformTitle>
-                <PlatformSubhead>Capability-led analysis workspace.</PlatformSubhead>
+                <PlatformSubhead>Tool-led analysis workspace.</PlatformSubhead>
               </PlatformBrandBlock>
               <PlatformCollapseButton
                 aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -118,12 +118,12 @@ export function PlatformShell({
                     data-testid="workspace-nav-button"
                     onClick={onOpenWorkspaceModal}
                     type="button"
-                    title="workspace"
+                    title="files"
                   >
                     <PlatformNavGlyph $active={workspaceModalOpen}>
                       <WorkspaceIcon />
                     </PlatformNavGlyph>
-                    <PlatformNavLabel $collapsed={collapsed}>workspace</PlatformNavLabel>
+                    <PlatformNavLabel $collapsed={collapsed}>files</PlatformNavLabel>
                     <PlatformNavMeta $collapsed={collapsed}>
                       {workspaceRegistration.activeWorkspaceName}
                     </PlatformNavMeta>
@@ -164,6 +164,7 @@ export function PlatformShell({
               </WorkspaceModalHeader>
               <WorkspaceInventoryPane
                 artifacts={workspaceRegistration.artifacts}
+                smartSplitBundles={workspaceRegistration.smartSplitBundles}
                 workspaces={workspaceRegistration.workspaces}
                 activeWorkspaceId={workspaceRegistration.activeWorkspaceId}
                 activeWorkspaceName={workspaceRegistration.activeWorkspaceName}

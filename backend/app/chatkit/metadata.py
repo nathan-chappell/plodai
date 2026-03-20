@@ -9,12 +9,11 @@ from pydantic import (
     model_validator,
 )
 
-from backend.app.chatkit.feedback_types import FeedbackOrigin
+from backend.app.chatkit.feedback_types import FeedbackKind, FeedbackOrigin
 from backend.app.chatkit.usage import ThreadUsageTotals
 
 
 JsonSchemaPrimitive: TypeAlias = str | int | float | bool | None
-ExecutionMode: TypeAlias = Literal["interactive", "batch"]
 
 
 class JsonSchema(TypedDict, total=False):
@@ -46,6 +45,14 @@ class ClientToolDefinition(TypedDict, total=False):
     description: str
     parameters: JsonSchema
     strict: bool
+    display: "ToolDisplaySpec"
+
+
+class ToolDisplaySpec(TypedDict, total=False):
+    label: str
+    prominent_args: list[str]
+    omit_args: list[str]
+    arg_labels: dict[str, str]
 
 
 class CapabilityHandoffTarget(TypedDict):
@@ -68,14 +75,17 @@ class CapabilityBundle(TypedDict):
 
 
 class WorkspaceContext(TypedDict):
-    path_prefix: str
+    workspace_id: str
     referenced_item_ids: list[str]
 
 
 class WorkspaceStateFileSummary(TypedDict, total=False):
     id: str
     name: str
-    path: str
+    bucket: str
+    producer_key: str
+    producer_label: str
+    source: Literal["uploaded", "derived", "demo"]
     kind: Literal["csv", "json", "pdf", "other"]
     extension: str
     mime_type: NotRequired[str | None]
@@ -105,10 +115,13 @@ class WorkspaceState(TypedDict):
     agents_markdown: NotRequired[str | None]
 
 
-class DemoValidatorCostSnapshot(TypedDict):
-    thread_id: str
-    scope: Literal["before_current_turn"]
-    usage: ThreadUsageTotals
+class PendingFeedbackSession(TypedDict):
+    session_id: str
+    item_ids: list[str]
+    recommended_options: list[str]
+    message_draft: str | None
+    inferred_sentiment: FeedbackKind | None
+    mode: Literal["recommendations", "confirmation"]
 
 
 class ThreadMetadataPatch(TypedDict, total=False):
@@ -123,9 +136,8 @@ class ThreadMetadataPatch(TypedDict, total=False):
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
     workspace_state: WorkspaceState
-    execution_mode: ExecutionMode
     origin: FeedbackOrigin
-    demo_validator_cost_snapshot: DemoValidatorCostSnapshot
+    feedback_session: PendingFeedbackSession
 
 
 class AppThreadMetadata(TypedDict, total=False):
@@ -140,9 +152,8 @@ class AppThreadMetadata(TypedDict, total=False):
     usage: ThreadUsageTotals
     capability_bundle: CapabilityBundle
     workspace_state: WorkspaceState
-    execution_mode: ExecutionMode
     origin: FeedbackOrigin
-    demo_validator_cost_snapshot: DemoValidatorCostSnapshot
+    feedback_session: PendingFeedbackSession
 
 
 class _MetadataModel(BaseModel):
@@ -305,6 +316,7 @@ class ClientToolDefinitionModel(_MetadataModel):
     description: str = ""
     parameters: dict[str, Any]
     strict: bool = True
+    display: "ToolDisplaySpecModel | None" = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -330,6 +342,51 @@ class ClientToolDefinitionModel(_MetadataModel):
     @classmethod
     def _tool_strict(cls, value: object) -> bool:
         return True if value is None else bool(value)
+
+    @field_validator("display", mode="before")
+    @classmethod
+    def _display(
+        cls,
+        value: object,
+    ) -> "ToolDisplaySpecModel | None":
+        validated = _validated_model_or_none(ToolDisplaySpecModel, value)
+        return cast(ToolDisplaySpecModel | None, validated)
+
+
+class ToolDisplaySpecModel(_MetadataModel):
+    label: str | None = None
+    prominent_args: list[str] | None = None
+    omit_args: list[str] | None = None
+    arg_labels: dict[str, str] | None = None
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _label(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+    @field_validator("prominent_args", "omit_args", mode="before")
+    @classmethod
+    def _string_list(cls, value: object) -> list[str] | None:
+        if not isinstance(value, list):
+            return None
+        cleaned = [
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        ]
+        return cleaned or None
+
+    @field_validator("arg_labels", mode="before")
+    @classmethod
+    def _arg_labels(cls, value: object) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        labels = {
+            key.strip(): cleaned
+            for key, raw_value in value.items()
+            if isinstance(key, str)
+            and key.strip()
+            and (cleaned := _strip_string(raw_value)) is not None
+        }
+        return labels or None
 
 
 class CapabilityHandoffTargetModel(_MetadataModel):
@@ -418,15 +475,15 @@ class CapabilityBundleModel(_MetadataModel):
 
 
 class WorkspaceContextModel(_MetadataModel):
-    path_prefix: str
+    workspace_id: str
     referenced_item_ids: list[str]
 
-    @field_validator("path_prefix", mode="before")
+    @field_validator("workspace_id", mode="before")
     @classmethod
-    def _path_prefix(cls, value: object) -> str:
+    def _workspace_id(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
-            raise ValueError("expected a non-empty path_prefix")
+            raise ValueError("expected a non-empty workspace_id")
         return text
 
     @field_validator("referenced_item_ids", mode="before")
@@ -442,7 +499,10 @@ class WorkspaceContextModel(_MetadataModel):
 class WorkspaceStateFileSummaryModel(_MetadataModel):
     id: str
     name: str
-    path: str
+    bucket: str | None = None
+    producer_key: str | None = None
+    producer_label: str | None = None
+    source: Literal["uploaded", "derived", "demo"] | None = None
     kind: Literal["csv", "json", "pdf", "other"]
     extension: str
     mime_type: str | None = None
@@ -453,13 +513,18 @@ class WorkspaceStateFileSummaryModel(_MetadataModel):
     sample_rows: list[dict[str, object]] | None = None
     page_count: int | None = None
 
-    @field_validator("id", "name", "path", "extension", mode="before")
+    @field_validator("id", "name", "extension", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
             raise ValueError("expected a non-empty string")
         return text
+
+    @field_validator("bucket", "producer_key", "producer_label", mode="before")
+    @classmethod
+    def _optional_required_string(cls, value: object) -> str | None:
+        return _strip_string(value)
 
     @field_validator("mime_type", mode="before")
     @classmethod
@@ -565,26 +630,55 @@ class WorkspaceStateModel(_MetadataModel):
         return _strip_string(value)
 
 
-class DemoValidatorCostSnapshotModel(_MetadataModel):
-    thread_id: str
-    scope: Literal["before_current_turn"]
-    usage: ThreadUsageTotalsModel
+class PendingFeedbackSessionModel(_MetadataModel):
+    session_id: str
+    item_ids: list[str]
+    recommended_options: list[str]
+    message_draft: str | None = None
+    inferred_sentiment: FeedbackKind | None = None
+    mode: Literal["recommendations", "confirmation"]
 
-    @field_validator("thread_id", mode="before")
+    @field_validator("session_id", mode="before")
     @classmethod
-    def _thread_id(cls, value: object) -> str:
+    def _session_id(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
-            raise ValueError("expected a non-empty thread_id")
+            raise ValueError("expected a non-empty session_id")
         return text
 
-    @field_validator("usage", mode="before")
+    @field_validator("item_ids", mode="before")
     @classmethod
-    def _usage(cls, value: object) -> ThreadUsageTotalsModel:
-        validated = _validated_model_or_none(ThreadUsageTotalsModel, value)
-        if not isinstance(validated, ThreadUsageTotalsModel):
-            raise ValueError("expected a valid usage snapshot")
-        return validated
+    def _item_ids(cls, value: object) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("expected a list")
+        cleaned = [
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        ]
+        if not cleaned:
+            raise ValueError("item_ids must contain at least one item id")
+        return cleaned
+
+    @field_validator("recommended_options", mode="before")
+    @classmethod
+    def _recommended_options(cls, value: object) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("expected a list")
+        cleaned = [
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        ]
+        if len(cleaned) != 3:
+            raise ValueError("recommended_options must contain exactly three items")
+        return cleaned
+
+    @field_validator("message_draft", mode="before")
+    @classmethod
+    def _message_draft(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+    @field_validator("inferred_sentiment", mode="before")
+    @classmethod
+    def _inferred_sentiment(cls, value: object) -> FeedbackKind | None:
+        return value if value in {"positive", "negative"} else None
 
 
 class AppThreadMetadataModel(_MetadataModel):
@@ -599,9 +693,8 @@ class AppThreadMetadataModel(_MetadataModel):
     usage: ThreadUsageTotalsModel | None = None
     capability_bundle: CapabilityBundleModel | None = None
     workspace_state: WorkspaceStateModel | None = None
-    execution_mode: ExecutionMode | None = None
     origin: FeedbackOrigin | None = None
-    demo_validator_cost_snapshot: DemoValidatorCostSnapshotModel | None = None
+    feedback_session: PendingFeedbackSessionModel | None = None
 
     @field_validator(
         "title",
@@ -650,19 +743,14 @@ class AppThreadMetadataModel(_MetadataModel):
         validated = _validated_model_or_none(WorkspaceStateModel, value)
         return cast(WorkspaceStateModel | None, validated)
 
-    @field_validator("demo_validator_cost_snapshot", mode="before")
+    @field_validator("feedback_session", mode="before")
     @classmethod
-    def _demo_validator_cost_snapshot(
+    def _feedback_session(
         cls,
         value: object,
-    ) -> DemoValidatorCostSnapshotModel | None:
-        validated = _validated_model_or_none(DemoValidatorCostSnapshotModel, value)
-        return cast(DemoValidatorCostSnapshotModel | None, validated)
-
-    @field_validator("execution_mode", mode="before")
-    @classmethod
-    def _execution_mode(cls, value: object) -> ExecutionMode | None:
-        return value if value in {"interactive", "batch"} else None
+    ) -> PendingFeedbackSessionModel | None:
+        validated = _validated_model_or_none(PendingFeedbackSessionModel, value)
+        return cast(PendingFeedbackSessionModel | None, validated)
 
     @field_validator("origin", mode="before")
     @classmethod

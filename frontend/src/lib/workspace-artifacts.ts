@@ -1,4 +1,4 @@
-import { base64ToUint8Array } from "./pdf";
+import { decodeBase64ToBytes } from "./base64";
 import { rowsToCsv, rowsToJson } from "./workspace-files";
 import type { LocalWorkspaceFile } from "../types/report";
 
@@ -24,7 +24,7 @@ export function buildWorkspaceFilePayload(file: LocalWorkspaceFile): { filename:
   if (file.kind === "pdf" && file.bytes_base64) {
     return {
       filename: file.name,
-      blob: new Blob([toArrayBuffer(base64ToUint8Array(file.bytes_base64))], {
+      blob: new Blob([toArrayBuffer(decodeBase64ToBytes(file.bytes_base64))], {
         type: file.mime_type || "application/pdf",
       }),
     };
@@ -42,7 +42,7 @@ export function buildWorkspaceFilePayload(file: LocalWorkspaceFile): { filename:
     if (file.bytes_base64) {
       return {
         filename: file.name,
-        blob: new Blob([toArrayBuffer(base64ToUint8Array(file.bytes_base64))], {
+        blob: new Blob([toArrayBuffer(decodeBase64ToBytes(file.bytes_base64))], {
           type: file.mime_type || "application/octet-stream",
         }),
       };

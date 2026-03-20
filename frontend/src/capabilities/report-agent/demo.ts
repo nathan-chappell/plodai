@@ -57,7 +57,7 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
       "If the first specialist pass only inspects or plans, continue until the chart is truly rendered and visible in the thread.",
       "Inspect the PDF packet only as supporting context if it helps, not as a replacement for the CSV and chart work.",
       "After the chart is rendered, append exactly one 1x2 report slide with the rendered chart in the first panel and a short stakeholder-ready summary in the second panel.",
-      "Treat this as a batch-style demo: infer reasonable defaults, continue without asking me follow-up questions, and show the completed result.",
+      "Infer reasonable defaults, continue without asking follow-up questions, and show the completed result.",
       "Do not stop until you have created the derived artifact, rendered the chart, and used append_report_slide to add the one required chart-backed report update.",
       "After that single report slide is appended, stop.",
       "Your final assistant reply should be brief, confirm the result is complete, and must not offer optional next steps, extra sections, or follow-up questions.",
@@ -68,7 +68,6 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
       buildCsvDemoFile("demo-report-sales", "board_sales_demo.csv", SALES_CSV),
       sourcePdf,
     ],
-    defaultExecutionMode: "batch",
     model: "lightweight",
     expectedOutcomes: [
       "Delegates specialized work instead of doing everything in one prompt",

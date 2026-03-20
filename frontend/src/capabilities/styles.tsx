@@ -28,10 +28,15 @@ export const CapabilityPage = styled.section`
 `;
 
 export const CapabilityHeroRow = styled.section`
+  ${sectionPanelCss("0.62rem 0.82rem", "0.35rem")};
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.7rem;
   align-items: start;
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 244, 0.88)),
+    var(--panel);
 
   @media (max-width: 980px) {
     grid-template-columns: 1fr;
@@ -39,11 +44,8 @@ export const CapabilityHeroRow = styled.section`
 `;
 
 export const CapabilityHeader = styled.section`
-  ${sectionPanelCss("0.62rem 0.82rem", "0.12rem")};
-  border-radius: var(--radius-xl);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 244, 0.88)),
-    var(--panel);
+  ${gridStackCss("0.12rem")};
+  min-width: 0;
 `;
 
 export const CapabilityEyebrow = styled.div`

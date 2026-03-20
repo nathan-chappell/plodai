@@ -1,26 +1,12 @@
+import type { PdfSmartSplitBundleView } from "../capabilities/types";
+
 export const WORKSPACE_CONTRACT_VERSION = "v1" as const;
 
-export const WORKSPACE_AGENTS_PATH = "/AGENTS.md" as const;
-export const WORKSPACE_SYSTEM_DIR = "/.system" as const;
-export const WORKSPACE_SYSTEM_VERSION_DIR = "/.system/v1" as const;
-export const WORKSPACE_APP_STATE_PATH = "/.system/v1/app-state.json" as const;
-export const WORKSPACE_TOOL_CATALOG_PATH = "/.system/v1/tool-catalog.json" as const;
-export const WORKSPACE_INDEX_PATH = "/.system/v1/workspace-index.json" as const;
-export const WORKSPACE_REPORTS_DIR = "/reports" as const;
-export const WORKSPACE_REPORT_INDEX_PATH = "/reports/index.json" as const;
-export const WORKSPACE_ARTIFACTS_DIR = "/artifacts" as const;
-export const WORKSPACE_DATA_ARTIFACTS_DIR = "/artifacts/data" as const;
-export const WORKSPACE_CHART_ARTIFACTS_DIR = "/artifacts/charts" as const;
-export const WORKSPACE_PDF_ARTIFACTS_DIR = "/artifacts/pdf" as const;
-
-export const RESERVED_WORKSPACE_DIRECTORIES = [
-  WORKSPACE_SYSTEM_DIR,
-  WORKSPACE_SYSTEM_VERSION_DIR,
-  WORKSPACE_REPORTS_DIR,
-  WORKSPACE_ARTIFACTS_DIR,
-  WORKSPACE_DATA_ARTIFACTS_DIR,
-  WORKSPACE_CHART_ARTIFACTS_DIR,
-  WORKSPACE_PDF_ARTIFACTS_DIR,
+export const WORKSPACE_ARTIFACT_BUCKET_VALUES = [
+  "uploaded",
+  "data",
+  "chart",
+  "pdf",
 ] as const;
 
 export const REPORT_ITEM_TYPE_VALUES = [
@@ -34,6 +20,7 @@ export const REPORT_SLIDE_LAYOUT_VALUES = ["1x1", "1x2", "2x2"] as const;
 export const REPORT_SLIDE_PANEL_TYPE_VALUES = ["narrative", "chart"] as const;
 
 export type WorkspaceContractVersion = typeof WORKSPACE_CONTRACT_VERSION;
+export type WorkspaceArtifactBucket = (typeof WORKSPACE_ARTIFACT_BUCKET_VALUES)[number];
 export type ReportItemType = (typeof REPORT_ITEM_TYPE_VALUES)[number];
 export type ReportSlideLayout = (typeof REPORT_SLIDE_LAYOUT_VALUES)[number];
 export type ReportSlidePanelType = (typeof REPORT_SLIDE_PANEL_TYPE_VALUES)[number];
@@ -42,10 +29,8 @@ export type WorkspaceAppStateV1 = {
   version: WorkspaceContractVersion;
   active_capability_id: string | null;
   active_workspace_tab: string | null;
-  execution_mode: "interactive" | "batch";
   current_report_id: string | null;
   current_goal: string | null;
-  current_prefix_by_surface: Record<string, string>;
 };
 
 export type WorkspaceReportIndexV1 = {
@@ -173,13 +158,16 @@ export type WorkspaceToolCatalogV1 = {
 
 export type WorkspaceIndexV1 = {
   version: WorkspaceContractVersion;
-  reserved_paths: string[];
   report_ids: string[];
   current_report_id: string | null;
 };
 
+export type WorkspacePdfSmartSplitRegistryV1 = {
+  version: WorkspaceContractVersion;
+  bundles: PdfSmartSplitBundleView[];
+};
+
 export type AgentsFileSummary = {
-  path: string;
   present: boolean;
   text: string | null;
 };
@@ -199,10 +187,8 @@ export function buildDefaultWorkspaceAppState(
     version: WORKSPACE_CONTRACT_VERSION,
     active_capability_id: defaults.active_capability_id ?? null,
     active_workspace_tab: defaults.active_workspace_tab ?? null,
-    execution_mode: defaults.execution_mode ?? "interactive",
     current_report_id: defaults.current_report_id ?? null,
     current_goal: defaults.current_goal ?? null,
-    current_prefix_by_surface: defaults.current_prefix_by_surface ?? {},
   };
 }
 
@@ -221,16 +207,6 @@ export function buildDefaultWorkspaceIndex(
 ): WorkspaceIndexV1 {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    reserved_paths: defaults.reserved_paths ?? [
-      WORKSPACE_AGENTS_PATH,
-      WORKSPACE_APP_STATE_PATH,
-      WORKSPACE_TOOL_CATALOG_PATH,
-      WORKSPACE_INDEX_PATH,
-      WORKSPACE_REPORT_INDEX_PATH,
-      WORKSPACE_DATA_ARTIFACTS_DIR,
-      WORKSPACE_CHART_ARTIFACTS_DIR,
-      WORKSPACE_PDF_ARTIFACTS_DIR,
-    ],
     report_ids: defaults.report_ids ?? [],
     current_report_id: defaults.current_report_id ?? null,
   };
@@ -256,7 +232,7 @@ export function buildDefaultWorkspaceReport(options?: {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
     report_id: reportId,
-    title: options?.title ?? "Current report",
+    title: options?.title?.trim() || "Untitled report",
     created_at: createdAt,
     updated_at: createdAt,
     slides: [],
@@ -264,24 +240,11 @@ export function buildDefaultWorkspaceReport(options?: {
 }
 
 export function normalizeReportId(input: string): string {
-  const normalized = input
-    .trim()
-    .toLowerCase()
+  const trimmed = input.trim().toLowerCase();
+  const normalized = trimmed
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return normalized || "report-1";
-}
-
-export function buildReportPath(reportId: string): string {
-  return `${WORKSPACE_REPORTS_DIR}/${normalizeReportId(reportId)}.json`;
-}
-
-export function extractReportIdFromPath(path: string): string | null {
-  if (!path.startsWith(`${WORKSPACE_REPORTS_DIR}/`) || !path.endsWith(".json")) {
-    return null;
-  }
-  const basename = path.slice(`${WORKSPACE_REPORTS_DIR}/`.length, -".json".length).trim();
-  return basename ? basename : null;
+  return normalized || "report";
 }
 
 export function buildDefaultAgentsFileContent(options: {
@@ -289,25 +252,19 @@ export function buildDefaultAgentsFileContent(options: {
   currentGoal: string;
 }): string {
   return [
-    "# AGENTS.md",
+    "# Workspace Guide",
     "",
     `Workspace contract version: ${WORKSPACE_CONTRACT_VERSION}`,
-    "",
     "Do not progress this workspace contract to v2 until the user explicitly says so.",
-    "",
-    "This workspace is shared across agents. Use the active agent's tools together with these workspace conventions.",
-    "",
-    "Reserved conventions:",
-    "- /AGENTS.md is the primary guidance artifact.",
-    "- /.system/v1/app-state.json stores durable app state relevant to tools and agents.",
-    "- /reports/index.json tracks report ids and the current report.",
-    "- /reports/{report_id}.json stores structured report slides.",
-    "- /artifacts/* stores derived capability outputs.",
-    "",
-    `Seeded from: ${options.capabilityTitle}`,
+    `This workspace is shared across agents. Use the active agent's tools together with the ${options.capabilityTitle} capability.`,
     "",
     "## Current Objective",
     options.currentGoal.trim() || "No explicit objective has been recorded yet.",
+    "",
+    "## Notes",
+    "- /AGENTS.md is represented as structured workspace metadata, not a visible artifact.",
+    "- Reports, tool catalog state, and smart split registry are stored as structured workspace state.",
+    "- Visible artifacts are grouped into logical buckets: uploaded, data, chart, and pdf.",
     "",
   ].join("\n");
 }

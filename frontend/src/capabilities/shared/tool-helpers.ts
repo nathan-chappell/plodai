@@ -9,12 +9,14 @@ import type {
   CapabilityClientTool,
   CapabilityWorkspaceContext,
   FunctionToolDefinition,
+  ToolDisplaySpec,
 } from "../types";
 
 export function buildToolDefinition(
   name: string,
   description: string,
   parameters: JsonSchema,
+  display?: ToolDisplaySpec,
 ): FunctionToolDefinition {
   return {
     type: "function",
@@ -22,6 +24,7 @@ export function buildToolDefinition(
     description,
     strict: true,
     parameters,
+    display,
   };
 }
 

@@ -49,16 +49,30 @@ export function buildChartAgentClientToolCatalog(
       "list_chartable_files",
       "List chartable CSV and JSON artifacts from the shared workspace, including schema hints and tiny samples when requested.",
       includeSamplesSchema,
+      {
+        label: "List Chartable Files",
+        omit_args: ["includeSamples"],
+      },
     ),
     buildToolDefinition(
       "inspect_chartable_file_schema",
       "Inspect a CSV or JSON chartable artifact before building a chart plan.",
       withChartableFileIdEnum(inspectChartableFileSchemaToolSchema, workspace),
+      {
+        label: "Inspect Chartable File Schema",
+        prominent_args: ["file_id"],
+        arg_labels: { file_id: "file" },
+      },
     ),
     buildToolDefinition(
       "render_chart_from_file",
       "Render a chart from a chartable CSV or JSON artifact after the chart has been planned.",
       withChartableFileIdEnum(renderChartFromFileToolSchema, workspace),
+      {
+        label: "Render Chart From File",
+        prominent_args: ["chart_plan.title", "file_id"],
+        arg_labels: { "chart_plan.title": "chart", file_id: "file" },
+      },
     ),
   ];
 }

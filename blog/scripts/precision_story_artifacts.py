@@ -489,13 +489,11 @@ def add_precision_path_trace(
 
 def build_precision_story_figure(payload: PrecisionStoryPayload) -> Figure:
     apply_static_rcparams()
-    figure = plt.figure(figsize=(9.2, 9.2))
+    figure = plt.figure(figsize=(8.8, 7.8))
     figure.patch.set_facecolor(STATIC_FIGURE_BG)
-    grid = figure.add_gridspec(2, 1, height_ratios=[1.0, 0.24], hspace=0.18)
+    grid = figure.add_gridspec(1, 1)
     axis = figure.add_subplot(grid[0, 0])
-    lag_axis = figure.add_subplot(grid[1, 0])
     style_static_axis(axis)
-    style_static_axis(lag_axis)
 
     add_cantor_scaffold(axis)
     xs = [state.x_left for state in payload.states]
@@ -548,63 +546,6 @@ def build_precision_story_figure(payload: PrecisionStoryPayload) -> Figure:
         handlelength=0.8,
     )
 
-    lag_colors = ("#314a66", "#6b7b8b", "#8a705f")
-    all_distances = [
-        distance
-        for summary in payload.lag_summaries
-        for distance in summary.distances
-    ]
-    distance_upper = max(all_distances) if all_distances else 1.0
-    bins = [distance_upper * index / 18.0 for index in range(19)]
-    for color, summary in zip(lag_colors, payload.lag_summaries, strict=True):
-        lag_axis.hist(
-            summary.distances,
-            bins=bins,
-            histtype="step",
-            linewidth=1.15,
-            color=color,
-            label=f"lag {summary.lag}",
-        )
-    lag_axis.set_title(
-        "Step distance by lag",
-        loc="left",
-        fontsize=8.5,
-        color=PRECISION_TEXT_INK,
-        fontfamily=FONT_STACK,
-        pad=4,
-    )
-    lag_axis.set_xlabel(
-        "Euclidean step distance",
-        fontsize=8.6,
-        fontfamily=FONT_STACK,
-        color=PRECISION_TEXT_INK,
-    )
-    lag_axis.set_ylabel(
-        "count",
-        fontsize=8.6,
-        fontfamily=FONT_STACK,
-        color=PRECISION_TEXT_INK,
-    )
-    lag_axis.tick_params(
-        axis="both", labelsize=7.4, colors=PRECISION_SUBTEXT_INK, width=0.55
-    )
-    for label in lag_axis.get_xticklabels() + lag_axis.get_yticklabels():
-        label.set_fontfamily(FONT_STACK)
-    lag_axis.spines["top"].set_visible(False)
-    lag_axis.spines["right"].set_visible(False)
-    lag_axis.spines["left"].set_color(STATIC_SPINE_INK)
-    lag_axis.spines["bottom"].set_color(STATIC_SPINE_INK)
-    lag_axis.spines["left"].set_linewidth(0.65)
-    lag_axis.spines["bottom"].set_linewidth(0.65)
-    lag_axis.legend(
-        frameon=False,
-        fontsize=7.3,
-        handlelength=1.8,
-        borderpad=0.1,
-        labelcolor=PRECISION_SUBTEXT_INK,
-        loc="upper right",
-    )
-
     axis.set_xlim(0.0, 1.0)
     axis.set_ylim(0.0, 1.0)
     axis.set_aspect("equal", adjustable="box")
@@ -633,7 +574,7 @@ def build_precision_story_figure(payload: PrecisionStoryPayload) -> Figure:
         fontfamily=FONT_STACK,
         color=PRECISION_TEXT_INK,
     )
-    figure.subplots_adjust(left=0.12, right=0.88, top=0.90, bottom=0.11)
+    figure.subplots_adjust(left=0.11, right=0.89, top=0.90, bottom=0.12)
     return figure
 
 

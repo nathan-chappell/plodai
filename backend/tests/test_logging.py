@@ -15,6 +15,7 @@ from backend.app.chatkit.server import (
     ClientWorkspaceChatKitServer,
     ClientToolResultConverter,
     _summarize_client_tool_result_for_log,
+    _usage_line,
 )
 from backend.app.core.logging import (
     COMPILE_LOG_DEDUPE_WINDOW_SECONDS,
@@ -248,8 +249,49 @@ def test_conversation_validation_log_uses_single_logs_link() -> None:
     captured = stream.getvalue()
     assert "conversation.validate" in captured
     assert "logs=https://platform.openai.com/logs/conv_123" in captured
+    assert "conv=conv_123" not in captured
     assert "conversation_id=" not in captured
     assert "conversation_logs=" not in captured
+
+
+def test_respond_end_log_uses_logs_link_and_compact_usage() -> None:
+    stream = StringIO()
+    logger = logging.getLogger("report_foundry.chatkit.server")
+    logger.handlers.clear()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(_build_plain_formatter())
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    try:
+        log_event(
+            logger,
+            logging.INFO,
+            "respond.end",
+            logs="https://platform.openai.com/logs/resp_123",
+            context="user=user_123 thread=thr_456",
+            usage=_usage_line(
+                {
+                    "input_tokens": 12,
+                    "output_tokens": 34,
+                    "cost_usd": 0.005,
+                },
+                model="gpt-4.1-mini",
+            ),
+        )
+    finally:
+        logger.removeHandler(handler)
+
+    captured = stream.getvalue()
+    assert "respond.end" in captured
+    assert "\n > logs=https://platform.openai.com/logs/resp_123" in captured
+    assert "\n > context=user=user_123 thread=thr_456" in captured
+    assert "\n > usage=model=gpt-4.1-mini input=12 output=34 cost_usd=0.005" in captured
+    assert "\n > conv=" not in captured
+    assert "\n > model=gpt-4.1-mini" not in captured
+    assert captured.index("\n > logs=") < captured.index("\n > context=")
+    assert captured.index("\n > context=") < captured.index("\n > usage=")
 
 
 def test_client_tool_converter_uses_uploaded_file_ids() -> None:

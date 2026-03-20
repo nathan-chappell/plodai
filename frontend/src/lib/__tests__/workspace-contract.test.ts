@@ -5,19 +5,25 @@ import {
   buildWorkspaceStateMetadata,
   createWorkspaceReport,
   ensureWorkspaceContractFilesystem,
+  pruneWorkspacePdfSmartSplitBundles,
+  readWorkspacePdfSmartSplitBundles,
   setWorkspaceCurrentReport,
   writeAgentsFile,
+  writeWorkspacePdfSmartSplitBundles,
 } from "../workspace-contract";
-import { createWorkspaceFilesystem } from "../workspace-fs";
+import {
+  addWorkspaceArtifactsWithResult,
+  createWorkspaceFilesystem,
+  removeWorkspaceEntry,
+} from "../workspace-fs";
 
 describe("workspace contract metadata", () => {
-  it("includes workspace AGENTS markdown in thread metadata without exposing it as a visible file", () => {
+  it("includes workspace AGENTS markdown in thread metadata without exposing it as a visible artifact", () => {
     let filesystem = ensureWorkspaceContractFilesystem(createWorkspaceFilesystem(), {
       capabilityId: "csv-agent",
       capabilityTitle: "CSV Agent",
       defaultGoal: "Inspect sales trends.",
       activeWorkspaceTab: "agent",
-      executionMode: "interactive",
     });
 
     filesystem = writeAgentsFile(
@@ -25,10 +31,10 @@ describe("workspace contract metadata", () => {
       "# AGENTS.md\n\n## Workspace conventions\n- Prefer compact artifact names.\n",
     );
 
-    const metadata = buildWorkspaceStateMetadata(filesystem, "/csv-agent/");
+    const metadata = buildWorkspaceStateMetadata(filesystem, "csv-agent");
 
     expect(metadata.agents_markdown).toContain("Prefer compact artifact names.");
-    expect(metadata.files.find((file) => file.path === "/AGENTS.md")).toBeUndefined();
+    expect(metadata.files.find((file) => file.name === "AGENTS.md")).toBeUndefined();
   });
 
   it("persists the selected current report across contract hydration", () => {
@@ -37,7 +43,6 @@ describe("workspace contract metadata", () => {
       capabilityTitle: "Report Agent",
       defaultGoal: "Build the narrative report.",
       activeWorkspaceTab: "report",
-      executionMode: "interactive",
     });
 
     const created = createWorkspaceReport(filesystem, {
@@ -50,10 +55,9 @@ describe("workspace contract metadata", () => {
       capabilityTitle: "Report Agent",
       defaultGoal: "Build the narrative report.",
       activeWorkspaceTab: "report",
-      executionMode: "interactive",
     });
 
-    expect(buildWorkspaceStateMetadata(hydrated, "/report-agent/").current_report_id).toBe("report-1");
+    expect(buildWorkspaceStateMetadata(hydrated, "report-agent").current_report_id).toBe("report-1");
   });
 
   it("keeps appended slides additive and marks the touched report current", () => {
@@ -62,7 +66,6 @@ describe("workspace contract metadata", () => {
       capabilityTitle: "Report Agent",
       defaultGoal: "Build the narrative report.",
       activeWorkspaceTab: "report",
-      executionMode: "interactive",
     });
 
     const created = createWorkspaceReport(filesystem, {
@@ -100,7 +103,7 @@ describe("workspace contract metadata", () => {
       },
     ]);
 
-    const metadata = buildWorkspaceStateMetadata(filesystem, "/report-agent/");
+    const metadata = buildWorkspaceStateMetadata(filesystem, "report-agent");
     const reportSummary = metadata.reports.find((report) => report.report_id === "quarterly-summary");
 
     expect(metadata.current_report_id).toBe("quarterly-summary");
@@ -113,7 +116,6 @@ describe("workspace contract metadata", () => {
       capabilityTitle: "Report Agent",
       defaultGoal: "Build the narrative report.",
       activeWorkspaceTab: "report",
-      executionMode: "interactive",
     });
 
     const created = createWorkspaceReport(filesystem, {
@@ -121,8 +123,83 @@ describe("workspace contract metadata", () => {
       reportId: "board-sales-review",
     });
 
-    expect(buildWorkspaceStateMetadata(created.filesystem, "/report-agent/").current_report_id).toBe(
+    expect(buildWorkspaceStateMetadata(created.filesystem, "report-agent").current_report_id).toBe(
       "board-sales-review",
     );
+  });
+
+  it("reads and prunes persisted PDF smart split bundles from structured workspace state", () => {
+    let filesystem = addWorkspaceArtifactsWithResult(createWorkspaceFilesystem(), [
+      {
+        file: {
+          id: "source-pdf",
+          name: "quarterly_packet_demo.pdf",
+          kind: "pdf",
+          extension: "pdf",
+          mime_type: "application/pdf",
+          byte_size: 240,
+          page_count: 4,
+          bytes_base64: "JVBERi0xLjQK",
+        },
+        source: "uploaded",
+        bucket: "uploaded",
+        producer_key: "uploaded",
+        producer_label: "Uploaded",
+      },
+      {
+        file: {
+          id: "split-pdf",
+          name: "quarterly_packet_demo__pages_1-2.pdf",
+          kind: "pdf",
+          extension: "pdf",
+          mime_type: "application/pdf",
+          byte_size: 160,
+          page_count: 2,
+          bytes_base64: "JVBERi0xLjQK",
+        },
+        source: "derived",
+        bucket: "pdf",
+        producer_key: "pdf-agent",
+        producer_label: "PDF Agent",
+      },
+    ]).filesystem;
+
+    filesystem = writeWorkspacePdfSmartSplitBundles(filesystem, [
+      {
+        id: "bundle-1",
+        createdAt: "2026-03-20T12:00:00.000Z",
+        sourceFileId: "source-pdf",
+        sourceFileName: "quarterly_packet_demo.pdf",
+        entries: [
+          {
+            fileId: "split-pdf",
+            name: "quarterly_packet_demo__pages_1-2.pdf",
+            title: "Executive summary",
+            startPage: 1,
+            endPage: 2,
+            pageCount: 2,
+          },
+        ],
+      },
+    ]);
+
+    expect(readWorkspacePdfSmartSplitBundles(filesystem)).toEqual([
+      expect.objectContaining({
+        id: "bundle-1",
+        sourceFileName: "quarterly_packet_demo.pdf",
+        entries: [
+          expect.objectContaining({
+            fileId: "split-pdf",
+            title: "Executive summary",
+          }),
+        ],
+      }),
+    ]);
+
+    filesystem = pruneWorkspacePdfSmartSplitBundles(
+      removeWorkspaceEntry(filesystem, "split-pdf"),
+    );
+
+    expect(readWorkspacePdfSmartSplitBundles(filesystem)).toEqual([]);
   });
 });

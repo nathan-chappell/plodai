@@ -60,10 +60,12 @@ export function AuthPanel({
   mode = "account",
   heading,
   subtitle,
+  blendWithShell = false,
 }: {
   mode?: "login" | "account";
   heading?: string;
   subtitle?: string;
+  blendWithShell?: boolean;
 }) {
   const { user, setUser } = useAppState();
   const { signOut } = useClerk();
@@ -92,7 +94,7 @@ export function AuthPanel({
     const identityLine = user.email ?? user.id;
 
     return (
-      <AccountCard>
+      <AccountCard $blend={blendWithShell}>
         <AccountTopRow>
           <AccountIdentityBlock>
             <AccountHeading>{heading ?? "Signed in"}</AccountHeading>
@@ -186,7 +188,7 @@ export function AuthPanel({
   }
 
   return (
-    <AccountCard>
+    <AccountCard $blend={blendWithShell}>
       <AccountHeading>{heading ?? "Clerk session"}</AccountHeading>
       <MetaText>{subtitle ?? "Sign in happens on the dedicated Clerk route before the app shell opens."}</MetaText>
     </AccountCard>

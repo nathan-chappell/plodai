@@ -6,7 +6,10 @@ from typing import TypedDict, cast
 class ClientToolWorkspaceFile(TypedDict, total=False):
     id: str
     name: str
-    path: str
+    bucket: str
+    producer_key: str
+    producer_label: str
+    source: str
     kind: str
     extension: str
     mime_type: str
@@ -21,7 +24,6 @@ class ClientToolWorkspaceFile(TypedDict, total=False):
 class ClientToolCsvFile(TypedDict):
     id: str
     name: str
-    path: str
     row_count: int
     columns: list[str]
     numeric_columns: list[str]
@@ -46,7 +48,6 @@ class ClientToolResultPayload(TypedDict, total=False):
     current_report_id: str
     created_file: ClientToolWorkspaceFile
     created_files: list[ClientToolWorkspaceFile]
-    path_prefix: str
     workspace_context: dict[str, object]
     workspace_operation: dict[str, object]
     file_input: dict[str, object]

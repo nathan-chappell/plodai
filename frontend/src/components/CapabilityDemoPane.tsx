@@ -4,16 +4,25 @@ import styled from "styled-components";
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
 import { MetaText, sectionPanelCss } from "../app/styles";
 import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
-import type { ClientEffect, ExecutionMode, WorkspaceState } from "../types/analysis";
+import type { ClientEffect, WorkspaceState } from "../types/analysis";
 import { devLogger } from "../lib/dev-logging";
 import type { LocalWorkspaceFile } from "../types/report";
-import {
-  buildDemoValidatorCapabilityBundle,
-  buildDemoValidatorPrompt,
-} from "../capabilities/shared/demoValidator";
 
 export function hasDemoScenarioNotes(scenario: CapabilityDemoScenario | null): boolean {
   return Boolean(scenario?.expectedOutcomes?.length || scenario?.notes?.length);
+}
+
+function buildDemoNotesBullets(
+  scenario: CapabilityDemoScenario | null,
+): string[] {
+  if (!scenario) {
+    return [];
+  }
+
+  return [...(scenario.expectedOutcomes ?? []), ...(scenario.notes ?? [])]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 export function CapabilityDemoPane({
@@ -23,8 +32,6 @@ export function CapabilityDemoPane({
   capabilityBundle,
   files,
   workspaceState,
-  executionMode,
-  onExecutionModeChange,
   clientTools,
   onEffects,
   onFilesAdded,
@@ -38,8 +45,6 @@ export function CapabilityDemoPane({
   capabilityBundle: CapabilityBundle;
   files: LocalWorkspaceFile[];
   workspaceState?: WorkspaceState;
-  executionMode: ExecutionMode;
-  onExecutionModeChange: (mode: ExecutionMode) => void;
   clientTools: CapabilityClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
@@ -50,6 +55,7 @@ export function CapabilityDemoPane({
   const workspaceFileIds = new Set(files.map((file) => file.id));
   const demoReady = scenario ? scenario.workspaceSeed.every((file) => workspaceFileIds.has(file.id)) : false;
   const demoPreparing = loading || (!error && !demoReady);
+  const demoNotesBullets = buildDemoNotesBullets(scenario);
   useEffect(() => {
     devLogger.demoState({
       capabilityId: capabilityBundle.root_capability_id,
@@ -79,12 +85,6 @@ export function CapabilityDemoPane({
           prompt: scenario.initialPrompt,
           model: scenario.model,
           beforeRun: onPrepareDemoRun,
-          followUp: {
-            label: "Demo validation",
-            prompt: buildDemoValidatorPrompt(scenario),
-            model: scenario.model,
-            capabilityBundle: buildDemoValidatorCapabilityBundle(),
-          },
         },
       ]
     : undefined;
@@ -94,11 +94,12 @@ export function CapabilityDemoPane({
       {showScenarioNotes && hasDemoScenarioNotes(scenario) ? (
         <DemoNotesCard data-testid="capability-demo-notes">
           <DemoNotesTitle>Demo notes</DemoNotesTitle>
-          {scenario?.expectedOutcomes?.length ? (
-            <DemoNotesMeta>{scenario.expectedOutcomes.join(" ")}</DemoNotesMeta>
-          ) : null}
-          {scenario?.notes?.length ? (
-            <DemoNotesMeta>{scenario.notes.join(" ")}</DemoNotesMeta>
+          {demoNotesBullets.length ? (
+            <DemoNotesList>
+              {demoNotesBullets.map((bullet) => (
+                <DemoNotesItem key={bullet}>{bullet}</DemoNotesItem>
+              ))}
+            </DemoNotesList>
           ) : null}
         </DemoNotesCard>
       ) : null}
@@ -110,8 +111,6 @@ export function CapabilityDemoPane({
         workspaceState={workspaceState}
         investigationBrief={scenario?.summary ?? ""}
         clientTools={clientTools}
-        executionMode={executionMode}
-        onExecutionModeChange={onExecutionModeChange}
         onEffects={onEffects}
         onFilesAdded={onFilesAdded}
         headerTitle={scenario?.title}
@@ -149,4 +148,15 @@ const DemoNotesMeta = styled(MetaText)`
   color: color-mix(in srgb, var(--ink) 72%, var(--muted));
   font-size: 0.82rem;
   line-height: 1.5;
+`;
+
+const DemoNotesList = styled.ul`
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.28rem;
+`;
+
+const DemoNotesItem = styled(DemoNotesMeta).attrs({ as: "li" })`
+  margin: 0;
 `;

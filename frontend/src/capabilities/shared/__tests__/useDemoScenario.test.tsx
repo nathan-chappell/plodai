@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useDemoScenario } from "../useDemoScenario";
 import type { CapabilityDemoScenario } from "../../types";
-import type { ClientEffect, ExecutionMode } from "../../../types/analysis";
+import type { ClientEffect } from "../../../types/analysis";
 import type { LocalWorkspaceFile } from "../../../types/report";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -34,7 +34,6 @@ const DEMO_SCENARIO: CapabilityDemoScenario = {
   summary: "Test scenario",
   initialPrompt: "Run the demo.",
   workspaceSeed: [DEMO_FILE],
-  defaultExecutionMode: "batch",
   expectedOutcomes: ["Loads once"],
 };
 
@@ -56,7 +55,6 @@ function DemoScenarioHarness({
       markdown: "seed",
     },
   ]);
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("interactive");
   const { scenario, loading, error } = useDemoScenario({
     active: true,
     capabilityId: "csv-agent",
@@ -72,9 +70,6 @@ function DemoScenarioHarness({
     setReportEffects: (value) => {
       setReportEffects(value);
     },
-    setExecutionMode: (value) => {
-      setExecutionMode(value);
-    },
   });
 
   return (
@@ -82,7 +77,6 @@ function DemoScenarioHarness({
       data-error={error ?? ""}
       data-file-count={String(files.length)}
       data-loading={String(loading)}
-      data-mode={executionMode}
       data-report-effects={String(reportEffects.length)}
       data-scenario={scenario?.id ?? ""}
       data-status={status}
@@ -126,7 +120,6 @@ describe("useDemoScenario", () => {
     expect(host?.dataset.loading).toBe("false");
     expect(host?.dataset.scenario).toBe(DEMO_SCENARIO.id);
     expect(host?.dataset.fileCount).toBe("1");
-    expect(host?.dataset.mode).toBe("batch");
     expect(host?.dataset.reportEffects).toBe("0");
   });
 
@@ -176,7 +169,6 @@ describe("useDemoScenario", () => {
     const host = container.firstElementChild as HTMLElement | null;
     expect(buildDemoScenario).toHaveBeenCalledTimes(1);
     expect(host?.dataset.fileCount).toBe("1");
-    expect(host?.dataset.mode).toBe("interactive");
     expect(host?.dataset.reportEffects).toBe("1");
     expect(host?.dataset.status).toBe("");
   });

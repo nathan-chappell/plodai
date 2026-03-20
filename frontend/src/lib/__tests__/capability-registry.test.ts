@@ -16,27 +16,24 @@ function capabilityIdsFor(rootCapabilityId: string): string[] {
 }
 
 function createWorkspaceContext(
-  activePrefix: string = "/report-agent/",
+  workspaceId: string = "workspace-default",
 ): CapabilityWorkspaceContext {
   const filesystem = createWorkspaceFilesystem();
   const workspaceContext = {
-    path_prefix: activePrefix,
+    workspace_id: workspaceId,
     referenced_item_ids: [],
   };
 
   return {
-    activePrefix,
-    cwdPath: activePrefix,
+    capabilityId: "workspace-agent",
+    capabilityTitle: "Workspace",
+    workspaceId,
     files: [],
     entries: [],
     workspaceContext,
-    setActivePrefix: () => {},
-    createDirectory: (path) => path,
-    changeDirectory: (path) => path,
     updateFilesystem: () => {},
     getState: () => ({
-      activePrefix,
-      cwdPath: activePrefix,
+      workspaceId,
       files: [],
       entries: [],
       filesystem,
@@ -46,6 +43,17 @@ function createWorkspaceContext(
 }
 
 describe("capability registry", () => {
+  it("returns the expected dependency graph for the workspace agent", () => {
+    expect(capabilityIdsFor("workspace-agent")).toEqual([
+      "workspace-agent",
+      "report-agent",
+      "csv-agent",
+      "chart-agent",
+      "feedback-agent",
+      "pdf-agent",
+    ]);
+  });
+
   it("returns the expected dependency graph for the report agent", () => {
     expect(capabilityIdsFor("report-agent")).toEqual([
       "report-agent",
@@ -66,7 +74,7 @@ describe("capability registry", () => {
   });
 
   it("exposes capability modules by id", () => {
-    expect(getCapabilityModule("report-agent")?.definition.path).toBe("/capabilities/report-agent");
+    expect(getCapabilityModule("workspace-agent")?.definition.path).toBe("/workspace");
     expect(getCapabilityModule("missing-agent")).toBeNull();
   });
 
@@ -89,7 +97,7 @@ describe("capability registry", () => {
   it("binds unique tools across delegated capability bundles", () => {
     const workspace = createWorkspaceContext();
     const toolNames = bindClientToolsForBundle(
-      buildCapabilityBundleForRoot("report-agent", workspace),
+      buildCapabilityBundleForRoot("workspace-agent", workspace),
       workspace,
     ).map((tool) => tool.name);
 

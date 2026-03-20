@@ -30,7 +30,7 @@ export function AdminUsersPage() {
           <CapabilityTitle>{adminUsersCapability.title}</CapabilityTitle>
           <CapabilitySubhead>Activate users, grant credits, and manage basic account access.</CapabilitySubhead>
         </CapabilityHeader>
-        <AuthPanel mode="account" heading="Account" />
+        <AuthPanel mode="account" heading="Account" blendWithShell />
       </CapabilityHeroRow>
 
       <CapabilityTabBar>

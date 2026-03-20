@@ -34,13 +34,13 @@ from blog.scripts.rnn_transition_selection import SelectedTrajectory
 
 
 BOUNDARY_EMPHASIS_K = 20.0
-TRACE_VIEW_ROTATION_DEGREES = 10.0
 MAIN_INK = STATIC_MAIN_INK
 SECONDARY_INK = STATIC_SECONDARY_INK
 ACCENT_INK = STATIC_ACCENT_INK
 GUIDE_INK = STATIC_GUIDE_INK
 SPINE_INK = STATIC_SPINE_INK
 BACKGROUND_FIELD_INK = STATIC_FIELD_INK
+LOCAL_NEIGHBOR_INK = "#6f8da8"
 TRACE_COLORS = ("#dd6b5f",)
 ACCEPT_FILL = (0.51, 0.65, 0.54, 0.15)
 ACCEPT_EDGE = "#78b97c"
@@ -195,28 +195,53 @@ def _label_endpoints(
         )
 
 
-def _fit_oblique_projection(
+def _fallback_secondary_axis(
+    pc1: torch.Tensor, right_vectors: torch.Tensor
+) -> torch.Tensor:
+    for index in range(1, right_vectors.shape[0]):
+        candidate = right_vectors[index].to(dtype=torch.float32)
+        orthogonal = candidate - torch.dot(candidate, pc1) * pc1
+        norm = torch.linalg.vector_norm(orthogonal)
+        if norm > 1e-6:
+            return orthogonal / norm
+    basis = torch.eye(len(pc1), dtype=torch.float32)
+    for index in range(basis.shape[0]):
+        candidate = basis[index]
+        orthogonal = candidate - torch.dot(candidate, pc1) * pc1
+        norm = torch.linalg.vector_norm(orthogonal)
+        if norm > 1e-6:
+            return orthogonal / norm
+    raise ValueError("Unable to build a secondary projection axis.")
+
+
+def _fit_trace_projection(
     points: list[list[float]],
-) -> tuple[torch.Tensor, torch.Tensor, tuple[float, ...]]:
+    *,
+    accept_center: torch.Tensor,
+    watched_endpoint: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
     tensor = torch.tensor(points, dtype=torch.float32)
     mean = tensor.mean(dim=0)
     centered = tensor - mean
-    _, singular_values, right_vectors = torch.linalg.svd(centered, full_matrices=False)
-    components = right_vectors[:3, :]
-    variance = singular_values.square()
-    explained = variance[:3] / variance.sum().clamp(min=1e-12)
-    theta = math.radians(TRACE_VIEW_ROTATION_DEGREES)
-    yaw = torch.tensor(
-        [
-            [math.cos(theta), 0.0, -math.sin(theta)],
-            [0.0, 1.0, 0.0],
-            [math.sin(theta), 0.0, math.cos(theta)],
-        ],
-        dtype=torch.float32,
+    _, _singular_values, right_vectors = torch.linalg.svd(
+        centered, full_matrices=False
     )
-    projection = yaw[:, :2]
-    basis = components.T @ projection
-    return mean, basis, tuple(float(value.item()) for value in explained)
+    pc1 = right_vectors[0].to(dtype=torch.float32)
+    pc1 = pc1 / torch.linalg.vector_norm(pc1).clamp(min=1e-12)
+
+    separation = watched_endpoint.to(dtype=torch.float32) - accept_center.to(
+        dtype=torch.float32
+    )
+    projected_separation = separation - torch.dot(separation, pc1) * pc1
+    projected_norm = torch.linalg.vector_norm(projected_separation)
+    if projected_norm <= 1e-6:
+        secondary = _fallback_secondary_axis(pc1, right_vectors)
+    else:
+        secondary = projected_separation / projected_norm
+    if torch.dot(separation, secondary) < 0:
+        secondary = -secondary
+    basis = torch.stack((pc1, secondary), dim=1)
+    return mean, basis
 
 
 def _project_points(
@@ -264,7 +289,7 @@ def _trace_support(
     result,
     *,
     selected: tuple[SelectedTrajectory, ...],
-    background: tuple[ProbeTrajectoryMetrics, ...],
+    global_background: tuple[ProbeTrajectoryMetrics, ...],
 ) -> tuple[TracePanel2D, ...]:
     from blog.scripts.neural_dynamics_artifacts import (
         PhasedTorchRNN,
@@ -278,10 +303,11 @@ def _trace_support(
     phase_labels = [f"After phase {index}" for index in range(1, len(phase_epochs) + 1)]
     raw_panel_curves: list[tuple[str, list[dict[str, object]], list[dict[str, object]]]] = []
     all_points: list[list[float]] = [RNN_ACCEPT_ANCHOR.tolist()]
+    watched_endpoint: torch.Tensor | None = None
     model = PhasedTorchRNN()
     model.eval()
     selected_texts = [item.trajectory.text for item in selected]
-    background_texts = [item.text for item in background]
+    background_texts = [item.text for item in global_background]
     for phase_epoch, phase_label in zip(phase_epochs, phase_labels, strict=True):
         load_model_parameters(model, result.checkpoint_states[phase_epoch])
         selected_states, selected_traces = model(selected_texts, capture_traces=True)
@@ -295,6 +321,12 @@ def _trace_support(
             strict=True,
         ):
             trimmed_points = raw_trace[: len(item.trajectory.text)]
+            if (
+                phase_epoch == phase_epochs[-1]
+                and item.trajectory.label == selected[0].trajectory.label
+                and trimmed_points
+            ):
+                watched_endpoint = torch.tensor(trimmed_points[-1], dtype=torch.float32)
             panel_curves.append(
                 {
                     "role": item.role,
@@ -311,7 +343,7 @@ def _trace_support(
         assert background_traces is not None
         raw_background: list[dict[str, object]] = []
         for probe, raw_trace in zip(
-            background, background_traces.tolist(), strict=True
+            global_background, background_traces.tolist(), strict=True
         ):
             trimmed_points = raw_trace[: len(probe.text)]
             probabilities = acceptance_probability(
@@ -330,7 +362,13 @@ def _trace_support(
                 all_points.append(point)
         raw_panel_curves.append((phase_label, panel_curves, raw_background))
 
-    mean, basis, _explained = _fit_oblique_projection(all_points)
+    if watched_endpoint is None:
+        watched_endpoint = RNN_ACCEPT_ANCHOR.to(dtype=torch.float32)
+    mean, basis = _fit_trace_projection(
+        all_points,
+        accept_center=RNN_ACCEPT_ANCHOR,
+        watched_endpoint=watched_endpoint,
+    )
     acceptance_region = _project_acceptance_region(
         center=RNN_ACCEPT_ANCHOR,
         radius=RNN_ACCEPT_RADIUS,
@@ -666,7 +704,8 @@ def build_transition_figure(
     *,
     result,
     selected: tuple[SelectedTrajectory, ...],
-    background: tuple[ProbeTrajectoryMetrics, ...],
+    local_neighbors: tuple[ProbeTrajectoryMetrics, ...],
+    global_background: tuple[ProbeTrajectoryMetrics, ...],
     phase_spans: list[dict[str, object]],
     assessment: TransitionAssessment,
 ) -> Figure:
@@ -674,7 +713,7 @@ def build_transition_figure(
     trace_panels = _trace_support(
         result,
         selected=selected,
-        background=background,
+        global_background=global_background,
     )
 
     fig = plt.figure(figsize=(13.1, 7.7))
@@ -697,7 +736,7 @@ def build_transition_figure(
 
     _style_axis(line_ax)
     line_ax.set_title(
-        "Off-by-one example across checkpoints",
+        "Corrected off-by-one neighborhood across checkpoints",
         loc="left",
         **font_kwargs(size=10.5, color=STATIC_TEXT_INK),
         pad=8,
@@ -707,15 +746,26 @@ def build_transition_figure(
     for item in selected:
         selected_endpoint_values.append(item.trajectory.probabilities[-1])
 
-    for trajectory in background:
+    for trajectory in global_background:
         values = _transform_series(trajectory.probabilities)
         line_ax.plot(
             epochs,
             values,
             color=BACKGROUND_FIELD_INK,
-            linewidth=0.72,
-            alpha=0.26,
-            zorder=2,
+            linewidth=0.62,
+            alpha=0.10,
+            zorder=1,
+        )
+
+    for trajectory in local_neighbors:
+        values = _transform_series(trajectory.probabilities)
+        line_ax.plot(
+            epochs,
+            values,
+            color=LOCAL_NEIGHBOR_INK,
+            linewidth=0.92,
+            alpha=0.46,
+            zorder=3,
         )
 
     for index, item in enumerate(selected):
@@ -789,7 +839,8 @@ def render_transition_figure(
     *,
     result,
     selected: tuple[SelectedTrajectory, ...],
-    background: tuple[ProbeTrajectoryMetrics, ...],
+    local_neighbors: tuple[ProbeTrajectoryMetrics, ...],
+    global_background: tuple[ProbeTrajectoryMetrics, ...],
     phase_spans: list[dict[str, object]],
     assessment: TransitionAssessment,
     output_dir: Path,
@@ -798,7 +849,8 @@ def render_transition_figure(
     fig = build_transition_figure(
         result=result,
         selected=selected,
-        background=background,
+        local_neighbors=local_neighbors,
+        global_background=global_background,
         phase_spans=phase_spans,
         assessment=assessment,
     )

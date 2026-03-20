@@ -2,23 +2,23 @@ import ClientToolsWorker from "./client-tools.worker?worker";
 import { renderChartToDataUrl } from "./chart";
 import {
   appendWorkspaceReportSlides,
+  buildCreatedFileSummaryById,
   buildWorkspaceBootstrapMetadata,
-  removeWorkspacePath,
+  pruneWorkspacePdfSmartSplitBundles,
   replaceWorkspaceReportSlides,
+  upsertWorkspacePdfSmartSplitBundle,
   updateWorkspaceAppState,
   writeWorkspaceIndex,
   writeWorkspaceReport,
   writeWorkspaceReportIndex,
-  writeWorkspaceTextFile,
 } from "./workspace-contract";
-import { addWorkspaceFilesAtPathsWithResult, getWorkspaceContext } from "./workspace-fs";
+import { addWorkspaceArtifactsWithResult, getWorkspaceContext } from "./workspace-fs";
 import { findWorkspaceFile } from "./workspace-files";
 
 import type { CapabilityWorkspaceContext } from "../capabilities/types";
 import type { ClientEffect, ClientToolArgsMap, ClientToolName } from "../types/analysis";
 import type { LocalOtherFile } from "../types/report";
 import type { ToolExecutionRequestV1, ToolExecutionResultV1, WorkspaceSnapshotV1 } from "../types/tool-runtime";
-import { WORKSPACE_CHART_ARTIFACTS_DIR } from "../types/workspace-contract";
 
 type PendingRequest = {
   resolve: (value: ToolExecutionResultV1) => void;
@@ -87,8 +87,10 @@ function buildSnapshot(workspace: CapabilityWorkspaceContext): WorkspaceSnapshot
   const state = workspace.getState();
   return {
     version: "v1",
+    workspace_id: state.workspaceId,
+    producer_key: workspace.capabilityId,
+    producer_label: workspace.capabilityTitle,
     filesystem: state.filesystem,
-    path_prefix: state.activePrefix,
     workspace_context: state.workspaceContext,
     bootstrap: buildWorkspaceBootstrapMetadata(state.filesystem),
   };
@@ -100,25 +102,23 @@ async function applyMutations(
 ): Promise<ToolExecutionResultV1> {
   const chartEffects: ClientEffect[] = [];
   const chartWarnings: string[] = [];
+  let createdChartFileId: string | null = null;
 
   workspace.updateFilesystem((filesystem) => {
     let nextFilesystem = filesystem;
 
     for (const mutation of result.mutations) {
       switch (mutation.type) {
-        case "write_text_file":
-          nextFilesystem = writeWorkspaceTextFile(
-            nextFilesystem,
-            mutation.path,
-            mutation.text,
-            mutation.source,
-          );
-          break;
-        case "delete_path":
-          nextFilesystem = removeWorkspacePath(nextFilesystem, mutation.path);
-          break;
         case "upsert_workspace_files":
-          nextFilesystem = addWorkspaceFilesAtPathsWithResult(nextFilesystem, mutation.files).filesystem;
+          nextFilesystem = addWorkspaceArtifactsWithResult(nextFilesystem, mutation.artifacts).filesystem;
+          break;
+        case "upsert_pdf_smart_split_registry":
+          nextFilesystem = mutation.bundles.reduce(
+            (currentFilesystem, bundle) =>
+              upsertWorkspacePdfSmartSplitBundle(currentFilesystem, bundle),
+            nextFilesystem,
+          );
+          nextFilesystem = pruneWorkspacePdfSmartSplitBundles(nextFilesystem);
           break;
         case "upsert_report":
           nextFilesystem = writeWorkspaceReport(nextFilesystem, mutation.report);
@@ -136,7 +136,6 @@ async function applyMutations(
             nextFilesystem,
             {
               version: "v1",
-              reserved_paths: [],
               report_ids: mutation.report_ids,
               current_report_id: mutation.current_report_id,
             },
@@ -184,7 +183,7 @@ async function applyMutations(
     }
     const artifact: LocalOtherFile = {
       id: crypto.randomUUID(),
-      name: mutation.artifact_path.split("/").filter(Boolean).at(-1) ?? `${mutation.chart_plan_id}.json`,
+      name: mutation.artifact_filename.trim() || `${mutation.chart_plan_id}.json`,
       kind: "other",
       extension: "json",
       mime_type: "application/json",
@@ -203,6 +202,7 @@ async function applyMutations(
       ),
     };
     artifact.byte_size = new TextEncoder().encode(artifact.text_content ?? "").length;
+    createdChartFileId = artifact.id;
     const chartEffect: ClientEffect = {
       type: "chart_rendered",
       fileId: mutation.file_id,
@@ -214,9 +214,17 @@ async function applyMutations(
     chartEffects.push(chartEffect);
 
     workspace.updateFilesystem((filesystem) => {
-      const nextFilesystem = addWorkspaceFilesAtPathsWithResult(
+      const nextFilesystem = addWorkspaceArtifactsWithResult(
         filesystem,
-        [{ path: mutation.artifact_path, file: artifact, source: "derived" }],
+        [
+          {
+            file: artifact,
+            source: "derived",
+            bucket: "chart",
+            producer_key: mutation.producer_key,
+            producer_label: mutation.producer_label,
+          },
+        ],
       ).filesystem;
       return nextFilesystem;
     });
@@ -231,9 +239,12 @@ async function applyMutations(
         chartEffects.find((effect) => effect.type === "chart_rendered")?.imageDataUrl ??
         result.payload.imageDataUrl ??
         null,
-      workspace_context: getWorkspaceContext(state.filesystem, "/"),
-      path_prefix: state.activePrefix,
-      artifact_prefix: WORKSPACE_CHART_ARTIFACTS_DIR,
+      workspace_id: state.workspaceId,
+      workspace_context: getWorkspaceContext(state.filesystem, state.workspaceId),
+      created_file:
+        createdChartFileId && chartEffects.length
+          ? buildCreatedFileSummaryById(state.filesystem, createdChartFileId)
+          : result.payload.created_file,
     },
     effects: [...result.effects, ...chartEffects],
     warnings: [...result.warnings, ...chartWarnings],

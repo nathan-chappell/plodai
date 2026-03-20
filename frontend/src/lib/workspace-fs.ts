@@ -1,9 +1,17 @@
+import { getFileExtension } from "./workspace-files";
 import type { LocalWorkspaceFile } from "../types/report";
 import type {
-  WorkspaceBreadcrumb,
-  WorkspaceDescriptor,
+  WorkspaceArtifactBucket,
+  WorkspaceAppStateV1,
+  WorkspaceIndexV1,
+  WorkspacePdfSmartSplitRegistryV1,
+  WorkspaceReportIndexV1,
+  WorkspaceReportV1,
+  WorkspaceToolCatalogV1,
+} from "../types/workspace-contract";
+import type {
   WorkspaceContext,
-  WorkspaceDirectoryNode,
+  WorkspaceDescriptor,
   WorkspaceFileNode,
   WorkspaceFilesystem,
   WorkspaceItem,
@@ -13,11 +21,10 @@ import type {
 } from "../types/workspace";
 
 const DATABASE_NAME = "ai-portfolio-workspace";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const FILESYSTEM_STORE = "workspace_filesystems";
 const SURFACE_STATE_STORE = "workspace_surface_state";
 const METADATA_STORE = "workspace_metadata";
-const ROOT_DIRECTORY_ID = "workspace-root";
 export const DEFAULT_WORKSPACE_ID = "default";
 export const DEMO_WORKSPACE_ID = "demo";
 const WORKSPACE_REGISTRY_VERSION = "v1";
@@ -37,11 +44,13 @@ type WorkspaceMetadataRecord = {
   value: WorkspaceRegistry;
 };
 
-type WorkspaceFileWriteInput = {
-  path: string;
+export type WorkspaceArtifactWriteInput = {
   file: LocalWorkspaceFile;
   source: WorkspaceFileNode["source"];
-  createdAt?: string;
+  bucket: WorkspaceArtifactBucket;
+  producer_key?: string;
+  producer_label?: string;
+  created_at?: string;
 };
 
 let databasePromise: Promise<IDBDatabase> | null = null;
@@ -60,15 +69,12 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const database = request.result;
-      if (!database.objectStoreNames.contains(FILESYSTEM_STORE)) {
-        database.createObjectStore(FILESYSTEM_STORE, { keyPath: "key" });
+      for (const storeName of Array.from(database.objectStoreNames)) {
+        database.deleteObjectStore(storeName);
       }
-      if (!database.objectStoreNames.contains(SURFACE_STATE_STORE)) {
-        database.createObjectStore(SURFACE_STATE_STORE, { keyPath: "key" });
-      }
-      if (!database.objectStoreNames.contains(METADATA_STORE)) {
-        database.createObjectStore(METADATA_STORE, { keyPath: "key" });
-      }
+      database.createObjectStore(FILESYSTEM_STORE, { keyPath: "key" });
+      database.createObjectStore(SURFACE_STATE_STORE, { keyPath: "key" });
+      database.createObjectStore(METADATA_STORE, { keyPath: "key" });
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -82,37 +88,29 @@ function workspaceFilesystemKey(userId: string, workspaceId: string): string {
   return `filesystem:${userId}:${workspaceId}`;
 }
 
-function legacyFilesystemKey(userId: string): string {
-  return `filesystem:${userId}`;
-}
-
 function surfaceStateKey(userId: string, workspaceId: string, surfaceKey: string): string {
   return `surface:${userId}:${workspaceId}:${surfaceKey}`;
-}
-
-function legacySurfaceStateKey(userId: string, surfaceKey: string): string {
-  return `surface:${userId}:${surfaceKey}`;
 }
 
 function workspaceRegistryKey(userId: string): string {
   return `registry:${userId}`;
 }
 
-function basename(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? "";
-}
-
-function parentPrefixForPath(path: string): string {
-  const normalizedPath = normalizeAbsolutePath(path);
-  const parts = normalizedPath.split("/").filter(Boolean);
-  if (parts.length <= 1) {
-    return "/";
-  }
-  return `/${parts.slice(0, -1).join("/")}/`;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function bucketOrder(bucket: WorkspaceArtifactBucket): number {
+  switch (bucket) {
+    case "uploaded":
+      return 0;
+    case "data":
+      return 1;
+    case "chart":
+      return 2;
+    case "pdf":
+      return 3;
+  }
 }
 
 function defaultWorkspaceDescriptors(): WorkspaceDescriptor[] {
@@ -183,119 +181,164 @@ function normalizeWorkspaceRegistry(
   };
 }
 
-function withTrailingSlash(prefix: string): string {
-  if (!prefix || prefix === "/") {
-    return "/";
-  }
-  return prefix.endsWith("/") ? prefix : `${prefix}/`;
+function compareWorkspaceItems(left: WorkspaceItem, right: WorkspaceItem): number {
+  return (
+    bucketOrder(left.bucket) - bucketOrder(right.bucket) ||
+    left.producer_label.localeCompare(right.producer_label) ||
+    left.name.localeCompare(right.name) ||
+    right.created_at.localeCompare(left.created_at)
+  );
 }
 
-function buildSyntheticDirectory(path: string): WorkspaceDirectoryNode {
-  const normalizedPath = normalizeAbsolutePath(path);
-  const parts = normalizedPath.split("/").filter(Boolean);
-  const name = parts.at(-1) ?? "";
-  const parentPath = parts.length > 1 ? `/${parts.slice(0, -1).join("/")}` : "/";
+function renameWorkspaceFile(file: LocalWorkspaceFile, name: string): LocalWorkspaceFile {
   return {
-    id: normalizedPath === "/" ? ROOT_DIRECTORY_ID : `dir:${normalizedPath}`,
-    kind: "directory",
+    ...file,
     name,
-    path: normalizedPath,
-    parent_id: normalizedPath === "/" ? null : parentPath === "/" ? ROOT_DIRECTORY_ID : `dir:${parentPath}`,
-    created_at: nowIso(),
+    extension: getFileExtension(name),
   };
 }
 
-function compareWorkspaceItems(left: WorkspaceItem, right: WorkspaceItem): number {
-  return left.path.localeCompare(right.path);
+function normalizeProducer(
+  source: WorkspaceFileNode["source"],
+  bucket: WorkspaceArtifactBucket,
+  producerKey?: string,
+  producerLabel?: string,
+): { producer_key: string; producer_label: string } {
+  if (producerKey?.trim() && producerLabel?.trim()) {
+    return {
+      producer_key: producerKey.trim(),
+      producer_label: producerLabel.trim(),
+    };
+  }
+
+  if (source === "uploaded" || bucket === "uploaded") {
+    return {
+      producer_key: "uploaded",
+      producer_label: "Uploaded",
+    };
+  }
+
+  return {
+    producer_key: producerKey?.trim() || "workspace",
+    producer_label: producerLabel?.trim() || "Workspace",
+  };
 }
 
 function normalizeWorkspaceFileNode(
-  path: string,
-  file: LocalWorkspaceFile,
-  source: WorkspaceFileNode["source"],
-  createdAt: string,
+  input: WorkspaceArtifactWriteInput,
 ): WorkspaceFileNode {
-  const normalizedPath = normalizeAbsolutePath(path);
-  const normalizedName = basename(normalizedPath) || file.name || "untitled";
+  const normalizedName = input.file.name.trim() || "untitled";
+  const producer = normalizeProducer(
+    input.source,
+    input.bucket,
+    input.producer_key,
+    input.producer_label,
+  );
+
   return {
-    id: file.id,
+    id: input.file.id,
     kind: "file",
     name: normalizedName,
-    path: normalizedPath,
-    created_at: createdAt,
-    source,
-    file: {
-      ...file,
-      name: normalizedName,
-    },
+    bucket: input.bucket,
+    producer_key: producer.producer_key,
+    producer_label: producer.producer_label,
+    created_at: input.created_at ?? nowIso(),
+    source: input.source,
+    file: renameWorkspaceFile(input.file, normalizedName),
   };
 }
 
-function normalizeFilesystem(filesystem: WorkspaceFilesystem): WorkspaceFilesystem {
-  const nextFilesByPath: Record<string, WorkspaceFileNode> = {};
-  const sourceEntries = Object.entries(filesystem.files_by_path ?? {});
-  for (const [rawPath, rawNode] of sourceEntries) {
+function normalizeStructuredState<T extends object>(value: T | null | undefined): T | null {
+  return value ?? null;
+}
+
+function normalizeFilesystem(filesystem: WorkspaceFilesystem | null | undefined): WorkspaceFilesystem {
+  const artifactsById: Record<string, WorkspaceFileNode> = {};
+
+  for (const rawNode of Object.values(filesystem?.artifacts_by_id ?? {})) {
     if (!rawNode || rawNode.kind !== "file" || !rawNode.file) {
       continue;
     }
-    const normalizedPath = normalizeAbsolutePath(rawNode.path || rawPath);
-    nextFilesByPath[normalizedPath] = normalizeWorkspaceFileNode(
-      normalizedPath,
-      rawNode.file,
-      rawNode.source,
-      rawNode.created_at || nowIso(),
-    );
+    artifactsById[rawNode.file.id] = normalizeWorkspaceFileNode({
+      file: rawNode.file,
+      source: rawNode.source,
+      bucket: rawNode.bucket,
+      producer_key: rawNode.producer_key,
+      producer_label: rawNode.producer_label,
+      created_at: rawNode.created_at,
+    });
   }
+
   return {
-    files_by_path: nextFilesByPath,
+    version: "v1",
+    artifacts_by_id: artifactsById,
+    app_state: normalizeStructuredState<WorkspaceAppStateV1>(filesystem?.app_state),
+    report_index: normalizeStructuredState<WorkspaceReportIndexV1>(filesystem?.report_index),
+    reports_by_id: { ...(filesystem?.reports_by_id ?? {}) },
+    tool_catalog: normalizeStructuredState<WorkspaceToolCatalogV1>(filesystem?.tool_catalog),
+    workspace_index: normalizeStructuredState<WorkspaceIndexV1>(filesystem?.workspace_index),
+    pdf_smart_splits: normalizeStructuredState<WorkspacePdfSmartSplitRegistryV1>(
+      filesystem?.pdf_smart_splits,
+    ),
+    agents_markdown: filesystem?.agents_markdown ?? null,
   };
 }
 
-function ensureUniquePath(filesystem: WorkspaceFilesystem, requestedPath: string): string {
-  const normalizedPath = normalizeAbsolutePath(requestedPath);
-  if (!filesystem.files_by_path[normalizedPath]) {
-    return normalizedPath;
+function normalizeSurfaceState(value: WorkspaceSurfaceState): WorkspaceSurfaceState {
+  return {
+    surface_key: value.surface_key,
+    active_tab:
+      typeof value.active_tab === "string" && value.active_tab.trim()
+        ? value.active_tab.trim()
+        : null,
+  };
+}
+
+function ensureUniqueName(
+  filesystem: WorkspaceFilesystem,
+  bucket: WorkspaceArtifactBucket,
+  requestedName: string,
+): string {
+  const normalizedName = requestedName.trim() || "untitled";
+  const existingNames = new Set(
+    Object.values(filesystem.artifacts_by_id)
+      .filter((artifact) => artifact.bucket === bucket)
+      .map((artifact) => artifact.file.name),
+  );
+
+  if (!existingNames.has(normalizedName)) {
+    return normalizedName;
   }
 
-  const pathParts = normalizedPath.split("/").filter(Boolean);
-  const filename = pathParts.at(-1) ?? "untitled";
-  const parentPath = pathParts.length > 1 ? `/${pathParts.slice(0, -1).join("/")}` : "/";
-  const dotIndex = filename.lastIndexOf(".");
-  const hasExtension = dotIndex > 0 && dotIndex < filename.length - 1;
-  const stem = hasExtension ? filename.slice(0, dotIndex) : filename;
-  const extension = hasExtension ? filename.slice(dotIndex) : "";
+  const dotIndex = normalizedName.lastIndexOf(".");
+  const hasExtension = dotIndex > 0 && dotIndex < normalizedName.length - 1;
+  const stem = hasExtension ? normalizedName.slice(0, dotIndex) : normalizedName;
+  const extension = hasExtension ? normalizedName.slice(dotIndex) : "";
   let counter = 2;
 
   while (true) {
-    const candidateName = `${stem} (${counter})${extension}`;
-    const candidatePath = parentPath === "/" ? `/${candidateName}` : `${parentPath}/${candidateName}`;
-    if (!filesystem.files_by_path[candidatePath]) {
-      return candidatePath;
+    const candidate = `${stem} (${counter})${extension}`;
+    if (!existingNames.has(candidate)) {
+      return candidate;
     }
     counter += 1;
   }
 }
 
-function writeFiles(
+function writeArtifacts(
   filesystem: WorkspaceFilesystem,
-  files: WorkspaceFileWriteInput[],
-  options: { dedupePaths: boolean },
+  artifacts: WorkspaceArtifactWriteInput[],
 ): { filesystem: WorkspaceFilesystem; files: LocalWorkspaceFile[] } {
   const nextFilesystem = normalizeFilesystem(filesystem);
   const storedFiles: LocalWorkspaceFile[] = [];
 
-  for (const input of files) {
-    const normalizedRequestedPath = normalizeAbsolutePath(input.path);
-    const targetPath = options.dedupePaths
-      ? ensureUniquePath(nextFilesystem, normalizedRequestedPath)
-      : normalizedRequestedPath;
-    const nextNode = normalizeWorkspaceFileNode(
-      targetPath,
-      input.file,
-      input.source,
-      input.createdAt ?? nowIso(),
-    );
-    nextFilesystem.files_by_path[targetPath] = nextNode;
+  for (const artifact of artifacts) {
+    const dedupedName = ensureUniqueName(nextFilesystem, artifact.bucket, artifact.file.name);
+    const nextNode = normalizeWorkspaceFileNode({
+      ...artifact,
+      file: renameWorkspaceFile(artifact.file, dedupedName),
+    });
+    nextFilesystem.artifacts_by_id[nextNode.id] = nextNode;
     storedFiles.push(nextNode.file);
   }
 
@@ -305,9 +348,34 @@ function writeFiles(
   };
 }
 
+function inferBucket(
+  file: LocalWorkspaceFile,
+  source: WorkspaceFileNode["source"],
+  bucket?: WorkspaceArtifactBucket,
+): WorkspaceArtifactBucket {
+  if (bucket) {
+    return bucket;
+  }
+  if (source === "uploaded" || source === "demo") {
+    return "uploaded";
+  }
+  if (file.kind === "pdf") {
+    return "pdf";
+  }
+  return "data";
+}
+
 export function createWorkspaceFilesystem(): WorkspaceFilesystem {
   return {
-    files_by_path: {},
+    version: "v1",
+    artifacts_by_id: {},
+    app_state: null,
+    report_index: null,
+    reports_by_id: {},
+    tool_catalog: null,
+    workspace_index: null,
+    pdf_smart_splits: null,
+    agents_markdown: null,
   };
 }
 
@@ -379,25 +447,7 @@ export async function loadWorkspaceFilesystem(
 
       request.onsuccess = () => {
         const record = request.result as WorkspaceFilesystemRecord | undefined;
-        if (record?.filesystem) {
-          resolve(normalizeFilesystem(record.filesystem));
-          return;
-        }
-        if (workspaceId !== DEFAULT_WORKSPACE_ID) {
-          resolve(createWorkspaceFilesystem());
-          return;
-        }
-        const legacyRequest = store.get(legacyFilesystemKey(userId));
-        legacyRequest.onsuccess = () => {
-          const legacyRecord = legacyRequest.result as WorkspaceFilesystemRecord | undefined;
-          resolve(
-            legacyRecord?.filesystem
-              ? normalizeFilesystem(legacyRecord.filesystem)
-              : createWorkspaceFilesystem(),
-          );
-        };
-        legacyRequest.onerror = () =>
-          reject(legacyRequest.error ?? new Error("Workspace filesystem read failed."));
+        resolve(record?.filesystem ? normalizeFilesystem(record.filesystem) : createWorkspaceFilesystem());
       };
       request.onerror = () => reject(request.error ?? new Error("Workspace filesystem read failed."));
     });
@@ -435,11 +485,9 @@ export async function saveWorkspaceFilesystem(
 
 export async function loadWorkspaceSurfaceState(
   userId: string,
-  workspaceIdOrSurfaceKey: string,
-  surfaceKeyArg?: string,
+  workspaceId: string,
+  surfaceKey: string,
 ): Promise<WorkspaceSurfaceState | null> {
-  const workspaceId = surfaceKeyArg ? workspaceIdOrSurfaceKey : DEFAULT_WORKSPACE_ID;
-  const surfaceKey = surfaceKeyArg ?? workspaceIdOrSurfaceKey;
   try {
     const database = await openDatabase();
     return await new Promise<WorkspaceSurfaceState | null>((resolve, reject) => {
@@ -449,21 +497,7 @@ export async function loadWorkspaceSurfaceState(
 
       request.onsuccess = () => {
         const record = request.result as WorkspaceSurfaceStateRecord | undefined;
-        if (record?.value) {
-          resolve(record.value);
-          return;
-        }
-        if (workspaceId !== DEFAULT_WORKSPACE_ID) {
-          resolve(null);
-          return;
-        }
-        const legacyRequest = store.get(legacySurfaceStateKey(userId, surfaceKey));
-        legacyRequest.onsuccess = () => {
-          const legacyRecord = legacyRequest.result as WorkspaceSurfaceStateRecord | undefined;
-          resolve(legacyRecord?.value ?? null);
-        };
-        legacyRequest.onerror = () =>
-          reject(legacyRequest.error ?? new Error("Workspace surface-state read failed."));
+        resolve(record?.value ? normalizeSurfaceState(record.value) : null);
       };
       request.onerror = () => reject(request.error ?? new Error("Workspace surface-state read failed."));
     });
@@ -494,225 +528,115 @@ export async function saveWorkspaceSurfaceState(
 
     store.put({
       key: surfaceStateKey(userId, workspaceId, state.surface_key),
-      value: {
-        ...state,
-        active_prefix: normalizePathPrefix(state.active_prefix),
-        active_tab:
-          typeof state.active_tab === "string" && state.active_tab.trim()
-            ? state.active_tab.trim()
-            : null,
-      },
+      value: normalizeSurfaceState(state),
     } satisfies WorkspaceSurfaceStateRecord);
   });
 }
 
-export function normalizeAbsolutePath(inputPath: string): string {
-  const trimmed = inputPath.trim();
-  const rawParts = trimmed ? trimmed.split("/") : [""];
-  const stack: string[] = [];
-
-  for (const rawPart of rawParts) {
-    const part = rawPart.trim();
-    if (!part || part === ".") {
-      continue;
-    }
-    if (part === "..") {
-      if (!stack.length) {
-        throw new Error("Workspace paths cannot escape the root directory.");
-      }
-      stack.pop();
-      continue;
-    }
-    stack.push(part);
-  }
-
-  return stack.length ? `/${stack.join("/")}` : "/";
-}
-
-export function normalizePathPrefix(inputPrefix: string): string {
-  const trimmed = inputPrefix.trim();
-  if (!trimmed || trimmed === "/") {
-    return "/";
-  }
-  const wantsTrailingSlash = trimmed.endsWith("/");
-  const normalizedPath = normalizeAbsolutePath(trimmed.startsWith("/") ? trimmed : `/${trimmed}`);
-  if (normalizedPath === "/") {
-    return "/";
-  }
-  return wantsTrailingSlash ? `${normalizedPath}/` : normalizedPath;
-}
-
-export function pathStartsWithPrefix(path: string, prefix: string): boolean {
-  const normalizedPath = normalizeAbsolutePath(path);
-  const normalizedPrefix = prefix.trim() ? normalizePathPrefix(prefix) : "";
-  if (!normalizedPrefix || normalizedPrefix === "/") {
-    return true;
-  }
-  return normalizedPath.startsWith(normalizedPrefix);
-}
-
-export function resolveWorkspacePath(path: string, basePath: string): string {
-  const trimmed = path.trim();
-  if (!trimmed) {
-    return normalizeAbsolutePath(basePath);
-  }
-  return normalizeAbsolutePath(trimmed.startsWith("/") ? trimmed : `${normalizeAbsolutePath(basePath)}/${trimmed}`);
-}
-
-export function getWorkspaceContext(filesystem: WorkspaceFilesystem, pathPrefix: string): WorkspaceContext {
-  const normalizedPrefix = normalizePathPrefix(pathPrefix);
-  const entryIds = listDirectoryEntries(filesystem, normalizedPrefix).map((entry) => entry.id);
+export function getWorkspaceContext(
+  filesystem: WorkspaceFilesystem,
+  workspaceId: string,
+): WorkspaceContext {
   return {
-    path_prefix: normalizedPrefix,
-    referenced_item_ids: entryIds,
+    workspace_id: workspaceId,
+    referenced_item_ids: listAllWorkspaceFileNodes(filesystem).map((entry) => entry.id),
   };
 }
 
 export function listAllWorkspaceFileNodes(filesystem: WorkspaceFilesystem): WorkspaceFileNode[] {
-  return Object.values(normalizeFilesystem(filesystem).files_by_path).sort(compareWorkspaceItems);
+  return Object.values(normalizeFilesystem(filesystem).artifacts_by_id).sort(compareWorkspaceItems);
 }
 
 export function listAllWorkspaceFiles(filesystem: WorkspaceFilesystem): LocalWorkspaceFile[] {
   return listAllWorkspaceFileNodes(filesystem).map((node) => node.file);
 }
 
-export function listDirectoryEntries(filesystem: WorkspaceFilesystem, pathPrefix: string): WorkspaceItem[] {
-  return listAllWorkspaceFileNodes(filesystem).filter((item) => pathStartsWithPrefix(item.path, pathPrefix));
-}
-
-export function listDirectoryFiles(filesystem: WorkspaceFilesystem, pathPrefix: string): LocalWorkspaceFile[] {
-  return listDirectoryEntries(filesystem, pathPrefix).map((item) => item.file);
-}
-
-export function listBreadcrumbs(_filesystem: WorkspaceFilesystem, pathPrefix: string): WorkspaceBreadcrumb[] {
-  const normalizedPrefix = normalizePathPrefix(pathPrefix);
-  const trimmedPrefix = normalizedPrefix === "/" ? "" : normalizedPrefix.replace(/\/$/, "");
-  const parts = trimmedPrefix ? trimmedPrefix.slice(1).split("/") : [];
-  const breadcrumbs: WorkspaceBreadcrumb[] = [{ id: ROOT_DIRECTORY_ID, name: "/", prefix: "/", path: "/" }];
-
-  let nextPrefix = "";
-  for (const part of parts) {
-    nextPrefix += `/${part}`;
-    breadcrumbs.push({
-      id: `prefix:${nextPrefix}/`,
-      name: part,
-      prefix: withTrailingSlash(nextPrefix),
-      path: withTrailingSlash(nextPrefix),
-    });
-  }
-  return breadcrumbs;
-}
-
-export function ensureDirectoryPath(
-  filesystem: WorkspaceFilesystem,
-  requestedPath: string,
-): { filesystem: WorkspaceFilesystem; directory: WorkspaceDirectoryNode; created: boolean } {
-  const normalizedPath = normalizeAbsolutePath(requestedPath);
-  return {
-    filesystem: normalizeFilesystem(filesystem),
-    directory: buildSyntheticDirectory(normalizedPath),
-    created: false,
-  };
-}
-
 export function addWorkspaceFiles(
   filesystem: WorkspaceFilesystem,
-  pathPrefix: string,
   files: LocalWorkspaceFile[],
   source: WorkspaceFileNode["source"],
+  options: {
+    bucket?: WorkspaceArtifactBucket;
+    producer_key?: string;
+    producer_label?: string;
+  } = {},
 ): WorkspaceFilesystem {
-  return addWorkspaceFilesWithResult(filesystem, pathPrefix, files, source).filesystem;
+  return addWorkspaceFilesWithResult(filesystem, files, source, options).filesystem;
 }
 
 export function addWorkspaceFilesWithResult(
   filesystem: WorkspaceFilesystem,
-  pathPrefix: string,
   files: LocalWorkspaceFile[],
   source: WorkspaceFileNode["source"],
+  options: {
+    bucket?: WorkspaceArtifactBucket;
+    producer_key?: string;
+    producer_label?: string;
+  } = {},
 ): { filesystem: WorkspaceFilesystem; files: LocalWorkspaceFile[] } {
   if (!files.length) {
     return { filesystem: normalizeFilesystem(filesystem), files: [] };
   }
 
-  const basePrefix = withTrailingSlash(normalizePathPrefix(pathPrefix));
-  return writeFiles(
+  return writeArtifacts(
     filesystem,
     files.map((file) => ({
-      path: resolveWorkspacePath(file.name, basePrefix === "/" ? "/" : basePrefix),
       file,
       source,
+      bucket: inferBucket(file, source, options.bucket),
+      producer_key: options.producer_key,
+      producer_label: options.producer_label,
     })),
-    { dedupePaths: true },
   );
 }
 
-export function addWorkspaceFilesAtPathsWithResult(
+export function addWorkspaceArtifactsWithResult(
   filesystem: WorkspaceFilesystem,
-  files: WorkspaceFileWriteInput[],
+  artifacts: WorkspaceArtifactWriteInput[],
 ): { filesystem: WorkspaceFilesystem; files: LocalWorkspaceFile[] } {
-  if (!files.length) {
+  if (!artifacts.length) {
     return { filesystem: normalizeFilesystem(filesystem), files: [] };
   }
-  return writeFiles(filesystem, files, { dedupePaths: false });
+  return writeArtifacts(filesystem, artifacts);
 }
 
-export function replaceDirectoryFiles(
+export function replaceWorkspaceFiles(
   filesystem: WorkspaceFilesystem,
-  pathPrefix: string,
   files: LocalWorkspaceFile[],
   source: WorkspaceFileNode["source"],
+  options: {
+    bucket?: WorkspaceArtifactBucket;
+    producer_key?: string;
+    producer_label?: string;
+  } = {},
 ): WorkspaceFilesystem {
-  const normalizedFilesystem = normalizeFilesystem(filesystem);
-  const normalizedPrefix = withTrailingSlash(normalizePathPrefix(pathPrefix));
-  const nextFilesystem = {
-    files_by_path: Object.fromEntries(
-      Object.entries(normalizedFilesystem.files_by_path).filter(
-        ([path]) => parentPrefixForPath(path) !== normalizedPrefix,
-      ),
-    ),
-  } satisfies WorkspaceFilesystem;
-  return addWorkspaceFiles(nextFilesystem, normalizedPrefix, files, source);
+  let nextFilesystem = createWorkspaceFilesystem();
+  nextFilesystem = {
+    ...nextFilesystem,
+    app_state: normalizeFilesystem(filesystem).app_state,
+    report_index: normalizeFilesystem(filesystem).report_index,
+    reports_by_id: { ...normalizeFilesystem(filesystem).reports_by_id },
+    tool_catalog: normalizeFilesystem(filesystem).tool_catalog,
+    workspace_index: normalizeFilesystem(filesystem).workspace_index,
+    pdf_smart_splits: normalizeFilesystem(filesystem).pdf_smart_splits,
+    agents_markdown: normalizeFilesystem(filesystem).agents_markdown,
+  };
+  return addWorkspaceFiles(nextFilesystem, files, source, options);
 }
 
 export function removeWorkspaceEntry(filesystem: WorkspaceFilesystem, entryId: string): WorkspaceFilesystem {
   const normalizedFilesystem = normalizeFilesystem(filesystem);
   return {
-    files_by_path: Object.fromEntries(
-      Object.entries(normalizedFilesystem.files_by_path).filter(([, item]) => item.id !== entryId),
-    ),
-  };
-}
-
-export function removeWorkspaceFileByPath(filesystem: WorkspaceFilesystem, path: string): WorkspaceFilesystem {
-  const normalizedFilesystem = normalizeFilesystem(filesystem);
-  const normalizedPath = normalizeAbsolutePath(path);
-  return {
-    files_by_path: Object.fromEntries(
-      Object.entries(normalizedFilesystem.files_by_path).filter(([candidatePath]) => candidatePath !== normalizedPath),
-    ),
-  };
-}
-
-export function removeWorkspacePrefix(filesystem: WorkspaceFilesystem, prefix: string): WorkspaceFilesystem {
-  const normalizedFilesystem = normalizeFilesystem(filesystem);
-  return {
-    files_by_path: Object.fromEntries(
-      Object.entries(normalizedFilesystem.files_by_path).filter(([path]) => !pathStartsWithPrefix(path, prefix)),
+    ...normalizedFilesystem,
+    artifacts_by_id: Object.fromEntries(
+      Object.entries(normalizedFilesystem.artifacts_by_id).filter(([artifactId]) => artifactId !== entryId),
     ),
   };
 }
 
 export function findWorkspaceFileNodeById(filesystem: WorkspaceFilesystem, fileId: string): WorkspaceFileNode | null {
-  return listAllWorkspaceFileNodes(filesystem).find((item) => item.id === fileId) ?? null;
-}
-
-export function findWorkspaceFileNodeByPath(filesystem: WorkspaceFilesystem, path: string): WorkspaceFileNode | null {
   const normalizedFilesystem = normalizeFilesystem(filesystem);
-  return normalizedFilesystem.files_by_path[normalizeAbsolutePath(path)] ?? null;
-}
-
-export function getDirectoryByPath(_filesystem: WorkspaceFilesystem, path: string): WorkspaceDirectoryNode {
-  return buildSyntheticDirectory(path);
+  return normalizedFilesystem.artifacts_by_id[fileId] ?? null;
 }
 
 export function summarizeWorkspaceFile(fileNode: WorkspaceFileNode): Record<string, unknown> {
@@ -720,11 +644,14 @@ export function summarizeWorkspaceFile(fileNode: WorkspaceFileNode): Record<stri
   return {
     id: file.id,
     name: file.name,
-    path: fileNode.path,
     kind: file.kind,
     extension: file.extension,
     byte_size: file.byte_size,
     mime_type: file.mime_type,
+    bucket: fileNode.bucket,
+    producer_key: fileNode.producer_key,
+    producer_label: fileNode.producer_label,
+    source: fileNode.source,
     ...(file.kind === "csv" || file.kind === "json"
       ? {
           row_count: file.row_count,
@@ -738,14 +665,5 @@ export function summarizeWorkspaceFile(fileNode: WorkspaceFileNode): Record<stri
           page_count: file.page_count,
         }
       : {}),
-  };
-}
-
-export function summarizeWorkspaceDirectory(directory: WorkspaceDirectoryNode): Record<string, unknown> {
-  return {
-    id: directory.id,
-    name: directory.name || "/",
-    kind: "directory",
-    path: directory.path,
   };
 }

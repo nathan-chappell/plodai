@@ -1,4 +1,6 @@
 from backend.app.agents.widgets import (
+    build_handoff_trace_copy_text,
+    build_handoff_trace_widget,
     build_tool_trace_copy_text,
     build_plan_widget,
     build_tool_trace_widget,
@@ -50,36 +52,66 @@ def test_build_plan_widget_includes_plan_sections() -> None:
     assert "run_aggregate_query, render_chart_from_file" in text_values
 
 
-def test_build_tool_trace_widget_shows_only_summary_but_keeps_copy_text_details() -> (
-    None
-):
+def test_build_tool_trace_widget_shows_compact_details_and_copy_text() -> None:
     widget = build_tool_trace_widget(
         "run_aggregate_query",
-        "Validated a grouped aggregate query plan.",
-        ["Dataset: revenue_csv", "Group by: 2", "Aggregates: 3"],
+        "Run Aggregate Query(dataset=revenue_csv)",
+        ["Dataset: revenue_csv", "Filters: 1", "Group by: 2", "Aggregates: 3"],
     )
     copy_text = build_tool_trace_copy_text(
         "run_aggregate_query",
-        "Validated a grouped aggregate query plan.",
-        ["Dataset: revenue_csv", "Group by: 2", "Aggregates: 3"],
+        "Run Aggregate Query(dataset=revenue_csv)",
+        ["Dataset: revenue_csv", "Filters: 1", "Group by: 2", "Aggregates: 3"],
     )
 
     assert widget["type"] == "Card"
     assert "status" not in widget
     assert widget["children"][0]["type"] == "Col"
     text_values = collect_text_values(widget["children"])
-    assert "Run Aggregate Query" in text_values
-    assert "Validated a grouped aggregate query plan." in text_values
-    assert "Dataset: revenue_csv" not in text_values
-    assert "Group by: 2" not in text_values
-    assert "Aggregates: 3" not in text_values
-    assert copy_text == (
-        "Run Aggregate Query\n"
-        "Validated a grouped aggregate query plan.\n"
-        "Dataset: revenue_csv\n"
-        "Group by: 2\n"
-        "Aggregates: 3"
+    assert text_values == ["Run Aggregate Query(dataset=revenue_csv)"]
+    assert copy_text == "Run Aggregate Query(dataset=revenue_csv)"
+
+
+def test_build_tool_trace_widget_uses_explicit_title_when_provided() -> None:
+    widget = build_tool_trace_widget(
+        "create_csv_file",
+        "Derived CSV artifact",
+        ["Path: aggregated_sales_by_month_category.csv"],
+        title="Create CSV File(aggregated_sales_by_month_category.csv)",
     )
+    copy_text = build_tool_trace_copy_text(
+        "create_csv_file",
+        "Derived CSV artifact",
+        ["Path: aggregated_sales_by_month_category.csv"],
+        title="Create CSV File(aggregated_sales_by_month_category.csv)",
+    )
+
+    text_values = collect_text_values(widget["children"])
+    assert "Create CSV File(aggregated_sales_by_month_category.csv)" in text_values
+    assert copy_text == "Create CSV File(aggregated_sales_by_month_category.csv)"
+
+
+def test_build_handoff_trace_widget_and_copy_text_include_agents() -> None:
+    widget = build_handoff_trace_widget(
+        source_agent_name="Report Agent",
+        target_agent_name="Chart Agent",
+        handoff_tool_name="delegate_to_chart_agent",
+        summary="Delegate chart work.",
+    )
+    copy_text = build_handoff_trace_copy_text(
+        source_agent_name="Report Agent",
+        target_agent_name="Chart Agent",
+        handoff_tool_name="delegate_to_chart_agent",
+        summary="Delegate chart work.",
+    )
+
+    assert widget["type"] == "Card"
+    assert widget["status"] == {"text": "Agent handoff", "icon": "agent"}
+    text_values = collect_text_values(widget["children"])
+    assert "Report Agent -> Chart Agent" in text_values
+    assert "Delegate chart work." not in text_values
+    assert "Tool: delegate_to_chart_agent" not in text_values
+    assert copy_text == "Report Agent -> Chart Agent"
 
 
 def test_build_workspace_context_widget_and_copy_text_include_paths() -> None:

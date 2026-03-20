@@ -1,3 +1,4 @@
+import type { PdfSmartSplitBundleView } from "../capabilities/types";
 import type { ClientEffect, ClientToolArgsMap, ClientToolName } from "./analysis";
 import type { LocalWorkspaceFile } from "./report";
 import type { WorkspaceContext, WorkspaceFilesystem } from "./workspace";
@@ -9,30 +10,22 @@ import type {
 
 export type WorkspaceSnapshotV1 = {
   version: "v1";
+  workspace_id: string;
+  producer_key: string;
+  producer_label: string;
   filesystem: WorkspaceFilesystem;
-  path_prefix: string;
   workspace_context: WorkspaceContext;
   bootstrap: WorkspaceBootstrapMetadata;
 };
 
-export type WriteTextFileMutationV1 = {
-  type: "write_text_file";
-  path: string;
-  text: string;
-  source: "derived" | "demo";
-};
-
-export type DeletePathMutationV1 = {
-  type: "delete_path";
-  path: string;
-};
-
 export type UpsertWorkspaceFilesMutationV1 = {
   type: "upsert_workspace_files";
-  files: Array<{
-    path: string;
+  artifacts: Array<{
     file: LocalWorkspaceFile;
     source: "derived" | "demo";
+    bucket: "uploaded" | "data" | "chart" | "pdf";
+    producer_key: string;
+    producer_label: string;
   }>;
 };
 
@@ -70,13 +63,19 @@ export type RenderChartArtifactMutationV1 = {
   file_id: string;
   title: string;
   chart: Record<string, unknown>;
-  artifact_path: string;
+  artifact_filename: string;
+  producer_key: string;
+  producer_label: string;
+};
+
+export type UpsertPdfSmartSplitRegistryMutationV1 = {
+  type: "upsert_pdf_smart_split_registry";
+  bundles: PdfSmartSplitBundleView[];
 };
 
 export type VfsMutationV1 =
-  | WriteTextFileMutationV1
-  | DeletePathMutationV1
   | UpsertWorkspaceFilesMutationV1
+  | UpsertPdfSmartSplitRegistryMutationV1
   | UpsertReportMutationV1
   | UpdateReportIndexMutationV1
   | ReplaceReportSlidesMutationV1

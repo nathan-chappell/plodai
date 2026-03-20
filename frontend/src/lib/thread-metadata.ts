@@ -19,7 +19,6 @@ export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThre
     workspace_state: metadata.workspace_state,
     openai_conversation_id: metadata.openai_conversation_id,
     openai_previous_response_id: metadata.openai_previous_response_id,
-    execution_mode: metadata.execution_mode,
     origin: metadata.origin,
   };
 }
