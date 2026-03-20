@@ -1,2 +1,0 @@
-role,example_id,literal,family_type,initial_score,phase_1_score,phase_2_score,net_change,steepest_checkpoint,local_window_change,concentration,note
-off-by-one example,O46,()))(((((())(())))()))(())()(),counterexample,0.055,0.676,0.355,+0.300,10,0.689,0.518,one extra close parenthesis

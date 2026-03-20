@@ -1,5 +1,4 @@
 export const WRITING_INDEX_PATH = "/writing";
-export const LEGACY_BLOG_INDEX_PATH = "/blog";
 
 export type WritingLinkEntry = {
   id: string;
@@ -36,7 +35,7 @@ const writingEntries: WritingLinkEntry[] = [
     platform: "Draft",
     summary:
       "A draft essay on why neural networks have the expressive and approximation properties that make them practical, with supporting artifacts evolving alongside the writeup.",
-    draftSourcePath: "blog/15-03-2026-the-theoretical-justification-of-neural-networks",
+    draftSourcePath: "notes/15-03-2026-the-theoretical-justification-of-neural-networks",
   },
   {
     id: "draft-ai-and-the-old-gods",
@@ -44,7 +43,7 @@ const writingEntries: WritingLinkEntry[] = [
     platform: "Draft",
     summary:
       "An unpublished essay draft exploring AI, mythic framing, and the emotional texture around modern tooling and identity.",
-    draftSourcePath: "blog/15-03-2026-ai-and-the-old-gods",
+    draftSourcePath: "notes/15-03-2026-ai-and-the-old-gods",
   },
 ];
 
@@ -84,8 +83,4 @@ export function formatWritingDate(value?: string): string | null {
 
 export function isWritingPath(pathname: string): boolean {
   return pathname === WRITING_INDEX_PATH;
-}
-
-export function isLegacyBlogPath(pathname: string): boolean {
-  return pathname === LEGACY_BLOG_INDEX_PATH || pathname.startsWith(`${LEGACY_BLOG_INDEX_PATH}/`);
 }

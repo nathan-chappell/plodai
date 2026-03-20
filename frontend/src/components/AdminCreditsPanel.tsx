@@ -295,7 +295,7 @@ export function AdminCreditsPanel() {
                       <AdminPanelBadge $tone={candidate.is_active ? "accent" : "muted"}>
                         {candidate.is_active ? "Active" : "Inactive"}
                       </AdminPanelBadge>
-                      {candidate.role === "admin" ? <AdminPanelBadge>Admin capabilities</AdminPanelBadge> : null}
+                      {candidate.role === "admin" ? <AdminPanelBadge>Admin tools</AdminPanelBadge> : null}
                     </AdminPanelBadgeRow>
                   </AdminPanelCell>
                   <AdminPanelCell>

@@ -15,7 +15,7 @@ from backend.app.agents.widgets import (
     build_handoff_trace_copy_text,
     build_handoff_trace_widget,
 )
-from backend.app.chatkit.metadata import CapabilityAgentSpec, CapabilityBundle
+from backend.app.chatkit.metadata import ToolProviderAgentSpec, ToolProviderBundle
 from backend.app.core.logging import get_logger, log_event
 
 COMPACTION_THRESHOLD_TOKENS = 200_000
@@ -28,7 +28,7 @@ Important operating rules:
 1. Use only the registered tools and the current conversation context.
 2. Treat the client-declared tool catalog as the source of truth for what local context is available.
 3. Prefer bounded, safe operations over raw data dumps or unconstrained exploration.
-4. If a required capability is not present in the registered tool catalog, say so plainly instead of inventing one.
+4. If a required tool is not present in the registered tool catalog, say so plainly instead of inventing one.
 5. When the user's goal is clear enough to act on, continue decisively without asking for unnecessary confirmation.
 6. Ask clarifying questions only when missing information, permissions, or tool availability would materially change the result.
 """.strip()
@@ -93,25 +93,25 @@ def _build_agent_instructions(
 def _build_response_api_metadata(
     context: ReportAgentContext,
     *,
-    capability_spec: CapabilityAgentSpec,
+    tool_provider_spec: ToolProviderAgentSpec,
 ) -> dict[str, str] | None:
-    capability_bundle = context.capability_bundle
-    root_capability_id = (
-        capability_bundle.get("root_capability_id")
-        if capability_bundle is not None
+    tool_provider_bundle = context.tool_provider_bundle
+    root_tool_provider_id = (
+        tool_provider_bundle.get("root_tool_provider_id")
+        if tool_provider_bundle is not None
         else None
     )
-    root_capability_spec = context.get_capability_spec(root_capability_id)
+    root_tool_provider_spec = context.get_tool_provider_spec(root_tool_provider_id)
     surface_key = context.thread_metadata.get("surface_key")
 
     metadata: dict[str, str] = {}
-    if root_capability_id:
-        metadata["root_capability_id"] = root_capability_id
-    if root_capability_spec is not None:
-        metadata["root_agent_name"] = root_capability_spec["agent_name"]
+    if root_tool_provider_id:
+        metadata["root_tool_provider_id"] = root_tool_provider_id
+    if root_tool_provider_spec is not None:
+        metadata["root_agent_name"] = root_tool_provider_spec["agent_name"]
 
-    metadata["capability_id"] = capability_spec["capability_id"]
-    metadata["agent_name"] = capability_spec["agent_name"]
+    metadata["tool_provider_id"] = tool_provider_spec["tool_provider_id"]
+    metadata["agent_name"] = tool_provider_spec["agent_name"]
 
     if isinstance(surface_key, str) and surface_key.strip():
         metadata["surface_key"] = surface_key.strip()
@@ -122,14 +122,14 @@ def _build_response_api_metadata(
 def _build_model_settings(
     context: ReportAgentContext,
     *,
-    capability_spec: CapabilityAgentSpec,
+    tool_provider_spec: ToolProviderAgentSpec,
 ) -> ModelSettings:
     safety_identifier = context.user_id[:64]
     return ModelSettings(
         parallel_tool_calls=False,
         metadata=_build_response_api_metadata(
             context,
-            capability_spec=capability_spec,
+            tool_provider_spec=tool_provider_spec,
         ),
         extra_args={
             "safety_identifier": safety_identifier,
@@ -146,43 +146,43 @@ def _build_model_settings(
 def _build_agent_graph(
     context: ReportAgentContext,
     *,
-    capability_bundle: CapabilityBundle,
+    tool_provider_bundle: ToolProviderBundle,
     model: str | None,
 ) -> dict[str, Agent[ChatKitAgentContext[ReportAgentContext]]]:
-    agents_by_capability_id: dict[
+    agents_by_tool_provider_id: dict[
         str, Agent[ChatKitAgentContext[ReportAgentContext]]
     ] = {}
-    capability_specs = {
-        capability["capability_id"]: capability
-        for capability in capability_bundle.get("capabilities", [])
+    tool_provider_specs = {
+        tool_provider["tool_provider_id"]: tool_provider
+        for tool_provider in tool_provider_bundle.get("tool_providers", [])
     }
     tool_stop_overrides: dict[str, list[str]] = {
         "feedback-agent": ["get_feedback", "send_feedback"],
     }
 
-    for capability_id, capability_spec in capability_specs.items():
-        client_tools = capability_spec.get("client_tools", [])
+    for tool_provider_id, tool_provider_spec in tool_provider_specs.items():
+        client_tools = tool_provider_spec.get("client_tools", [])
         tool_names = get_client_tool_names(client_tools)
         stop_at_tool_names = [
             *tool_names,
-            *tool_stop_overrides.get(capability_id, []),
+            *tool_stop_overrides.get(tool_provider_id, []),
         ]
         compiled_tools = list(
             build_agent_tools(
                 context,
-                capability_id=capability_id,
+                capability_id=tool_provider_id,
                 client_tools=client_tools,
             )
         )
         handoff_agent_names = [
-            capability_specs[target["capability_id"]]["agent_name"]
-            for target in capability_spec.get("handoff_targets", [])
-            if target["capability_id"] in capability_specs
+            tool_provider_specs[target["tool_provider_id"]]["agent_name"]
+            for target in tool_provider_spec.get("delegation_targets", [])
+            if target["tool_provider_id"] in tool_provider_specs
         ]
         agent_heading = (
-            f"{capability_spec['agent_name']}({', '.join(handoff_agent_names)}):"
+            f"{tool_provider_spec['agent_name']}({', '.join(handoff_agent_names)}):"
             if handoff_agent_names
-            else f"{capability_spec['agent_name']}:"
+            else f"{tool_provider_spec['agent_name']}:"
         )
         rendered_lines = [
             agent_heading,
@@ -196,47 +196,47 @@ def _build_agent_graph(
         log_event(
             logger,
             logging.DEBUG,
-            "agent.capability_compiled",
+            "agent.tool_provider_compiled",
             rendered=rendered_lines,
             dedupe=True,
         )
-        agents_by_capability_id[capability_id] = Agent[
+        agents_by_tool_provider_id[tool_provider_id] = Agent[
             ChatKitAgentContext[ReportAgentContext]
         ](
-            name=capability_spec["agent_name"],
+            name=tool_provider_spec["agent_name"],
             model=model,
             instructions=_build_agent_instructions(
                 context,
-                instructions=capability_spec["instructions"],
+                instructions=tool_provider_spec["instructions"],
             ),
             tools=compiled_tools,
             model_settings=_build_model_settings(
                 context,
-                capability_spec=capability_spec,
+                tool_provider_spec=tool_provider_spec,
             ),
             handoffs=[],
             tool_use_behavior={"stop_at_tool_names": stop_at_tool_names},
         )
 
-    for capability_id, capability_spec in capability_specs.items():
-        agent = agents_by_capability_id[capability_id]
+    for tool_provider_id, tool_provider_spec in tool_provider_specs.items():
+        agent = agents_by_tool_provider_id[tool_provider_id]
         agent.handoffs = [
             handoff(
-                agent=agents_by_capability_id[target["capability_id"]],
+                agent=agents_by_tool_provider_id[target["tool_provider_id"]],
                 tool_name_override=target["tool_name"],
                 tool_description_override=target["description"],
                 on_handoff=_build_handoff_callback(
-                    source_agent_name=capability_spec["agent_name"],
-                    target_agent_name=agents_by_capability_id[
-                        target["capability_id"]
+                    source_agent_name=tool_provider_spec["agent_name"],
+                    target_agent_name=agents_by_tool_provider_id[
+                        target["tool_provider_id"]
                     ].name,
                 ),
             )
-            for target in capability_spec.get("handoff_targets", [])
-            if target["capability_id"] in agents_by_capability_id
+            for target in tool_provider_spec.get("delegation_targets", [])
+            if target["tool_provider_id"] in agents_by_tool_provider_id
         ]
 
-    return agents_by_capability_id
+    return agents_by_tool_provider_id
 
 
 def build_registered_agent(
@@ -244,44 +244,49 @@ def build_registered_agent(
     *,
     model: str | None = None,
 ) -> Agent[ChatKitAgentContext[ReportAgentContext]]:
-    capability_bundle = context.capability_bundle
-    if capability_bundle is None:
+    tool_provider_bundle = context.tool_provider_bundle
+    if tool_provider_bundle is None:
         raise RuntimeError(
-            "No registered capability bundle is available for this thread."
+            "No registered tool provider bundle is available for this thread."
         )
 
-    root_capability_id = capability_bundle["root_capability_id"]
-    agents_by_capability_id = _build_agent_graph(
+    root_tool_provider_id = tool_provider_bundle["root_tool_provider_id"]
+    agents_by_tool_provider_id = _build_agent_graph(
         context,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
         model=model,
     )
-    root_agent = agents_by_capability_id.get(root_capability_id)
+    root_agent = agents_by_tool_provider_id.get(root_tool_provider_id)
     if root_agent is None:
         raise RuntimeError(
-            f"Capability bundle does not define root capability '{root_capability_id}'."
+            "Tool provider bundle does not define root tool provider "
+            f"'{root_tool_provider_id}'."
         )
     return root_agent
 
 
-def get_agent_graph_capability_ids(
-    capability_bundle: CapabilityBundle,
+def get_agent_graph_tool_provider_ids(
+    tool_provider_bundle: ToolProviderBundle,
 ) -> list[str]:
     return [
-        capability_spec["capability_id"]
-        for capability_spec in capability_bundle.get("capabilities", [])
+        tool_provider_spec["tool_provider_id"]
+        for tool_provider_spec in tool_provider_bundle.get("tool_providers", [])
     ]
 
 
-def get_capability_spec(
-    capability_bundle: CapabilityBundle,
-    capability_id: str,
-) -> CapabilityAgentSpec | None:
+def get_tool_provider_spec(
+    tool_provider_bundle: ToolProviderBundle,
+    tool_provider_id: str,
+) -> ToolProviderAgentSpec | None:
     return next(
         (
-            capability_spec
-            for capability_spec in capability_bundle.get("capabilities", [])
-            if capability_spec.get("capability_id") == capability_id
+            tool_provider_spec
+            for tool_provider_spec in tool_provider_bundle.get("tool_providers", [])
+            if tool_provider_spec.get("tool_provider_id") == tool_provider_id
         ),
         None,
     )
+
+
+get_agent_graph_capability_ids = get_agent_graph_tool_provider_ids
+get_capability_spec = get_tool_provider_spec

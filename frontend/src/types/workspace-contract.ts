@@ -1,4 +1,4 @@
-import type { PdfSmartSplitBundleView } from "../capabilities/types";
+import type { PdfSmartSplitBundleView } from "../tools/types";
 
 export const WORKSPACE_CONTRACT_VERSION = "v1" as const;
 
@@ -27,7 +27,7 @@ export type ReportSlidePanelType = (typeof REPORT_SLIDE_PANEL_TYPE_VALUES)[numbe
 
 export type WorkspaceAppStateV1 = {
   version: WorkspaceContractVersion;
-  active_capability_id: string | null;
+  active_tool_provider_id: string | null;
   active_workspace_tab: string | null;
   current_report_id: string | null;
   current_goal: string | null;
@@ -152,7 +152,7 @@ export type WorkspaceReportV1 = {
 
 export type WorkspaceToolCatalogV1 = {
   version: WorkspaceContractVersion;
-  capability_id: string | null;
+  tool_provider_id: string | null;
   tool_names: string[];
 };
 
@@ -185,7 +185,7 @@ export function buildDefaultWorkspaceAppState(
 ): WorkspaceAppStateV1 {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    active_capability_id: defaults.active_capability_id ?? null,
+    active_tool_provider_id: defaults.active_tool_provider_id ?? null,
     active_workspace_tab: defaults.active_workspace_tab ?? null,
     current_report_id: defaults.current_report_id ?? null,
     current_goal: defaults.current_goal ?? null,
@@ -217,7 +217,7 @@ export function buildDefaultWorkspaceToolCatalog(
 ): WorkspaceToolCatalogV1 {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    capability_id: defaults.capability_id ?? null,
+    tool_provider_id: defaults.tool_provider_id ?? null,
     tool_names: defaults.tool_names ?? [],
   };
 }
@@ -248,7 +248,7 @@ export function normalizeReportId(input: string): string {
 }
 
 export function buildDefaultAgentsFileContent(options: {
-  capabilityTitle: string;
+  toolProviderTitle: string;
   currentGoal: string;
 }): string {
   return [
@@ -256,7 +256,7 @@ export function buildDefaultAgentsFileContent(options: {
     "",
     `Workspace contract version: ${WORKSPACE_CONTRACT_VERSION}`,
     "Do not progress this workspace contract to v2 until the user explicitly says so.",
-    `This workspace is shared across agents. Use the active agent's tools together with the ${options.capabilityTitle} capability.`,
+    `This workspace is shared across tools. Use the active tool together with the ${options.toolProviderTitle} workflow.`,
     "",
     "## Current Objective",
     options.currentGoal.trim() || "No explicit objective has been recorded yet.",

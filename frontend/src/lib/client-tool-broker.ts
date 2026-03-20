@@ -15,7 +15,7 @@ import {
 import { addWorkspaceArtifactsWithResult, getWorkspaceContext } from "./workspace-fs";
 import { findWorkspaceFile } from "./workspace-files";
 
-import type { CapabilityWorkspaceContext } from "../capabilities/types";
+import type { ToolRuntimeContext } from "../tools/types";
 import type { ClientEffect, ClientToolArgsMap, ClientToolName } from "../types/analysis";
 import type { LocalOtherFile } from "../types/report";
 import type { ToolExecutionRequestV1, ToolExecutionResultV1, WorkspaceSnapshotV1 } from "../types/tool-runtime";
@@ -83,13 +83,16 @@ function getWorker(): Worker {
   return worker;
 }
 
-function buildSnapshot(workspace: CapabilityWorkspaceContext): WorkspaceSnapshotV1 {
+function buildSnapshot(workspace: ToolRuntimeContext): WorkspaceSnapshotV1 {
   const state = workspace.getState();
+  const producerKey = workspace.toolProviderId ?? workspace.capabilityId ?? "workspace-agent";
+  const producerLabel =
+    workspace.toolProviderTitle ?? workspace.capabilityTitle ?? "Workspace";
   return {
     version: "v1",
     workspace_id: state.workspaceId,
-    producer_key: workspace.capabilityId,
-    producer_label: workspace.capabilityTitle,
+    producer_key: producerKey,
+    producer_label: producerLabel,
     filesystem: state.filesystem,
     workspace_context: state.workspaceContext,
     bootstrap: buildWorkspaceBootstrapMetadata(state.filesystem),
@@ -97,7 +100,7 @@ function buildSnapshot(workspace: CapabilityWorkspaceContext): WorkspaceSnapshot
 }
 
 async function applyMutations(
-  workspace: CapabilityWorkspaceContext,
+  workspace: ToolRuntimeContext,
   result: ToolExecutionResultV1,
 ): Promise<ToolExecutionResultV1> {
   const chartEffects: ClientEffect[] = [];
@@ -252,7 +255,7 @@ async function applyMutations(
 }
 
 export async function executeToolWithBroker<Name extends ClientToolName>(
-  workspace: CapabilityWorkspaceContext,
+  workspace: ToolRuntimeContext,
   toolName: Name,
   args: ClientToolArgsMap[Name],
 ): Promise<ToolExecutionResultV1> {

@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import type { CapabilityDefinition, ShellWorkspaceRegistration } from "../capabilities/types";
+import type { ToolProviderDefinition, WorkspaceSurfaceRegistration } from "../tools/types";
 import { WorkspaceInventoryPane } from "./WorkspaceInventoryPane";
 import { usePlatformShellState } from "./hooks";
 import { PlatformThemeProvider } from "./platformTheme";
@@ -61,10 +61,10 @@ export function PlatformShell({
   onCloseWorkspaceModal,
   children,
 }: {
-  capabilities: CapabilityDefinition[];
+  capabilities: ToolProviderDefinition[];
   activeCapabilityId: string | null;
   onSelectCapability: (path: string) => void;
-  workspaceRegistration: ShellWorkspaceRegistration | null;
+  workspaceRegistration: WorkspaceSurfaceRegistration | null;
   workspaceModalOpen: boolean;
   onOpenWorkspaceModal: () => void;
   onCloseWorkspaceModal: () => void;

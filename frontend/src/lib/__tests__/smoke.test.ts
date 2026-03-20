@@ -11,36 +11,33 @@ import { createWorkspaceFilesystem } from "../workspace-fs";
 
 describe("frontend smoke harness", () => {
   it("builds a serializable report bundle for the browser harness", () => {
+    const filesystem = createWorkspaceFilesystem();
+    const workspaceContext = {
+      workspace_id: "report-agent-workspace",
+      referenced_item_ids: [],
+    };
     const workspace: CapabilityWorkspaceContext = {
-      activePrefix: "/report-agent/",
-      cwdPath: "/report-agent/",
+      toolProviderId: "report-agent",
+      toolProviderTitle: "Report Agent",
+      workspaceId: "report-agent-workspace",
       files: [],
       entries: [],
-      workspaceContext: {
-        path_prefix: "/report-agent/",
-        referenced_item_ids: [],
-      },
-      setActivePrefix: () => {},
-      createDirectory: (path: string) => path,
-      changeDirectory: (path: string) => path,
+      workspaceContext,
       updateFilesystem: () => {},
       getState: () => ({
-        activePrefix: "/report-agent/",
-        cwdPath: "/report-agent/",
+        workspaceId: "report-agent-workspace",
         files: [],
         entries: [],
-        filesystem: createWorkspaceFilesystem(),
-        workspaceContext: {
-          path_prefix: "/report-agent/",
-          referenced_item_ids: [],
-        },
+        filesystem,
+        workspaceContext,
       }),
     };
     const bundle = buildCapabilityBundleForRoot("report-agent", workspace);
 
     expect(() => JSON.stringify(bundle)).not.toThrow();
-    const reportCapability = bundle.capabilities.find(
-      (capability) => capability.capability_id === bundle.root_capability_id,
+    const reportCapability = bundle.tool_providers.find(
+      (toolProvider) =>
+        toolProvider.tool_provider_id === bundle.root_tool_provider_id,
     );
     expect(reportCapability?.client_tools.map((tool) => tool.name)).toEqual([
       "list_reports",

@@ -14,13 +14,13 @@ import {
 } from "./app/styles";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
-import { allCapabilityDefinitions } from "./capabilities/definitions";
-import type { ShellWorkspaceRegistration } from "./capabilities/types";
+import { allToolSurfaceDefinitions } from "./tools/definitions";
+import type { WorkspaceSurfaceRegistration } from "./tools/types";
 import { navigate, usePathname } from "./lib/router";
-import { isLegacyBlogPath, isWritingPath } from "./lib/writing";
+import { isWritingPath } from "./lib/writing";
 
 type CapabilityPageProps = {
-  onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
+  onRegisterWorkspace?: (registration: WorkspaceSurfaceRegistration | null) => void;
 };
 
 type CapabilityPageComponent = ComponentType<CapabilityPageProps>;
@@ -31,12 +31,12 @@ const WritingPage = lazy(async () => {
 });
 
 const WorkspaceAgentPage = lazy(async () => {
-  const module = await import("./capabilities/workspaceAgent");
+  const module = await import("./tools/workspaceAgent");
   return { default: module.WorkspaceAgentPage };
 });
 
 const AdminUsersPage = lazy(async () => {
-  const module = await import("./capabilities/adminUsers");
+  const module = await import("./tools/adminUsers");
   const WrappedAdminUsersPage: CapabilityPageComponent = () => <module.AdminUsersPage />;
   return { default: WrappedAdminUsersPage };
 });
@@ -56,7 +56,7 @@ function RouteLoadingState({ label }: { label: string }) {
 }
 
 function filterCapabilities(role: "admin" | "user") {
-  return allCapabilityDefinitions.filter((capability) =>
+  return allToolSurfaceDefinitions.filter((capability) =>
     capability.showInSidebar !== false &&
     (capability.tabs.length === 0 ||
       capability.tabs.some((tab) => (tab.visible ? tab.visible({ role }) : true))),
@@ -72,10 +72,10 @@ export function App() {
   const pathname = usePathname();
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const { dismissToast, toasts } = useToastState();
-  const viewingWriting = isWritingPath(pathname) || isLegacyBlogPath(pathname);
-  const [workspaceRegistration, setWorkspaceRegistration] = useState<ShellWorkspaceRegistration | null>(null);
+  const viewingWriting = isWritingPath(pathname);
+  const [workspaceRegistration, setWorkspaceRegistration] = useState<WorkspaceSurfaceRegistration | null>(null);
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
-  const handleRegisterWorkspace = useCallback((registration: ShellWorkspaceRegistration | null) => {
+  const handleRegisterWorkspace = useCallback((registration: WorkspaceSurfaceRegistration | null) => {
     setWorkspaceRegistration(registration);
   }, []);
   const handleSelectCapability = useCallback((path: string) => {

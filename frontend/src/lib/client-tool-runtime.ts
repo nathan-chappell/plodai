@@ -42,7 +42,7 @@ import type {
   RunLocalQueryToolArgs,
   SmartSplitPdfToolArgs,
 } from "../types/analysis";
-import type { PdfSmartSplitBundleView } from "../capabilities/types";
+import type { PdfSmartSplitBundleView } from "../tools/types";
 import type { LocalChartableFile, LocalDataset, LocalJsonFile, LocalOtherFile, LocalPdfFile, LocalWorkspaceFile } from "../types/report";
 import type { ToolExecutionRequestV1, ToolExecutionResultV1, VfsMutationV1, WorkspaceSnapshotV1 } from "../types/tool-runtime";
 import type { WorkspaceFileNode, WorkspaceFilesystem } from "../types/workspace";

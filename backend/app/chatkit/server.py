@@ -405,7 +405,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             available_files=workspace_files_from_workspace_state(
                 metadata.get("workspace_state")
             ),
-            capability_bundle=metadata.get("capability_bundle"),
+            tool_provider_bundle=metadata.get("tool_provider_bundle"),
         )
         context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
 
@@ -441,9 +441,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             context=context,
         )
         recent_item_data = recent_items.data
-        if context.capability_bundle is None:
+        if context.tool_provider_bundle is None:
             raise RuntimeError(
-                "No registered capability bundle is available for this thread or request surface."
+                "No registered tool provider bundle is available for this thread or request surface."
             )
 
         pending_items = self._collect_pending_items(

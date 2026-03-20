@@ -124,14 +124,14 @@ export type AgentPlan = {
   created_at?: string;
 };
 
-export type CapabilityHandoffTargetMetadata = {
-  capability_id: string;
+export type ToolProviderDelegationTargetMetadata = {
+  tool_provider_id: string;
   tool_name: string;
   description: string;
 };
 
-export type CapabilityAgentSpecMetadata = {
-  capability_id: string;
+export type ToolProviderSpecMetadata = {
+  tool_provider_id: string;
   agent_name: string;
   instructions: string;
   client_tools: Array<{
@@ -147,12 +147,12 @@ export type CapabilityAgentSpecMetadata = {
       arg_labels?: Record<string, string>;
     };
   }>;
-  handoff_targets: CapabilityHandoffTargetMetadata[];
+  delegation_targets: ToolProviderDelegationTargetMetadata[];
 };
 
-export type CapabilityBundleMetadata = {
-  root_capability_id: string;
-  capabilities: CapabilityAgentSpecMetadata[];
+export type ToolProviderBundleMetadata = {
+  root_tool_provider_id: string;
+  tool_providers: ToolProviderSpecMetadata[];
 };
 
 export type FeedbackOrigin = "interactive" | "ui_integration_test";
@@ -164,12 +164,16 @@ export type AppThreadMetadata = {
   chart_plan?: AgentPlan;
   chart_cache?: Record<string, string>;
   surface_key?: string;
-  capability_bundle?: CapabilityBundleMetadata;
+  tool_provider_bundle?: ToolProviderBundleMetadata;
   workspace_state?: WorkspaceState;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
   origin?: FeedbackOrigin;
 };
+
+export type CapabilityHandoffTargetMetadata = ToolProviderDelegationTargetMetadata;
+export type CapabilityAgentSpecMetadata = ToolProviderSpecMetadata;
+export type CapabilityBundleMetadata = ToolProviderBundleMetadata;
 
 export type UpdateThreadMetadataPayload = Partial<AppThreadMetadata>;
 

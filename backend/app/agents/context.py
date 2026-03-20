@@ -7,9 +7,9 @@ from backend.app.agents.DatasetMetadata import DatasetMetadata
 from backend.app.agents.workspace_file import WorkspaceFileMetadata
 from backend.app.chatkit.metadata import (
     AppThreadMetadata,
-    CapabilityAgentSpec,
-    CapabilityBundle,
     ClientToolDefinition,
+    ToolProviderAgentSpec,
+    ToolProviderBundle,
 )
 
 
@@ -24,7 +24,7 @@ class ReportAgentContext:
     thread_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
     available_files: list[WorkspaceFileMetadata] = field(default_factory=list)
     query_plan_model: type[BaseModel] | None = None
-    capability_bundle: CapabilityBundle | None = None
+    tool_provider_bundle: ToolProviderBundle | None = None
     uploaded_file_ids: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -75,50 +75,73 @@ class ReportAgentContext:
         )
 
     @property
-    def capability_id(self) -> str | None:
-        bundle = self.capability_bundle
-        return bundle.get("root_capability_id") if bundle is not None else None
+    def tool_provider_id(self) -> str | None:
+        bundle = self.tool_provider_bundle
+        return bundle.get("root_tool_provider_id") if bundle is not None else None
 
     @property
-    def capability_spec(self) -> CapabilityAgentSpec | None:
-        capability_id = self.capability_id
+    def tool_provider_spec(self) -> ToolProviderAgentSpec | None:
+        tool_provider_id = self.tool_provider_id
         return (
-            self.get_capability_spec(capability_id)
-            if capability_id is not None
+            self.get_tool_provider_spec(tool_provider_id)
+            if tool_provider_id is not None
             else None
         )
 
-    def get_capability_spec(
-        self, capability_id: str | None
-    ) -> CapabilityAgentSpec | None:
-        bundle = self.capability_bundle
-        if bundle is None or capability_id is None:
+    def get_tool_provider_spec(
+        self, tool_provider_id: str | None
+    ) -> ToolProviderAgentSpec | None:
+        bundle = self.tool_provider_bundle
+        if bundle is None or tool_provider_id is None:
             return None
         return next(
             (
-                capability
-                for capability in bundle.get("capabilities", [])
-                if capability.get("capability_id") == capability_id
+                tool_provider
+                for tool_provider in bundle.get("tool_providers", [])
+                if tool_provider.get("tool_provider_id") == tool_provider_id
             ),
             None,
         )
 
     @property
     def client_tools(self) -> list[ClientToolDefinition]:
-        capability_spec = self.capability_spec
+        tool_provider_spec = self.tool_provider_spec
         return (
-            list(capability_spec.get("client_tools") or [])
-            if capability_spec is not None
+            list(tool_provider_spec.get("client_tools") or [])
+            if tool_provider_spec is not None
             else []
         )
 
-    def get_client_tools(self, capability_id: str | None) -> list[ClientToolDefinition]:
-        capability_spec = self.get_capability_spec(capability_id)
+    def get_client_tools(
+        self, tool_provider_id: str | None
+    ) -> list[ClientToolDefinition]:
+        tool_provider_spec = self.get_tool_provider_spec(tool_provider_id)
         return (
-            list(capability_spec.get("client_tools") or [])
-            if capability_spec is not None
+            list(tool_provider_spec.get("client_tools") or [])
+            if tool_provider_spec is not None
             else []
         )
+
+    @property
+    def capability_bundle(self) -> ToolProviderBundle | None:
+        return self.tool_provider_bundle
+
+    @capability_bundle.setter
+    def capability_bundle(self, value: ToolProviderBundle | None) -> None:
+        self.tool_provider_bundle = value
+
+    @property
+    def capability_id(self) -> str | None:
+        return self.tool_provider_id
+
+    @property
+    def capability_spec(self) -> ToolProviderAgentSpec | None:
+        return self.tool_provider_spec
+
+    def get_capability_spec(
+        self, capability_id: str | None
+    ) -> ToolProviderAgentSpec | None:
+        return self.get_tool_provider_spec(capability_id)
 
     @property
     def workspace_agents_markdown(self) -> str | None:

@@ -465,11 +465,11 @@ def test_client_tool_schema_summary_rejects_non_closed_object_schema() -> None:
 
 def test_agent_compile_log_renders_human_readable_tool_block() -> None:
     clear_log_event_dedupe_cache()
-    capability_bundle = {
-        "root_capability_id": "report-agent",
-        "capabilities": [
+    tool_provider_bundle = {
+        "root_tool_provider_id": "report-agent",
+        "tool_providers": [
             {
-                "capability_id": "report-agent",
+                "tool_provider_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [
@@ -488,20 +488,20 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
                         "strict": True,
                     }
                 ],
-                "handoff_targets": [
+                "delegation_targets": [
                     {
-                        "capability_id": "chart-agent",
+                        "tool_provider_id": "chart-agent",
                         "tool_name": "delegate_to_chart_agent",
                         "description": "Delegate chart work.",
                     }
                 ],
             },
             {
-                "capability_id": "chart-agent",
+                "tool_provider_id": "chart-agent",
                 "agent_name": "Chart Agent",
                 "instructions": "Render charts.",
                 "client_tools": [],
-                "handoff_targets": [],
+                "delegation_targets": [],
             },
         ],
     }
@@ -510,7 +510,7 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
     )
     stream = StringIO()
     logger = logging.getLogger("report_foundry.agents.agent_builder")
@@ -524,14 +524,14 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
     try:
         _build_agent_graph(
             context,
-            capability_bundle=capability_bundle,
+            tool_provider_bundle=tool_provider_bundle,
             model=None,
         )
     finally:
         clear_log_event_dedupe_cache()
 
     output = stream.getvalue()
-    assert "agent.capability_compiled" in output
+    assert "agent.tool_provider_compiled" in output
     assert "\n > Report Agent(Chart Agent):" in output
     assert "\n > - name_current_thread(title)" in output
     assert "\n > - make_plan(" in output

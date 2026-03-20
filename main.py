@@ -14,7 +14,7 @@ DIST_DIR = ROOT_DIR / "dist"
 DEV_RELOAD_WATCH_DIRS = [ROOT_DIR / "backend"]
 DEV_RELOAD_EXCLUDE_DIRS = [
     ROOT_DIR / "frontend",
-    ROOT_DIR / "blog",
+    ROOT_DIR / "notes",
     ROOT_DIR / "dist",
     ROOT_DIR / "node_modules",
     ROOT_DIR / ".venv",

@@ -89,12 +89,12 @@ export function SignInPage({
           <SignInEyebrow>AI Portfolio</SignInEyebrow>
           <SignInTitle>Sign in before opening the workspace</SignInTitle>
           <SignInSubhead>
-            Keep authentication outside the app shell so the workspace can focus on capabilities, navigation, and
+            Keep authentication outside the app shell so the workspace can focus on tools, navigation, and
             account state once a user is approved and signed in.
           </SignInSubhead>
           <SignInFeatureList>
             <li>Unauthenticated users land on a dedicated sign-in route instead of seeing a half-open app shell.</li>
-            <li>The authenticated app can assume a known session and keep the sidebar focused on capability state.</li>
+            <li>The authenticated app can assume a known session and keep the sidebar focused on workspace state.</li>
             <li>Clerk handles sign-in, while backend access still checks role and activation in public metadata.</li>
           </SignInFeatureList>
           <SignInButtonRow>

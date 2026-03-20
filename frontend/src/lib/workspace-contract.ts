@@ -1,5 +1,5 @@
 import type { WorkspaceState, WorkspaceStateFileSummary } from "../types/analysis";
-import type { PdfSmartSplitBundleView, PdfSmartSplitEntryView } from "../capabilities/types";
+import type { PdfSmartSplitBundleView, PdfSmartSplitEntryView } from "../tools/types";
 import type { LocalOtherFile, LocalWorkspaceFile } from "../types/report";
 import type {
   AgentsFileSummary,
@@ -868,19 +868,29 @@ export function buildWorkspaceStateMetadata(
 export function ensureWorkspaceContractFilesystem(
   filesystem: WorkspaceFilesystem,
   options: {
-    capabilityId: string;
-    capabilityTitle: string;
+    toolProviderId?: string;
+    toolProviderTitle?: string;
+    capabilityId?: string;
+    capabilityTitle?: string;
     defaultGoal: string;
     activeWorkspaceTab: string;
     toolNames?: string[];
   },
 ): WorkspaceFilesystem {
+  const toolProviderId = options.toolProviderId ?? options.capabilityId;
+  const toolProviderTitle =
+    options.toolProviderTitle ?? options.capabilityTitle;
+  if (!toolProviderId || !toolProviderTitle) {
+    throw new Error(
+      "ensureWorkspaceContractFilesystem requires a toolProviderId and toolProviderTitle.",
+    );
+  }
   let nextFilesystem = filesystem;
 
   let appState =
     readWorkspaceAppState(nextFilesystem) ??
     buildDefaultWorkspaceAppState({
-      active_capability_id: options.capabilityId,
+      active_tool_provider_id: toolProviderId,
       active_workspace_tab: options.activeWorkspaceTab,
       current_goal: options.defaultGoal,
     });
@@ -913,7 +923,7 @@ export function ensureWorkspaceContractFilesystem(
   appState = {
     ...appState,
     version: WORKSPACE_CONTRACT_VERSION,
-    active_capability_id: options.capabilityId,
+    active_tool_provider_id: toolProviderId,
     active_workspace_tab:
       appState.active_workspace_tab ?? options.activeWorkspaceTab,
     current_goal: appState.current_goal ?? options.defaultGoal,
@@ -932,7 +942,7 @@ export function ensureWorkspaceContractFilesystem(
   nextFilesystem = writeWorkspaceToolCatalog(
     nextFilesystem,
     buildDefaultWorkspaceToolCatalog({
-      capability_id: options.capabilityId,
+      tool_provider_id: toolProviderId,
       tool_names: options.toolNames ?? [],
     }),
   );
@@ -941,7 +951,7 @@ export function ensureWorkspaceContractFilesystem(
     nextFilesystem = writeAgentsFile(
       nextFilesystem,
       buildDefaultAgentsFileContent({
-        capabilityTitle: options.capabilityTitle,
+        toolProviderTitle,
         currentGoal: appState.current_goal ?? options.defaultGoal,
       }),
     );
@@ -1047,13 +1057,13 @@ export function removeWorkspaceReportSlide(
 
 export function syncWorkspaceToolCatalog(
   filesystem: WorkspaceFilesystem,
-  capabilityId: string,
+  toolProviderId: string,
   toolNames: string[],
 ): WorkspaceFilesystem {
   return writeWorkspaceToolCatalog(
     filesystem,
     buildDefaultWorkspaceToolCatalog({
-      capability_id: capabilityId,
+      tool_provider_id: toolProviderId,
       tool_names: toolNames,
     }),
   );

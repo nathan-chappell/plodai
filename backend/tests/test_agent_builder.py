@@ -9,11 +9,11 @@ from backend.app.agents.context import ReportAgentContext
 
 
 def test_build_agent_graph_compiles_tools_per_capability() -> None:
-    capability_bundle = {
-        "root_capability_id": "report-agent",
-        "capabilities": [
+    tool_provider_bundle = {
+        "root_tool_provider_id": "report-agent",
+        "tool_providers": [
             {
-                "capability_id": "report-agent",
+                "tool_provider_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [
@@ -32,16 +32,16 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
                         "strict": True,
                     }
                 ],
-                "handoff_targets": [
+                "delegation_targets": [
                     {
-                        "capability_id": "chart-agent",
+                        "tool_provider_id": "chart-agent",
                         "tool_name": "delegate_to_chart_agent",
                         "description": "Delegate chart work.",
                     }
                 ],
             },
             {
-                "capability_id": "chart-agent",
+                "tool_provider_id": "chart-agent",
                 "agent_name": "Chart Agent",
                 "instructions": "Render charts.",
                 "client_tools": [
@@ -72,7 +72,7 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
                         "strict": True,
                     }
                 ],
-                "handoff_targets": [],
+                "delegation_targets": [],
             },
         ],
     }
@@ -81,12 +81,12 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
     )
 
     agents = _build_agent_graph(
         context,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
         model=None,
     )
 
@@ -101,42 +101,42 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
         "delegate_to_chart_agent"
     ]
     assert agents["report-agent"].model_settings.metadata == {
-        "root_capability_id": "report-agent",
+        "root_tool_provider_id": "report-agent",
         "root_agent_name": "Report Agent",
-        "capability_id": "report-agent",
+        "tool_provider_id": "report-agent",
         "agent_name": "Report Agent",
     }
     assert agents["chart-agent"].model_settings.metadata == {
-        "root_capability_id": "report-agent",
+        "root_tool_provider_id": "report-agent",
         "root_agent_name": "Report Agent",
-        "capability_id": "chart-agent",
+        "tool_provider_id": "chart-agent",
         "agent_name": "Chart Agent",
     }
 
 
 def test_handoff_streams_widget_with_distinct_status() -> None:
-    capability_bundle = {
-        "root_capability_id": "report-agent",
-        "capabilities": [
+    tool_provider_bundle = {
+        "root_tool_provider_id": "report-agent",
+        "tool_providers": [
             {
-                "capability_id": "report-agent",
+                "tool_provider_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [],
-                "handoff_targets": [
+                "delegation_targets": [
                     {
-                        "capability_id": "chart-agent",
+                        "tool_provider_id": "chart-agent",
                         "tool_name": "delegate_to_chart_agent",
                         "description": "Delegate chart work.",
                     }
                 ],
             },
             {
-                "capability_id": "chart-agent",
+                "tool_provider_id": "chart-agent",
                 "agent_name": "Chart Agent",
                 "instructions": "Render charts.",
                 "client_tools": [],
-                "handoff_targets": [],
+                "delegation_targets": [],
             },
         ],
     }
@@ -145,11 +145,11 @@ def test_handoff_streams_widget_with_distinct_status() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
     )
     agents = _build_agent_graph(
         context,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
         model=None,
     )
     widget_calls: list[tuple[object, str | None]] = []
@@ -173,22 +173,22 @@ def test_handoff_streams_widget_with_distinct_status() -> None:
 
 
 def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
-    capability_bundle = {
-        "root_capability_id": "feedback-agent",
-        "capabilities": [
+    tool_provider_bundle = {
+        "root_tool_provider_id": "feedback-agent",
+        "tool_providers": [
             {
-                "capability_id": "feedback-agent",
+                "tool_provider_id": "feedback-agent",
                 "agent_name": "Feedback Agent",
                 "instructions": "Capture feedback.",
                 "client_tools": [],
-                "handoff_targets": [],
+                "delegation_targets": [],
             },
             {
-                "capability_id": "report-agent",
+                "tool_provider_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports.",
                 "client_tools": [],
-                "handoff_targets": [],
+                "delegation_targets": [],
             },
         ],
     }
@@ -197,12 +197,12 @@ def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
     )
 
     agents = _build_agent_graph(
         context,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
         model=None,
     )
 
@@ -237,7 +237,7 @@ def test_build_agent_instructions_injects_workspace_agents_overlay() -> None:
             "workspace_state": {
                 "version": "v1",
                 "context": {
-                    "path_prefix": "/csv-agent/",
+                    "workspace_id": "workspace-demo",
                     "referenced_item_ids": [],
                 },
                 "files": [],
@@ -265,15 +265,15 @@ def test_build_agent_instructions_injects_workspace_agents_overlay() -> None:
 
 
 def test_build_agent_graph_attaches_surface_key_to_response_metadata() -> None:
-    capability_bundle = {
-        "root_capability_id": "report-agent",
-        "capabilities": [
+    tool_provider_bundle = {
+        "root_tool_provider_id": "report-agent",
+        "tool_providers": [
             {
-                "capability_id": "report-agent",
+                "tool_provider_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports.",
                 "client_tools": [],
-                "handoff_targets": [],
+                "delegation_targets": [],
             }
         ],
     }
@@ -282,20 +282,20 @@ def test_build_agent_graph_attaches_surface_key_to_response_metadata() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
         thread_metadata={"surface_key": "report-agent-demo"},
     )
 
     agents = _build_agent_graph(
         context,
-        capability_bundle=capability_bundle,
+        tool_provider_bundle=tool_provider_bundle,
         model=None,
     )
 
     assert agents["report-agent"].model_settings.metadata == {
-        "root_capability_id": "report-agent",
+        "root_tool_provider_id": "report-agent",
         "root_agent_name": "Report Agent",
-        "capability_id": "report-agent",
+        "tool_provider_id": "report-agent",
         "agent_name": "Report Agent",
         "surface_key": "report-agent-demo",
     }

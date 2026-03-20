@@ -6,7 +6,7 @@ import { MetaText } from "../app/styles";
 import type {
   PdfSmartSplitBundleView,
   ShellWorkspaceArtifact,
-} from "../capabilities/types";
+} from "../tools/types";
 import {
   buildSmartSplitGroups,
   type SmartSplitArtifactRow,

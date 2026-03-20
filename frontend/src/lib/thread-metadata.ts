@@ -15,7 +15,7 @@ export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThre
     chart_plan: metadata.chart_plan,
     chart_cache: metadata.chart_cache,
     surface_key: metadata.surface_key,
-    capability_bundle: metadata.capability_bundle,
+    tool_provider_bundle: metadata.tool_provider_bundle,
     workspace_state: metadata.workspace_state,
     openai_conversation_id: metadata.openai_conversation_id,
     openai_previous_response_id: metadata.openai_previous_response_id,

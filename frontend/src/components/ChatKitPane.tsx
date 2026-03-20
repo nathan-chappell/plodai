@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
 import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
-import { getCapabilityDefinition } from "../capabilities/definitions";
+import { getToolProviderDefinition } from "../tools/definitions";
 import {
   buildFeedbackSubmissionPrompt,
   buildProvideFeedbackPrompt,
@@ -11,7 +11,7 @@ import {
 } from "../lib/chatkit-feedback";
 import { devLogger } from "../lib/dev-logging";
 import { findChatKitScrollTarget, isNearScrollBottom } from "../lib/chatkit-autoscroll";
-import type { CapabilityBundle, CapabilityClientTool } from "../capabilities/types";
+import type { ToolProviderBundle, ToolProviderClientTool } from "../tools/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
@@ -61,7 +61,7 @@ const CHATKIT_MODEL_CHOICES = [
   {
     id: "powerful",
     label: import.meta.env.VITE_CHATKIT_POWERFUL_MODEL_LABEL ?? "Powerful",
-    description: "Best available capability for hard cases",
+    description: "Best available model for hard cases",
   },
 ] as const;
 
@@ -72,11 +72,11 @@ function formatToolLabel(tool: string): string {
     .join(" ");
 }
 
-function listBundleToolDefinitions(capabilityBundle: CapabilityBundle) {
+function listBundleToolDefinitions(capabilityBundle: ToolProviderBundle) {
   const seen = new Set<string>();
-  const toolDefinitions: Array<CapabilityBundle["capabilities"][number]["client_tools"][number]> = [];
+  const toolDefinitions: Array<ToolProviderBundle["tool_providers"][number]["client_tools"][number]> = [];
 
-  for (const capability of capabilityBundle.capabilities) {
+  for (const capability of capabilityBundle.tool_providers) {
     for (const tool of capability.client_tools) {
       if (seen.has(tool.name)) {
         continue;
@@ -97,16 +97,16 @@ type ComposerToolOption = {
   placeholderOverride?: string;
 };
 
-function listBundleComposerTools(capabilityBundle: CapabilityBundle): ComposerToolOption[] {
+function listBundleComposerTools(capabilityBundle: ToolProviderBundle): ComposerToolOption[] {
   const capabilityComposerTools: Array<ComposerToolOption & { order: number }> = [];
 
-  for (const capability of capabilityBundle.capabilities) {
-    const definition = getCapabilityDefinition(capability.capability_id);
+  for (const capability of capabilityBundle.tool_providers) {
+    const definition = getToolProviderDefinition(capability.tool_provider_id);
     if (!definition?.showInComposer) {
       continue;
     }
     capabilityComposerTools.push({
-      id: capability.capability_id,
+      id: capability.tool_provider_id,
       label: definition.composerLabel ?? definition.title,
       shortLabel: definition.composerShortLabel,
       placeholderOverride: definition.composerPlaceholder ?? definition.chatkitPlaceholder,
@@ -199,7 +199,7 @@ export type ChatKitQuickAction = {
 };
 
 export function buildChatKitRequestMetadata(options: {
-  capabilityBundle: CapabilityBundle;
+  capabilityBundle: ToolProviderBundle;
   workspaceState?: WorkspaceState;
   investigationBrief?: string;
   threadOrigin: FeedbackOrigin;
@@ -209,8 +209,8 @@ export function buildChatKitRequestMetadata(options: {
     surface_key:
       typeof window !== "undefined"
         ? window.location.pathname
-        : options.capabilityBundle.root_capability_id,
-    capability_bundle: options.capabilityBundle,
+        : options.capabilityBundle.root_tool_provider_id,
+    tool_provider_bundle: options.capabilityBundle,
     workspace_state: options.workspaceState,
     origin: options.threadOrigin,
   };
@@ -238,13 +238,13 @@ export function ChatKitHarness({
   showChatKitHeader = true,
   onToolActivity,
 }: {
-  capabilityBundle: CapabilityBundle;
+  capabilityBundle: ToolProviderBundle;
   files: LocalWorkspaceFile[];
   workspaceState?: WorkspaceState;
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
-  clientTools: CapabilityClientTool[];
+  clientTools: ToolProviderClientTool[];
   headerTitle?: string;
   greeting?: string;
   prompts?: readonly ChatKitStarterPrompt[];
@@ -491,7 +491,7 @@ export function ChatKitHarness({
         setRunning(true);
         setStatus("Agent run in progress.");
         devLogger.responseStart({
-          capabilityId: capabilityBundle.root_capability_id,
+          capabilityId: capabilityBundle.root_tool_provider_id,
           fileCount: files.length,
           running: true,
           threadId: threadIdRef.current,
@@ -507,7 +507,7 @@ export function ChatKitHarness({
           scheduleIdleStatus("Agent run finished.");
         }
         devLogger.responseEnd({
-          capabilityId: capabilityBundle.root_capability_id,
+          capabilityId: capabilityBundle.root_tool_provider_id,
           fileCount: files.length,
           running: false,
           threadId: threadIdRef.current,
@@ -541,7 +541,7 @@ export function ChatKitHarness({
         let effectCount = 0;
         let appendedFileCount = 0;
         devLogger.clientToolStart({
-          capabilityId: capabilityBundle.root_capability_id,
+          capabilityId: capabilityBundle.root_tool_provider_id,
           fileCount: files.length,
           threadId: threadIdRef.current,
           toolName: name,
@@ -568,7 +568,7 @@ export function ChatKitHarness({
             },
           });
           devLogger.clientToolSuccess({
-            capabilityId: capabilityBundle.root_capability_id,
+            capabilityId: capabilityBundle.root_tool_provider_id,
             fileCount: files.length,
             threadId: threadIdRef.current,
             toolName: name,
@@ -584,7 +584,7 @@ export function ChatKitHarness({
           return result;
         } catch (error) {
           devLogger.clientToolError({
-            capabilityId: capabilityBundle.root_capability_id,
+            capabilityId: capabilityBundle.root_tool_provider_id,
             fileCount: files.length,
             threadId: threadIdRef.current,
             toolName: name,
@@ -618,7 +618,7 @@ export function ChatKitHarness({
       composerTools,
       colorScheme,
       composerPlaceholder,
-      capabilityBundle.root_capability_id,
+      capabilityBundle.root_tool_provider_id,
       files.length,
       greeting,
       headerTitle,
@@ -753,12 +753,12 @@ export function ChatKitPane({
   showChatKitHeader = true,
   onToolActivity,
 }: {
-  capabilityBundle: CapabilityBundle;
+  capabilityBundle: ToolProviderBundle;
   enabled: boolean;
   files: LocalWorkspaceFile[];
   workspaceState?: WorkspaceState;
   investigationBrief: string;
-  clientTools: CapabilityClientTool[];
+  clientTools: ToolProviderClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
   headerTitle?: string;
@@ -790,14 +790,14 @@ export function ChatKitPane({
 
   useEffect(() => {
     devLogger.chatKitGate({
-      capabilityId: capabilityBundle.root_capability_id,
+      capabilityId: capabilityBundle.root_tool_provider_id,
       clientToolCount: clientTools.length,
       enabled,
       canInvestigate,
       fileCount: files.length,
       emptyMessage,
     });
-  }, [capabilityBundle.root_capability_id, canInvestigate, clientTools.length, emptyMessage, enabled, files.length]);
+  }, [capabilityBundle.root_tool_provider_id, canInvestigate, clientTools.length, emptyMessage, enabled, files.length]);
 
   return (
     <ChatKitPaneCard>

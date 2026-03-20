@@ -124,8 +124,7 @@ vi.mock("../../lib/dev-logging", () => ({
 import { ChatKitHarness, ChatKitPane, buildChatKitRequestMetadata } from "../ChatKitPane";
 import type { CapabilityBundle, CapabilityClientTool } from "../../capabilities/types";
 import {
-  chartAgentCapability,
-  csvAgentCapability,
+  dataAgentCapability,
   pdfAgentCapability,
   reportAgentCapability,
   workspaceAgentCapability,
@@ -155,14 +154,14 @@ function setScrollMetrics(
 }
 
 const capabilityBundle: CapabilityBundle = {
-  root_capability_id: "report-agent",
-  capabilities: [
+  root_tool_provider_id: "report-agent",
+  tool_providers: [
     {
-      capability_id: "report-agent",
+      tool_provider_id: "report-agent",
       agent_name: "Report Agent",
       instructions: "Inspect files.",
       client_tools: [],
-      handoff_targets: [],
+      delegation_targets: [],
     },
   ],
 };
@@ -348,7 +347,7 @@ describe("ChatKitHarness auto-scroll", () => {
       }),
     ).toMatchObject({
       investigation_brief: "Render the chart before stopping.",
-      capability_bundle: capabilityBundle,
+      tool_provider_bundle: capabilityBundle,
       workspace_state: workspaceState,
       origin: "interactive",
     });
@@ -376,8 +375,8 @@ describe("ChatKitHarness auto-scroll", () => {
 
   it("defaults to compact chrome and accepts capability-specific lead text", async () => {
     await renderPane("", {
-      greeting: csvAgentCapability.chatkitLead,
-      composerPlaceholder: csvAgentCapability.chatkitPlaceholder,
+      greeting: dataAgentCapability.chatkitLead,
+      composerPlaceholder: dataAgentCapability.chatkitPlaceholder,
     });
 
     expect(container.textContent).not.toContain("Analyst workspace");
@@ -388,16 +387,15 @@ describe("ChatKitHarness auto-scroll", () => {
     const startScreen = latestChatKitOptions?.startScreen as { greeting?: string } | undefined;
     const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
 
-    expect(startScreen?.greeting).toBe(csvAgentCapability.chatkitLead);
-    expect(composer?.placeholder).toBe(csvAgentCapability.chatkitPlaceholder);
+    expect(startScreen?.greeting).toBe(dataAgentCapability.chatkitLead);
+    expect(composer?.placeholder).toBe(dataAgentCapability.chatkitPlaceholder);
   });
 
   it("can receive compact ChatKit copy for all core capability surfaces", async () => {
     const capabilities = [
       workspaceAgentCapability,
       reportAgentCapability,
-      csvAgentCapability,
-      chartAgentCapability,
+      dataAgentCapability,
       pdfAgentCapability,
     ];
 
@@ -417,17 +415,17 @@ describe("ChatKitHarness auto-scroll", () => {
 
   it("uses capability-level composer tools instead of raw client function names", async () => {
     const bundleWithSpecialists: CapabilityBundle = {
-      root_capability_id: "workspace-agent",
-      capabilities: [
+      root_tool_provider_id: "workspace-agent",
+      tool_providers: [
         {
-          capability_id: "workspace-agent",
+          tool_provider_id: "workspace-agent",
           agent_name: "Workspace Agent",
           instructions: "Route work.",
           client_tools: [],
-          handoff_targets: [],
+          delegation_targets: [],
         },
         {
-          capability_id: "report-agent",
+          tool_provider_id: "report-agent",
           agent_name: "Report Agent",
           instructions: "Build reports.",
           client_tools: [
@@ -442,10 +440,31 @@ describe("ChatKitHarness auto-scroll", () => {
               },
             },
           ],
-          handoff_targets: [],
+          delegation_targets: [],
         },
         {
-          capability_id: "csv-agent",
+          tool_provider_id: "data-agent",
+          agent_name: "Data Agent",
+          instructions: "Analyze data and coordinate charts.",
+          client_tools: [
+            {
+              type: "function",
+              name: "list_csv_files",
+              description: "List CSV files.",
+              parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+              display: {
+                label: "List CSV Files",
+              },
+            },
+          ],
+          delegation_targets: [],
+        },
+        {
+          tool_provider_id: "csv-agent",
           agent_name: "CSV Agent",
           instructions: "Analyze CSVs.",
           client_tools: [
@@ -458,15 +477,12 @@ describe("ChatKitHarness auto-scroll", () => {
                 properties: {},
                 additionalProperties: false,
               },
-              display: {
-                label: "Create CSV File",
-              },
             },
           ],
-          handoff_targets: [],
+          delegation_targets: [],
         },
         {
-          capability_id: "chart-agent",
+          tool_provider_id: "chart-agent",
           agent_name: "Chart Agent",
           instructions: "Render charts.",
           client_tools: [
@@ -481,10 +497,10 @@ describe("ChatKitHarness auto-scroll", () => {
               },
             },
           ],
-          handoff_targets: [],
+          delegation_targets: [],
         },
         {
-          capability_id: "pdf-agent",
+          tool_provider_id: "pdf-agent",
           agent_name: "PDF Agent",
           instructions: "Inspect PDFs.",
           client_tools: [
@@ -499,7 +515,7 @@ describe("ChatKitHarness auto-scroll", () => {
               },
             },
           ],
-          handoff_targets: [],
+          delegation_targets: [],
         },
       ],
     };
@@ -529,18 +545,11 @@ describe("ChatKitHarness auto-scroll", () => {
         icon: "document",
       },
       {
-        id: "csv-agent",
-        label: "CSV",
-        shortLabel: "CSV",
-        placeholderOverride: "Use the CSV specialist for grouped queries and reusable data artifacts.",
+        id: "data-agent",
+        label: "Data",
+        shortLabel: "Data",
+        placeholderOverride: "Use the data tool for grouped analysis, reusable artifacts, and chart follow-through.",
         icon: "analytics",
-      },
-      {
-        id: "chart-agent",
-        label: "Charts",
-        shortLabel: "Charts",
-        placeholderOverride: "Use the chart specialist to turn saved data artifacts into polished charts.",
-        icon: "chart",
       },
       {
         id: "pdf-agent",

@@ -9,7 +9,7 @@ import {
   formatByteSize,
   openWorkspaceFileInNewTab,
 } from "../lib/workspace-artifacts";
-import type { ShellWorkspaceArtifact } from "../capabilities/types";
+import type { ShellWorkspaceArtifact } from "../tools/types";
 import type { LocalWorkspaceFile } from "../types/report";
 
 const PAGE_SIZE = 8;

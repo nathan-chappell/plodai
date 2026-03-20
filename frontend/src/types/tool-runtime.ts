@@ -1,4 +1,4 @@
-import type { PdfSmartSplitBundleView } from "../capabilities/types";
+import type { PdfSmartSplitBundleView } from "../tools/types";
 import type { ClientEffect, ClientToolArgsMap, ClientToolName } from "./analysis";
 import type { LocalWorkspaceFile } from "./report";
 import type { WorkspaceContext, WorkspaceFilesystem } from "./workspace";

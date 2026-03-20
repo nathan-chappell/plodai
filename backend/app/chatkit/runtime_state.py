@@ -38,7 +38,6 @@ def _workspace_file_from_summary(
         id=file_summary["id"],
         name=file_summary["name"],
         kind=kind,
-        path=file_summary["path"],
         extension=file_summary.get("extension", ""),
         mime_type=file_summary.get("mime_type"),
         byte_size=file_summary.get("byte_size"),
@@ -95,12 +94,12 @@ def build_runtime_metadata_patch(
     ):
         patch["surface_key"] = request_surface_key
 
-    request_bundle = request_metadata.get("capability_bundle")
+    request_bundle = request_metadata.get("tool_provider_bundle")
     if (
         request_bundle is not None
-        and current_metadata.get("capability_bundle") != request_bundle
+        and current_metadata.get("tool_provider_bundle") != request_bundle
     ):
-        patch["capability_bundle"] = request_bundle
+        patch["tool_provider_bundle"] = request_bundle
 
     request_workspace_state = request_metadata.get("workspace_state")
     if (
@@ -139,7 +138,7 @@ def resolve_thread_runtime_state(
     context.available_files = workspace_files_from_workspace_state(
         metadata.get("workspace_state")
     )
-    context.capability_bundle = metadata.get("capability_bundle")
+    context.tool_provider_bundle = metadata.get("tool_provider_bundle")
     query_plan_model, _ = build_query_plan_model(context.available_datasets)
     context.query_plan_model = query_plan_model
 

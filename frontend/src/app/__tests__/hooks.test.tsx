@@ -67,8 +67,4 @@ describe("useAppRouteGuards", () => {
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 
-  it("redirects legacy /blog routes to /writing", async () => {
-    await renderRouteGuard({ pathname: "/blog/legacy-post" });
-    expect(navigateSpy).toHaveBeenCalledWith("/writing");
-  });
 });

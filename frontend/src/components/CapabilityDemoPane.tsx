@@ -3,17 +3,21 @@ import styled from "styled-components";
 
 import { ChatKitPane, type ChatKitQuickAction } from "./ChatKitPane";
 import { MetaText, sectionPanelCss } from "../app/styles";
-import type { CapabilityBundle, CapabilityClientTool, CapabilityDemoScenario } from "../capabilities/types";
+import type {
+  ToolProviderBundle,
+  ToolProviderClientTool,
+  ToolProviderDemoScenario,
+} from "../tools/types";
 import type { ClientEffect, WorkspaceState } from "../types/analysis";
 import { devLogger } from "../lib/dev-logging";
 import type { LocalWorkspaceFile } from "../types/report";
 
-export function hasDemoScenarioNotes(scenario: CapabilityDemoScenario | null): boolean {
+export function hasDemoScenarioNotes(scenario: ToolProviderDemoScenario | null): boolean {
   return Boolean(scenario?.expectedOutcomes?.length || scenario?.notes?.length);
 }
 
 function buildDemoNotesBullets(
-  scenario: CapabilityDemoScenario | null,
+  scenario: ToolProviderDemoScenario | null,
 ): string[] {
   if (!scenario) {
     return [];
@@ -29,6 +33,7 @@ export function CapabilityDemoPane({
   scenario,
   loading,
   error,
+  toolProviderBundle,
   capabilityBundle,
   files,
   workspaceState,
@@ -39,26 +44,31 @@ export function CapabilityDemoPane({
   showScenarioNotes = true,
   showChatKitHeader = true,
 }: {
-  scenario: CapabilityDemoScenario | null;
+  scenario: ToolProviderDemoScenario | null;
   loading: boolean;
   error: string | null;
-  capabilityBundle: CapabilityBundle;
+  toolProviderBundle?: ToolProviderBundle;
+  capabilityBundle?: ToolProviderBundle;
   files: LocalWorkspaceFile[];
   workspaceState?: WorkspaceState;
-  clientTools: CapabilityClientTool[];
+  clientTools: ToolProviderClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
   onPrepareDemoRun?: () => Promise<unknown> | void;
   showScenarioNotes?: boolean;
   showChatKitHeader?: boolean;
 }) {
+  const resolvedToolProviderBundle = toolProviderBundle ?? capabilityBundle;
+  if (!resolvedToolProviderBundle) {
+    throw new Error("CapabilityDemoPane requires a tool provider bundle.");
+  }
   const workspaceFileIds = new Set(files.map((file) => file.id));
   const demoReady = scenario ? scenario.workspaceSeed.every((file) => workspaceFileIds.has(file.id)) : false;
   const demoPreparing = loading || (!error && !demoReady);
   const demoNotesBullets = buildDemoNotesBullets(scenario);
   useEffect(() => {
     devLogger.demoState({
-      capabilityId: capabilityBundle.root_capability_id,
+      capabilityId: resolvedToolProviderBundle.root_tool_provider_id,
       active: true,
       ready: true,
       loading,
@@ -68,7 +78,7 @@ export function CapabilityDemoPane({
       error,
       scenarioId: scenario?.id ?? null,
     });
-  }, [capabilityBundle.root_capability_id, demoReady, error, files.length, loading, scenario]);
+  }, [resolvedToolProviderBundle.root_tool_provider_id, demoReady, error, files.length, loading, scenario]);
   const prompts = scenario
     ? [
         {
@@ -105,7 +115,7 @@ export function CapabilityDemoPane({
       ) : null}
 
       <ChatKitPane
-        capabilityBundle={capabilityBundle}
+        capabilityBundle={resolvedToolProviderBundle}
         enabled={demoReady}
         files={files}
         workspaceState={workspaceState}

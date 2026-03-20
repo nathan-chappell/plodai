@@ -10,8 +10,8 @@ import { createWorkspaceFilesystem } from "../workspace-fs";
 import type { CapabilityWorkspaceContext } from "../../capabilities/types";
 
 function capabilityIdsFor(rootCapabilityId: string): string[] {
-  return buildCapabilityBundleForRoot(rootCapabilityId, createWorkspaceContext()).capabilities.map(
-    (capability) => capability.capability_id,
+  return buildCapabilityBundleForRoot(rootCapabilityId, createWorkspaceContext()).tool_providers.map(
+    (toolProvider) => toolProvider.tool_provider_id,
   );
 }
 
@@ -47,9 +47,10 @@ describe("capability registry", () => {
     expect(capabilityIdsFor("workspace-agent")).toEqual([
       "workspace-agent",
       "report-agent",
+      "data-agent",
       "csv-agent",
-      "chart-agent",
       "feedback-agent",
+      "chart-agent",
       "pdf-agent",
     ]);
   });
@@ -57,15 +58,21 @@ describe("capability registry", () => {
   it("returns the expected dependency graph for the report agent", () => {
     expect(capabilityIdsFor("report-agent")).toEqual([
       "report-agent",
+      "data-agent",
       "csv-agent",
-      "chart-agent",
       "feedback-agent",
+      "chart-agent",
       "pdf-agent",
     ]);
   });
 
-  it("returns the expected dependency graph for the csv agent", () => {
-    expect(capabilityIdsFor("csv-agent")).toEqual(["csv-agent", "chart-agent", "feedback-agent"]);
+  it("returns the expected dependency graph for the data agent", () => {
+    expect(capabilityIdsFor("data-agent")).toEqual([
+      "data-agent",
+      "csv-agent",
+      "feedback-agent",
+      "chart-agent",
+    ]);
   });
 
   it("returns standalone bundles for chart and pdf agents", () => {
@@ -81,8 +88,8 @@ describe("capability registry", () => {
   it("keeps the root report agent limited to report CRUD tools", () => {
     const workspace = createWorkspaceContext();
     const bundle = buildCapabilityBundleForRoot("report-agent", workspace);
-    const rootSpec = bundle.capabilities.find(
-      (capability) => capability.capability_id === "report-agent",
+    const rootSpec = bundle.tool_providers.find(
+      (toolProvider) => toolProvider.tool_provider_id === "report-agent",
     );
 
     expect(rootSpec?.client_tools.map((tool) => tool.name)).toEqual([

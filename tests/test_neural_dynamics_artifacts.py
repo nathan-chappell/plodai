@@ -9,9 +9,9 @@ from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import blog.scripts.mlp_story_artifacts as mlp_story
-import blog.scripts.neural_dynamics_artifacts as demo
-import blog.scripts.precision_story_artifacts as precision_story
+import notes.scripts.mlp_story_artifacts as mlp_story
+import notes.scripts.neural_dynamics_artifacts as demo
+import notes.scripts.precision_story_artifacts as precision_story
 
 
 def _hamming_distance(left: str, right: str) -> int:
@@ -100,13 +100,14 @@ def test_precision_story_figure_uses_matplotlib_layout_and_precision_annotations
 
 def test_article_uses_repo_relative_asset_links() -> None:
     article = Path(
-        "blog/15-03-2026-the-theoretical-justification-of-neural-networks/article.md"
+        "notes/15-03-2026-the-theoretical-justification-of-neural-networks/article.md"
     ).read_text(encoding="utf-8")
 
-    assert "./assets/mlp-sine-story.svg" in article
-    assert "./assets/stack-cantor-dust-story.svg" in article
-    assert "./assets/rnn-training-story.svg" in article
-    assert article.count("./assets/") == 3
+    prefix = "../../tmp/15-03-2026-the-theoretical-justification-of-neural-networks/assets/"
+    assert f"{prefix}mlp-sine-story.png" in article
+    assert f"{prefix}stack-cantor-dust-story.png" in article
+    assert f"{prefix}rnn-training-story.png" in article
+    assert article.count(prefix) == 3
 
 
 def test_story_probe_pool_uses_balanced_family_slice() -> None:
@@ -201,7 +202,7 @@ def test_run_rnn_experiment_returns_phased_shock_story_metadata(
 def test_curated_probe_bundle_uses_long_held_out_examples(
     small_rnn_result: demo.RNNExperimentResult,
 ) -> None:
-    from blog.scripts.rnn_transition_selection import build_curated_probe_bundle
+    from notes.scripts.rnn_transition_selection import build_curated_probe_bundle
 
     bundle = build_curated_probe_bundle(
         small_rnn_result,
@@ -243,13 +244,13 @@ def test_build_transition_figure_includes_trace_panels_and_endpoint_context(
 ) -> None:
     import matplotlib.pyplot as plt
 
-    from blog.scripts.rnn_transition_matplotlib import build_transition_figure
-    from blog.scripts.rnn_transition_metrics import (
+    from notes.scripts.rnn_transition_matplotlib import build_transition_figure
+    from notes.scripts.rnn_transition_metrics import (
         TransitionMetricsBundle,
         assess_transition,
         build_transition_metrics,
     )
-    from blog.scripts.rnn_transition_selection import build_curated_probe_bundle
+    from notes.scripts.rnn_transition_selection import build_curated_probe_bundle
 
     bundle = build_curated_probe_bundle(
         small_rnn_result,
@@ -302,7 +303,7 @@ def test_render_rnn_transition_report_produces_static_report_bundle(
     small_rnn_result: demo.RNNExperimentResult,
     tmp_path: Path,
 ) -> None:
-    from blog.scripts.rnn_transition_report import render_rnn_transition_report
+    from notes.scripts.rnn_transition_report import render_rnn_transition_report
 
     manifest = render_rnn_transition_report(
         small_rnn_result,
@@ -329,7 +330,7 @@ def test_render_rnn_transition_report_produces_static_report_bundle(
     assert manifest["story_value_transform"] == "boundary_emphasized_probability_nonlinear"
     assert manifest["figure_background"] == "dark_slate"
     assert manifest["summary_table_files"] == ["rnn-transition-summary.csv"]
-    assert (tmp_path / "rnn-training-story.svg").exists()
+    assert (tmp_path / "rnn-training-story.png").exists()
     assert (tmp_path / "rnn-transition-summary.csv").exists()
     assert (tmp_path / "rnn-transition-metrics.json").exists()
     assert (tmp_path / "rnn-transition-assessment.md").exists()
@@ -391,7 +392,7 @@ def test_render_mlp_assets_uses_fixed_publication_shape(
     )
     assert manifest["seed"] == 7
     assert manifest["published_shape"] == [32]
-    assert "mlp-sine-story.svg" in manifest["files"]
+    assert "mlp-sine-story.png" in manifest["files"]
     assert manifest["selected_epochs"] == [0, 4]
     assert manifest["reorganization_epoch"] == 4
     assert manifest["reorganization_score"] >= 0.0
@@ -404,7 +405,7 @@ def test_generate_mlp_cli_smoke(tmp_path: Path) -> None:
         ["generate", "--target", "mlp", "--output-dir", str(tmp_path), "--mlp-epochs", "8", "--mlp-batch-size", "32"],
     )
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "mlp-sine-story.svg").exists()
+    assert (tmp_path / "mlp-sine-story.png").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["seed"] == {"shared": None, "mlp": 7, "rnn": 1337}
     assert manifest["mlp"]["seed"] == 7
@@ -419,7 +420,7 @@ def test_generate_precision_cli_smoke(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "stack-cantor-dust-story.svg").exists()
+    assert (tmp_path / "stack-cantor-dust-story.png").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["precision"]["encoding"] == demo.PRECISION_STORY_MODE
     assert manifest["precision"]["dust_depth"] == demo.PRECISION_DUST_DEPTH
@@ -432,12 +433,12 @@ def test_generate_all_manifest_includes_precision_section(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(demo, "render_mlp_assets", lambda **_: {"files": ["mlp-sine-story.svg"]})
+    monkeypatch.setattr(demo, "render_mlp_assets", lambda **_: {"files": ["mlp-sine-story.png"]})
     monkeypatch.setattr(
         demo,
         "render_precision_assets",
         lambda **_: {
-            "files": ["stack-cantor-dust-story.svg"],
+            "files": ["stack-cantor-dust-story.png"],
             "encoding": demo.PRECISION_STORY_MODE,
             "dust_depth": demo.PRECISION_DUST_DEPTH,
             "counting_bits": demo.PRECISION_COUNT_BITS,
@@ -448,7 +449,7 @@ def test_generate_all_manifest_includes_precision_section(
             "milestone_step_indexes": [0],
         },
     )
-    monkeypatch.setattr(demo, "render_rnn_assets", lambda **_: {"files": ["rnn-training-story.svg"]})
+    monkeypatch.setattr(demo, "render_rnn_assets", lambda **_: {"files": ["rnn-training-story.png"]})
 
     runner = CliRunner()
     result = runner.invoke(
@@ -459,9 +460,9 @@ def test_generate_all_manifest_includes_precision_section(
     assert result.exit_code == 0, result.output
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["seed"] == {"shared": None, "mlp": 7, "rnn": 1337}
-    assert manifest["mlp"]["files"] == ["mlp-sine-story.svg"]
-    assert manifest["precision"]["files"] == ["stack-cantor-dust-story.svg"]
-    assert manifest["rnn"]["files"] == ["rnn-training-story.svg"]
+    assert manifest["mlp"]["files"] == ["mlp-sine-story.png"]
+    assert manifest["precision"]["files"] == ["stack-cantor-dust-story.png"]
+    assert manifest["rnn"]["files"] == ["rnn-training-story.png"]
 
 
 def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
@@ -483,7 +484,7 @@ def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "rnn-training-story.svg").exists()
+    assert (tmp_path / "rnn-training-story.png").exists()
     assert (tmp_path / "rnn-transition-summary.csv").exists()
     assert (tmp_path / "rnn-transition-family-metrics.csv").exists()
     assert (tmp_path / "rnn-transition-probe-trajectories.csv").exists()

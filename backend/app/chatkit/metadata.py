@@ -55,23 +55,23 @@ class ToolDisplaySpec(TypedDict, total=False):
     arg_labels: dict[str, str]
 
 
-class CapabilityHandoffTarget(TypedDict):
-    capability_id: str
+class ToolProviderDelegationTarget(TypedDict):
+    tool_provider_id: str
     tool_name: str
     description: str
 
 
-class CapabilityAgentSpec(TypedDict):
-    capability_id: str
+class ToolProviderAgentSpec(TypedDict):
+    tool_provider_id: str
     agent_name: str
     instructions: str
     client_tools: list[ClientToolDefinition]
-    handoff_targets: list[CapabilityHandoffTarget]
+    delegation_targets: list[ToolProviderDelegationTarget]
 
 
-class CapabilityBundle(TypedDict):
-    root_capability_id: str
-    capabilities: list[CapabilityAgentSpec]
+class ToolProviderBundle(TypedDict):
+    root_tool_provider_id: str
+    tool_providers: list[ToolProviderAgentSpec]
 
 
 class WorkspaceContext(TypedDict):
@@ -134,7 +134,7 @@ class ThreadMetadataPatch(TypedDict, total=False):
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
-    capability_bundle: CapabilityBundle
+    tool_provider_bundle: ToolProviderBundle
     workspace_state: WorkspaceState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
@@ -150,7 +150,7 @@ class AppThreadMetadata(TypedDict, total=False):
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
-    capability_bundle: CapabilityBundle
+    tool_provider_bundle: ToolProviderBundle
     workspace_state: WorkspaceState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
@@ -389,12 +389,12 @@ class ToolDisplaySpecModel(_MetadataModel):
         return labels or None
 
 
-class CapabilityHandoffTargetModel(_MetadataModel):
-    capability_id: str
+class ToolProviderDelegationTargetModel(_MetadataModel):
+    tool_provider_id: str
     tool_name: str
     description: str
 
-    @field_validator("capability_id", "tool_name", "description", mode="before")
+    @field_validator("tool_provider_id", "tool_name", "description", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -403,14 +403,16 @@ class CapabilityHandoffTargetModel(_MetadataModel):
         return text
 
 
-class CapabilityAgentSpecModel(_MetadataModel):
-    capability_id: str
+class ToolProviderAgentSpecModel(_MetadataModel):
+    tool_provider_id: str
     agent_name: str
     instructions: str
     client_tools: list[ClientToolDefinitionModel] = Field(default_factory=list)
-    handoff_targets: list[CapabilityHandoffTargetModel] = Field(default_factory=list)
+    delegation_targets: list[ToolProviderDelegationTargetModel] = Field(
+        default_factory=list
+    )
 
-    @field_validator("capability_id", "agent_name", "instructions", mode="before")
+    @field_validator("tool_provider_id", "agent_name", "instructions", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -429,48 +431,52 @@ class CapabilityAgentSpecModel(_MetadataModel):
             _validated_model_list(ClientToolDefinitionModel, value),
         )
 
-    @field_validator("handoff_targets", mode="before")
+    @field_validator("delegation_targets", mode="before")
     @classmethod
-    def _handoff_targets(
+    def _delegation_targets(
         cls,
         value: object,
-    ) -> list[CapabilityHandoffTargetModel]:
+    ) -> list[ToolProviderDelegationTargetModel]:
         return cast(
-            list[CapabilityHandoffTargetModel],
-            _validated_model_list(CapabilityHandoffTargetModel, value),
+            list[ToolProviderDelegationTargetModel],
+            _validated_model_list(ToolProviderDelegationTargetModel, value),
         )
 
 
-class CapabilityBundleModel(_MetadataModel):
-    root_capability_id: str
-    capabilities: list[CapabilityAgentSpecModel]
+class ToolProviderBundleModel(_MetadataModel):
+    root_tool_provider_id: str
+    tool_providers: list[ToolProviderAgentSpecModel]
 
-    @field_validator("root_capability_id", mode="before")
+    @field_validator("root_tool_provider_id", mode="before")
     @classmethod
-    def _root_capability_id(cls, value: object) -> str:
+    def _root_tool_provider_id(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
-            raise ValueError("expected a non-empty root_capability_id")
+            raise ValueError("expected a non-empty root_tool_provider_id")
         return text
 
-    @field_validator("capabilities", mode="before")
+    @field_validator("tool_providers", mode="before")
     @classmethod
-    def _capabilities(
+    def _tool_providers(
         cls,
         value: object,
-    ) -> list[CapabilityAgentSpecModel]:
+    ) -> list[ToolProviderAgentSpecModel]:
         return cast(
-            list[CapabilityAgentSpecModel],
-            _validated_model_list(CapabilityAgentSpecModel, value),
+            list[ToolProviderAgentSpecModel],
+            _validated_model_list(ToolProviderAgentSpecModel, value),
         )
 
     @model_validator(mode="after")
-    def _validate_root_capability(self) -> "CapabilityBundleModel":
-        if not self.capabilities:
-            raise ValueError("capabilities must not be empty")
-        capability_ids = {capability.capability_id for capability in self.capabilities}
-        if self.root_capability_id not in capability_ids:
-            raise ValueError("root_capability_id must be present in capabilities")
+    def _validate_root_tool_provider(self) -> "ToolProviderBundleModel":
+        if not self.tool_providers:
+            raise ValueError("tool_providers must not be empty")
+        tool_provider_ids = {
+            tool_provider.tool_provider_id for tool_provider in self.tool_providers
+        }
+        if self.root_tool_provider_id not in tool_provider_ids:
+            raise ValueError(
+                "root_tool_provider_id must be present in tool_providers"
+            )
         return self
 
 
@@ -691,7 +697,7 @@ class AppThreadMetadataModel(_MetadataModel):
     openai_conversation_id: str | None = None
     openai_previous_response_id: str | None = None
     usage: ThreadUsageTotalsModel | None = None
-    capability_bundle: CapabilityBundleModel | None = None
+    tool_provider_bundle: ToolProviderBundleModel | None = None
     workspace_state: WorkspaceStateModel | None = None
     origin: FeedbackOrigin | None = None
     feedback_session: PendingFeedbackSessionModel | None = None
@@ -731,11 +737,13 @@ class AppThreadMetadataModel(_MetadataModel):
         validated = _validated_model_or_none(ThreadUsageTotalsModel, value)
         return cast(ThreadUsageTotalsModel | None, validated)
 
-    @field_validator("capability_bundle", mode="before")
+    @field_validator("tool_provider_bundle", mode="before")
     @classmethod
-    def _capability_bundle(cls, value: object) -> CapabilityBundleModel | None:
-        validated = _validated_model_or_none(CapabilityBundleModel, value)
-        return cast(CapabilityBundleModel | None, validated)
+    def _tool_provider_bundle(
+        cls, value: object
+    ) -> ToolProviderBundleModel | None:
+        validated = _validated_model_or_none(ToolProviderBundleModel, value)
+        return cast(ToolProviderBundleModel | None, validated)
 
     @field_validator("workspace_state", mode="before")
     @classmethod

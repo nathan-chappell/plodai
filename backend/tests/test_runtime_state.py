@@ -13,29 +13,32 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
         user_email=None,
         db=None,
         request_metadata={
-            "capability_bundle": {
-                "root_capability_id": "csv-agent",
-                "capabilities": [
+            "tool_provider_bundle": {
+                "root_tool_provider_id": "csv-agent",
+                "tool_providers": [
                     {
-                        "capability_id": "csv-agent",
+                        "tool_provider_id": "csv-agent",
                         "agent_name": "CSV Agent",
                         "instructions": "Inspect CSV files.",
                         "client_tools": [],
-                        "handoff_targets": [],
+                        "delegation_targets": [],
                     }
                 ],
             },
             "workspace_state": {
                 "version": "v1",
                 "context": {
-                    "path_prefix": "/csv-agent/",
+                    "workspace_id": "workspace-demo",
                     "referenced_item_ids": ["file_csv"],
                 },
                 "files": [
                     {
                         "id": "file_csv",
                         "name": "sales.csv",
-                        "path": "/csv-agent/sales.csv",
+                        "bucket": "uploaded",
+                        "producer_key": "csv-agent",
+                        "producer_label": "CSV Agent",
+                        "source": "uploaded",
                         "kind": "csv",
                         "extension": "csv",
                         "row_count": 2,
@@ -56,11 +59,8 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
 
     runtime_state = resolve_thread_runtime_state(thread=thread, context=context)
 
-    assert (
-        runtime_state.metadata["workspace_state"]["context"]["path_prefix"]
-        == "/csv-agent/"
-    )
+    assert runtime_state.metadata["workspace_state"]["context"]["workspace_id"] == "workspace-demo"
     assert context.report_id == "thread_123"
-    assert context.capability_id == "csv-agent"
+    assert context.tool_provider_id == "csv-agent"
     assert context.dataset_ids == ["file_csv"]
     assert context.available_files[0].csv is not None

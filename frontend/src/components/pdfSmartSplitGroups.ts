@@ -1,7 +1,7 @@
 import type {
   PdfSmartSplitBundleView,
   ShellWorkspaceArtifact,
-} from "../capabilities/types";
+} from "../tools/types";
 
 export type SmartSplitArtifactRow = {
   key: string;
