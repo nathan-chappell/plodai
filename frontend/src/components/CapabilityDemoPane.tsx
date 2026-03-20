@@ -24,8 +24,6 @@ export function CapabilityDemoPane({
   onEffects,
   onFilesAdded,
   showScenarioNotes = true,
-  showExecutionModeControls = true,
-  feedbackButtonVariant = "button",
   showChatKitHeader = true,
 }: {
   scenario: CapabilityDemoScenario | null;
@@ -40,8 +38,6 @@ export function CapabilityDemoPane({
   onEffects: (effects: ClientEffect[]) => void;
   onFilesAdded?: (files: LocalWorkspaceFile[]) => void;
   showScenarioNotes?: boolean;
-  showExecutionModeControls?: boolean;
-  feedbackButtonVariant?: "button" | "icon";
   showChatKitHeader?: boolean;
 }) {
   const workspaceFileIds = new Set(files.map((file) => file.id));
@@ -115,8 +111,6 @@ export function CapabilityDemoPane({
         showDefaultModelMeta={false}
         surfaceMinHeight={620}
         emptyMessage={demoPreparing ? "Preparing the demo workspace..." : error ?? "Demo unavailable."}
-        showExecutionModeControls={showExecutionModeControls}
-        feedbackButtonVariant={feedbackButtonVariant}
         showChatKitHeader={showChatKitHeader}
       />
     </>

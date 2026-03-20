@@ -12,13 +12,13 @@ export type GrantCreditResponse = {
 export type SetUserActivePayload = {
   user_id: string;
   active: boolean;
-  grant_welcome_credit?: boolean;
 };
 
 export type SetUserActiveResponse = {
   user_id: string;
   is_active: boolean;
   current_credit_usd: number;
+  credit_floor_usd: number;
 };
 
 export type AdminUserSummary = {
@@ -29,6 +29,7 @@ export type AdminUserSummary = {
   role: "admin" | "user";
   is_active: boolean;
   current_credit_usd: number;
+  credit_floor_usd: number;
   created_at_ms: number;
   last_sign_in_at_ms: number | null;
 };

@@ -18,8 +18,12 @@ class ChatThread(Base):
     user_id: Mapped[str] = mapped_column(Text, index=True)
     title: Mapped[str | None] = mapped_column(Text, default="New report")
     metadata_json: Mapped[dict] = mapped_column(JSON, default_factory=dict)
-    status_json: Mapped[dict] = mapped_column(JSON, default_factory=lambda: {"type": "active"})
-    allowed_image_domains_json: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    status_json: Mapped[dict] = mapped_column(
+        JSON, default_factory=lambda: {"type": "active"}
+    )
+    allowed_image_domains_json: Mapped[list[str] | None] = mapped_column(
+        JSON, default=None
+    )
     updated_sequence: Mapped[int] = mapped_column(Integer, index=True, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

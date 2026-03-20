@@ -55,10 +55,10 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
       "A plan, an inspection step, or a statement that a chart would be helpful does not count.",
       "If the first specialist pass only inspects or plans, continue until the chart is truly rendered and visible in the thread.",
       "Inspect the PDF packet only as supporting context if it helps, not as a replacement for the CSV and chart work.",
-      "Append exactly one short report item that summarizes the strongest CSV or chart finding and why it matters.",
+      "Append exactly one report slide that summarizes the strongest CSV or chart finding and why it matters.",
       "Treat this as a batch-style demo: infer reasonable defaults, continue without asking me follow-up questions, and show the completed result.",
-      "Do not stop until you have created the derived artifact, rendered the chart, and used append_report_item to add the one required report update.",
-      "After that single report item is appended, stop.",
+      "Do not stop until you have created the derived artifact, rendered the chart, and used append_report_slide to add the one required report update.",
+      "After that single report slide is appended, stop.",
       "Your final assistant reply should be brief, confirm the result is complete, and must not offer optional next steps, extra sections, or follow-up questions.",
       "Do not satisfy this task with a PDF-only summary.",
       "Do not stop after one tool call.",
@@ -72,7 +72,7 @@ export async function buildReportAgentDemoScenario(): Promise<CapabilityDemoScen
     expectedOutcomes: [
       "Delegates specialized work instead of doing everything in one prompt",
       "Produces at least one visible specialist effect",
-      "Appends a short report item at the end",
+      "Appends a short report slide at the end",
     ],
     notes: [
       "This is the most complete demo and is intended to be the easiest boss-click path.",

@@ -1,6 +1,17 @@
 import { useEffect, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import styled from "styled-components";
 
 import { AuthPanel } from "../components/AuthPanel";
+import {
+  buildFolderRowsFromArtifacts,
+  CapabilityQuickView,
+  PdfInlinePreview,
+  renderDefaultCapabilityQuickViewPreview,
+  type CapabilityQuickViewArtifactRow,
+  type CapabilityQuickViewGroup,
+  type CapabilityQuickViewRenderArgs,
+} from "../components/CapabilityQuickView";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import {
@@ -15,20 +26,18 @@ import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import { MetaText } from "../app/styles";
 import type { ClientEffect } from "../types/analysis";
-import type { ShellWorkspaceRegistration } from "./types";
+import type {
+  ShellWorkspaceArtifact,
+  ShellWorkspaceRegistration,
+} from "./types";
 import {
+  CapabilityPage,
   CapabilityEyebrow,
   CapabilityHeader,
   CapabilityHeroRow,
-  CapabilityHighlight,
-  CapabilityMetaText,
-  CapabilityPanel,
-  CapabilitySectionHeader,
-  CapabilitySectionTitle,
   CapabilitySubhead,
   CapabilityTabBar,
   CapabilityTabButton,
-  CapabilityTextarea,
   CapabilityTitle,
   ReportChatColumn,
   ReportEffectCard,
@@ -47,31 +56,160 @@ function isPdfEffect(effect: ClientEffect): effect is Extract<ClientEffect, { ty
   return effect.type === "pdf_smart_split_completed";
 }
 
-function GoalPanel({
-  investigationBrief,
-  setInvestigationBrief,
-}: {
-  investigationBrief: string;
-  setInvestigationBrief: (value: string) => void;
-}) {
+function isPdfIndexArtifact(artifact: ShellWorkspaceArtifact): boolean {
   return (
-    <CapabilityPanel>
-      <CapabilitySectionHeader>
-        <CapabilitySectionTitle>Agent goal</CapabilitySectionTitle>
-        <CapabilityMetaText>This brief keeps the PDF agent focused on the current decomposition task.</CapabilityMetaText>
-      </CapabilitySectionHeader>
-      <CapabilityTextarea
-        value={investigationBrief}
-        onChange={(event) => setInvestigationBrief(event.target.value)}
-        placeholder="Example: Extract the executive summary and appendix pages into separate sub-PDFs."
-      />
-      <CapabilityHighlight>
-        <CapabilityMetaText>
-          Inspect first, then either extract bounded page ranges or ask for a smart split that creates sub-PDFs, an index, and a ZIP.
-        </CapabilityMetaText>
-      </CapabilityHighlight>
-    </CapabilityPanel>
+    artifact.path.startsWith("/artifacts/pdf/") &&
+    artifact.file.kind === "other" &&
+    artifact.file.extension.toLowerCase() === "md" &&
+    typeof artifact.file.text_content === "string"
   );
+}
+
+function extractMarkdownLinks(markdown: string): string[] {
+  return Array.from(markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g))
+    .map((match) => match[1]?.trim() ?? "")
+    .filter(Boolean);
+}
+
+function basename(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function smartSplitBundleTitle(artifact: ShellWorkspaceArtifact): string {
+  if (artifact.file.kind !== "other" || !artifact.file.text_content) {
+    return artifact.file.name.replace(/\.md$/i, "");
+  }
+  const heading = artifact.file.text_content.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  return heading || artifact.file.name.replace(/\.md$/i, "");
+}
+
+function buildPdfQuickViewGroups(
+  artifacts: ShellWorkspaceArtifact[],
+): CapabilityQuickViewGroup[] {
+  const pdfArtifacts = artifacts.filter((artifact) =>
+    artifact.path.startsWith("/artifacts/pdf/"),
+  );
+  const usedEntryIds = new Set<string>();
+  const groups: CapabilityQuickViewGroup[] = [];
+
+  const indexArtifacts = pdfArtifacts
+    .filter(isPdfIndexArtifact)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  for (const indexArtifact of indexArtifacts) {
+    const referencedNames = new Set(
+      extractMarkdownLinks(
+        indexArtifact.file.kind === "other" ? indexArtifact.file.text_content ?? "" : "",
+      ).map((href) => basename(href)),
+    );
+    const stem = indexArtifact.file.name.replace(/\.md$/i, "");
+    const bundleArtifacts = pdfArtifacts.filter((artifact) => {
+      if (artifact.entryId === indexArtifact.entryId) {
+        return true;
+      }
+      if (referencedNames.has(artifact.file.name)) {
+        return true;
+      }
+      return artifact.file.name === `${stem}.zip`;
+    });
+
+    bundleArtifacts.forEach((artifact) => usedEntryIds.add(artifact.entryId));
+    groups.push({
+      key: indexArtifact.entryId,
+      label: smartSplitBundleTitle(indexArtifact),
+      rows: [
+        {
+          kind: "artifact",
+          key: indexArtifact.entryId,
+          artifact: indexArtifact,
+          label: "index",
+          meta: "markdown index",
+        },
+        ...bundleArtifacts
+          .filter((artifact) => artifact.entryId !== indexArtifact.entryId)
+          .sort((left, right) => left.file.name.localeCompare(right.file.name))
+          .map(
+            (artifact): CapabilityQuickViewArtifactRow => ({
+              kind: "artifact",
+              key: artifact.entryId,
+              artifact,
+              depth: 1,
+            }),
+          ),
+      ],
+    });
+  }
+
+  const remainingArtifacts = pdfArtifacts.filter(
+    (artifact) => !usedEntryIds.has(artifact.entryId),
+  );
+  if (remainingArtifacts.length) {
+    groups.push({
+      key: "other-pdf-artifacts",
+      label: "Other PDF artifacts",
+      rows: buildFolderRowsFromArtifacts(remainingArtifacts, {
+        stripPrefixes: ["/artifacts/pdf/"],
+      }),
+    });
+  }
+
+  return groups;
+}
+
+function renderPdfQuickViewPreview(args: CapabilityQuickViewRenderArgs) {
+  const { selectedArtifact, artifactRows, selectArtifact } = args;
+  if (isPdfIndexArtifact(selectedArtifact)) {
+    const markdown =
+      selectedArtifact.file.kind === "other"
+        ? selectedArtifact.file.text_content ?? ""
+        : "";
+    return (
+      <PdfPreviewSection>
+        <PdfPreviewMetaRow>
+          <PdfPreviewMetaChip>Smart split index</PdfPreviewMetaChip>
+          <PdfPreviewMetaChip>{selectedArtifact.file.name}</PdfPreviewMetaChip>
+        </PdfPreviewMetaRow>
+        <PdfPreviewMarkdown>
+          <ReactMarkdown
+            components={{
+              a: ({ href, children }) => {
+                const target = href
+                  ? artifactRows.find(
+                      (row) =>
+                        row.artifact.file.name === basename(href) ||
+                        row.artifact.path.endsWith(`/${basename(href)}`),
+                    )
+                  : null;
+                if (target) {
+                  return (
+                    <PdfPreviewLinkButton
+                      onClick={() => selectArtifact(target.artifact.entryId)}
+                      type="button"
+                    >
+                      {children}
+                    </PdfPreviewLinkButton>
+                  );
+                }
+                return (
+                  <a href={href} rel="noreferrer" target="_blank">
+                    {children}
+                  </a>
+                );
+              },
+            }}
+          >
+            {markdown}
+          </ReactMarkdown>
+        </PdfPreviewMarkdown>
+      </PdfPreviewSection>
+    );
+  }
+
+  if (selectedArtifact.file.kind === "pdf") {
+    return <PdfInlinePreview file={selectedArtifact.file} />;
+  }
+
+  return renderDefaultCapabilityQuickViewPreview(args);
 }
 
 export function PdfAgentPage({
@@ -82,16 +220,13 @@ export function PdfAgentPage({
   const {
     activePrefix,
     cwdPath,
-    filesystem,
-    breadcrumbs,
     entries,
     files,
     setFiles,
     appendFiles,
-    status,
+    artifacts,
     setStatus,
     investigationBrief,
-    setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
     executionMode,
@@ -110,6 +245,13 @@ export function PdfAgentPage({
     syncToolCatalog,
     appendReportEffects,
     workspaceStateMetadata,
+    workspaces,
+    selectedWorkspaceId,
+    selectedWorkspaceName,
+    selectedWorkspaceKind,
+    selectWorkspace,
+    createWorkspace,
+    clearWorkspace,
   } = useCapabilityFileWorkspace({
     capabilityId: pdfAgentCapability.id,
     capabilityTitle: pdfAgentCapability.title,
@@ -160,30 +302,70 @@ export function PdfAgentPage({
     setReportEffects,
   });
 
+  const handleClearWorkspace = useMemo(() => {
+    if (selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo") {
+      return () => {
+        if (!demoScenario) {
+          return;
+        }
+        setFiles(demoScenario.workspaceSeed);
+        setReportEffects([]);
+        setStatus(`Reset demo workspace for ${demoScenario.title}.`);
+      };
+    }
+    return clearWorkspace;
+  }, [activeWorkspaceTab, clearWorkspace, demoScenario, selectedWorkspaceKind, setFiles, setReportEffects, setStatus]);
+
   useEffect(() => {
     onRegisterWorkspace?.({
       capabilityId: pdfAgentCapability.id,
-      title: "Files",
+      title: "Workspace",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      activePrefix,
-      cwdPath,
-      filesystem,
-      breadcrumbs,
-      entries,
+      artifacts,
+      workspaces,
+      activeWorkspaceId: selectedWorkspaceId,
+      activeWorkspaceName: selectedWorkspaceName,
+      activeWorkspaceKind: selectedWorkspaceKind,
       accept: ".pdf",
       onSelectFiles: handleFiles,
-      onCreateDirectory: createDirectory,
-      onChangeDirectory: changeDirectory,
-      onRemoveEntry: handleRemoveEntry,
+      onSelectWorkspace: selectWorkspace,
+      onCreateWorkspace: createWorkspace,
+      onClearWorkspace: handleClearWorkspace,
+      clearActionLabel:
+        selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo"
+          ? "Reset demo workspace"
+          : "Clear workspace",
+      clearActionDisabled:
+        selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo" && !demoScenario,
+      onRemoveArtifact: handleRemoveEntry,
     });
-  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [
+    activeWorkspaceTab,
+    artifacts,
+    createWorkspace,
+    demoScenario,
+    handleClearWorkspace,
+    handleFiles,
+    handleRemoveEntry,
+    onRegisterWorkspace,
+    selectWorkspace,
+    selectedWorkspaceId,
+    selectedWorkspaceKind,
+    selectedWorkspaceName,
+    workspaces,
+  ]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
   }, [clientToolCatalogKey, syncToolCatalog]);
 
+  const pdfQuickViewGroups = useMemo(
+    () => buildPdfQuickViewGroups(artifacts),
+    [artifacts],
+  );
+
   return (
-    <>
+    <CapabilityPage>
       <CapabilityHeroRow>
         <CapabilityHeader>
           <CapabilityEyebrow>{pdfAgentCapability.eyebrow}</CapabilityEyebrow>
@@ -212,37 +394,14 @@ export function PdfAgentPage({
       {activeWorkspaceTab === "agent" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
-              <CapabilitySectionHeader>
-                <CapabilitySectionTitle>Workspace state</CapabilitySectionTitle>
-                <CapabilityMetaText>{status}</CapabilityMetaText>
-              </CapabilitySectionHeader>
-              <MetaText>
-                Prefix: {activePrefix}
-              </MetaText>
-              <MetaText>
-                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
-              </MetaText>
-              <MetaText>
-                Goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the current extraction task."}
-              </MetaText>
-              <MetaText>Use the sidebar workspace panel to load PDFs or remove them from the current session.</MetaText>
-              {reportEffects.length ? <MetaText>Client effects captured this session: {reportEffects.length}</MetaText> : null}
-            </CapabilityPanel>
-            {reportEffects.filter(isPdfEffect).length ? (
-              <ReportEffectsPanel>
-                {reportEffects.filter(isPdfEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.archiveFileId}-${index}`}>
-                    <h3>Smart split: {effect.sourceFileName}</h3>
-                    <MetaText>{effect.markdown}</MetaText>
-                    <MetaText>Archive ready: {effect.archiveFileName}</MetaText>
-                    <MetaText>
-                      Outputs: {effect.entries.map((entry) => `${entry.title} (${entry.startPage}-${entry.endPage})`).join(", ")}
-                    </MetaText>
-                  </ReportEffectCard>
-                ))}
-              </ReportEffectsPanel>
-            ) : null}
+            <CapabilityQuickView
+              title="Smart splits"
+              description="Review saved smart split bundles and preview their index or extracted PDFs."
+              emptyMessage="Saved smart split bundles will appear here once the PDF agent creates them."
+              groups={pdfQuickViewGroups}
+              renderPreview={renderPdfQuickViewPreview}
+              dataTestId="pdf-agent-quick-view"
+            />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
@@ -256,6 +415,8 @@ export function PdfAgentPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              greeting={pdfAgentCapability.chatkitLead}
+              composerPlaceholder={pdfAgentCapability.chatkitPlaceholder}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
@@ -264,18 +425,6 @@ export function PdfAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel data-testid="pdf-agent-demo-workspace">
-              <CapabilitySectionHeader>
-                <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
-                <CapabilityMetaText>
-                  {demoLoading ? "Preparing the PDF demo." : demoError ?? status}
-                </CapabilityMetaText>
-              </CapabilitySectionHeader>
-              <MetaText data-testid="pdf-agent-demo-files">
-                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
-              </MetaText>
-              <MetaText data-testid="pdf-agent-demo-title">Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
-            </CapabilityPanel>
             {reportEffects.filter(isPdfEffect).length ? (
               <ReportEffectsPanel data-testid="pdf-agent-demo-effects">
                 {reportEffects.filter(isPdfEffect).map((effect, index) => (
@@ -308,6 +457,63 @@ export function PdfAgentPage({
           </ReportChatColumn>
         </ReportWorkspaceLayout>
       ) : null}
-    </>
+    </CapabilityPage>
   );
 }
+
+const PdfPreviewSection = styled.div`
+  display: grid;
+  gap: 0.6rem;
+`;
+
+const PdfPreviewMetaRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+`;
+
+const PdfPreviewMetaChip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 0.72rem;
+  font-weight: 700;
+`;
+
+const PdfPreviewMarkdown = styled.div`
+  display: grid;
+  gap: 0.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.84);
+  padding: 0.8rem 0.9rem;
+  line-height: 1.5;
+
+  & > * {
+    min-width: 0;
+  }
+
+  p,
+  ul,
+  ol,
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 0;
+  }
+`;
+
+const PdfPreviewLinkButton = styled.button`
+  border: 0;
+  background: none;
+  color: var(--accent-deep);
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+`;

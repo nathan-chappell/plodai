@@ -50,7 +50,9 @@ def test_build_plan_widget_includes_plan_sections() -> None:
     assert "run_aggregate_query, render_chart_from_file" in text_values
 
 
-def test_build_tool_trace_widget_shows_only_summary_but_keeps_copy_text_details() -> None:
+def test_build_tool_trace_widget_shows_only_summary_but_keeps_copy_text_details() -> (
+    None
+):
     widget = build_tool_trace_widget(
         "run_aggregate_query",
         "Validated a grouped aggregate query plan.",

@@ -3,6 +3,13 @@ from typing import TypedDict
 from clerk_backend_api import models
 from clerk_backend_api.sdk import Clerk
 
+from backend.app.core.clerk_metadata import (
+    CREDIT_FLOOR_METADATA_KEY,
+    DEFAULT_CREDIT_FLOOR_USD,
+    as_public_metadata,
+    has_explicit_credit_floor,
+    resolve_credit_floor_usd,
+)
 from backend.app.core.config import get_settings
 from backend.app.models.types import UserRole
 
@@ -14,6 +21,7 @@ class UserSummaryMapping(TypedDict):
     image_url: str | None
     role: UserRole
     is_active: bool
+    credit_floor_usd: float
     created_at_ms: int
     last_sign_in_at_ms: int | None
 
@@ -43,12 +51,12 @@ def _resolve_full_name(user: models.User) -> str | None:
 
 
 def _resolve_role(user: models.User) -> UserRole:
-    role = user.public_metadata.get("role")
+    role = as_public_metadata(user.public_metadata).get("role")
     return "admin" if role == "admin" else "user"
 
 
 def _resolve_active(user: models.User) -> bool:
-    return bool(user.public_metadata.get("active") is True)
+    return bool(as_public_metadata(user.public_metadata).get("active") is True)
 
 
 async def list_users(
@@ -77,18 +85,27 @@ def map_user_summary(user: models.User) -> UserSummaryMapping:
         "image_url": user.image_url,
         "role": _resolve_role(user),
         "is_active": _resolve_active(user),
+        "credit_floor_usd": resolve_credit_floor_usd(
+            as_public_metadata(user.public_metadata)
+        ),
         "created_at_ms": user.created_at,
         "last_sign_in_at_ms": user.last_sign_in_at,
     }
 
 
-async def set_user_active_state(*, user_id: str, active: bool) -> bool:
+async def set_user_active_state(
+    *,
+    user_id: str,
+    active: bool,
+) -> UserSummaryMapping:
     client = _client()
     user = await client.users.get_async(user_id=user_id)
-    public_metadata = dict(user.public_metadata or {})
+    public_metadata = dict(as_public_metadata(user.public_metadata))
     public_metadata["active"] = active
+    if active and not has_explicit_credit_floor(public_metadata):
+        public_metadata[CREDIT_FLOOR_METADATA_KEY] = DEFAULT_CREDIT_FLOOR_USD
     updated_user = await client.users.update_async(
         user_id=user_id,
         public_metadata=public_metadata,
     )
-    return bool((updated_user.public_metadata or {}).get("active") is True)
+    return map_user_summary(updated_user)

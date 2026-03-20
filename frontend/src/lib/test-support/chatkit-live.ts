@@ -16,7 +16,7 @@ import type {
 } from "../../types/analysis";
 import type { LocalWorkspaceFile } from "../../types/report";
 import type { WorkspaceFilesystem } from "../../types/workspace";
-import type { ReportItemV1 } from "../../types/workspace-contract";
+import type { ReportSlideV1 } from "../../types/workspace-contract";
 import {
   addWorkspaceFilesWithResult,
   createWorkspaceFilesystem,
@@ -25,7 +25,10 @@ import {
   listDirectoryFiles,
   normalizePathPrefix,
 } from "../workspace-fs";
-import { buildWorkspaceStateMetadata, readWorkspaceReport } from "../workspace-contract";
+import {
+  buildWorkspaceStateMetadata,
+  readWorkspaceReport,
+} from "../workspace-contract";
 import { prepareLiveTestClientToolBroker } from "./client-tool-worker";
 
 const FEEDBACK_AGENT_PRELUDE =
@@ -94,9 +97,9 @@ export type LiveWorkspaceSummary = {
   current_report: {
     report_id: string;
     title: string;
-    item_count: number;
-    items: Array<{
-      type: ReportItemV1["type"];
+    slide_count: number;
+    slides: Array<{
+      layout: ReportSlideV1["layout"];
       title: string;
       preview: string | null;
     }>;
@@ -272,11 +275,11 @@ function buildCapabilityInvestigationBrief(
     return [
       scenario.title,
       "Complete exactly one report-agent demo pass.",
-      "Create or reuse the active report, use dataset_id demo-report-sales for the sales CSV work, produce the grouped revenue-by-region artifact, render one bar chart, append exactly one report item, then stop.",
+      "Create or reuse the active report, use dataset_id demo-report-sales for the sales CSV work, produce the grouped revenue-by-region artifact, render one bar chart, append exactly one report slide, then stop.",
       "After each specialist handoff, control returns to the report agent, which must check the original demo requirements again before stopping.",
       "The run is not complete until render_chart_from_file has actually happened and chart evidence is visible in the thread.",
       "A plan, inspection step, or recommendation does not count as chart completion.",
-      "Do not propose optional follow-up sections, extra analysis, or additional report items after the first completed report update.",
+      "Do not propose optional follow-up sections, extra analysis, or additional report slides after the first completed report update.",
     ].join(" ");
   }
 
@@ -808,43 +811,24 @@ async function runLiveChatKitConversation(
   };
 }
 
-function summarizeReportItem(item: ReportItemV1): {
-  type: ReportItemV1["type"];
+function summarizeReportSlide(slide: ReportSlideV1): {
+  layout: ReportSlideV1["layout"];
   title: string;
   preview: string | null;
 } {
-  if (item.type === "section") {
-    return {
-      type: item.type,
-      title: item.title,
-      preview: item.markdown.slice(0, 200),
-    };
-  }
-  if (item.type === "note") {
-    return {
-      type: item.type,
-      title: item.title,
-      preview: item.text.slice(0, 200),
-    };
-  }
-  if (item.type === "chart") {
-    return {
-      type: item.type,
-      title: item.title,
-      preview: JSON.stringify(item.chart).slice(0, 200),
-    };
-  }
-  if (item.type === "pdf_split") {
-    return {
-      type: item.type,
-      title: item.source_file_name,
-      preview: item.markdown.slice(0, 200),
-    };
-  }
+  const preview =
+    slide.panels
+      .map((panel) =>
+        panel.type === "narrative"
+          ? panel.markdown
+          : JSON.stringify(panel.chart),
+      )
+      .join(" ")
+      .slice(0, 200) || null;
   return {
-    type: item.type,
-    title: item.title,
-    preview: JSON.stringify(item.payload).slice(0, 200),
+    layout: slide.layout,
+    title: slide.title,
+    preview,
   };
 }
 
@@ -872,8 +856,8 @@ function summarizeWorkspaceForLiveTest(
       ? {
           report_id: currentReport.report_id,
           title: currentReport.title,
-          item_count: currentReport.items.length,
-          items: currentReport.items.slice(0, 10).map(summarizeReportItem),
+          slide_count: currentReport.slides.length,
+          slides: currentReport.slides.slice(0, 10).map(summarizeReportSlide),
         }
       : null,
   };
@@ -950,10 +934,10 @@ function formatValidationReportSummary(workspaceSummary: LiveWorkspaceSummary): 
   if (!currentReport) {
     return `reports=${workspaceSummary.reports.length}; current=none`;
   }
-  const itemTitles =
-    currentReport.items.map((item) => item.title).filter((title) => title.trim().length > 0).join(", ") ||
+  const slideTitles =
+    currentReport.slides.map((slide) => slide.title).filter((title) => title.trim().length > 0).join(", ") ||
     "untitled";
-  return `reports=${workspaceSummary.reports.length}; current=${currentReport.title}; items=${currentReport.item_count}; item_titles=${itemTitles}`;
+  return `reports=${workspaceSummary.reports.length}; current=${currentReport.title}; slides=${currentReport.slide_count}; slide_titles=${slideTitles}`;
 }
 
 function buildLiveDemoValidationPrompt(options: {

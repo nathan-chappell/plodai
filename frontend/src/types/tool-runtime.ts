@@ -2,7 +2,7 @@ import type { ClientEffect, ClientToolArgsMap, ClientToolName } from "./analysis
 import type { LocalWorkspaceFile } from "./report";
 import type { WorkspaceContext, WorkspaceFilesystem } from "./workspace";
 import type {
-  ReportItemV1,
+  ReportSlideV1,
   WorkspaceBootstrapMetadata,
   WorkspaceReportV1,
 } from "./workspace-contract";
@@ -36,10 +36,10 @@ export type UpsertWorkspaceFilesMutationV1 = {
   }>;
 };
 
-export type ReplaceReportItemsMutationV1 = {
-  type: "replace_report_items";
+export type ReplaceReportSlidesMutationV1 = {
+  type: "replace_report_slides";
   report_id: string;
-  items: ReportItemV1[];
+  slides: ReportSlideV1[];
 };
 
 export type UpsertReportMutationV1 = {
@@ -53,10 +53,10 @@ export type UpdateReportIndexMutationV1 = {
   current_report_id: string | null;
 };
 
-export type AppendReportItemsMutationV1 = {
-  type: "append_report_items";
+export type AppendReportSlidesMutationV1 = {
+  type: "append_report_slides";
   report_id: string;
-  items: ReportItemV1[];
+  slides: ReportSlideV1[];
 };
 
 export type UpdateAppStateMutationV1 = {
@@ -79,8 +79,8 @@ export type VfsMutationV1 =
   | UpsertWorkspaceFilesMutationV1
   | UpsertReportMutationV1
   | UpdateReportIndexMutationV1
-  | ReplaceReportItemsMutationV1
-  | AppendReportItemsMutationV1
+  | ReplaceReportSlidesMutationV1
+  | AppendReportSlidesMutationV1
   | UpdateAppStateMutationV1
   | RenderChartArtifactMutationV1;
 

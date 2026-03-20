@@ -46,6 +46,18 @@ function formatTimestamp(timestampMs: number | null): string {
   return new Date(timestampMs).toLocaleDateString();
 }
 
+function formatCreditsValue(
+  role: "admin" | "user",
+  currentCreditUsd: number,
+  creditFloorUsd: number,
+): string {
+  if (role === "admin") {
+    return "N/A";
+  }
+  const availableCreditsUsd = Math.max(currentCreditUsd - creditFloorUsd, 0);
+  return `$${availableCreditsUsd.toFixed(2)}`;
+}
+
 export function AdminCreditsPanel() {
   const { user, setUser } = useAppState();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
@@ -165,7 +177,7 @@ export function AdminCreditsPanel() {
     }
   }
 
-  async function handleSetActive(active: boolean, grantWelcomeCredit = false) {
+  async function handleSetActive(active: boolean) {
     if (!selectedUserId) {
       setStatus("Select a user first.");
       return;
@@ -177,7 +189,6 @@ export function AdminCreditsPanel() {
       const payload: SetUserActivePayload = {
         user_id: selectedUserId,
         active,
-        grant_welcome_credit: grantWelcomeCredit,
       };
       const result = await apiRequest<SetUserActiveResponse>("/admin/users/set-active", {
         method: "POST",
@@ -190,12 +201,17 @@ export function AdminCreditsPanel() {
                 ...candidate,
                 is_active: result.is_active,
                 current_credit_usd: result.current_credit_usd,
+                credit_floor_usd: result.credit_floor_usd,
               }
             : candidate,
         ),
       );
       setStatus(
-        `${result.user_id} is now ${result.is_active ? "active" : "inactive"} with $${result.current_credit_usd.toFixed(2)}.`,
+        `${result.user_id} is now ${result.is_active ? "active" : "inactive"} with balance $${result.current_credit_usd.toFixed(2)} and credits ${formatCreditsValue(
+          selectedUser?.role ?? "user",
+          result.current_credit_usd,
+          result.credit_floor_usd,
+        )}.`,
       );
       if (result.user_id === currentUser.id) {
         setUser((current) =>
@@ -204,6 +220,7 @@ export function AdminCreditsPanel() {
                 ...current,
                 is_active: result.is_active,
                 current_credit_usd: result.current_credit_usd,
+                credit_floor_usd: result.credit_floor_usd,
               }
             : current,
         );
@@ -253,7 +270,7 @@ export function AdminCreditsPanel() {
             <tr>
               <AdminPanelHeaderCell>User</AdminPanelHeaderCell>
               <AdminPanelHeaderCell>Status</AdminPanelHeaderCell>
-              <AdminPanelHeaderCell>Credit</AdminPanelHeaderCell>
+              <AdminPanelHeaderCell>Balance</AdminPanelHeaderCell>
               <AdminPanelHeaderCell>Last sign-in</AdminPanelHeaderCell>
               <AdminPanelHeaderCell>Actions</AdminPanelHeaderCell>
             </tr>
@@ -281,7 +298,12 @@ export function AdminCreditsPanel() {
                       {candidate.role === "admin" ? <AdminPanelBadge>Admin capabilities</AdminPanelBadge> : null}
                     </AdminPanelBadgeRow>
                   </AdminPanelCell>
-                  <AdminPanelCell>${candidate.current_credit_usd.toFixed(2)}</AdminPanelCell>
+                  <AdminPanelCell>
+                    ${candidate.current_credit_usd.toFixed(2)}
+                    <AdminPanelInlineMeta>
+                      Credits {formatCreditsValue(candidate.role, candidate.current_credit_usd, candidate.credit_floor_usd)}
+                    </AdminPanelInlineMeta>
+                  </AdminPanelCell>
                   <AdminPanelCell>{formatTimestamp(candidate.last_sign_in_at_ms)}</AdminPanelCell>
                   <AdminPanelActionCell>
                     <AdminPanelSecondaryButton
@@ -332,7 +354,13 @@ export function AdminCreditsPanel() {
         </AdminPanelRow>
       </AdminPanelPager>
 
-      <MetaText>Signed-in balance: ${currentUser.current_credit_usd.toFixed(2)}</MetaText>
+      <MetaText>
+        Signed-in balance: ${currentUser.current_credit_usd.toFixed(2)}. Credits: {formatCreditsValue(
+          currentUser.role,
+          currentUser.current_credit_usd,
+          currentUser.credit_floor_usd,
+        )}.
+      </MetaText>
       {status ? <AdminPanelMessage>{status}</AdminPanelMessage> : null}
 
       {creditPromptOpen ? (
@@ -373,29 +401,23 @@ export function AdminCreditsPanel() {
         <AdminPanelModalBackdrop>
           <AdminPanelModalCard>
             <AdminPanelTitle>Activate user</AdminPanelTitle>
-            <MetaText>Activate this Clerk user and optionally add the default $1.00 welcome credit.</MetaText>
+            <MetaText>
+              Activate this Clerk user. If Clerk metadata does not already define a credit floor, the backend will
+              store the default floor of $-1.00 so the account can try the workspace before payments are live.
+            </MetaText>
             <MetaText>User id: {selectedUserId || "Not set"}</MetaText>
             <AdminPanelModalActions>
               <AdminPanelSecondaryButton onClick={() => setActivationPromptOpen(false)} type="button">
                 Cancel
               </AdminPanelSecondaryButton>
-              <AdminPanelSecondaryButton
-                onClick={() => {
-                  setActivationPromptOpen(false);
-                  void handleSetActive(true, false);
-                }}
-                type="button"
-              >
-                Activate only
-              </AdminPanelSecondaryButton>
               <AdminPanelSubmitButton
                 onClick={() => {
                   setActivationPromptOpen(false);
-                  void handleSetActive(true, true);
+                  void handleSetActive(true);
                 }}
                 type="button"
               >
-                Activate + $1.00
+                Activate
               </AdminPanelSubmitButton>
             </AdminPanelModalActions>
           </AdminPanelModalCard>

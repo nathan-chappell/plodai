@@ -25,13 +25,13 @@ class AdminGrantCreditResponse(BaseModel):
 class AdminSetUserActiveRequest(BaseModel):
     user_id: str = Field(min_length=1)
     active: bool
-    grant_welcome_credit: bool = False
 
 
 class AdminSetUserActiveResponse(BaseModel):
     user_id: str
     is_active: bool
     current_credit_usd: float
+    credit_floor_usd: float
 
 
 class AdminUserSummary(BaseModel):
@@ -42,6 +42,7 @@ class AdminUserSummary(BaseModel):
     role: UserRole
     is_active: bool
     current_credit_usd: float
+    credit_floor_usd: float
     created_at_ms: int
     last_sign_in_at_ms: int | None
 

@@ -1,6 +1,8 @@
 import { Show, SignIn, SignInButton, SignUpButton, useClerk } from "@clerk/react";
 
 import { DEFAULT_AUTHENTICATED_PATH } from "../lib/auth";
+import { navigate } from "../lib/router";
+import { WRITING_INDEX_PATH } from "../lib/writing";
 import { MetaText } from "../app/styles";
 import {
   SignInErrorActions,
@@ -12,6 +14,7 @@ import {
   SignInFeatureList,
   SignInHero,
   SignInPageRoot,
+  SignInSecondaryActionButton,
   SignInShell,
   SignInSubhead,
   SignInTitle,
@@ -94,6 +97,11 @@ export function SignInPage({
             <li>The authenticated app can assume a known session and keep the sidebar focused on capability state.</li>
             <li>Clerk handles sign-in, while backend access still checks role and activation in public metadata.</li>
           </SignInFeatureList>
+          <SignInButtonRow>
+            <SignInSecondaryActionButton onClick={() => navigate(WRITING_INDEX_PATH)} type="button">
+              Browse writing
+            </SignInSecondaryActionButton>
+          </SignInButtonRow>
         </SignInHero>
         <ClerkSignInCard authError={authError} hasClerkSession={hasClerkSession} onRetryAuth={onRetryAuth} />
       </SignInShell>

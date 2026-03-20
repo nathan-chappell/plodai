@@ -3,11 +3,23 @@ type StorageKey =
   | "ai-portfolio-theme"
   | "ai-portfolio-theme-mode";
 
+function isStorageLike(value: unknown): value is Storage {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "getItem" in value &&
+      typeof value.getItem === "function" &&
+      "setItem" in value &&
+      typeof value.setItem === "function",
+  );
+}
+
 function getStorage(): Storage | null {
   if (typeof window === "undefined") {
     return null;
   }
-  return window.localStorage;
+  const storage = window.localStorage;
+  return isStorageLike(storage) ? storage : null;
 }
 
 export function readStoredString(key: StorageKey): string | null {

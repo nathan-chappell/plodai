@@ -1,6 +1,13 @@
 from typing import Any, Literal, NotRequired, TypeAlias, TypeGuard, TypedDict, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from backend.app.chatkit.feedback_types import FeedbackOrigin
 from backend.app.chatkit.usage import ThreadUsageTotals
@@ -84,6 +91,7 @@ class WorkspaceStateReportSummary(TypedDict):
     report_id: str
     title: str
     item_count: int
+    slide_count: NotRequired[int]
     updated_at: NotRequired[str | None]
 
 
@@ -94,6 +102,7 @@ class WorkspaceState(TypedDict):
     reports: list[WorkspaceStateReportSummary]
     current_report_id: NotRequired[str | None]
     current_goal: NotRequired[str | None]
+    agents_markdown: NotRequired[str | None]
 
 
 class DemoValidatorCostSnapshot(TypedDict):
@@ -270,9 +279,7 @@ class AgentPlanModel(_MetadataModel):
         if not isinstance(value, list):
             return []
         return [
-            item.strip()
-            for item in value
-            if isinstance(item, str) and item.strip()
+            item.strip() for item in value if isinstance(item, str) and item.strip()
         ]
 
     @field_validator("success_criteria", "follow_on_tool_hints", mode="before")
@@ -281,9 +288,7 @@ class AgentPlanModel(_MetadataModel):
         if not isinstance(value, list):
             return None
         cleaned = [
-            item.strip()
-            for item in value
-            if isinstance(item, str) and item.strip()
+            item.strip() for item in value if isinstance(item, str) and item.strip()
         ]
         return cleaned or None
 
@@ -430,9 +435,7 @@ class WorkspaceContextModel(_MetadataModel):
         if not isinstance(value, list):
             raise ValueError("expected a list")
         return [
-            item.strip()
-            for item in value
-            if isinstance(item, str) and item.strip()
+            item.strip() for item in value if isinstance(item, str) and item.strip()
         ]
 
 
@@ -474,9 +477,7 @@ class WorkspaceStateFileSummaryModel(_MetadataModel):
         if not isinstance(value, list):
             return None
         cleaned = [
-            item.strip()
-            for item in value
-            if isinstance(item, str) and item.strip()
+            item.strip() for item in value if isinstance(item, str) and item.strip()
         ]
         return cleaned or None
 
@@ -497,6 +498,7 @@ class WorkspaceStateReportSummaryModel(_MetadataModel):
     report_id: str
     title: str
     item_count: int
+    slide_count: int | None = None
     updated_at: str | None = None
 
     @field_validator("report_id", "title", mode="before")
@@ -520,6 +522,7 @@ class WorkspaceStateModel(_MetadataModel):
     reports: list[WorkspaceStateReportSummaryModel] = Field(default_factory=list)
     current_report_id: str | None = None
     current_goal: str | None = None
+    agents_markdown: str | None = None
 
     @field_validator("context", mode="before")
     @classmethod
@@ -551,7 +554,12 @@ class WorkspaceStateModel(_MetadataModel):
             _validated_model_list(WorkspaceStateReportSummaryModel, value),
         )
 
-    @field_validator("current_report_id", "current_goal", mode="before")
+    @field_validator(
+        "current_report_id",
+        "current_goal",
+        "agents_markdown",
+        mode="before",
+    )
     @classmethod
     def _optional_string(cls, value: object) -> str | None:
         return _strip_string(value)

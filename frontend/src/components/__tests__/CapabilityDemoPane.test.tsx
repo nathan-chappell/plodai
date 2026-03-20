@@ -11,18 +11,15 @@ function MockChatKitPane({
   enabled,
   emptyMessage,
   showExecutionModeControls,
-  feedbackButtonVariant,
   showChatKitHeader,
 }: {
   enabled: boolean;
   emptyMessage?: string;
   showExecutionModeControls?: boolean;
-  feedbackButtonVariant?: string;
   showChatKitHeader?: boolean;
 }) {
   return enabled ? (
     <div
-      data-feedback-variant={feedbackButtonVariant}
       data-show-chatkit-header={String(showChatKitHeader)}
       data-show-execution-mode-controls={String(showExecutionModeControls)}
       data-testid="mock-chatkit-mounted"
@@ -162,7 +159,7 @@ describe("CapabilityDemoPane", () => {
     expect(container.querySelector("[data-testid='mock-chatkit-mounted']")).not.toBeNull();
   });
 
-  it("can suppress inline demo notes and pass compact chat chrome controls through", async () => {
+  it("can suppress inline demo notes without overriding the shared run-mode controls", async () => {
     await act(async () => {
       root.render(
         <CapabilityDemoPane
@@ -180,8 +177,6 @@ describe("CapabilityDemoPane", () => {
           clientTools={[]}
           onEffects={() => {}}
           showScenarioNotes={false}
-          showExecutionModeControls={false}
-          feedbackButtonVariant="icon"
           showChatKitHeader={false}
         />,
       );
@@ -189,8 +184,7 @@ describe("CapabilityDemoPane", () => {
 
     expect(container.textContent).not.toContain("Demo notes");
     const mounted = container.querySelector("[data-testid='mock-chatkit-mounted']");
-    expect(mounted?.getAttribute("data-show-execution-mode-controls")).toBe("false");
-    expect(mounted?.getAttribute("data-feedback-variant")).toBe("icon");
+    expect(mounted?.getAttribute("data-show-execution-mode-controls")).toBe("undefined");
     expect(mounted?.getAttribute("data-show-chatkit-header")).toBe("false");
   });
 });

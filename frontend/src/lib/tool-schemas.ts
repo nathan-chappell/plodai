@@ -403,10 +403,10 @@ export const createReportToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-const reportSectionDraftSchema: JsonSchema = {
+const reportNarrativePanelDraftSchema: JsonSchema = {
   type: "object",
   properties: {
-    type: { enum: ["section"] },
+    type: { enum: ["narrative"] },
     title: { type: "string" },
     markdown: { type: "string" },
   },
@@ -414,36 +414,71 @@ const reportSectionDraftSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-const reportNoteDraftSchema: JsonSchema = {
+const reportChartPanelDraftSchema: JsonSchema = {
   type: "object",
   properties: {
-    type: { enum: ["note"] },
+    type: { enum: ["chart"] },
     title: { type: "string" },
-    text: { type: "string" },
-  },
-  required: ["type", "title", "text"],
-  additionalProperties: false,
-};
-
-export const appendReportItemToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    report_id: { type: "string" },
-    item: {
-      anyOf: [reportSectionDraftSchema, reportNoteDraftSchema],
+    file_id: { type: "string" },
+    chart_plan_id: { type: "string" },
+    chart: clientChartSpecSchema,
+    image_data_url: {
+      anyOf: [{ type: "string" }, { type: "null" }],
     },
   },
-  required: ["report_id", "item"],
+  required: ["type", "title", "file_id", "chart_plan_id", "chart"],
   additionalProperties: false,
 };
 
-export const removeReportItemToolSchema: JsonSchema = {
+const reportSlidePanelDraftSchema: JsonSchema = {
+  anyOf: [reportNarrativePanelDraftSchema, reportChartPanelDraftSchema],
+};
+
+function reportSlideDraftForLayout(
+  layout: "1x1" | "1x2" | "2x2",
+  minItems: number,
+  maxItems: number,
+): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      layout: { enum: [layout] },
+      panels: {
+        type: "array",
+        items: reportSlidePanelDraftSchema,
+        minItems,
+        maxItems,
+      },
+    },
+    required: ["title", "layout", "panels"],
+    additionalProperties: false,
+  };
+}
+
+export const appendReportSlideToolSchema: JsonSchema = {
   type: "object",
   properties: {
     report_id: { type: "string" },
-    item_id: { type: "string" },
+    slide: {
+      anyOf: [
+        reportSlideDraftForLayout("1x1", 1, 1),
+        reportSlideDraftForLayout("1x2", 2, 2),
+        reportSlideDraftForLayout("2x2", 3, 4),
+      ],
+    },
   },
-  required: ["report_id", "item_id"],
+  required: ["report_id", "slide"],
+  additionalProperties: false,
+};
+
+export const removeReportSlideToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    report_id: { type: "string" },
+    slide_id: { type: "string" },
+  },
+  required: ["report_id", "slide_id"],
   additionalProperties: false,
 };
 

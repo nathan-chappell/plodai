@@ -16,8 +16,8 @@ import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
 import { allCapabilityDefinitions } from "./capabilities/definitions";
 import type { ShellWorkspaceRegistration } from "./capabilities/types";
-import { isBlogPath } from "./lib/blog";
 import { navigate, usePathname } from "./lib/router";
+import { isLegacyBlogPath, isWritingPath } from "./lib/writing";
 
 type CapabilityPageProps = {
   onRegisterWorkspace?: (registration: ShellWorkspaceRegistration | null) => void;
@@ -25,9 +25,9 @@ type CapabilityPageProps = {
 
 type CapabilityPageComponent = ComponentType<CapabilityPageProps>;
 
-const BlogPage = lazy(async () => {
-  const module = await import("./components/BlogPage");
-  return { default: module.BlogPage };
+const WritingPage = lazy(async () => {
+  const module = await import("./components/WritingPage");
+  return { default: module.WritingPage };
 });
 
 const ReportFoundryPage = lazy(async () => {
@@ -88,7 +88,7 @@ export function App() {
   const pathname = usePathname();
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const { dismissToast, toasts } = useToastState();
-  const viewingBlog = isBlogPath(pathname);
+  const viewingWriting = isWritingPath(pathname) || isLegacyBlogPath(pathname);
   const [workspaceRegistration, setWorkspaceRegistration] = useState<ShellWorkspaceRegistration | null>(null);
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const handleRegisterWorkspace = useCallback((registration: ShellWorkspaceRegistration | null) => {
@@ -112,11 +112,11 @@ export function App() {
     hydrating,
   });
 
-  if (viewingBlog) {
+  if (viewingWriting) {
     return (
       <>
-        <Suspense fallback={<RouteLoadingState label="blog post" />}>
-          <BlogPage pathname={pathname} viewerRole={user?.role ?? null} />
+        <Suspense fallback={<RouteLoadingState label="writing" />}>
+          <WritingPage />
         </Suspense>
         <ToastViewport>
           {toasts.map((toast) => (
@@ -157,7 +157,6 @@ export function App() {
         <PlatformShell
           capabilities={capabilities}
           activeCapabilityId={activeCapability?.id ?? null}
-          currentPathname={pathname}
           onSelectCapability={handleSelectCapability}
           workspaceRegistration={workspaceRegistration}
           workspaceModalOpen={workspaceModalOpen}

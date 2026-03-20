@@ -20,6 +20,8 @@ Important operating rules:
 4. If a result set should be charted or reused, materialize it explicitly with \`create_csv_file\` or \`create_json_file\`.
 5. Use \`make_plan\` when it helps you stay organized, then continue immediately with more tool calls.
 6. When the next step is clear from the request and the available files, continue without unnecessary confirmation.
+7. If the user's objective, comparison, or desired output artifact is materially unclear, ask one concise clarifying question early.
+8. Once the objective is clear enough, keep moving through schema inspection, queries, and artifact creation instead of asking repeated follow-ups.
 `.trim();
 
 const csvAgentModule: CapabilityModule = {

@@ -1,9 +1,9 @@
 import {
-  appendReportItemToolSchema,
+  appendReportSlideToolSchema,
   createReportToolSchema,
   getReportToolSchema,
   listReportsToolSchema,
-  removeReportItemToolSchema,
+  removeReportSlideToolSchema,
 } from "../../lib/tool-schemas";
 import { readWorkspaceReportIndex } from "../../lib/workspace-contract";
 import type { JsonSchema } from "../../types/json-schema";
@@ -63,14 +63,14 @@ export function buildReportAgentClientToolCatalog(
       createReportToolSchema,
     ),
     buildToolDefinition(
-      "append_report_item",
-      "Append a narrative report item to a structured report in the shared workspace.",
-      withReportIdEnum(appendReportItemToolSchema, workspace),
+      "append_report_slide",
+      "Append a structured report slide to a report in the shared workspace.",
+      withReportIdEnum(appendReportSlideToolSchema, workspace),
     ),
     buildToolDefinition(
-      "remove_report_item",
-      "Remove a report item from a structured report in the shared workspace.",
-      withReportIdEnum(removeReportItemToolSchema, workspace),
+      "remove_report_slide",
+      "Remove a report slide from a structured report in the shared workspace.",
+      withReportIdEnum(removeReportSlideToolSchema, workspace),
     ),
   ];
 }
@@ -86,8 +86,8 @@ export function createReportAgentClientTools(
         | "list_reports"
         | "get_report"
         | "create_report"
-        | "append_report_item"
-        | "remove_report_item",
+        | "append_report_slide"
+        | "remove_report_slide",
     ),
   );
 }

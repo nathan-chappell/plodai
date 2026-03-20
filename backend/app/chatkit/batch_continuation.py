@@ -22,6 +22,14 @@ class ContinueBatchDecision(BaseModel):
     next_input: str | None = Field(default=None)
 
 
+def build_batch_continuation_progress_text(
+    decision: ContinueBatchDecision,
+) -> str | None:
+    if not decision.should_continue:
+        return None
+    return f"Batch mode is continuing automatically. {decision.reason}"
+
+
 CONTINUE_BATCH_AGENT = Agent[None](
     name="Continue Batch Agent",
     model=CONTINUE_BATCH_MODEL,
@@ -75,7 +83,9 @@ async def decide_batch_continuation(
     if decision.should_continue and not (
         isinstance(decision.next_input, str) and decision.next_input.strip()
     ):
-        return decision.model_copy(update={"next_input": DEFAULT_BATCH_CONTINUATION_INPUT})
+        return decision.model_copy(
+            update={"next_input": DEFAULT_BATCH_CONTINUATION_INPUT}
+        )
     if not decision.should_continue:
         return decision.model_copy(update={"next_input": None})
     return decision

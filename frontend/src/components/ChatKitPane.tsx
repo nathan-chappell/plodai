@@ -16,8 +16,6 @@ import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
   ChatKitPaneHarness,
-  ChatKitPaneIconButton,
-  ChatKitPaneHarnessMeta,
   ChatKitPaneMeta,
   ChatKitPaneModeButton,
   ChatKitPaneModeRow,
@@ -64,9 +62,6 @@ const CHATKIT_MODEL_CHOICES = [
   },
 ] as const;
 
-const CHATKIT_DEFAULT_MODEL_LABEL =
-  CHATKIT_MODEL_CHOICES.find((choice) => choice.id === CHATKIT_DEFAULT_MODEL_ID)?.label ?? "Lightweight";
-
 function formatToolLabel(tool: string): string {
   return tool
     .split("_")
@@ -94,8 +89,8 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
     case "list_reports":
     case "get_report":
     case "create_report":
-    case "append_report_item":
-    case "remove_report_item":
+    case "append_report_slide":
+    case "remove_report_slide":
       return "cube";
     case "run_aggregate_query":
     case "create_csv_file":
@@ -161,24 +156,7 @@ export function buildChatKitRequestMetadata(options: {
   };
 }
 
-function FeedbackIcon() {
-  return (
-    <svg aria-hidden="true" fill="none" viewBox="0 0 16 16">
-      <path
-        d="M10.57 2.57a1.5 1.5 0 0 1 2.12 0l.74.74a1.5 1.5 0 0 1 0 2.12l-6.6 6.6-2.76.64.64-2.76 6.6-6.6Z"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.25"
-      />
-      <path d="M9.5 3.5 12.5 6.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.25" />
-    </svg>
-  );
-}
-
-const FEEDBACK_ACTION_LABEL = "Open feedback flow";
-const FEEDBACK_CONFIRMATION_MESSAGE =
-  "Open the feedback flow for the latest assistant response in this thread?";
+const FEEDBACK_ACTION_LABEL = "Feedback";
 
 export function ChatKitHarness({
   capabilityBundle,
@@ -200,7 +178,6 @@ export function ChatKitHarness({
   showDictation = true,
   surfaceMinHeight,
   showExecutionModeControls = true,
-  feedbackButtonVariant = "button",
   showChatKitHeader = true,
 }: {
   capabilityBundle: CapabilityBundle;
@@ -222,7 +199,6 @@ export function ChatKitHarness({
   showDictation?: boolean;
   surfaceMinHeight?: number;
   showExecutionModeControls?: boolean;
-  feedbackButtonVariant?: "button" | "icon";
   showChatKitHeader?: boolean;
 }) {
   const [status, setStatus] = useState<string | null>(null);
@@ -407,11 +383,7 @@ export function ChatKitHarness({
             enabled: false,
           },
       startScreen: {
-        greeting:
-          greeting ??
-          (files.length
-            ? `Investigate ${files.length} attached file${files.length === 1 ? "" : "s"}.`
-            : "Manage the workspace or add local files to start the investigation."),
+        greeting: greeting ?? "Inspect local files and create the next useful artifact.",
         prompts: starterPrompts.map((prompt) => ({
           label: prompt.label,
           prompt: prompt.prompt,
@@ -629,12 +601,6 @@ export function ChatKitHarness({
     if (!threadIdRef.current || busy) {
       return;
     }
-    if (feedbackButtonVariant === "icon" && typeof window !== "undefined") {
-      const confirmed = window.confirm(FEEDBACK_CONFIRMATION_MESSAGE);
-      if (!confirmed) {
-        return;
-      }
-    }
     clearFinishStatusTimeout();
     setStatus("Starting feedback flow.");
     await chatKit.sendUserMessage({
@@ -644,85 +610,68 @@ export function ChatKitHarness({
   }
 
   const isBusy = running || activeClientToolName !== null;
-  const showFeedbackIcon = feedbackButtonVariant === "icon" && Boolean(threadId);
-  const showFeedbackButton = feedbackButtonVariant === "button" && Boolean(threadId);
-  const showStatusRow = Boolean(status) || showFeedbackIcon || showExecutionModeControls;
   const feedbackActionTitle = !threadId
     ? "Feedback is available after the first assistant response."
     : isBusy
       ? "Wait for the current run to finish before opening feedback."
-      : FEEDBACK_ACTION_LABEL;
+      : "Open the feedback flow for the latest assistant response in this thread.";
 
   return (
     <ChatKitPaneHarness>
-      {quickActions?.length || showFeedbackButton ? (
-        <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
-          {(quickActions ?? []).map((action) => (
-            <ChatKitPaneToolbarButton
-              key={action.label}
-              data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
-              type="button"
-              onClick={() => void handleQuickAction(action)}
-              disabled={isBusy}
-            >
-              {action.label}
-            </ChatKitPaneToolbarButton>
-          ))}
-          {showFeedbackButton ? (
-            <ChatKitPaneToolbarButton
-              data-testid="chatkit-provide-feedback"
-              type="button"
-              onClick={() => void handleProvideFeedback()}
-              disabled={isBusy || !threadId}
-              title={feedbackActionTitle}
-            >
-              Open feedback
-            </ChatKitPaneToolbarButton>
+      <ChatKitPaneStatusRow data-testid="chatkit-top-row">
+        <ChatKitPaneStatusActions data-testid="chatkit-header-controls">
+          {(quickActions ?? []).length ? (
+            <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
+              {(quickActions ?? []).map((action) => (
+                <ChatKitPaneToolbarButton
+                  key={action.label}
+                  data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
+                  type="button"
+                  onClick={() => void handleQuickAction(action)}
+                  disabled={isBusy}
+                >
+                  {action.label}
+                </ChatKitPaneToolbarButton>
+              ))}
+            </ChatKitPaneToolbar>
           ) : null}
-        </ChatKitPaneToolbar>
-      ) : null}
-      {showStatusRow ? (
-        <ChatKitPaneStatusRow>
-          <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
-            {status}
-          </ChatKitPaneStatusText>
-          <ChatKitPaneStatusActions>
-            {showExecutionModeControls ? (
-              <>
-                <ChatKitPaneHarnessMeta $light={colorScheme === "light"}>Mode</ChatKitPaneHarnessMeta>
-                <ChatKitPaneModeRow aria-label="Run mode toggle" data-testid="chatkit-execution-mode-controls">
-                  {(["interactive", "batch"] as const).map((mode) => (
-                    <ChatKitPaneModeButton
-                      key={mode}
-                      type="button"
-                      $active={executionMode === mode}
-                      onClick={() => onExecutionModeChange(mode)}
-                      data-testid={`chatkit-execution-mode-${mode}`}
-                      disabled={isBusy}
-                      title={isBusy ? "Wait for the current run to finish before changing the run mode." : "Run mode"}
-                    >
-                      {EXECUTION_MODE_LABELS[mode]}
-                    </ChatKitPaneModeButton>
-                  ))}
-                </ChatKitPaneModeRow>
-              </>
-            ) : null}
-            {showFeedbackIcon ? (
-              <ChatKitPaneIconButton
-                $light={colorScheme === "light"}
-                aria-label={FEEDBACK_ACTION_LABEL}
-                data-testid="chatkit-provide-feedback"
-                onClick={() => void handleProvideFeedback()}
-                disabled={isBusy || !threadId}
-                title={feedbackActionTitle}
-                type="button"
-              >
-                <FeedbackIcon />
-              </ChatKitPaneIconButton>
-            ) : null}
-          </ChatKitPaneStatusActions>
-        </ChatKitPaneStatusRow>
-      ) : null}
+          {showExecutionModeControls ? (
+            <ChatKitPaneModeRow
+              $light={colorScheme === "light"}
+              aria-label="Run mode toggle"
+              data-testid="chatkit-execution-mode-controls"
+            >
+              {(["interactive", "batch"] as const).map((mode) => (
+                <ChatKitPaneModeButton
+                  key={mode}
+                  type="button"
+                  $active={executionMode === mode}
+                  $light={colorScheme === "light"}
+                  onClick={() => onExecutionModeChange(mode)}
+                  data-testid={`chatkit-execution-mode-${mode}`}
+                  disabled={isBusy}
+                  title={isBusy ? "Wait for the current run to finish before changing the run mode." : "Run mode"}
+                >
+                  {EXECUTION_MODE_LABELS[mode]}
+                </ChatKitPaneModeButton>
+              ))}
+            </ChatKitPaneModeRow>
+          ) : null}
+          <ChatKitPaneToolbarButton
+            aria-label={FEEDBACK_ACTION_LABEL}
+            data-testid="chatkit-provide-feedback"
+            type="button"
+            onClick={() => void handleProvideFeedback()}
+            disabled={isBusy || !threadId}
+            title={feedbackActionTitle}
+          >
+            {FEEDBACK_ACTION_LABEL}
+          </ChatKitPaneToolbarButton>
+        </ChatKitPaneStatusActions>
+        <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
+          {status}
+        </ChatKitPaneStatusText>
+      </ChatKitPaneStatusRow>
       <ChatKitPaneSurface
         ref={surfaceRef}
         $light={colorScheme === "light"}
@@ -758,11 +707,10 @@ export function ChatKitPane({
   paneTitle,
   paneMeta,
   emptyMessage,
-  showPaneHeader = true,
-  showDefaultModelMeta = true,
+  showPaneHeader = false,
+  showDefaultModelMeta = false,
   surfaceMinHeight,
   showExecutionModeControls = true,
-  feedbackButtonVariant = "button",
   showChatKitHeader = true,
 }: {
   capabilityBundle: CapabilityBundle;
@@ -791,7 +739,6 @@ export function ChatKitPane({
   showDefaultModelMeta?: boolean;
   surfaceMinHeight?: number;
   showExecutionModeControls?: boolean;
-  feedbackButtonVariant?: "button" | "icon";
   showChatKitHeader?: boolean;
 }) {
   const canInvestigate = enabled && (files.length > 0 || clientTools.length > 0);
@@ -823,9 +770,7 @@ export function ChatKitPane({
           <ChatKitPaneMeta>{resolvedMeta}</ChatKitPaneMeta>
         </>
       ) : null}
-      {showDefaultModelMeta ? (
-        <ChatKitPaneMeta>Default model capability: {CHATKIT_DEFAULT_MODEL_LABEL}</ChatKitPaneMeta>
-      ) : null}
+      {showDefaultModelMeta ? <ChatKitPaneMeta>{paneMeta ?? resolvedMeta}</ChatKitPaneMeta> : null}
       {canInvestigate ? (
         <ChatKitHarness
           capabilityBundle={capabilityBundle}
@@ -847,13 +792,12 @@ export function ChatKitPane({
           showDictation={showDictation}
           surfaceMinHeight={surfaceMinHeight}
           showExecutionModeControls={showExecutionModeControls}
-          feedbackButtonVariant={feedbackButtonVariant}
           showChatKitHeader={showChatKitHeader}
         />
       ) : (
         <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">
           <ChatKitPaneEmpty>
-            {emptyMessage ?? (enabled ? "The agent is ready once you add local CSV files." : "Sign in to open the analyst workspace.")}
+            {emptyMessage ?? (enabled ? "Add local files or derived artifacts to start this workspace." : "Sign in to open the workspace.")}
           </ChatKitPaneEmpty>
         </ChatKitPaneSurface>
       )}

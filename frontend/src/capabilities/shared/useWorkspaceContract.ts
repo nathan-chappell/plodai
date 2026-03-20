@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useMemo, useReducer } from "react";
 
 import {
-  appendWorkspaceReportItems,
   buildWorkspaceBootstrapMetadata,
-  effectsToReportItems,
   ensureWorkspaceContractFilesystem,
   readWorkspaceAppState,
   readWorkspaceReport,
   readWorkspaceReportIndex,
-  replaceWorkspaceReportItems,
-  reportItemsToEffects,
   syncWorkspaceToolCatalog,
   updateWorkspaceAppState,
   updateWorkspaceCurrentGoal,
 } from "../../lib/workspace-contract";
 import type { CapabilityWorkspaceSnapshot } from "../../lib/workspace-store";
-import type { ClientEffect, ExecutionMode } from "../../types/analysis";
+import type { ExecutionMode } from "../../types/analysis";
 import type { WorkspaceBootstrapMetadata, WorkspaceReportV1 } from "../../types/workspace-contract";
 import type { CapabilityWorkspaceContext } from "../types";
 
@@ -63,8 +59,6 @@ function migrateLegacySnapshot(
     const legacy = options.legacySnapshot;
     if (legacy) {
       const appState = readWorkspaceAppState(nextFilesystem);
-      const reportIndex = readWorkspaceReportIndex(nextFilesystem);
-      const reportId = appState?.current_report_id ?? reportIndex?.current_report_id;
 
       if (legacy.investigationBrief && !appState?.current_goal) {
         nextFilesystem = updateWorkspaceCurrentGoal(nextFilesystem, legacy.investigationBrief);
@@ -78,16 +72,6 @@ function migrateLegacySnapshot(
         nextFilesystem = updateWorkspaceAppState(nextFilesystem, {
           execution_mode: legacy.executionMode,
         });
-      }
-      if (reportId && legacy.reportEffects.length) {
-        const currentReport = readWorkspaceReport(nextFilesystem, reportId);
-        if (!currentReport?.items.length) {
-          nextFilesystem = replaceWorkspaceReportItems(
-            nextFilesystem,
-            reportId,
-            effectsToReportItems(legacy.reportEffects),
-          );
-        }
       }
     }
 
@@ -145,10 +129,6 @@ export function useWorkspaceContract(options: {
     const reportId = appState?.current_report_id ?? reportIndex?.current_report_id;
     return reportId ? readWorkspaceReport(filesystem, reportId) : null;
   }, [appState, filesystem, reportIndex]);
-  const reportEffects = useMemo(
-    () => reportItemsToEffects(currentReport?.items ?? []),
-    [currentReport],
-  );
   const bootstrapMetadata = useMemo<WorkspaceBootstrapMetadata>(
     () => buildWorkspaceBootstrapMetadata(filesystem),
     [filesystem],
@@ -170,35 +150,6 @@ export function useWorkspaceContract(options: {
     );
   }, [options.workspace.updateFilesystem]);
 
-  const setReportEffects = useCallback((
-    value: ClientEffect[] | ((current: ClientEffect[]) => ClientEffect[]),
-  ) => {
-    const currentEffects = reportItemsToEffects(currentReport?.items ?? []);
-    const nextEffects = typeof value === "function" ? value(currentEffects) : value;
-    const reportId =
-      appState?.current_report_id ?? reportIndex?.current_report_id;
-    if (!reportId) {
-      return;
-    }
-    options.workspace.updateFilesystem((filesystem) =>
-      replaceWorkspaceReportItems(filesystem, reportId, effectsToReportItems(nextEffects)),
-    );
-  }, [appState, currentReport, options.workspace.updateFilesystem, reportIndex]);
-
-  const appendReportEffects = useCallback((effects: ClientEffect[]) => {
-    if (!effects.length) {
-      return;
-    }
-    const reportId =
-      appState?.current_report_id ?? reportIndex?.current_report_id;
-    if (!reportId) {
-      return;
-    }
-    options.workspace.updateFilesystem((filesystem) =>
-      appendWorkspaceReportItems(filesystem, reportId, effectsToReportItems(effects)),
-    );
-  }, [appState, options.workspace.updateFilesystem, reportIndex]);
-
   const syncToolCatalog = useCallback((toolNames: string[]) => {
     options.workspace.updateFilesystem((filesystem) =>
       syncWorkspaceToolCatalog(filesystem, options.capabilityId, toolNames),
@@ -218,9 +169,6 @@ export function useWorkspaceContract(options: {
     setActiveWorkspaceTab,
     executionMode: appState?.execution_mode ?? options.defaultExecutionMode,
     setExecutionMode,
-    reportEffects,
-    setReportEffects,
-    appendReportEffects,
     syncToolCatalog,
     currentReportId:
       appState?.current_report_id ?? reportIndex?.current_report_id ?? null,

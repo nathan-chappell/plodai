@@ -45,6 +45,8 @@ export type JsonEnumSchema = JsonSchemaBase & {
 export type JsonArraySchema = JsonSchemaBase & {
   type: "array";
   items: JsonSchema;
+  minItems?: number;
+  maxItems?: number;
 };
 
 export type JsonObjectSchema = JsonSchemaBase & {

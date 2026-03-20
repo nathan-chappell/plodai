@@ -1,12 +1,10 @@
 import ClientToolsWorker from "./client-tools.worker?worker";
 import { renderChartToDataUrl } from "./chart";
 import {
-  appendWorkspaceReportItems,
+  appendWorkspaceReportSlides,
   buildWorkspaceBootstrapMetadata,
-  readWorkspaceAppState,
-  readWorkspaceReportIndex,
   removeWorkspacePath,
-  replaceWorkspaceReportItems,
+  replaceWorkspaceReportSlides,
   updateWorkspaceAppState,
   writeWorkspaceIndex,
   writeWorkspaceReport,
@@ -144,15 +142,15 @@ async function applyMutations(
             },
           );
           break;
-        case "replace_report_items":
-          nextFilesystem = replaceWorkspaceReportItems(
+        case "replace_report_slides":
+          nextFilesystem = replaceWorkspaceReportSlides(
             nextFilesystem,
             mutation.report_id,
-            mutation.items,
+            mutation.slides,
           );
           break;
-        case "append_report_items":
-          nextFilesystem = appendWorkspaceReportItems(nextFilesystem, mutation.report_id, mutation.items);
+        case "append_report_slides":
+          nextFilesystem = appendWorkspaceReportSlides(nextFilesystem, mutation.report_id, mutation.slides);
           break;
         case "update_app_state":
           nextFilesystem = updateWorkspaceAppState(nextFilesystem, mutation.patch as never);
@@ -233,7 +231,7 @@ async function applyMutations(
         chartEffects.find((effect) => effect.type === "chart_rendered")?.imageDataUrl ??
         result.payload.imageDataUrl ??
         null,
-      workspace_context: getWorkspaceContext(state.filesystem, state.activePrefix),
+      workspace_context: getWorkspaceContext(state.filesystem, "/"),
       path_prefix: state.activePrefix,
       artifact_prefix: WORKSPACE_CHART_ARTIFACTS_DIR,
     },

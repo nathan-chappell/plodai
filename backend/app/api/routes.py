@@ -16,7 +16,11 @@ from backend.app.schemas.credits import (
     AdminUserListResponse,
     AdminUserSummary,
 )
-from backend.app.services.clerk_admin_service import list_users, map_user_summary, set_user_active_state
+from backend.app.services.clerk_admin_service import (
+    list_users,
+    map_user_summary,
+    set_user_active_state,
+)
 from backend.app.services.credit_service import CreditService
 
 
@@ -36,6 +40,7 @@ async def me(
         role=user.role,
         is_active=user.is_active,
         current_credit_usd=balance.current_credit_usd,
+        credit_floor_usd=user.credit_floor_usd,
     )
 
 
@@ -66,7 +71,9 @@ async def get_admin_users(
     db: AsyncSession = Depends(get_db),
 ):
     clerk_users = await list_users(limit=limit, offset=offset, query=query)
-    credit_amounts = await CreditService(db).list_balance_amounts([user.id for user in clerk_users])
+    credit_amounts = await CreditService(db).list_balance_amounts(
+        [user.id for user in clerk_users]
+    )
     items = [
         AdminUserSummary(
             **map_user_summary(clerk_user),
@@ -86,22 +93,16 @@ async def get_admin_users(
 @router.post("/admin/users/set-active", response_model=AdminSetUserActiveResponse)
 async def set_user_active(
     payload: AdminSetUserActiveRequest,
-    admin: AuthenticatedUser = Depends(require_admin_user),
+    _: AuthenticatedUser = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     user_id = payload.user_id.strip()
-    is_active = await set_user_active_state(user_id=user_id, active=payload.active)
+    user_summary = await set_user_active_state(user_id=user_id, active=payload.active)
     credit_service = CreditService(db)
-    if is_active and payload.grant_welcome_credit:
-        await credit_service.grant_credit(
-            user_id,
-            1.0,
-            note="Activation welcome credit",
-            admin_user_id=admin.id,
-        )
     balance = await credit_service.get_or_create_balance(user_id)
     return AdminSetUserActiveResponse(
         user_id=user_id,
-        is_active=is_active,
+        is_active=user_summary["is_active"],
         current_credit_usd=balance.current_credit_usd,
+        credit_floor_usd=user_summary["credit_floor_usd"],
     )

@@ -9,6 +9,11 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.app.core.config import Settings, get_settings
+from backend.app.core.clerk_metadata import (
+    DEFAULT_CREDIT_FLOOR_USD,
+    as_public_metadata,
+    resolve_credit_floor_usd,
+)
 from backend.app.core.logging import get_logger, log_event
 from backend.app.db.session import get_db
 from backend.app.models.credit import UserCreditBalance
@@ -28,6 +33,7 @@ class AuthenticatedUser:
     full_name: str | None
     role: UserRole
     is_active: bool
+    credit_floor_usd: float
 
 
 @dataclass(frozen=True)
@@ -45,7 +51,9 @@ def _resolve_dev_authenticated_user(
         return None
     if credentials is None or credentials.scheme.lower() != "bearer":
         return None
-    if not secrets.compare_digest(credentials.credentials, DEFAULT_DEV_AUTH_BEARER_TOKEN):
+    if not secrets.compare_digest(
+        credentials.credentials, DEFAULT_DEV_AUTH_BEARER_TOKEN
+    ):
         return None
 
     user = AuthenticatedUser(
@@ -54,6 +62,7 @@ def _resolve_dev_authenticated_user(
         full_name="Local Dev Admin",
         role="admin",
         is_active=True,
+        credit_floor_usd=DEFAULT_CREDIT_FLOOR_USD,
     )
     log_event(
         logger,
@@ -89,7 +98,9 @@ async def _require_clerk_user(
 
     client = Clerk(bearer_auth=resolved_settings.CLERK_SECRET_KEY)
     request_state = await client.authenticate_request_async(
-        ClerkRequest(headers={"Authorization": f"{credentials.scheme} {credentials.credentials}"}),
+        ClerkRequest(
+            headers={"Authorization": f"{credentials.scheme} {credentials.credentials}"}
+        ),
         AuthenticateRequestOptions(
             secret_key=resolved_settings.CLERK_SECRET_KEY,
             jwt_key=resolved_settings.CLERK_JWT_KEY,
@@ -126,13 +137,14 @@ async def _require_clerk_user(
             detail="Clerk session did not include a usable email address.",
         )
 
-    public_metadata = clerk_user.public_metadata if isinstance(clerk_user.public_metadata, dict) else {}
+    public_metadata = as_public_metadata(clerk_user.public_metadata)
 
     role_value = public_metadata.get("role")
     role: UserRole = "admin" if role_value == "admin" else "user"
 
     active_value = public_metadata.get("active")
     is_active = active_value is True
+    credit_floor_usd = resolve_credit_floor_usd(public_metadata)
     if not is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -141,7 +153,10 @@ async def _require_clerk_user(
 
     full_name = None
     if clerk_user.first_name or clerk_user.last_name:
-        full_name = f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or None
+        full_name = (
+            f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip()
+            or None
+        )
     if not full_name:
         full_name = str(payload.get("name") or "").strip() or None
 
@@ -151,6 +166,7 @@ async def _require_clerk_user(
         full_name=full_name,
         role=role,
         is_active=True,
+        credit_floor_usd=credit_floor_usd,
     )
 
 
@@ -179,10 +195,12 @@ async def require_paid_user(
         return user
 
     balance = await db.get(UserCreditBalance, user.id)
-    current_credit_usd = float(balance.current_credit_usd) if balance is not None else 0.0
-    if current_credit_usd <= 0:
+    current_credit_usd = (
+        float(balance.current_credit_usd) if balance is not None else 0.0
+    )
+    if current_credit_usd <= user.credit_floor_usd:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="No remaining credit. Add credit to continue using the workspace.",
+            detail="Credit limit reached. Add credit to continue using the workspace.",
         )
     return user

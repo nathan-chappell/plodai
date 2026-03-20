@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 
+from matplotlib.figure import Figure
 import pytest
 import torch
 from typer.testing import CliRunner
@@ -57,22 +58,31 @@ def test_precision_story_payload_uses_curated_two_stack_sequence() -> None:
 
     assert payload.encoding == demo.PRECISION_STORY_MODE
     assert payload.dust_depth == demo.PRECISION_DUST_DEPTH
-    assert payload.initial_left_stack == ""
-    assert payload.initial_right_stack == "101011001110010110100111001011010011010111001011"
-    assert len(payload.states) == 30
+    assert payload.counting_bits == demo.PRECISION_COUNT_BITS
+    assert payload.initial_left_stack == "0" * (demo.PRECISION_COUNT_BITS - 1)
+    assert payload.initial_right_stack == "0"
+    assert len(payload.states) > 200
     assert payload.step_labels[0] == "start"
-    assert payload.step_labels[-1] == "move R"
+    assert "carry L" in payload.step_labels
+    assert "return R" in payload.step_labels
+    assert len(payload.milestone_step_indexes) == len(demo.PRECISION_MILESTONE_COUNTS)
+    assert [summary.lag for summary in payload.lag_summaries] == [1, 2, 4]
 
 
-def test_precision_story_figure_uses_2d_panels_and_precision_annotations() -> None:
+def test_precision_story_figure_uses_matplotlib_layout_and_precision_annotations() -> None:
     figure = demo.build_precision_story_figure(demo.build_precision_story_payload())
 
-    assert all(trace.type != "scatter3d" for trace in figure.data)
-    assert {trace.type for trace in figure.data} == {"scatter"}
-    assert len(figure.layout.images) == 1
-    assert any("10-bit tape windows" in annotation.text for annotation in figure.layout.annotations)
-    assert any("[0]" in annotation.text or "[1]" in annotation.text for annotation in figure.layout.annotations)
-    assert any("Finite picture, infinite claim" in annotation.text for annotation in figure.layout.annotations)
+    assert isinstance(figure, Figure)
+    assert len(figure.axes) == 2
+    assert figure._suptitle is not None
+    axis_text = [text.get_text() for text in figure.axes[0].texts]
+    assert "Binary counting sweep through Cantor dust" in figure._suptitle.get_text()
+    assert len(axis_text) <= 3
+    assert any("carry L" in text for text in axis_text)
+    assert any("return R" in text for text in axis_text)
+    assert any("[" in text and "]" in text for text in axis_text)
+    assert figure.axes[1].get_title(loc="left") == "Step distance by lag"
+    assert figure.axes[1].get_xlabel() == "Euclidean step distance"
 
 
 def test_story_probe_pool_uses_balanced_family_slice() -> None:
@@ -96,30 +106,49 @@ def test_acceptance_probability_uses_fixed_ball_geometry() -> None:
 
 
 def test_publication_checkpoint_epochs_cover_three_training_phases() -> None:
-    assert demo.phase_epoch_schedule(2) == [2, 4, 4]
-    assert demo.phase_batch_schedule() == [8, 16, 32]
-    assert demo.build_publication_checkpoint_epochs(2) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert demo.phase_epoch_schedule(2) == [2, 2]
+    assert demo.phase_batch_schedule() == [8, 16]
+    assert demo.build_publication_checkpoint_epochs(2) == [0, 1, 2, 3, 4]
     assert demo.checkpoint_label(0, 2) == "Random init"
     assert demo.checkpoint_label(2, 2) == "After phase 1"
-    assert demo.checkpoint_label(6, 2) == "After phase 2"
-    assert demo.checkpoint_label(10, 2) == "After phase 3"
+    assert demo.checkpoint_label(4, 2) == "After phase 2"
 
 
 def test_phase_learning_rate_decays_with_cosine_restarts() -> None:
-    phase_1_start = demo.phase_learning_rate(phase_index=0, epoch_in_phase=1, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
-    phase_1_end = demo.phase_learning_rate(phase_index=0, epoch_in_phase=6, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
-    phase_2_start = demo.phase_learning_rate(phase_index=1, epoch_in_phase=1, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
-    phase_3_end = demo.phase_learning_rate(phase_index=2, epoch_in_phase=6, epochs_in_phase=6, lr_start=0.0015, lr_end=0.00015)
+    phase_1_start = demo.phase_learning_rate(phase_index=0, epoch_in_phase=1, epochs_in_phase=6, lr_start=0.0015, lr_end=0.0002)
+    phase_1_end = demo.phase_learning_rate(phase_index=0, epoch_in_phase=6, epochs_in_phase=6, lr_start=0.0015, lr_end=0.0002)
+    phase_2_start = demo.phase_learning_rate(phase_index=1, epoch_in_phase=1, epochs_in_phase=6, lr_start=0.0015, lr_end=0.0002)
+    phase_2_end = demo.phase_learning_rate(phase_index=1, epoch_in_phase=6, epochs_in_phase=6, lr_start=0.0015, lr_end=0.0002)
 
-    assert phase_1_start > phase_1_end > 0.00015
+    assert phase_1_start > phase_1_end > 0.0002
     assert phase_2_start < phase_1_start
-    assert phase_3_end == pytest.approx(0.00015)
+    assert phase_2_end == pytest.approx(0.0002)
+
+
+def test_phase_builders_use_article_length_regimes() -> None:
+    phase_1_examples = demo.build_phase_epoch_examples(
+        phase_spec=demo.RNN_PHASE_SPECS[0],
+        epoch_index=1,
+        total_examples=20,
+        seed=7,
+    )
+    phase_2_examples = demo.build_phase_epoch_examples(
+        phase_spec=demo.RNN_PHASE_SPECS[1],
+        epoch_index=1,
+        total_examples=20,
+        seed=17,
+    )
+
+    assert {len(example.text) for example in phase_1_examples} <= {2, 4, 6, 8, 20}
+    assert 20 in {len(example.text) for example in phase_1_examples}
+    assert {len(example.text) for example in phase_2_examples} <= {10, 20, 30}
 
 
 def test_run_rnn_experiment_returns_phased_shock_story_metadata(
     small_rnn_result: demo.RNNExperimentResult,
 ) -> None:
     result = small_rnn_result
+    assert result.seed == 7
     assert result.model_mode == demo.RNN_MODEL_MODE
     assert result.language == demo.TARGET_LANGUAGE
     assert result.architecture["module"] == "torch.RNN"
@@ -127,12 +156,11 @@ def test_run_rnn_experiment_returns_phased_shock_story_metadata(
     assert result.architecture["hidden_size"] == 4
     assert result.architecture["num_layers"] == 2
     assert result.checkpoint_labels[0] == "Random init"
-    assert result.checkpoint_labels[-1] == "After phase 3"
-    assert result.phase_epoch_schedule == [2, 4, 4]
-    assert result.phase_batch_schedule == [8, 16, 32]
+    assert result.checkpoint_labels[-1] == "After phase 2"
+    assert result.phase_epoch_schedule == [2, 2]
+    assert result.phase_batch_schedule == [8, 16]
     assert result.phase_family_mix == [
         {"random": 1.0},
-        {"random": 0.5, "off_by_one": 0.5},
         {"random": 0.25, "off_by_one": 0.25, "valid_prefix": 0.25, "balanced_invalid": 0.25},
     ]
     assert len(result.metrics) == len(result.checkpoint_epochs)
@@ -141,71 +169,115 @@ def test_run_rnn_experiment_returns_phased_shock_story_metadata(
     assert [span["phase_kind"] for span in result.phase_spans] == [
         demo.PHASE_KIND_PRETRAIN,
         demo.PHASE_KIND_SHOCK,
-        demo.PHASE_KIND_REINFORCE,
     ]
     assert sorted(result.checkpoint_states) == result.checkpoint_epochs
+    assert len(result.training_texts) > 0
 
 
-def test_trace_selection_and_payload_use_four_rows_and_literal_headers(
+def test_curated_probe_bundle_uses_long_held_out_examples(
     small_rnn_result: demo.RNNExperimentResult,
 ) -> None:
-    selection = demo.select_trace_story_probes(small_rnn_result)
-    payload = demo.build_trace_grid_payload(result=small_rnn_result, trace_selection=selection)
+    from blog.scripts.rnn_transition_selection import build_curated_probe_bundle
 
-    assert payload.phase_labels == ["Random init", "After phase 1", "After phase 2", "After phase 3"]
-    assert payload.phase_epochs == [0, 2, 6, 10]
-    assert payload.probe_role_labels == ["Valid control", "Off-by-one shock", "Valid-prefix repair"]
-    assert len(payload.probe_texts) == 3
-    assert all(set(text) <= {"(", ")"} for text in payload.probe_texts)
-    assert payload.projection_mode == "oblique_pca_2d"
-    assert len(payload.cells) == 12
-    assert len(payload.acceptance_region) == 73
+    bundle = build_curated_probe_bundle(
+        small_rnn_result,
+        is_valid_fn=demo.is_balanced_parentheses,
+    )
 
-
-def test_story_figure_has_three_rows_and_family_probe_annotation(
-    small_rnn_result: demo.RNNExperimentResult,
-) -> None:
-    figure = demo.build_rnn_story_figure(small_rnn_result)
-
-    family_traces = [
-        trace
-        for trace in figure.data
-        if getattr(trace, "yaxis", "") == "y2"
-        and getattr(trace, "name", "") in {"off-by-one", "valid-prefix", "balanced-invalid"}
+    assert [item.role for item in bundle.selected] == [
+        "valid control",
+        "off-by-one shock",
+        "repair case",
     ]
-    sigma_traces = [trace for trace in figure.data if getattr(trace, "yaxis", "") == "y3"]
+    assert len(bundle.background) == 96
+    assert all(len(item.trajectory.text) in {20, 30} for item in bundle.selected)
+    assert all(
+        item.trajectory.text not in small_rnn_result.training_texts
+        for item in bundle.selected
+    )
+    assert bundle.watchlist_mode == "curated_long_held_out_plus_balanced_background"
 
-    assert family_traces
-    assert sigma_traces
-    assert all(trace.line.dash == "dash" for trace in family_traces)
-    assert figure.layout.yaxis3.title.text == "sigma(valid) · boundary zoom"
-    assert any("128 fixed length-10 probes" in annotation.text for annotation in figure.layout.annotations)
 
-
-def test_trace_figure_uses_2d_subplots_with_acceptance_ellipse(
+def test_build_transition_figure_includes_trace_panels_and_endpoint_context(
     small_rnn_result: demo.RNNExperimentResult,
 ) -> None:
-    payload = demo.build_trace_grid_payload(
+    import matplotlib.pyplot as plt
+
+    from blog.scripts.rnn_transition_matplotlib import build_transition_figure
+    from blog.scripts.rnn_transition_metrics import (
+        TransitionMetricsBundle,
+        assess_transition,
+        build_transition_metrics,
+    )
+    from blog.scripts.rnn_transition_selection import build_curated_probe_bundle
+
+    bundle = build_curated_probe_bundle(
+        small_rnn_result,
+        is_valid_fn=demo.is_balanced_parentheses,
+    )
+    metrics = build_transition_metrics(
+        small_rnn_result, is_valid_fn=demo.is_balanced_parentheses
+    )
+    assessment = assess_transition(
+        TransitionMetricsBundle(
+            trajectories=bundle.all_trajectories,
+            family_series=metrics.family_series,
+            phase_epochs=metrics.phase_epochs,
+            boundary_family_labels=metrics.boundary_family_labels,
+            boundary_family_size=metrics.boundary_family_size,
+        ),
+        representative_counterexample=bundle.selected[1].trajectory,
+        representative_ordinary=bundle.selected[0].trajectory,
+        representative_boundary=bundle.selected[2].trajectory,
+    )
+
+    figure = build_transition_figure(
         result=small_rnn_result,
-        trace_selection=demo.select_trace_story_probes(small_rnn_result),
-    )
-    figure = demo.build_trace_figure(payload)
-
-    path_trace = next(
-        trace
-        for trace in figure.data
-        if trace.type == "scatter" and getattr(trace, "mode", "") == "lines+markers"
-    )
-    acceptance_trace = next(
-        trace
-        for trace in figure.data
-        if trace.type == "scatter" and getattr(trace, "fill", None) == "toself"
+        selected=bundle.selected,
+        background=bundle.background,
+        phase_spans=small_rnn_result.phase_spans,
+        assessment=assessment,
     )
 
-    assert all(trace.type != "scatter3d" for trace in figure.data)
-    assert path_trace.line.color in demo.STORY_STATUS_COLORS.values()
-    assert acceptance_trace.fillcolor == "rgba(74,222,128,0.18)"
-    assert any("Valid control: ((((()))))"[:12] in annotation.text or "Valid control: " in annotation.text for annotation in figure.layout.annotations)
+    assert isinstance(figure, Figure)
+    assert len(figure.axes) == 3
+    assert any(axis.collections for axis in figure.axes[:2])
+    assert any(axis.patches for axis in figure.axes[:2])
+    assert figure.axes[2].get_ylabel() == "p(valid)"
+    plt.close(figure)
+
+def test_render_rnn_transition_report_produces_static_report_bundle(
+    small_rnn_result: demo.RNNExperimentResult,
+    tmp_path: Path,
+) -> None:
+    from blog.scripts.rnn_transition_report import render_rnn_transition_report
+
+    manifest = render_rnn_transition_report(
+        small_rnn_result,
+        output_dir=tmp_path,
+        is_valid_fn=demo.is_balanced_parentheses,
+    )
+
+    assert manifest["report_backend"] == "matplotlib"
+    assert manifest["report_layout"] == "trace_panels_plus_transition_field"
+    assert manifest["transition_classification"] in {"abrupt", "gradual", "absent"}
+    assert len(manifest["representative_probes"]) == 3
+    assert manifest["watchlist_mode"] == "curated_long_held_out_plus_balanced_background"
+    assert manifest["background_probe_count"] == 96
+    assert (
+        manifest["trace_panel_background_mode"]
+        == "held_out_state_cloud_plus_endpoints"
+    )
+    assert len(manifest["curated_probe_notes"]) == 3
+    assert manifest["trace_marker_mode"] == "start_end_only"
+    assert manifest["story_value_transform"] == "boundary_emphasized_probability_nonlinear"
+    assert manifest["figure_background"] == "dark_slate"
+    assert manifest["summary_table_files"] == ["rnn-transition-summary.csv"]
+    assert (tmp_path / "rnn-training-story.svg").exists()
+    assert (tmp_path / "rnn-transition-summary.csv").exists()
+    assert (tmp_path / "rnn-transition-metrics.json").exists()
+    assert (tmp_path / "rnn-transition-assessment.md").exists()
+    assert not (tmp_path / "rnn-transition-summary.svg").exists()
 
 
 def test_parse_mlp_shape_accepts_single_and_multiple_layers() -> None:
@@ -216,6 +288,23 @@ def test_parse_mlp_shape_accepts_single_and_multiple_layers() -> None:
 def test_mlp_story_epoch_selector_uses_fixed_story_checkpoints() -> None:
     assert mlp_story.mlp_story_epochs(400) == [0, 30, 200, 400]
     assert mlp_story.mlp_story_epochs(40) == [0, 30, 40]
+    assert mlp_story.mlp_story_epochs(400, reorganization_epoch=275) == [
+        0,
+        30,
+        200,
+        275,
+        400,
+    ]
+
+
+def test_detect_mlp_reorganization_epoch_is_deterministic() -> None:
+    loss_history = [0.30 - (0.0004 * epoch) for epoch in range(400)]
+    loss_history[274] = 0.205
+
+    epoch, score = mlp_story.detect_mlp_reorganization_epoch(loss_history)
+
+    assert epoch == 275
+    assert score > 0.03
 
 
 def test_render_mlp_assets_uses_fixed_publication_shape(
@@ -225,11 +314,13 @@ def test_render_mlp_assets_uses_fixed_publication_shape(
     xs = torch.zeros((2, 1))
     ys = torch.zeros((2, 1))
 
-    def fake_run_mlp_training(*, epochs: int, batch_size: int, seed: int, hidden_layers: tuple[int, ...]) -> demo.MLPTrainingRun:
-        return demo.MLPTrainingRun(
+    def fake_run_mlp_training(*, epochs: int, batch_size: int, seed: int, hidden_layers: tuple[int, ...]) -> mlp_story.MLPTrainingRun:
+        predictions_by_epoch = {epoch: xs for epoch in range(epochs + 1)}
+        loss_history = [0.08, 0.07, 0.075, 0.05]
+        return mlp_story.MLPTrainingRun(
             hidden_layers=hidden_layers,
-            loss_history=[0.01],
-            predictions_by_epoch={0: xs, 1: xs},
+            loss_history=loss_history,
+            predictions_by_epoch=predictions_by_epoch,
             xs=xs,
             ys=ys,
         )
@@ -237,23 +328,26 @@ def test_render_mlp_assets_uses_fixed_publication_shape(
     monkeypatch.setattr(mlp_story, "run_mlp_training", fake_run_mlp_training)
     manifest = demo.render_mlp_assets(
         output_dir=tmp_path,
-        write_html=False,
         seed=7,
         mlp_epochs=4,
         mlp_batch_size=8,
         mlp_shape="32",
     )
     assert manifest["published_shape"] == [32]
+    assert "mlp-sine-story.svg" in manifest["files"]
+    assert manifest["selected_epochs"] == [0, 4]
+    assert manifest["reorganization_epoch"] == 4
+    assert manifest["reorganization_score"] >= 0.0
 
 
 def test_generate_mlp_cli_smoke(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         demo.app,
-        ["generate", "--target", "mlp", "--output-dir", str(tmp_path), "--mlp-epochs", "8", "--mlp-batch-size", "32", "--no-html"],
+        ["generate", "--target", "mlp", "--output-dir", str(tmp_path), "--mlp-epochs", "8", "--mlp-batch-size", "32"],
     )
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "mlp-sine-story.png").exists()
+    assert (tmp_path / "mlp-sine-story.svg").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["mlp"]["published_shape"] == [32, 32]
 
@@ -262,47 +356,52 @@ def test_generate_precision_cli_smoke(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         demo.app,
-        ["generate", "--target", "precision", "--output-dir", str(tmp_path), "--no-html"],
+        ["generate", "--target", "precision", "--output-dir", str(tmp_path)],
     )
 
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "stack-cantor-dust-story.png").exists()
+    assert (tmp_path / "stack-cantor-dust-story.svg").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["precision"]["encoding"] == demo.PRECISION_STORY_MODE
     assert manifest["precision"]["dust_depth"] == demo.PRECISION_DUST_DEPTH
+    assert manifest["precision"]["counting_bits"] == demo.PRECISION_COUNT_BITS
+    assert manifest["precision"]["lag_distance_lags"] == [1, 2, 4]
+    assert manifest["precision"]["label_mode"] == "minimal_head_aware_callouts"
 
 
 def test_generate_all_manifest_includes_precision_section(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(demo, "render_mlp_assets", lambda **_: {"files": ["mlp-sine-story.png"]})
+    monkeypatch.setattr(demo, "render_mlp_assets", lambda **_: {"files": ["mlp-sine-story.svg"]})
     monkeypatch.setattr(
         demo,
         "render_precision_assets",
         lambda **_: {
-            "files": ["stack-cantor-dust-story.png"],
+            "files": ["stack-cantor-dust-story.svg"],
             "encoding": demo.PRECISION_STORY_MODE,
             "dust_depth": demo.PRECISION_DUST_DEPTH,
+            "counting_bits": demo.PRECISION_COUNT_BITS,
             "initial_left_stack": demo.PRECISION_INITIAL_LEFT_STACK,
             "initial_right_stack": demo.PRECISION_INITIAL_RIGHT_STACK,
             "step_labels": ["start"],
-            "zoom_depths": list(demo.PRECISION_ZOOM_DEPTHS),
+            "lag_distance_lags": [1, 2, 4],
+            "milestone_step_indexes": [0],
         },
     )
-    monkeypatch.setattr(demo, "render_rnn_assets", lambda **_: {"files": ["rnn-training-story.png"]})
+    monkeypatch.setattr(demo, "render_rnn_assets", lambda **_: {"files": ["rnn-training-story.svg"]})
 
     runner = CliRunner()
     result = runner.invoke(
         demo.app,
-        ["generate", "--target", "all", "--output-dir", str(tmp_path), "--no-html", "--no-trace-images"],
+        ["generate", "--target", "all", "--output-dir", str(tmp_path)],
     )
 
     assert result.exit_code == 0, result.output
     manifest = json.loads((tmp_path / "manifest.json").read_text())
-    assert manifest["mlp"]["files"] == ["mlp-sine-story.png"]
-    assert manifest["precision"]["files"] == ["stack-cantor-dust-story.png"]
-    assert manifest["rnn"]["files"] == ["rnn-training-story.png"]
+    assert manifest["mlp"]["files"] == ["mlp-sine-story.svg"]
+    assert manifest["precision"]["files"] == ["stack-cantor-dust-story.svg"]
+    assert manifest["rnn"]["files"] == ["rnn-training-story.svg"]
 
 
 def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
@@ -321,12 +420,15 @@ def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
             "4",
             "--rnn-test-samples",
             "8",
-            "--no-html",
-            "--no-trace-images",
         ],
     )
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "rnn-training-story.png").exists()
+    assert (tmp_path / "rnn-training-story.svg").exists()
+    assert (tmp_path / "rnn-transition-summary.csv").exists()
+    assert (tmp_path / "rnn-transition-family-metrics.csv").exists()
+    assert (tmp_path / "rnn-transition-probe-trajectories.csv").exists()
+    assert (tmp_path / "rnn-transition-metrics.json").exists()
+    assert (tmp_path / "rnn-transition-assessment.md").exists()
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["rnn"]["model_mode"] == demo.RNN_MODEL_MODE
     assert manifest["rnn"]["language"] == demo.TARGET_LANGUAGE
@@ -337,13 +439,32 @@ def test_generate_rnn_cli_smoke(tmp_path: Path) -> None:
     assert manifest["rnn"]["dynamics"] == "phased_resampled_counterexample_shocks"
     assert manifest["rnn"]["optimizer"] == "adamw"
     assert manifest["rnn"]["learning_rate_schedule"] == "phase_restart_cosine_decay"
-    assert manifest["rnn"]["story_plot_sampling"] == "deterministic_family_balanced_slice"
-    assert manifest["rnn"]["acceptance_region_shape"] == "projected_ball_ellipse"
-    assert manifest["rnn"]["trace_projection_mode"] == "oblique_pca_2d"
-    assert manifest["rnn"]["phase_schedule"] == [
-        "Phase 1: random baseline",
-        "Phase 2: add off-by-one",
-        "Phase 3: add valid-prefix + balanced-invalid",
+    assert manifest["rnn"]["story_plot_sampling"] == "curated_watchlist_plus_balanced_background"
+    assert manifest["rnn"]["story_plot_probe_count"] == 99
+    assert manifest["rnn"]["report_backend"] == "matplotlib"
+    assert manifest["rnn"]["report_layout"] == "trace_panels_plus_transition_field"
+    assert manifest["rnn"]["story_value_transform"] == "boundary_emphasized_probability_nonlinear"
+    assert manifest["rnn"]["figure_background"] == "dark_slate"
+    assert len(manifest["rnn"]["representative_probes"]) == 3
+    assert manifest["rnn"]["watchlist_mode"] == "curated_long_held_out_plus_balanced_background"
+    assert manifest["rnn"]["curated_probe_roles"] == [
+        "valid control",
+        "off-by-one shock",
+        "repair case",
     ]
-    assert manifest["rnn"]["phase_epoch_schedule"] == [1, 2, 2]
-    assert manifest["rnn"]["phase_batch_schedule"] == [8, 16, 32]
+    assert len(manifest["rnn"]["curated_probe_texts"]) == 3
+    assert len(manifest["rnn"]["curated_probe_notes"]) == 3
+    assert manifest["rnn"]["background_probe_count"] == 96
+    assert (
+        manifest["rnn"]["trace_panel_background_mode"]
+        == "held_out_state_cloud_plus_endpoints"
+    )
+    assert manifest["rnn"]["trace_marker_mode"] == "start_end_only"
+    assert "rnn-transition-summary.csv" in manifest["rnn"]["summary_table_files"]
+    assert "rnn-transition-metrics.json" in manifest["rnn"]["supporting_metrics_files"]
+    assert manifest["rnn"]["phase_schedule"] == [
+        "Phase 1: short strings + some random length-20",
+        "Phase 2: introduce counterexamples",
+    ]
+    assert manifest["rnn"]["phase_epoch_schedule"] == [1, 1]
+    assert manifest["rnn"]["phase_batch_schedule"] == [8, 16]

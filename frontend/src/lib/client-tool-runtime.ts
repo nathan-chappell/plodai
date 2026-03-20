@@ -2,7 +2,7 @@ import { executeQueryPlan } from "./analysis";
 import { parseCsvText } from "./csv";
 import { parseJsonText } from "./json";
 import {
-  appendWorkspaceReportItems,
+  appendWorkspaceReportSlides,
   buildArtifactTargetPath,
   buildWorkspaceBootstrapMetadata,
   createWorkspaceReport,
@@ -10,7 +10,7 @@ import {
   readWorkspaceReport,
   readWorkspaceReportIndex,
   removeWorkspacePath,
-  replaceWorkspaceReportItems,
+  replaceWorkspaceReportSlides,
   updateWorkspaceAppState,
   writeWorkspaceIndex,
   writeWorkspaceReport,
@@ -35,7 +35,7 @@ import {
 } from "./pdf";
 
 import type {
-  AppendReportItemToolArgs,
+  AppendReportSlideToolArgs,
   ClientEffect,
   ClientToolCall,
   ClientToolName,
@@ -49,7 +49,7 @@ import type {
   InspectPdfFileToolArgs,
   ListLoadedDatasetsToolArgs,
   ListWorkspaceFilesToolArgs,
-  RemoveReportItemToolArgs,
+  RemoveReportSlideToolArgs,
   RenderChartFromFileToolArgs,
   RunLocalQueryToolArgs,
   SmartSplitPdfToolArgs,
@@ -57,7 +57,7 @@ import type {
 import type { LocalChartableFile, LocalDataset, LocalJsonFile, LocalPdfFile, LocalWorkspaceFile } from "../types/report";
 import type { ToolExecutionRequestV1, ToolExecutionResultV1, VfsMutationV1, WorkspaceSnapshotV1 } from "../types/tool-runtime";
 import type { WorkspaceFileNode, WorkspaceFilesystem } from "../types/workspace";
-import type { ReportItemV1 } from "../types/workspace-contract";
+import type { ReportSlideV1 } from "../types/workspace-contract";
 
 function listAllFileNodes(filesystem: WorkspaceFilesystem): WorkspaceFileNode[] {
   return listDirectoryEntries(filesystem, "/");
@@ -103,7 +103,8 @@ function buildWorkspacePayload(
         return {
           report_id: reportId,
           title: report?.title ?? reportId,
-          item_count: report?.items.length ?? 0,
+          item_count: report?.slides.length ?? 0,
+          slide_count: report?.slides.length ?? 0,
           updated_at: report?.updated_at ?? null,
         };
       }) ?? [],
@@ -185,18 +186,18 @@ export function applyVfsMutations(
           },
         );
         break;
-      case "replace_report_items":
-        filesystem = replaceWorkspaceReportItems(
+      case "replace_report_slides":
+        filesystem = replaceWorkspaceReportSlides(
           filesystem,
           mutation.report_id,
-          mutation.items,
+          mutation.slides,
         );
         break;
-      case "append_report_items":
-        filesystem = appendWorkspaceReportItems(
+      case "append_report_slides":
+        filesystem = appendWorkspaceReportSlides(
           filesystem,
           mutation.report_id,
-          mutation.items,
+          mutation.slides,
         );
         break;
       case "update_app_state":
@@ -237,23 +238,45 @@ function buildPdfIndexFilename(archiveName: string): string {
     : `${archiveName}.md`;
 }
 
-function buildReportItemFromDraft(args: AppendReportItemToolArgs): ReportItemV1 {
+function hasValidSlidePanelCount(
+  layout: AppendReportSlideToolArgs["slide"]["layout"],
+  panelCount: number,
+): boolean {
+  return (
+    (layout === "1x1" && panelCount === 1) ||
+    (layout === "1x2" && panelCount === 2) ||
+    (layout === "2x2" && panelCount >= 3 && panelCount <= 4)
+  );
+}
+
+function buildReportSlideFromDraft(args: AppendReportSlideToolArgs): ReportSlideV1 {
   const createdAt = new Date().toISOString();
-  if (args.item.type === "section") {
-    return {
-      id: crypto.randomUUID(),
-      type: "section",
-      created_at: createdAt,
-      title: args.item.title,
-      markdown: args.item.markdown,
-    };
+  if (!hasValidSlidePanelCount(args.slide.layout, args.slide.panels.length)) {
+    throw new Error(`Invalid panel count for ${args.slide.layout} slide.`);
   }
   return {
     id: crypto.randomUUID(),
-    type: "note",
     created_at: createdAt,
-    title: args.item.title,
-    text: args.item.text,
+    title: args.slide.title,
+    layout: args.slide.layout,
+    panels: args.slide.panels.map((panel) =>
+      panel.type === "narrative"
+        ? {
+            id: crypto.randomUUID(),
+            type: "narrative",
+            title: panel.title,
+            markdown: panel.markdown,
+          }
+        : {
+            id: crypto.randomUUID(),
+            type: "chart",
+            title: panel.title,
+            file_id: panel.file_id,
+            chart_plan_id: panel.chart_plan_id,
+            chart: panel.chart as Record<string, unknown>,
+            image_data_url: panel.image_data_url ?? null,
+          },
+    ),
   };
 }
 
@@ -267,7 +290,7 @@ async function executeTool<Name extends ClientToolName>(
     case "list_csv_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       const includeSamples = args.includeSamples ?? true;
-      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : snapshot.path_prefix;
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
       const csvFiles = fileNodesForPrefix(snapshot, normalizedPrefix).filter((entry) => entry.file.kind === "csv");
       return {
         payload: {
@@ -288,7 +311,7 @@ async function executeTool<Name extends ClientToolName>(
     case "list_pdf_files": {
       const args = toolCall.arguments as ListWorkspaceFilesToolArgs;
       const includeSamples = args.includeSamples ?? true;
-      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : snapshot.path_prefix;
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
       const pdfFiles = fileNodesForPrefix(snapshot, normalizedPrefix).filter((entry) => entry.file.kind === "pdf");
       return {
         payload: {
@@ -309,7 +332,7 @@ async function executeTool<Name extends ClientToolName>(
     case "list_chartable_files": {
       const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
       const includeSamples = args.includeSamples ?? true;
-      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : snapshot.path_prefix;
+      const normalizedPrefix = args.prefix?.trim() ? normalizePathPrefix(args.prefix) : "/";
       const chartableFiles = fileNodesForPrefix(snapshot, normalizedPrefix).filter(
         (entry) => entry.file.kind === "csv" || entry.file.kind === "json",
       );
@@ -672,7 +695,8 @@ async function executeTool<Name extends ClientToolName>(
               return {
                 report_id: reportId,
                 title: report?.title ?? reportId,
-                item_count: report?.items.length ?? 0,
+                item_count: report?.slides.length ?? 0,
+                slide_count: report?.slides.length ?? 0,
                 updated_at: report?.updated_at ?? null,
               };
             }) ?? [],
@@ -731,21 +755,21 @@ async function executeTool<Name extends ClientToolName>(
         warnings: [],
       };
     }
-    case "append_report_item": {
-      const args = toolCall.arguments as AppendReportItemToolArgs;
-      const item = buildReportItemFromDraft(args);
+    case "append_report_slide": {
+      const args = toolCall.arguments as AppendReportSlideToolArgs;
+      const slide = buildReportSlideFromDraft(args);
       const mutations: VfsMutationV1[] = [
         {
-          type: "append_report_items",
+          type: "append_report_slides",
           report_id: args.report_id,
-          items: [item],
+          slides: [slide],
         },
       ];
       const nextSnapshot = applyVfsMutations(snapshot, mutations);
       return {
         payload: {
           report_id: args.report_id,
-          item,
+          slide,
           report: readWorkspaceReport(nextSnapshot.filesystem, args.report_id),
           reports: buildWorkspacePayload(nextSnapshot).reports,
           current_report_id:
@@ -758,26 +782,26 @@ async function executeTool<Name extends ClientToolName>(
         warnings: [],
       };
     }
-    case "remove_report_item": {
-      const args = toolCall.arguments as RemoveReportItemToolArgs;
+    case "remove_report_slide": {
+      const args = toolCall.arguments as RemoveReportSlideToolArgs;
       const report = readWorkspaceReport(snapshot.filesystem, args.report_id);
       if (!report) {
         throw new Error(`Unknown report: ${args.report_id}`);
       }
-      const nextItems = report.items.filter((item) => item.id !== args.item_id);
+      const nextSlides = report.slides.filter((slide) => slide.id !== args.slide_id);
       const mutations: VfsMutationV1[] = [
         {
-          type: "replace_report_items",
+          type: "replace_report_slides",
           report_id: args.report_id,
-          items: nextItems,
+          slides: nextSlides,
         },
       ];
       const nextSnapshot = applyVfsMutations(snapshot, mutations);
       return {
         payload: {
           report_id: args.report_id,
-          item_id: args.item_id,
-          removed: nextItems.length !== report.items.length,
+          slide_id: args.slide_id,
+          removed: nextSlides.length !== report.slides.length,
           report: readWorkspaceReport(nextSnapshot.filesystem, args.report_id),
         },
         mutations,

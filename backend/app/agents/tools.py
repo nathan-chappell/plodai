@@ -129,8 +129,7 @@ def describe_tool_signature(
     if not property_names:
         return f"{tool_name}()"
     signature_parameters = [
-        name if name in required_names else f"{name}?"
-        for name in property_names
+        name if name in required_names else f"{name}?" for name in property_names
     ]
     return f"{tool_name}({', '.join(signature_parameters)})"
 
@@ -147,9 +146,7 @@ def summarize_client_tool_schema_for_log(
     )
     required_parameters = [name for name in property_names if name in required_names]
     optional_parameters = [
-        f"{name}?"
-        for name in property_names
-        if name not in required_names
+        f"{name}?" for name in property_names if name not in required_names
     ]
     schema_parts = [
         "schema=closed",
@@ -316,25 +313,28 @@ def _summarize_client_tool_request(
         details = []
         if isinstance(arguments.get("title"), str) and arguments["title"].strip():
             details.append(f"Title: {arguments['title'].strip()}")
-        if isinstance(arguments.get("report_id"), str) and arguments["report_id"].strip():
+        if (
+            isinstance(arguments.get("report_id"), str)
+            and arguments["report_id"].strip()
+        ):
             details.append(f"Requested id: {arguments['report_id'].strip()}")
         return ("Queued a report creation.", details)
 
-    if tool_name == "append_report_item":
+    if tool_name == "append_report_slide":
         details = [f"Report: {arguments.get('report_id') or 'unknown'}"]
-        raw_item = arguments.get("item")
-        if isinstance(raw_item, Mapping):
-            details.append(f"Item type: {raw_item.get('type') or 'unknown'}")
-            if isinstance(raw_item.get("title"), str) and raw_item["title"].strip():
-                details.append(f"Title: {raw_item['title'].strip()}")
-        return ("Queued a report item append.", details)
+        raw_slide = arguments.get("slide")
+        if isinstance(raw_slide, Mapping):
+            details.append(f"Layout: {raw_slide.get('layout') or 'unknown'}")
+            if isinstance(raw_slide.get("title"), str) and raw_slide["title"].strip():
+                details.append(f"Title: {raw_slide['title'].strip()}")
+        return ("Queued a report slide append.", details)
 
-    if tool_name == "remove_report_item":
+    if tool_name == "remove_report_slide":
         return (
-            "Queued a report item removal.",
+            "Queued a report slide removal.",
             [
                 f"Report: {arguments.get('report_id') or 'unknown'}",
-                f"Item: {arguments.get('item_id') or 'unknown'}",
+                f"Slide: {arguments.get('slide_id') or 'unknown'}",
             ],
         )
 
@@ -377,7 +377,9 @@ def _summarize_client_tool_request(
         details = [f"Path: {arguments.get('path') or 'unknown'}"]
         query_plan = arguments.get("query_plan")
         if isinstance(query_plan, Mapping):
-            details.extend(_tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)))
+            details.extend(
+                _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan))
+            )
         return ("Queued a derived artifact build.", details)
 
     if tool_name == "render_chart_from_file":
@@ -597,7 +599,10 @@ def build_agent_tools(
         if cleaned_follow_on_tool_hints:
             plan["follow_on_tool_hints"] = cleaned_follow_on_tool_hints
         request_context.thread_metadata["plan"] = plan
-        if "render_chart_from_file" in cleaned_follow_on_tool_hints or capability_id == "chart-agent":
+        if (
+            "render_chart_from_file" in cleaned_follow_on_tool_hints
+            or capability_id == "chart-agent"
+        ):
             request_context.thread_metadata["chart_plan"] = plan
         ctx.context.thread.metadata = dict(request_context.thread_metadata)
         await ctx.context.stream(
@@ -653,9 +658,9 @@ def build_agent_tools(
                 )
             ),
         )
-        request_context.thread_metadata[
-            DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY
-        ] = result
+        request_context.thread_metadata[DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY] = (
+            result
+        )
         await ctx.context.stream(
             ProgressUpdateEvent(
                 text=f"{DEMO_VALIDATOR_COST_SNAPSHOT_PROGRESS_PREFIX}{json.dumps(result, ensure_ascii=True)}"
@@ -700,7 +705,11 @@ def build_agent_tools(
                 raise ValueError(
                     "There is no assistant response in this thread yet to attach feedback to."
                 )
-            cleaned_message = message.strip() if isinstance(message, str) and message.strip() else None
+            cleaned_message = (
+                message.strip()
+                if isinstance(message, str) and message.strip()
+                else None
+            )
             feedback = ChatItemFeedback(
                 id=f"fb_{uuid4().hex}",
                 thread_id=ctx.context.thread.id,

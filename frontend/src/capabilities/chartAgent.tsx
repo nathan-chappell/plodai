@@ -1,7 +1,15 @@
 import { useEffect, useMemo } from "react";
+import styled from "styled-components";
 
-import { MetaText } from "../app/styles";
 import { AuthPanel } from "../components/AuthPanel";
+import {
+  buildFolderRowsFromArtifacts,
+  CapabilityQuickView,
+  parseSavedChartArtifact,
+  renderDefaultCapabilityQuickViewPreview,
+  type CapabilityQuickViewGroup,
+  type CapabilityQuickViewRenderArgs,
+} from "../components/CapabilityQuickView";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
@@ -16,20 +24,19 @@ import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
 import type { ClientEffect } from "../types/analysis";
-import type { ShellWorkspaceRegistration } from "./types";
+import type {
+  ShellWorkspaceArtifact,
+  ShellWorkspaceRegistration,
+} from "./types";
+import { CapabilityMetaText } from "./styles";
 import {
+  CapabilityPage,
   CapabilityEyebrow,
   CapabilityHeader,
   CapabilityHeroRow,
-  CapabilityHighlight,
-  CapabilityMetaText,
-  CapabilityPanel,
-  CapabilitySectionHeader,
-  CapabilitySectionTitle,
   CapabilitySubhead,
   CapabilityTabBar,
   CapabilityTabButton,
-  CapabilityTextarea,
   CapabilityTitle,
   ReportChatColumn,
   ReportEffectCard,
@@ -48,30 +55,47 @@ function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { 
   return effect.type === "chart_rendered";
 }
 
-function GoalPanel({
-  investigationBrief,
-  setInvestigationBrief,
-}: {
-  investigationBrief: string;
-  setInvestigationBrief: (value: string) => void;
-}) {
+function buildChartQuickViewGroups(
+  artifacts: ShellWorkspaceArtifact[],
+): CapabilityQuickViewGroup[] {
+  const relevantArtifacts = artifacts.filter((artifact) =>
+    artifact.path.startsWith("/artifacts/charts/") &&
+    parseSavedChartArtifact(artifact.file) !== null,
+  );
+
+  return [
+    {
+      key: "saved-charts",
+      label: "Saved charts",
+      rows: buildFolderRowsFromArtifacts(relevantArtifacts, {
+        stripPrefixes: ["/artifacts/charts/"],
+      }),
+    },
+  ];
+}
+
+function renderChartQuickViewPreview(args: CapabilityQuickViewRenderArgs) {
+  const savedChart = parseSavedChartArtifact(args.selectedArtifact.file);
+  if (!savedChart) {
+    return renderDefaultCapabilityQuickViewPreview(args);
+  }
   return (
-    <CapabilityPanel>
-      <CapabilitySectionHeader>
-        <CapabilitySectionTitle>Chart goal</CapabilitySectionTitle>
-        <CapabilityMetaText>This brief keeps the Chart agent focused on the current visual story.</CapabilityMetaText>
-      </CapabilitySectionHeader>
-      <CapabilityTextarea
-        value={investigationBrief}
-        onChange={(event) => setInvestigationBrief(event.target.value)}
-        placeholder="Example: Turn the explicit result artifacts into the most persuasive comparative charts."
-      />
-      <CapabilityHighlight>
+    <>
+      <ChartPreviewMetaRow>
+        <ChartPreviewMetaChip>
+          {savedChart.chartPlanId ? `Plan ${savedChart.chartPlanId}` : "Saved chart"}
+        </ChartPreviewMetaChip>
+        <ChartPreviewMetaChip>
+          {savedChart.fileId ? `Source ${savedChart.fileId}` : "Source file unavailable"}
+        </ChartPreviewMetaChip>
+      </ChartPreviewMetaRow>
+      {renderDefaultCapabilityQuickViewPreview(args)}
+      {!savedChart.imageDataUrl ? (
         <CapabilityMetaText>
-          The Chart agent expects explicit CSV or JSON artifacts and always makes a plan before rendering.
+          This chart artifact is saved in the workspace, but it does not have an inline image yet.
         </CapabilityMetaText>
-      </CapabilityHighlight>
-    </CapabilityPanel>
+      ) : null}
+    </>
   );
 }
 
@@ -83,16 +107,13 @@ export function ChartAgentPage({
   const {
     activePrefix,
     cwdPath,
-    filesystem,
-    breadcrumbs,
     entries,
     files,
     setFiles,
     appendFiles,
-    status,
+    artifacts,
     setStatus,
     investigationBrief,
-    setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
     executionMode,
@@ -111,6 +132,13 @@ export function ChartAgentPage({
     syncToolCatalog,
     appendReportEffects,
     workspaceStateMetadata,
+    workspaces,
+    selectedWorkspaceId,
+    selectedWorkspaceName,
+    selectedWorkspaceKind,
+    selectWorkspace,
+    createWorkspace,
+    clearWorkspace,
   } = useCapabilityFileWorkspace({
     capabilityId: chartAgentCapability.id,
     capabilityTitle: chartAgentCapability.title,
@@ -161,30 +189,70 @@ export function ChartAgentPage({
     setReportEffects,
   });
 
+  const handleClearWorkspace = useMemo(() => {
+    if (selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo") {
+      return () => {
+        if (!demoScenario) {
+          return;
+        }
+        setFiles(demoScenario.workspaceSeed);
+        setReportEffects([]);
+        setStatus(`Reset demo workspace for ${demoScenario.title}.`);
+      };
+    }
+    return clearWorkspace;
+  }, [activeWorkspaceTab, clearWorkspace, demoScenario, selectedWorkspaceKind, setFiles, setReportEffects, setStatus]);
+
   useEffect(() => {
     onRegisterWorkspace?.({
       capabilityId: chartAgentCapability.id,
-      title: "Files",
+      title: "Workspace",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      activePrefix,
-      cwdPath,
-      filesystem,
-      breadcrumbs,
-      entries,
+      artifacts,
+      workspaces,
+      activeWorkspaceId: selectedWorkspaceId,
+      activeWorkspaceName: selectedWorkspaceName,
+      activeWorkspaceKind: selectedWorkspaceKind,
       accept: ".csv,.json",
       onSelectFiles: handleFiles,
-      onCreateDirectory: createDirectory,
-      onChangeDirectory: changeDirectory,
-      onRemoveEntry: handleRemoveEntry,
+      onSelectWorkspace: selectWorkspace,
+      onCreateWorkspace: createWorkspace,
+      onClearWorkspace: handleClearWorkspace,
+      clearActionLabel:
+        selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo"
+          ? "Reset demo workspace"
+          : "Clear workspace",
+      clearActionDisabled:
+        selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo" && !demoScenario,
+      onRemoveArtifact: handleRemoveEntry,
     });
-  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [
+    activeWorkspaceTab,
+    artifacts,
+    createWorkspace,
+    demoScenario,
+    handleClearWorkspace,
+    handleFiles,
+    handleRemoveEntry,
+    onRegisterWorkspace,
+    selectWorkspace,
+    selectedWorkspaceId,
+    selectedWorkspaceKind,
+    selectedWorkspaceName,
+    workspaces,
+  ]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
   }, [clientToolCatalogKey, syncToolCatalog]);
 
+  const chartQuickViewGroups = useMemo(
+    () => buildChartQuickViewGroups(artifacts),
+    [artifacts],
+  );
+
   return (
-    <>
+    <CapabilityPage>
       <CapabilityHeroRow>
         <CapabilityHeader>
           <CapabilityEyebrow>{chartAgentCapability.eyebrow}</CapabilityEyebrow>
@@ -213,31 +281,14 @@ export function ChartAgentPage({
       {activeWorkspaceTab === "agent" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
-              <CapabilitySectionHeader>
-                <CapabilitySectionTitle>Chartable artifacts</CapabilitySectionTitle>
-                <CapabilityMetaText>{status}</CapabilityMetaText>
-              </CapabilitySectionHeader>
-              <MetaText>
-                Prefix: {activePrefix}
-              </MetaText>
-              <MetaText>
-                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
-              </MetaText>
-              <MetaText>
-                Goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the current charting task."}
-              </MetaText>
-            </CapabilityPanel>
-
-            {reportEffects.length ? (
-              <ReportEffectsPanel>
-                {reportEffects.filter(isChartEffect).map((effect, index) => (
-                  <ReportEffectCard key={`${effect.type}-${effect.chartPlanId}-${index}`}>
-                    <DatasetChart spec={effect.chart} rows={effect.rows} />
-                  </ReportEffectCard>
-                ))}
-              </ReportEffectsPanel>
-            ) : null}
+            <CapabilityQuickView
+              title="Saved charts"
+              description="Preview charts already rendered into the current workspace."
+              emptyMessage="Rendered chart artifacts will appear here as the Chart agent saves them."
+              groups={chartQuickViewGroups}
+              renderPreview={renderChartQuickViewPreview}
+              dataTestId="chart-agent-quick-view"
+            />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
@@ -251,6 +302,8 @@ export function ChartAgentPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              greeting={chartAgentCapability.chatkitLead}
+              composerPlaceholder={chartAgentCapability.chatkitPlaceholder}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
@@ -259,19 +312,6 @@ export function ChartAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel data-testid="chart-agent-demo-workspace">
-              <CapabilitySectionHeader>
-                <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
-                <CapabilityMetaText>
-                  {demoLoading ? "Preparing the chart demo." : demoError ?? status}
-                </CapabilityMetaText>
-              </CapabilitySectionHeader>
-              <MetaText data-testid="chart-agent-demo-files">
-                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
-              </MetaText>
-              <MetaText data-testid="chart-agent-demo-title">Demo: {demoScenario?.title ?? "Preparing scenario"}</MetaText>
-            </CapabilityPanel>
-
             {reportEffects.filter(isChartEffect).length ? (
               <ReportEffectsPanel data-testid="chart-agent-demo-effects">
                 {reportEffects.filter(isChartEffect).map((effect, index) => (
@@ -299,6 +339,23 @@ export function ChartAgentPage({
           </ReportChatColumn>
         </ReportWorkspaceLayout>
       ) : null}
-    </>
+    </CapabilityPage>
   );
 }
+
+const ChartPreviewMetaRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+`;
+
+const ChartPreviewMetaChip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 0.72rem;
+  font-weight: 700;
+`;

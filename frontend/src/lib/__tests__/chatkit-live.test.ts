@@ -35,11 +35,16 @@ describe.sequential("report-agent live integration", () => {
         ),
       ).toBe(true);
       expect(toolNames.has("render_chart_from_file")).toBe(true);
-      expect(toolNames.has("append_report_item")).toBe(true);
+      expect(toolNames.has("append_report_slide")).toBe(true);
       expect(
         result.effects.some((effect) => effect.type === "chart_rendered"),
       ).toBe(true);
-      expect(result.workspaceSummary.current_report?.item_count ?? 0).toBeGreaterThan(0);
+      expect(result.workspaceSummary.current_report?.slide_count ?? 0).toBeGreaterThan(0);
+      expect(
+        result.workspaceSummary.current_report?.slides.some((slide) =>
+          slide.preview?.includes("Revenue") || slide.preview?.includes("bar"),
+        ) ?? false,
+      ).toBe(true);
       expect(result.requestMetadata.origin).toBe("ui_integration_test");
       expect(result.requestMetadata.execution_mode).toBe("batch");
       expect(result.validation.passed).toBe(true);

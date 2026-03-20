@@ -55,7 +55,10 @@ from backend.app.chatkit.client_tools import (
     ClientToolResultPayload,
     coerce_client_tool_result,
 )
-from backend.app.chatkit.batch_continuation import decide_batch_continuation
+from backend.app.chatkit.batch_continuation import (
+    build_batch_continuation_progress_text,
+    decide_batch_continuation,
+)
 from backend.app.chatkit.feedback_types import (
     CancelFeedbackDetailsPayload,
     ChatItemFeedbackRecord,
@@ -349,7 +352,9 @@ class ClientToolResultConverter(ThreadItemConverter):
             file=(
                 filename,
                 file_bytes,
-                mime_type if isinstance(mime_type, str) and mime_type else "application/octet-stream",
+                mime_type
+                if isinstance(mime_type, str) and mime_type
+                else "application/octet-stream",
             ),
             purpose="user_data",
         )
@@ -509,7 +514,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         self.logger,
                         logging.WARNING,
                         "respond.retry",
-                        context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                        context=_context_line(
+                            user_id=context.user_id, thread_id=thread.id
+                        ),
                         retry=summarize_pairs_for_log(
                             (
                                 ("attempt", f"{attempt_number}/{total_attempts}"),
@@ -542,7 +549,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                             logging.ERROR,
                             "respond.error",
                             exc_info=exc,
-                            context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                            context=_context_line(
+                                user_id=context.user_id, thread_id=thread.id
+                            ),
                             logs=_logs_link(previous_response_id, conversation_id),
                         )
                         raise
@@ -611,17 +620,16 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                     thread.id,
                     context,
                 )
+                if latest_assistant_text is None:
+                    break
                 decision = await decide_batch_continuation(
                     capability_id=context.capability_id,
                     investigation_brief=typed_metadata.get("investigation_brief"),
                     latest_assistant_text=latest_assistant_text,
                 )
-                yield ProgressUpdateEvent(
-                    text=(
-                        f"Batch continuation decision: {'continue' if decision.should_continue else 'stop'}. "
-                        f"{decision.reason}"
-                    )
-                )
+                progress_text = build_batch_continuation_progress_text(decision)
+                if progress_text:
+                    yield ProgressUpdateEvent(text=progress_text)
                 if decision.should_continue:
                     if continuation_count >= MAX_BATCH_CONTINUATIONS:
                         yield ProgressUpdateEvent(
@@ -637,7 +645,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         self.logger,
                         logging.INFO,
                         "respond.batch_continue",
-                        context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                        context=_context_line(
+                            user_id=context.user_id, thread_id=thread.id
+                        ),
                         logs=_logs_link(result_response_id, result_conversation_id),
                         continuation_count=continuation_count,
                         reason=decision.reason,
@@ -858,7 +868,15 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             order="desc",
             context=context,
         )
-        for item in recent_items.data:
+        return self._extract_batch_continuation_assistant_text(recent_items.data)
+
+    @staticmethod
+    def _extract_batch_continuation_assistant_text(
+        recent_items: list[ThreadItem],
+    ) -> str | None:
+        for item in recent_items:
+            if item.type == "client_tool_call":
+                return None
             if item.type != "assistant_message":
                 continue
             text = " ".join(
@@ -866,8 +884,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 for content in item.content
                 if getattr(content, "text", "").strip()
             ).strip()
-            if text:
-                return text
+            return text or None
         return None
 
     async def create_feedback_draft(
@@ -896,7 +913,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             user_email=normalized_email,
             kind=kind if kind in {"positive", "negative"} else None,
             label=label if label in {"ui", "tools", "behavior"} else None,
-            message=message.strip() if isinstance(message, str) and message.strip() else None,
+            message=message.strip()
+            if isinstance(message, str) and message.strip()
+            else None,
             origin=origin,
         )
         self.db.add(feedback)
@@ -926,7 +945,11 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
     ) -> ChatItemFeedback:
         feedback.kind = payload.kind
         feedback.label = payload.label
-        feedback.message = payload.message.strip() if payload.message and payload.message.strip() else None
+        feedback.message = (
+            payload.message.strip()
+            if payload.message and payload.message.strip()
+            else None
+        )
         await self.db.commit()
         return feedback
 
@@ -1003,7 +1026,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         ("kind", feedback.kind),
                         ("label", feedback.label),
                         ("origin", feedback.origin),
-                        ("item_ids", summarize_sequence_for_log(feedback.item_ids_json)),
+                        (
+                            "item_ids",
+                            summarize_sequence_for_log(feedback.item_ids_json),
+                        ),
                     )
                 ),
             )
@@ -1013,10 +1039,24 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         "widget": {
                             "type": "Card",
                             "size": "sm",
-                            "status": {"text": "Feedback saved", "icon": "check-circle"},
+                            "status": {
+                                "text": "Feedback saved",
+                                "icon": "check-circle",
+                            },
                             "children": [
-                                {"type": "Badge", "label": "Feedback", "color": "success", "variant": "soft", "pill": True, "size": "sm"},
-                                {"type": "Title", "value": "Thanks for the feedback", "size": "sm"},
+                                {
+                                    "type": "Badge",
+                                    "label": "Feedback",
+                                    "color": "success",
+                                    "variant": "soft",
+                                    "pill": True,
+                                    "size": "sm",
+                                },
+                                {
+                                    "type": "Title",
+                                    "value": "Thanks for the feedback",
+                                    "size": "sm",
+                                },
                                 {
                                     "type": "Caption",
                                     "value": "The feedback agent saved your notes for this thread.",

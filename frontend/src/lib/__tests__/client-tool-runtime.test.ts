@@ -148,7 +148,7 @@ describe("client tool runtime", () => {
     ]);
   });
 
-  it("creates a report and appends then removes a report item", async () => {
+  it("creates a report and appends then removes a report slide", async () => {
     const { filesystem } = createSnapshot();
     const snapshot = {
       version: "v1" as const,
@@ -175,21 +175,27 @@ describe("client tool runtime", () => {
     const appended = await executeToolRequest({
       version: "v1",
       request_id: 5,
-      tool_name: "append_report_item",
+      tool_name: "append_report_slide",
       arguments: {
         report_id: "quarterly-summary",
-        item: {
-          type: "section",
+        slide: {
           title: "Key finding",
-          markdown: "Revenue accelerated in the west.",
+          layout: "1x1",
+          panels: [
+            {
+              type: "narrative",
+              title: "Key finding",
+              markdown: "Revenue accelerated in the west.",
+            },
+          ],
         },
       },
       snapshot: withReport,
     });
 
-    const appendedReport = appended.payload.report as { items: Array<{ id: string; title: string }> } | undefined;
-    expect(appendedReport?.items).toHaveLength(1);
-    expect(appendedReport?.items[0]?.title).toBe("Key finding");
+    const appendedReport = appended.payload.report as { slides: Array<{ id: string; title: string }> } | undefined;
+    expect(appendedReport?.slides).toHaveLength(1);
+    expect(appendedReport?.slides[0]?.title).toBe("Key finding");
 
     const withItem = {
       ...snapshot,
@@ -198,16 +204,16 @@ describe("client tool runtime", () => {
     const removed = await executeToolRequest({
       version: "v1",
       request_id: 6,
-      tool_name: "remove_report_item",
+      tool_name: "remove_report_slide",
       arguments: {
         report_id: "quarterly-summary",
-        item_id: appendedReport?.items[0]?.id ?? "",
+        slide_id: appendedReport?.slides[0]?.id ?? "",
       },
       snapshot: withItem,
     });
 
-    const removedReport = removed.payload.report as { items: unknown[] } | undefined;
+    const removedReport = removed.payload.report as { slides: unknown[] } | undefined;
     expect(removed.payload.removed).toBe(true);
-    expect(removedReport?.items ?? []).toHaveLength(0);
+    expect(removedReport?.slides ?? []).toHaveLength(0);
   });
 });

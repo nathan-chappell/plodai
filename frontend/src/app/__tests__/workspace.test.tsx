@@ -10,10 +10,13 @@ import { writeWorkspaceTextFile } from "../../lib/workspace-contract";
 import type { AuthUser } from "../../types/auth";
 import type { WorkspaceFilesystem } from "../../types/workspace";
 import {
+  createWorkspaceRegistry,
   createWorkspaceFilesystem,
   loadWorkspaceFilesystem,
+  loadWorkspaceRegistry,
   loadWorkspaceSurfaceState,
   saveWorkspaceFilesystem,
+  saveWorkspaceRegistry,
   saveWorkspaceSurfaceState,
 } from "../../lib/workspace-fs";
 import type { LocalWorkspaceFile } from "../../types/report";
@@ -23,8 +26,10 @@ vi.mock("../../lib/workspace-fs", async () => {
   return {
     ...actual,
     loadWorkspaceFilesystem: vi.fn(),
+    loadWorkspaceRegistry: vi.fn(),
     loadWorkspaceSurfaceState: vi.fn(),
     saveWorkspaceFilesystem: vi.fn(),
+    saveWorkspaceRegistry: vi.fn(),
     saveWorkspaceSurfaceState: vi.fn(),
   };
 });
@@ -40,6 +45,7 @@ const user: AuthUser = {
   role: "user",
   is_active: true,
   current_credit_usd: 10,
+  credit_floor_usd: -1,
 };
 
 function createDeferred<T>() {
@@ -82,7 +88,7 @@ function WorkspaceSurfaceHarness() {
       workspace.updateFilesystem((filesystem) =>
         writeWorkspaceTextFile(filesystem, "/csv-agent/meta/notes.txt", "meta", "derived"),
       );
-      workspace.replaceFiles([demoFile], "demo");
+      workspace.appendFiles([demoFile], "demo");
     }
 
     window.addEventListener("workspace-test-run", handleRun);
@@ -112,7 +118,9 @@ describe("WorkspaceProvider", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     vi.mocked(saveWorkspaceFilesystem).mockResolvedValue(undefined);
+    vi.mocked(loadWorkspaceRegistry).mockResolvedValue(createWorkspaceRegistry());
     vi.mocked(loadWorkspaceSurfaceState).mockResolvedValue(null);
+    vi.mocked(saveWorkspaceRegistry).mockResolvedValue(undefined);
     vi.mocked(saveWorkspaceSurfaceState).mockResolvedValue(undefined);
   });
 
@@ -126,7 +134,7 @@ describe("WorkspaceProvider", () => {
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  it("does not persist the filesystem before hydration completes", async () => {
+  it("does not persist workspace data before hydration completes", async () => {
     const deferred = createDeferred<WorkspaceFilesystem>();
     vi.mocked(loadWorkspaceFilesystem).mockReturnValue(deferred.promise);
 
@@ -162,14 +170,16 @@ describe("WorkspaceProvider", () => {
       vi.advanceTimersByTime(200);
     });
 
-    expect(saveWorkspaceFilesystem).toHaveBeenCalledTimes(1);
+    expect(saveWorkspaceFilesystem).toHaveBeenCalledTimes(2);
     expect(saveWorkspaceFilesystem).toHaveBeenCalledWith(
       user.id,
+      "default",
       expect.objectContaining({ files_by_path: expect.any(Object) }),
     );
+    expect(saveWorkspaceRegistry).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves adjacent workspace updates instead of clobbering earlier filesystem changes", async () => {
+  it("preserves adjacent workspace updates while appending new artifacts", async () => {
     vi.mocked(loadWorkspaceFilesystem).mockResolvedValue(createWorkspaceFilesystem());
 
     await act(async () => {

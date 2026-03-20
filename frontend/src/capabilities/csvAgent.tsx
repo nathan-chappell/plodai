@@ -1,7 +1,11 @@
 import { useEffect, useMemo } from "react";
 
-import { MetaText } from "../app/styles";
 import { AuthPanel } from "../components/AuthPanel";
+import {
+  buildFolderRowsFromArtifacts,
+  CapabilityQuickView,
+  type CapabilityQuickViewGroup,
+} from "../components/CapabilityQuickView";
 import { CapabilityDemoPane } from "../components/CapabilityDemoPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { DatasetChart } from "../components/DatasetChart";
@@ -15,21 +19,19 @@ import { buildCsvAgentDemoScenario } from "./csv-agent/demo";
 import { SIDEBAR_WORKSPACE_DESCRIPTION } from "./constants";
 import { useCapabilityFileWorkspace } from "./fileWorkspace";
 import { useDemoScenario } from "./shared/useDemoScenario";
-import type { ShellWorkspaceRegistration } from "./types";
+import type {
+  ShellWorkspaceArtifact,
+  ShellWorkspaceRegistration,
+} from "./types";
 import type { ClientEffect } from "../types/analysis";
 import {
+  CapabilityPage,
   CapabilityEyebrow,
   CapabilityHeader,
   CapabilityHeroRow,
-  CapabilityHighlight,
-  CapabilityMetaText,
-  CapabilityPanel,
-  CapabilitySectionHeader,
-  CapabilitySectionTitle,
   CapabilitySubhead,
   CapabilityTabBar,
   CapabilityTabButton,
-  CapabilityTextarea,
   CapabilityTitle,
   ReportChatColumn,
   ReportEffectCard,
@@ -48,31 +50,26 @@ function isChartEffect(effect: ClientEffect): effect is Extract<ClientEffect, { 
   return effect.type === "chart_rendered";
 }
 
-function GoalPanel({
-  investigationBrief,
-  setInvestigationBrief,
-}: {
-  investigationBrief: string;
-  setInvestigationBrief: (value: string) => void;
-}) {
-  return (
-    <CapabilityPanel>
-      <CapabilitySectionHeader>
-        <CapabilitySectionTitle>Agent goal</CapabilitySectionTitle>
-        <CapabilityMetaText>This brief is saved with the conversation so the CSV agent keeps the current objective in view.</CapabilityMetaText>
-      </CapabilitySectionHeader>
-      <CapabilityTextarea
-        value={investigationBrief}
-        onChange={(event) => setInvestigationBrief(event.target.value)}
-        placeholder="Example: Investigate revenue concentration, create a chartable JSON artifact, and prepare it for the chart specialist."
-      />
-      <CapabilityHighlight>
-        <CapabilityMetaText>
-          This workspace is focused on CSV inspection, aggregate analysis, and reusable CSV or JSON artifact creation.
-        </CapabilityMetaText>
-      </CapabilityHighlight>
-    </CapabilityPanel>
+function buildCsvQuickViewGroups(
+  artifacts: ShellWorkspaceArtifact[],
+): CapabilityQuickViewGroup[] {
+  const relevantArtifacts = artifacts.filter(
+    (artifact) =>
+      artifact.source !== "uploaded" &&
+      (artifact.file.kind === "csv" || artifact.file.kind === "json") &&
+      !artifact.path.startsWith("/reports/") &&
+      !artifact.path.startsWith("/artifacts/charts/"),
   );
+
+  return [
+    {
+      key: "csv-results",
+      label: "Materialized results",
+      rows: buildFolderRowsFromArtifacts(relevantArtifacts, {
+        stripPrefixes: ["/artifacts/data/"],
+      }),
+    },
+  ];
 }
 
 export function CsvAgentPage({
@@ -83,16 +80,13 @@ export function CsvAgentPage({
   const {
     activePrefix,
     cwdPath,
-    filesystem,
-    breadcrumbs,
     entries,
     files,
     setFiles,
     appendFiles,
-    status,
+    artifacts,
     setStatus,
     investigationBrief,
-    setInvestigationBrief,
     activeWorkspaceTab,
     setActiveWorkspaceTab,
     executionMode,
@@ -111,6 +105,13 @@ export function CsvAgentPage({
     syncToolCatalog,
     appendReportEffects,
     workspaceStateMetadata,
+    workspaces,
+    selectedWorkspaceId,
+    selectedWorkspaceName,
+    selectedWorkspaceKind,
+    selectWorkspace,
+    createWorkspace,
+    clearWorkspace,
   } = useCapabilityFileWorkspace({
     capabilityId: csvAgentCapability.id,
     capabilityTitle: csvAgentCapability.title,
@@ -161,30 +162,70 @@ export function CsvAgentPage({
     setReportEffects,
   });
 
+  const handleClearWorkspace = useMemo(() => {
+    if (selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo") {
+      return () => {
+        if (!demoScenario) {
+          return;
+        }
+        setFiles(demoScenario.workspaceSeed);
+        setReportEffects([]);
+        setStatus(`Reset demo workspace for ${demoScenario.title}.`);
+      };
+    }
+    return clearWorkspace;
+  }, [activeWorkspaceTab, clearWorkspace, demoScenario, selectedWorkspaceKind, setFiles, setReportEffects, setStatus]);
+
   useEffect(() => {
     onRegisterWorkspace?.({
       capabilityId: csvAgentCapability.id,
-      title: "Files",
+      title: "Workspace",
       description: SIDEBAR_WORKSPACE_DESCRIPTION,
-      activePrefix,
-      cwdPath,
-      filesystem,
-      breadcrumbs,
-      entries,
+      artifacts,
+      workspaces,
+      activeWorkspaceId: selectedWorkspaceId,
+      activeWorkspaceName: selectedWorkspaceName,
+      activeWorkspaceKind: selectedWorkspaceKind,
       accept: ".csv",
       onSelectFiles: handleFiles,
-      onCreateDirectory: createDirectory,
-      onChangeDirectory: changeDirectory,
-      onRemoveEntry: handleRemoveEntry,
+      onSelectWorkspace: selectWorkspace,
+      onCreateWorkspace: createWorkspace,
+      onClearWorkspace: handleClearWorkspace,
+      clearActionLabel:
+        selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo"
+          ? "Reset demo workspace"
+          : "Clear workspace",
+      clearActionDisabled:
+        selectedWorkspaceKind === "demo" && activeWorkspaceTab === "demo" && !demoScenario,
+      onRemoveArtifact: handleRemoveEntry,
     });
-  }, [activePrefix, breadcrumbs, changeDirectory, createDirectory, cwdPath, entries, filesystem, handleFiles, handleRemoveEntry, onRegisterWorkspace]);
+  }, [
+    activeWorkspaceTab,
+    artifacts,
+    createWorkspace,
+    demoScenario,
+    handleClearWorkspace,
+    handleFiles,
+    handleRemoveEntry,
+    onRegisterWorkspace,
+    selectWorkspace,
+    selectedWorkspaceId,
+    selectedWorkspaceKind,
+    selectedWorkspaceName,
+    workspaces,
+  ]);
 
   useEffect(() => {
     syncToolCatalog(clientToolCatalogKey ? clientToolCatalogKey.split("|") : []);
   }, [clientToolCatalogKey, syncToolCatalog]);
 
+  const csvQuickViewGroups = useMemo(
+    () => buildCsvQuickViewGroups(artifacts),
+    [artifacts],
+  );
+
   return (
-    <>
+    <CapabilityPage>
       <CapabilityHeroRow>
         <CapabilityHeader>
           <CapabilityEyebrow>{csvAgentCapability.eyebrow}</CapabilityEyebrow>
@@ -213,22 +254,13 @@ export function CsvAgentPage({
       {activeWorkspaceTab === "agent" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel>
-              <CapabilitySectionHeader>
-                <CapabilitySectionTitle>Workspace state</CapabilitySectionTitle>
-                <CapabilityMetaText>{status}</CapabilityMetaText>
-              </CapabilitySectionHeader>
-              <MetaText>
-                Prefix: {activePrefix}
-              </MetaText>
-              <MetaText>
-                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "none yet"}
-              </MetaText>
-              <MetaText>
-                Goal: {investigationBrief.trim() || "No goal set yet. Open the Goal tab to define the current CSV task."}
-              </MetaText>
-              {reportEffects.length ? <MetaText>Client effects captured this session: {reportEffects.length}</MetaText> : null}
-            </CapabilityPanel>
+            <CapabilityQuickView
+              title="CSV results"
+              description="Review reusable CSV and JSON outputs from the current workspace."
+              emptyMessage="Materialized CSV and JSON results will appear here as the agent creates them."
+              groups={csvQuickViewGroups}
+              dataTestId="csv-agent-quick-view"
+            />
           </ReportWorkspaceColumn>
           <ReportChatColumn>
             <ChatKitPane
@@ -242,6 +274,8 @@ export function CsvAgentPage({
               clientTools={clientTools}
               onEffects={appendReportEffects}
               onFilesAdded={appendFiles}
+              greeting={csvAgentCapability.chatkitLead}
+              composerPlaceholder={csvAgentCapability.chatkitPlaceholder}
             />
           </ReportChatColumn>
         </ReportWorkspaceLayout>
@@ -250,25 +284,6 @@ export function CsvAgentPage({
       {activeWorkspaceTab === "demo" ? (
         <ReportWorkspaceLayout>
           <ReportWorkspaceColumn>
-            <CapabilityPanel data-testid="csv-agent-demo-workspace">
-              <CapabilitySectionHeader>
-                <CapabilitySectionTitle>Demo workspace</CapabilitySectionTitle>
-                <CapabilityMetaText>
-                  {demoLoading
-                    ? "Preparing the curated CSV demo."
-                    : demoError ?? status}
-                </CapabilityMetaText>
-              </CapabilitySectionHeader>
-              <MetaText data-testid="csv-agent-demo-files">
-                Files: {files.length ? files.map((file) => `${file.name} (${file.kind})`).join(", ") : "loading demo files"}
-              </MetaText>
-              <MetaText data-testid="csv-agent-demo-title">
-                Demo: {demoScenario?.title ?? "Preparing scenario"}
-              </MetaText>
-              <MetaText data-testid="csv-agent-demo-effect-count">
-                Effects captured this run: {reportEffects.length}
-              </MetaText>
-            </CapabilityPanel>
             {reportEffects.filter(isChartEffect).length ? (
               <ReportEffectsPanel data-testid="csv-agent-demo-effects">
                 {reportEffects.filter(isChartEffect).map((effect, index) => (
@@ -296,6 +311,6 @@ export function CsvAgentPage({
           </ReportChatColumn>
         </ReportWorkspaceLayout>
       ) : null}
-    </>
+    </CapabilityPage>
   );
 }

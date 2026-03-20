@@ -139,6 +139,11 @@ export const SignInActionButton = styled.button`
   background: var(--ink);
 `;
 
+export const SignInSecondaryActionButton = styled.button`
+  ${secondaryButtonCss};
+  padding: 0.72rem 1rem;
+`;
+
 export const AccountCard = styled(CardSection)`
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -195,6 +200,117 @@ export const AccountActions = styled(WrapRow)`
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 0.45rem;
+`;
+
+export const AccountThemeWrap = styled.div`
+  position: relative;
+  display: inline-flex;
+`;
+
+export const AccountIconButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.94);
+  }
+
+  svg {
+    width: 1rem;
+    height: 1rem;
+  }
+`;
+
+export const AccountThemePopover = styled.div`
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 30;
+  width: min(280px, 70vw);
+  ${gridStackCss("0.42rem")};
+  padding: 0.55rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-strong) 92%, white 8%);
+  box-shadow: 0 20px 50px rgba(27, 21, 16, 0.16);
+`;
+
+export const AccountThemePopoverHeader = styled.div`
+  ${gridStackCss("0.14rem")};
+`;
+
+export const AccountThemePopoverTitle = styled.strong`
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+`;
+
+export const AccountThemeList = styled.div`
+  ${gridStackCss("0.22rem")};
+`;
+
+export const AccountThemeOption = styled.button<{ $active: boolean }>`
+  border: 1px solid ${({ $active }) => ($active ? "color-mix(in srgb, var(--accent) 46%, rgba(31, 41, 55, 0.12))" : "var(--line)")};
+  background: ${({ $active }) => ($active ? "color-mix(in srgb, var(--accent) 10%, white 90%)" : "rgba(255, 255, 255, 0.6)")};
+  color: var(--ink);
+  border-radius: 14px;
+  padding: 0.48rem 0.56rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  text-align: left;
+  cursor: pointer;
+`;
+
+export const AccountThemePreview = styled.div`
+  ${flexWrapRowCss("0.24rem")};
+  align-items: center;
+`;
+
+export const AccountThemeSwatch = styled.span<{ $color: string }>`
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  background: ${({ $color }) => $color};
+  border: 1px solid rgba(31, 41, 55, 0.12);
+`;
+
+export const AccountThemeLabel = styled.span`
+  font-size: 0.84rem;
+  font-weight: 700;
+`;
+
+export const AccountThemeModeToggle = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem;
+  padding: 0.18rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.62);
+`;
+
+export const AccountThemeModeButton = styled.button<{ $active: boolean }>`
+  border: 0;
+  border-radius: 10px;
+  padding: 0.4rem 0.56rem;
+  background: ${({ $active }) => ($active ? "rgba(31, 41, 55, 0.08)" : "transparent")};
+  color: ${({ $active }) => ($active ? "var(--ink)" : "var(--muted)")};
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
 `;
 
 export const AccountButton = styled.button`
@@ -531,7 +647,7 @@ export const PlatformMain = styled.div`
   max-height: 100dvh;
   overflow: auto;
   ${gridStackCss("0.7rem")};
-  align-content: start;
+  align-content: stretch;
   padding: 0.48rem 0.64rem;
   animation: fadeSlideIn 260ms ease;
 
@@ -654,6 +770,11 @@ export const PlatformSidebarSectionIcon = styled.div<{ $collapsed?: boolean }>`
     opacity 180ms ease,
     width 180ms ease,
     height 180ms ease;
+
+  svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
 `;
 
 export const PlatformSectionTitle = styled.div<{ $collapsed?: boolean }>`
@@ -707,11 +828,19 @@ export const PlatformNavMeta = styled(MetaText)<{ $collapsed: boolean }>`
 `;
 
 export const PlatformNavGlyph = styled.span<{ $active: boolean }>`
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 0.9rem;
+  height: 0.9rem;
   border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: ${({ $active }) => ($active ? "var(--accent)" : "rgba(255,255,255,0.18)")};
   transition: background 180ms ease, transform 180ms ease;
+
+  svg {
+    width: 0.72rem;
+    height: 0.72rem;
+  }
 `;
 
 export const PlatformSessionWrap = styled.div<{ $collapsed?: boolean }>`
@@ -950,29 +1079,34 @@ export const ChatKitPaneHarness = styled.div`
 
 export const ChatKitPaneStatusRow = styled.div`
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.45rem;
-  min-height: 1.75rem;
+  gap: 0.6rem;
+  min-height: 2rem;
 `;
 
 export const ChatKitPaneStatusActions = styled.div`
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 0.4rem;
+  gap: 0.45rem;
   min-width: 0;
-  flex: 0 0 auto;
+  flex: 1 1 360px;
   flex-wrap: wrap;
 `;
 
 export const ChatKitPaneStatusText = styled(OverlayMetaText)<{ $light?: boolean }>`
   margin: 0;
-  flex: 1 1 auto;
+  flex: 1 1 220px;
   min-width: 0;
+  text-align: right;
   color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.72)")};
   font-size: 0.8rem;
   line-height: 1.35;
+
+  @media (max-width: 760px) {
+    flex-basis: 100%;
+    text-align: left;
+  }
 `;
 
 export const ChatKitPaneIconButton = styled.button<{ $light?: boolean }>`
@@ -1064,22 +1198,36 @@ export const ChatKitPaneToolbarButton = styled.button`
   cursor: pointer;
 `;
 
-export const ChatKitPaneModeRow = styled.div`
+export const ChatKitPaneModeRow = styled.div<{ $light?: boolean }>`
   display: inline-flex;
   align-items: center;
   gap: 0.14rem;
   flex: 0 0 auto;
   padding: 0.12rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.12)" : "rgba(255, 255, 255, 0.12)")};
+  background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.07)")};
 `;
 
-export const ChatKitPaneModeButton = styled.button<{ $active?: boolean }>`
+export const ChatKitPaneModeButton = styled.button<{ $active?: boolean; $light?: boolean }>`
   border: 1px solid
-    ${({ $active }) => ($active ? "rgba(244, 196, 48, 0.62)" : "rgba(255, 255, 255, 0.2)")};
-  background: ${({ $active }) => ($active ? "rgba(244, 196, 48, 0.18)" : "rgba(255, 255, 255, 0.08)")};
-  color: #f8f6f2;
+    ${({ $active, $light }) =>
+      $active
+        ? $light
+          ? "rgba(31, 41, 55, 0.18)"
+          : "rgba(244, 196, 48, 0.62)"
+        : $light
+          ? "rgba(31, 41, 55, 0.14)"
+          : "rgba(255, 255, 255, 0.2)"};
+  background: ${({ $active, $light }) =>
+    $active
+      ? $light
+        ? "rgba(31, 41, 55, 0.08)"
+        : "rgba(244, 196, 48, 0.18)"
+      : $light
+        ? "rgba(255, 255, 255, 0.78)"
+        : "rgba(255, 255, 255, 0.08)"};
+  color: ${({ $light }) => ($light ? "#1f2937" : "#f8f6f2")};
   border-radius: 999px;
   padding: 0.28rem 0.56rem;
   font: inherit;

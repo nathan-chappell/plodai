@@ -344,21 +344,30 @@ def test_log_event_dedupes_rendered_compile_events_for_five_minutes() -> None:
                 logger,
                 logging.DEBUG,
                 "tool.schema_compiled",
-                rendered=["create_report(title)", "schema=closed strict=true required=title"],
+                rendered=[
+                    "create_report(title)",
+                    "schema=closed strict=true required=title",
+                ],
                 dedupe=True,
             )
             log_event(
                 logger,
                 logging.DEBUG,
                 "tool.schema_compiled",
-                rendered=["create_report(title)", "schema=closed strict=true required=title"],
+                rendered=[
+                    "create_report(title)",
+                    "schema=closed strict=true required=title",
+                ],
                 dedupe=True,
             )
             log_event(
                 logger,
                 logging.DEBUG,
                 "tool.schema_compiled",
-                rendered=["create_report(title)", "schema=closed strict=true required=title"],
+                rendered=[
+                    "create_report(title)",
+                    "schema=closed strict=true required=title",
+                ],
                 dedupe=True,
             )
     finally:
@@ -368,7 +377,9 @@ def test_log_event_dedupes_rendered_compile_events_for_five_minutes() -> None:
     assert output.count("tool.schema_compiled") == 2
 
 
-def test_client_tool_schema_summary_surfaces_closed_required_optional_and_enum() -> None:
+def test_client_tool_schema_summary_surfaces_closed_required_optional_and_enum() -> (
+    None
+):
     summary = summarize_client_tool_schema_for_log(
         "inspect_pdf_file",
         {

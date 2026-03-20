@@ -30,9 +30,13 @@ export const REPORT_ITEM_TYPE_VALUES = [
   "note",
   "tool_result",
 ] as const;
+export const REPORT_SLIDE_LAYOUT_VALUES = ["1x1", "1x2", "2x2"] as const;
+export const REPORT_SLIDE_PANEL_TYPE_VALUES = ["narrative", "chart"] as const;
 
 export type WorkspaceContractVersion = typeof WORKSPACE_CONTRACT_VERSION;
 export type ReportItemType = (typeof REPORT_ITEM_TYPE_VALUES)[number];
+export type ReportSlideLayout = (typeof REPORT_SLIDE_LAYOUT_VALUES)[number];
+export type ReportSlidePanelType = (typeof REPORT_SLIDE_PANEL_TYPE_VALUES)[number];
 
 export type WorkspaceAppStateV1 = {
   version: WorkspaceContractVersion;
@@ -116,13 +120,49 @@ export type ReportItemV1 =
   | ReportNoteItemV1
   | ReportToolResultItemV1;
 
-export type WorkspaceReportV1 = {
+export type ReportNarrativePanelV1 = {
+  id: string;
+  type: "narrative";
+  title: string;
+  markdown: string;
+};
+
+export type ReportChartPanelV1 = {
+  id: string;
+  type: "chart";
+  title: string;
+  file_id: string;
+  chart_plan_id: string;
+  chart: Record<string, unknown>;
+  image_data_url?: string | null;
+};
+
+export type ReportSlidePanelV1 = ReportNarrativePanelV1 | ReportChartPanelV1;
+
+export type ReportSlideV1 = {
+  id: string;
+  created_at: string;
+  title: string;
+  layout: ReportSlideLayout;
+  panels: ReportSlidePanelV1[];
+};
+
+export type WorkspaceLegacyReportV1 = {
   version: WorkspaceContractVersion;
   report_id: string;
   title: string;
   created_at: string;
   updated_at: string;
   items: ReportItemV1[];
+};
+
+export type WorkspaceReportV1 = {
+  version: WorkspaceContractVersion;
+  report_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  slides: ReportSlideV1[];
 };
 
 export type WorkspaceToolCatalogV1 = {
@@ -219,7 +259,7 @@ export function buildDefaultWorkspaceReport(options?: {
     title: options?.title ?? "Current report",
     created_at: createdAt,
     updated_at: createdAt,
-    items: [],
+    slides: [],
   };
 }
 
@@ -255,14 +295,16 @@ export function buildDefaultAgentsFileContent(options: {
     "",
     "Do not progress this workspace contract to v2 until the user explicitly says so.",
     "",
+    "This workspace is shared across agents. Use the active agent's tools together with these workspace conventions.",
+    "",
     "Reserved conventions:",
     "- /AGENTS.md is the primary guidance artifact.",
     "- /.system/v1/app-state.json stores durable app state relevant to tools and agents.",
     "- /reports/index.json tracks report ids and the current report.",
-    "- /reports/{report_id}.json stores structured report items.",
+    "- /reports/{report_id}.json stores structured report slides.",
     "- /artifacts/* stores derived capability outputs.",
     "",
-    `Current capability: ${options.capabilityTitle}`,
+    `Seeded from: ${options.capabilityTitle}`,
     "",
     "## Current Objective",
     options.currentGoal.trim() || "No explicit objective has been recorded yet.",

@@ -34,7 +34,7 @@ export function publishPaymentRequiredToast(message?: string): void {
   }
   lastPaymentRequiredToastAt = now;
   publishToast({
-    title: "No credit remaining",
+    title: "Credit limit reached",
     message: message ?? "Add credit to keep using the workspace.",
     tone: "warning",
   });

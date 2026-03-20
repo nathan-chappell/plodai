@@ -61,10 +61,7 @@ def test_client_tool_proxy_streams_widget_without_progress_event() -> None:
     widget, copy_text = chatkit_context.widget_calls[0]
     assert widget["type"] == "Card"
     assert "status" not in widget
-    assert copy_text == (
-        "List Csv Files\n"
-        "Queued a CSV workspace listing with samples."
-    )
+    assert copy_text == ("List Csv Files\nQueued a CSV workspace listing with samples.")
     assert result == {
         "name": "list_csv_files",
         "arguments": {"includeSamples": True},
@@ -110,9 +107,10 @@ def test_demo_validator_cost_tool_returns_pre_turn_usage_snapshot() -> None:
             "cost_usd": 0.00123456,
         },
     }
-    assert chatkit_context.thread.metadata[
-        DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY
-    ] == result
+    assert (
+        chatkit_context.thread.metadata[DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY]
+        == result
+    )
     assert context.thread_metadata[DEMO_VALIDATOR_COST_SNAPSHOT_METADATA_KEY] == result
     assert len(chatkit_context.stream_events) == 1
     assert chatkit_context.stream_events[0].text == (

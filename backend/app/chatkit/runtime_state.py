@@ -89,11 +89,17 @@ def build_runtime_metadata_patch(
     patch: ThreadMetadataPatch = {}
 
     request_surface_key = request_metadata.get("surface_key")
-    if request_surface_key and current_metadata.get("surface_key") != request_surface_key:
+    if (
+        request_surface_key
+        and current_metadata.get("surface_key") != request_surface_key
+    ):
         patch["surface_key"] = request_surface_key
 
     request_bundle = request_metadata.get("capability_bundle")
-    if request_bundle is not None and current_metadata.get("capability_bundle") != request_bundle:
+    if (
+        request_bundle is not None
+        and current_metadata.get("capability_bundle") != request_bundle
+    ):
         patch["capability_bundle"] = request_bundle
 
     request_workspace_state = request_metadata.get("workspace_state")
@@ -128,7 +134,11 @@ def resolve_thread_runtime_state(
         current_metadata=current_metadata,
         request_metadata=request_metadata,
     )
-    metadata = merge_thread_metadata(current_metadata, runtime_patch) if runtime_patch else current_metadata
+    metadata = (
+        merge_thread_metadata(current_metadata, runtime_patch)
+        if runtime_patch
+        else current_metadata
+    )
 
     context.report_id = thread.id
     context.thread_metadata = metadata

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from backend.app.chatkit.batch_continuation import (
     ContinueBatchDecision,
     DEFAULT_BATCH_CONTINUATION_INPUT,
+    build_batch_continuation_progress_text,
     decide_batch_continuation,
 )
 
@@ -24,10 +25,12 @@ def test_decide_batch_continuation_stops_without_assistant_text() -> None:
 def test_decide_batch_continuation_fills_default_next_input() -> None:
     async def fake_run(*args, **kwargs):
         return SimpleNamespace(
-            final_output_as=lambda cls, raise_if_incorrect_type=False: ContinueBatchDecision(
-                should_continue=True,
-                reason="The assistant only asked for avoidable confirmation.",
-                next_input=None,
+            final_output_as=lambda cls, raise_if_incorrect_type=False: (
+                ContinueBatchDecision(
+                    should_continue=True,
+                    reason="The assistant only asked for avoidable confirmation.",
+                    next_input=None,
+                )
             )
         )
 
@@ -42,3 +45,26 @@ def test_decide_batch_continuation_fills_default_next_input() -> None:
 
     assert decision.should_continue is True
     assert decision.next_input == DEFAULT_BATCH_CONTINUATION_INPUT
+
+
+def test_build_batch_continuation_progress_text_only_surfaces_continue() -> None:
+    assert (
+        build_batch_continuation_progress_text(
+            ContinueBatchDecision(
+                should_continue=True,
+                reason="The assistant only asked for avoidable confirmation.",
+                next_input="Continue.",
+            )
+        )
+        == "Batch mode is continuing automatically. The assistant only asked for avoidable confirmation."
+    )
+    assert (
+        build_batch_continuation_progress_text(
+            ContinueBatchDecision(
+                should_continue=False,
+                reason="No assistant message is available to evaluate.",
+                next_input=None,
+            )
+        )
+        is None
+    )

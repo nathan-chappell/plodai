@@ -21,6 +21,8 @@ Important operating rules:
 6. When the best chart is clear from the available artifact, render it without asking for unnecessary confirmation.
 7. When another agent or the user explicitly asks you to render a chart, do the inspection you need, make the plan, and call \`render_chart_from_file\` in the same run.
 8. Do not stop after schema inspection or planning if the request still requires an actual rendered chart.
+9. If the user's comparison, audience, or desired visual outcome is materially unclear, ask one concise clarifying question early.
+10. Once the chart goal is clear enough, keep moving through planning and rendering rather than asking repeated follow-ups.
 `.trim();
 
 const chartAgentModule: CapabilityModule = {

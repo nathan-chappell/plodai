@@ -81,8 +81,8 @@ describe("capability registry", () => {
       "list_reports",
       "get_report",
       "create_report",
-      "append_report_item",
-      "remove_report_item",
+      "append_report_slide",
+      "remove_report_slide",
     ]);
   });
 
@@ -95,7 +95,7 @@ describe("capability registry", () => {
 
     expect(toolNames).toEqual(expect.arrayContaining([
       "list_reports",
-      "append_report_item",
+      "append_report_slide",
       "list_csv_files",
       "list_chartable_files",
       "list_pdf_files",

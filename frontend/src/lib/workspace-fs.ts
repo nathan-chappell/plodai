@@ -1,19 +1,26 @@
 import type { LocalWorkspaceFile } from "../types/report";
 import type {
   WorkspaceBreadcrumb,
+  WorkspaceDescriptor,
   WorkspaceContext,
   WorkspaceDirectoryNode,
   WorkspaceFileNode,
   WorkspaceFilesystem,
   WorkspaceItem,
+  WorkspaceKind,
+  WorkspaceRegistry,
   WorkspaceSurfaceState,
 } from "../types/workspace";
 
 const DATABASE_NAME = "ai-portfolio-workspace";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const FILESYSTEM_STORE = "workspace_filesystems";
 const SURFACE_STATE_STORE = "workspace_surface_state";
+const METADATA_STORE = "workspace_metadata";
 const ROOT_DIRECTORY_ID = "workspace-root";
+export const DEFAULT_WORKSPACE_ID = "default";
+export const DEMO_WORKSPACE_ID = "demo";
+const WORKSPACE_REGISTRY_VERSION = "v1";
 
 type WorkspaceFilesystemRecord = {
   key: string;
@@ -23,6 +30,11 @@ type WorkspaceFilesystemRecord = {
 type WorkspaceSurfaceStateRecord = {
   key: string;
   value: WorkspaceSurfaceState;
+};
+
+type WorkspaceMetadataRecord = {
+  key: string;
+  value: WorkspaceRegistry;
 };
 
 type WorkspaceFileWriteInput = {
@@ -46,18 +58,17 @@ function openDatabase(): Promise<IDBDatabase> {
   databasePromise = new Promise((resolve, reject) => {
     const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
 
-    request.onupgradeneeded = (event) => {
+    request.onupgradeneeded = () => {
       const database = request.result;
-      if (event.oldVersion > 0) {
-        if (database.objectStoreNames.contains(FILESYSTEM_STORE)) {
-          database.deleteObjectStore(FILESYSTEM_STORE);
-        }
-        if (database.objectStoreNames.contains(SURFACE_STATE_STORE)) {
-          database.deleteObjectStore(SURFACE_STATE_STORE);
-        }
+      if (!database.objectStoreNames.contains(FILESYSTEM_STORE)) {
+        database.createObjectStore(FILESYSTEM_STORE, { keyPath: "key" });
       }
-      database.createObjectStore(FILESYSTEM_STORE, { keyPath: "key" });
-      database.createObjectStore(SURFACE_STATE_STORE, { keyPath: "key" });
+      if (!database.objectStoreNames.contains(SURFACE_STATE_STORE)) {
+        database.createObjectStore(SURFACE_STATE_STORE, { keyPath: "key" });
+      }
+      if (!database.objectStoreNames.contains(METADATA_STORE)) {
+        database.createObjectStore(METADATA_STORE, { keyPath: "key" });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -67,12 +78,24 @@ function openDatabase(): Promise<IDBDatabase> {
   return databasePromise;
 }
 
-function filesystemKey(userId: string): string {
+function workspaceFilesystemKey(userId: string, workspaceId: string): string {
+  return `filesystem:${userId}:${workspaceId}`;
+}
+
+function legacyFilesystemKey(userId: string): string {
   return `filesystem:${userId}`;
 }
 
-function surfaceStateKey(userId: string, surfaceKey: string): string {
+function surfaceStateKey(userId: string, workspaceId: string, surfaceKey: string): string {
+  return `surface:${userId}:${workspaceId}:${surfaceKey}`;
+}
+
+function legacySurfaceStateKey(userId: string, surfaceKey: string): string {
   return `surface:${userId}:${surfaceKey}`;
+}
+
+function workspaceRegistryKey(userId: string): string {
+  return `registry:${userId}`;
 }
 
 function basename(path: string): string {
@@ -90,6 +113,74 @@ function parentPrefixForPath(path: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function defaultWorkspaceDescriptors(): WorkspaceDescriptor[] {
+  return [
+    {
+      id: DEFAULT_WORKSPACE_ID,
+      name: "Default workspace",
+      kind: "default",
+      created_at: nowIso(),
+    },
+    {
+      id: DEMO_WORKSPACE_ID,
+      name: "Demo workspace",
+      kind: "demo",
+      created_at: nowIso(),
+    },
+  ];
+}
+
+function normalizeWorkspaceDescriptor(
+  descriptor: WorkspaceDescriptor,
+): WorkspaceDescriptor {
+  return {
+    id: descriptor.id.trim() || crypto.randomUUID(),
+    name: descriptor.name.trim() || "Untitled workspace",
+    kind: descriptor.kind,
+    created_at: descriptor.created_at || nowIso(),
+  };
+}
+
+function normalizeWorkspaceRegistry(
+  registry: WorkspaceRegistry | null | undefined,
+): WorkspaceRegistry {
+  const descriptors = registry?.workspaces ?? [];
+  const normalizedById = new Map<string, WorkspaceDescriptor>();
+
+  for (const builtin of defaultWorkspaceDescriptors()) {
+    const existing = descriptors.find((descriptor) => descriptor.id === builtin.id);
+    normalizedById.set(
+      builtin.id,
+      existing
+        ? normalizeWorkspaceDescriptor({
+            ...existing,
+            kind: builtin.kind,
+            name: existing.name.trim() || builtin.name,
+          })
+        : builtin,
+    );
+  }
+
+  for (const descriptor of descriptors) {
+    if (!descriptor.id || normalizedById.has(descriptor.id)) {
+      continue;
+    }
+    normalizedById.set(descriptor.id, normalizeWorkspaceDescriptor(descriptor));
+  }
+
+  const workspaces = Array.from(normalizedById.values());
+  const selectedWorkspaceId =
+    registry?.selected_workspace_id && normalizedById.has(registry.selected_workspace_id)
+      ? registry.selected_workspace_id
+      : DEFAULT_WORKSPACE_ID;
+
+  return {
+    version: WORKSPACE_REGISTRY_VERSION,
+    selected_workspace_id: selectedWorkspaceId,
+    workspaces,
+  };
 }
 
 function withTrailingSlash(prefix: string): string {
@@ -220,17 +311,93 @@ export function createWorkspaceFilesystem(): WorkspaceFilesystem {
   };
 }
 
-export async function loadWorkspaceFilesystem(userId: string): Promise<WorkspaceFilesystem> {
+export function createWorkspaceDescriptor(
+  name: string,
+  kind: WorkspaceKind = "user",
+): WorkspaceDescriptor {
+  const trimmedName = name.trim();
+  return {
+    id: kind === "default" ? DEFAULT_WORKSPACE_ID : kind === "demo" ? DEMO_WORKSPACE_ID : crypto.randomUUID(),
+    name:
+      trimmedName ||
+      (kind === "default" ? "Default workspace" : kind === "demo" ? "Demo workspace" : "Untitled workspace"),
+    kind,
+    created_at: nowIso(),
+  };
+}
+
+export function createWorkspaceRegistry(): WorkspaceRegistry {
+  return normalizeWorkspaceRegistry(null);
+}
+
+export async function loadWorkspaceRegistry(userId: string): Promise<WorkspaceRegistry> {
+  try {
+    const database = await openDatabase();
+    return await new Promise<WorkspaceRegistry>((resolve, reject) => {
+      const transaction = database.transaction(METADATA_STORE, "readonly");
+      const store = transaction.objectStore(METADATA_STORE);
+      const request = store.get(workspaceRegistryKey(userId));
+
+      request.onsuccess = () => {
+        const record = request.result as WorkspaceMetadataRecord | undefined;
+        resolve(normalizeWorkspaceRegistry(record?.value));
+      };
+      request.onerror = () => reject(request.error ?? new Error("Workspace registry read failed."));
+    });
+  } catch {
+    return createWorkspaceRegistry();
+  }
+}
+
+export async function saveWorkspaceRegistry(userId: string, registry: WorkspaceRegistry): Promise<void> {
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readwrite");
+    const store = transaction.objectStore(METADATA_STORE);
+
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("Workspace registry write aborted."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("Workspace registry write failed."));
+
+    store.put({
+      key: workspaceRegistryKey(userId),
+      value: normalizeWorkspaceRegistry(registry),
+    } satisfies WorkspaceMetadataRecord);
+  });
+}
+
+export async function loadWorkspaceFilesystem(
+  userId: string,
+  workspaceId = DEFAULT_WORKSPACE_ID,
+): Promise<WorkspaceFilesystem> {
   try {
     const database = await openDatabase();
     return await new Promise<WorkspaceFilesystem>((resolve, reject) => {
       const transaction = database.transaction(FILESYSTEM_STORE, "readonly");
       const store = transaction.objectStore(FILESYSTEM_STORE);
-      const request = store.get(filesystemKey(userId));
+      const request = store.get(workspaceFilesystemKey(userId, workspaceId));
 
       request.onsuccess = () => {
         const record = request.result as WorkspaceFilesystemRecord | undefined;
-        resolve(record?.filesystem ? normalizeFilesystem(record.filesystem) : createWorkspaceFilesystem());
+        if (record?.filesystem) {
+          resolve(normalizeFilesystem(record.filesystem));
+          return;
+        }
+        if (workspaceId !== DEFAULT_WORKSPACE_ID) {
+          resolve(createWorkspaceFilesystem());
+          return;
+        }
+        const legacyRequest = store.get(legacyFilesystemKey(userId));
+        legacyRequest.onsuccess = () => {
+          const legacyRecord = legacyRequest.result as WorkspaceFilesystemRecord | undefined;
+          resolve(
+            legacyRecord?.filesystem
+              ? normalizeFilesystem(legacyRecord.filesystem)
+              : createWorkspaceFilesystem(),
+          );
+        };
+        legacyRequest.onerror = () =>
+          reject(legacyRequest.error ?? new Error("Workspace filesystem read failed."));
       };
       request.onerror = () => reject(request.error ?? new Error("Workspace filesystem read failed."));
     });
@@ -239,7 +406,17 @@ export async function loadWorkspaceFilesystem(userId: string): Promise<Workspace
   }
 }
 
-export async function saveWorkspaceFilesystem(userId: string, filesystem: WorkspaceFilesystem): Promise<void> {
+export async function saveWorkspaceFilesystem(
+  userId: string,
+  workspaceIdOrFilesystem: string | WorkspaceFilesystem,
+  filesystemArg?: WorkspaceFilesystem,
+): Promise<void> {
+  const workspaceId =
+    typeof workspaceIdOrFilesystem === "string" ? workspaceIdOrFilesystem : DEFAULT_WORKSPACE_ID;
+  const filesystem =
+    typeof workspaceIdOrFilesystem === "string"
+      ? (filesystemArg ?? createWorkspaceFilesystem())
+      : workspaceIdOrFilesystem;
   const database = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(FILESYSTEM_STORE, "readwrite");
@@ -250,7 +427,7 @@ export async function saveWorkspaceFilesystem(userId: string, filesystem: Worksp
     transaction.onerror = () => reject(transaction.error ?? new Error("Workspace filesystem write failed."));
 
     store.put({
-      key: filesystemKey(userId),
+      key: workspaceFilesystemKey(userId, workspaceId),
       filesystem: normalizeFilesystem(filesystem),
     } satisfies WorkspaceFilesystemRecord);
   });
@@ -258,18 +435,35 @@ export async function saveWorkspaceFilesystem(userId: string, filesystem: Worksp
 
 export async function loadWorkspaceSurfaceState(
   userId: string,
-  surfaceKey: string,
+  workspaceIdOrSurfaceKey: string,
+  surfaceKeyArg?: string,
 ): Promise<WorkspaceSurfaceState | null> {
+  const workspaceId = surfaceKeyArg ? workspaceIdOrSurfaceKey : DEFAULT_WORKSPACE_ID;
+  const surfaceKey = surfaceKeyArg ?? workspaceIdOrSurfaceKey;
   try {
     const database = await openDatabase();
     return await new Promise<WorkspaceSurfaceState | null>((resolve, reject) => {
       const transaction = database.transaction(SURFACE_STATE_STORE, "readonly");
       const store = transaction.objectStore(SURFACE_STATE_STORE);
-      const request = store.get(surfaceStateKey(userId, surfaceKey));
+      const request = store.get(surfaceStateKey(userId, workspaceId, surfaceKey));
 
       request.onsuccess = () => {
         const record = request.result as WorkspaceSurfaceStateRecord | undefined;
-        resolve(record?.value ?? null);
+        if (record?.value) {
+          resolve(record.value);
+          return;
+        }
+        if (workspaceId !== DEFAULT_WORKSPACE_ID) {
+          resolve(null);
+          return;
+        }
+        const legacyRequest = store.get(legacySurfaceStateKey(userId, surfaceKey));
+        legacyRequest.onsuccess = () => {
+          const legacyRecord = legacyRequest.result as WorkspaceSurfaceStateRecord | undefined;
+          resolve(legacyRecord?.value ?? null);
+        };
+        legacyRequest.onerror = () =>
+          reject(legacyRequest.error ?? new Error("Workspace surface-state read failed."));
       };
       request.onerror = () => reject(request.error ?? new Error("Workspace surface-state read failed."));
     });
@@ -280,8 +474,15 @@ export async function loadWorkspaceSurfaceState(
 
 export async function saveWorkspaceSurfaceState(
   userId: string,
-  state: WorkspaceSurfaceState,
+  workspaceIdOrState: string | WorkspaceSurfaceState,
+  stateArg?: WorkspaceSurfaceState,
 ): Promise<void> {
+  const workspaceId =
+    typeof workspaceIdOrState === "string" ? workspaceIdOrState : DEFAULT_WORKSPACE_ID;
+  const state = typeof workspaceIdOrState === "string" ? stateArg : workspaceIdOrState;
+  if (!state) {
+    return;
+  }
   const database = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(SURFACE_STATE_STORE, "readwrite");
@@ -292,7 +493,7 @@ export async function saveWorkspaceSurfaceState(
     transaction.onerror = () => reject(transaction.error ?? new Error("Workspace surface-state write failed."));
 
     store.put({
-      key: surfaceStateKey(userId, state.surface_key),
+      key: surfaceStateKey(userId, workspaceId, state.surface_key),
       value: { ...state, active_prefix: normalizePathPrefix(state.active_prefix) },
     } satisfies WorkspaceSurfaceStateRecord);
   });

@@ -233,26 +233,35 @@ export type CreateReportToolArgs = {
   report_id?: string;
 };
 
-export type ReportItemDraft =
+export type ReportSlidePanelDraft =
   | {
-      type: "section";
+      type: "narrative";
       title: string;
       markdown: string;
     }
   | {
-      type: "note";
+      type: "chart";
       title: string;
-      text: string;
+      file_id: string;
+      chart_plan_id: string;
+      chart: ClientChartSpec;
+      image_data_url?: string | null;
     };
 
-export type AppendReportItemToolArgs = {
-  report_id: string;
-  item: ReportItemDraft;
+export type ReportSlideDraft = {
+  title: string;
+  layout: "1x1" | "1x2" | "2x2";
+  panels: ReportSlidePanelDraft[];
 };
 
-export type RemoveReportItemToolArgs = {
+export type AppendReportSlideToolArgs = {
   report_id: string;
-  item_id: string;
+  slide: ReportSlideDraft;
+};
+
+export type RemoveReportSlideToolArgs = {
+  report_id: string;
+  slide_id: string;
 };
 
 export type ClientToolArgsMap = {
@@ -270,8 +279,8 @@ export type ClientToolArgsMap = {
   list_reports: ListReportsToolArgs;
   get_report: GetReportToolArgs;
   create_report: CreateReportToolArgs;
-  append_report_item: AppendReportItemToolArgs;
-  remove_report_item: RemoveReportItemToolArgs;
+  append_report_slide: AppendReportSlideToolArgs;
+  remove_report_slide: RemoveReportSlideToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;
@@ -329,6 +338,7 @@ export type WorkspaceStateReportSummary = {
   report_id: string;
   title: string;
   item_count: number;
+  slide_count: number;
   updated_at: string | null;
 };
 
@@ -339,6 +349,7 @@ export type WorkspaceState = {
   reports: WorkspaceStateReportSummary[];
   current_report_id: string | null;
   current_goal: string | null;
+  agents_markdown?: string | null;
 };
 
 export type PdfSmartSplitEffect = {

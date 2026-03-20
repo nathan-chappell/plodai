@@ -1,4 +1,5 @@
 import type {
+  AppendReportSlideToolArgs,
   ClientEffect,
   ClientToolCall,
   ClientToolName,
@@ -7,11 +8,10 @@ import type {
   CreateJsonFileToolArgs,
   DataRow,
   GetReportToolArgs,
-  AppendReportItemToolArgs,
   ListLoadedDatasetsToolArgs,
   ListReportsToolArgs,
   ListWorkspaceFilesToolArgs,
-  RemoveReportItemToolArgs,
+  RemoveReportSlideToolArgs,
   RenderChartFromFileToolArgs,
   RunLocalQueryToolArgs,
 } from "../types/analysis";
@@ -245,7 +245,7 @@ export async function executeClientTool<Name extends ClientToolName>(
             title: args.report_id,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            items: [],
+            slides: [],
           },
         },
         effects: [],
@@ -261,7 +261,7 @@ export async function executeClientTool<Name extends ClientToolName>(
             title: args.title,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            items: [],
+            slides: [],
           },
           reports: [],
           current_report_id: args.report_id ?? "smoke-report",
@@ -269,22 +269,22 @@ export async function executeClientTool<Name extends ClientToolName>(
         effects: [],
       };
     }
-    case "append_report_item": {
-      const args = toolCall.arguments as AppendReportItemToolArgs;
+    case "append_report_slide": {
+      const args = toolCall.arguments as AppendReportSlideToolArgs;
       return {
         payload: {
           report_id: args.report_id,
-          item: args.item,
+          slide: args.slide,
         },
         effects: [],
       };
     }
-    case "remove_report_item": {
-      const args = toolCall.arguments as RemoveReportItemToolArgs;
+    case "remove_report_slide": {
+      const args = toolCall.arguments as RemoveReportSlideToolArgs;
       return {
         payload: {
           report_id: args.report_id,
-          item_id: args.item_id,
+          slide_id: args.slide_id,
           removed: true,
         },
         effects: [],

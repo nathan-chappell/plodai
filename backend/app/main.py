@@ -13,14 +13,15 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
 from backend.app.api.routes import router
-from backend.app.chatkit.server import ClientWorkspaceChatKitServer, build_chatkit_server
+from backend.app.chatkit.server import (
+    ClientWorkspaceChatKitServer,
+    build_chatkit_server,
+)
 from backend.app.core.auth import AuthenticatedUser, require_paid_user
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging, get_logger, log_event
 from backend.app.db.session import Base, engine
-from backend.app.models.cost import CostEvent  # noqa: F401
-from backend.app.models.credit import UserCreditBalance  # noqa: F401
-from backend.app.models.credit_grant import CreditGrant  # noqa: F401
+from backend.app.models.registry import import_models
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT_DIR / "package.json"
@@ -34,8 +35,10 @@ def _read_version() -> str:
     version = data.get("version")
     return version if isinstance(version, str) and version else "unknown"
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    import_models()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

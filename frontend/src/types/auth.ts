@@ -5,4 +5,5 @@ export type AuthUser = {
   role: "admin" | "user";
   is_active: boolean;
   current_credit_usd: number;
+  credit_floor_usd: number;
 };

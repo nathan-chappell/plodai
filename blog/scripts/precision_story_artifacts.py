@@ -6,70 +6,52 @@ from pathlib import Path
 import math
 from typing import Literal
 
-try:
-    from blog.scripts.artifact_common import DEFAULT_OUTPUT_DIR, FIGURE_STYLE, clean_output_dir, write_figure
-except ModuleNotFoundError:
-    from artifact_common import DEFAULT_OUTPUT_DIR, FIGURE_STYLE, clean_output_dir, write_figure
+import matplotlib
+
+matplotlib.use("Agg")
+from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+
+from blog.scripts.artifact_common import (
+    DEFAULT_OUTPUT_DIR,
+    STATIC_FIGURE_BG,
+    STATIC_PANEL_BG,
+    STATIC_SECONDARY_INK,
+    STATIC_SPINE_INK,
+    STATIC_TEXT_INK,
+    clean_output_dir,
+    apply_static_rcparams,
+    font_kwargs,
+    style_static_axis,
+    write_matplotlib_figure,
+)
 
 from PIL import Image, ImageDraw
-from plotly.colors import sample_colorscale
-import plotly.graph_objects as go
 import typer
 
 
-app = typer.Typer(help="Generate the Cantor-dust precision story figure for the theoretical-justification post.")
+app = typer.Typer(
+    help="Generate the Cantor-dust precision story figure for the theoretical-justification post."
+)
 PRECISION_STORY_MODE = "two_stack_cantor4"
 PRECISION_IMAGE_STEM = "stack-cantor-dust-story"
 PRECISION_DUST_DEPTH = 6
-PRECISION_INITIAL_LEFT_STACK = ""
-PRECISION_INITIAL_RIGHT_STACK = "101011001110010110100111001011010011010111001011"
+PRECISION_COUNT_BITS = 6
+PRECISION_INITIAL_LEFT_STACK = "0" * (PRECISION_COUNT_BITS - 1)
+PRECISION_INITIAL_RIGHT_STACK = "0"
 PRECISION_ZOOM_DEPTHS: tuple[int, int] = (2, 6)
 PRECISION_DUST_BACKGROUND = "#f6f7f3"
 PRECISION_DUST_FILL = "#bae6fd"
 PRECISION_DUST_BORDER = "#0f766e"
-PRECISION_PATH_COLOR = "#9a3412"
-PRECISION_STEP_COLORS = [
-    "#1d4ed8",
-    "#2563eb",
-    "#0f766e",
-    "#16a34a",
-    "#65a30d",
-    "#ca8a04",
-    "#ea580c",
-    "#dc2626",
-    "#be123c",
-]
-PRECISION_STORY_OPERATIONS = (
-    ("write", "write 0", 0),
-    ("move_right", "move R", None),
-    ("move_right", "move R", None),
-    ("write", "write 1", 1),
-    ("move_right", "move R", None),
-    ("move_right", "move R", None),
-    ("write", "write 0", 0),
-    ("move_right", "move R", None),
-    ("move_right", "move R", None),
-    ("write", "write 1", 1),
-    ("move_right", "move R", None),
-    ("move_right", "move R", None),
-    ("write", "write 0", 0),
-    ("move_left", "move L", None),
-    ("move_left", "move L", None),
-    ("write", "write 1", 1),
-    ("move_left", "move L", None),
-    ("move_left", "move L", None),
-    ("write", "write 0", 0),
-    ("move_left", "move L", None),
-    ("move_left", "move L", None),
-    ("write", "write 1", 1),
-    ("move_right", "move R", None),
-    ("move_right", "move R", None),
-    ("write", "write 0", 0),
-    ("move_right", "move R", None),
-    ("move_right", "move R", None),
-    ("write", "write 1", 1),
-    ("move_right", "move R", None),
-)
+PRECISION_PATH_COLOR = "#6b5448"
+PRECISION_MARKER_COLOR = "#314a66"
+PRECISION_GUIDE_INK = "#c8d0d8"
+PRECISION_TEXT_INK = STATIC_TEXT_INK
+PRECISION_SUBTEXT_INK = STATIC_SECONDARY_INK
+PRECISION_LAGS: tuple[int, ...] = (1, 2, 4)
+PRECISION_MILESTONE_COUNTS: tuple[int, ...] = (0, 1, 2, 4, 8, 32, 63)
+FONT_STACK = ["Ubuntu", "DejaVu Sans", "Liberation Sans"]
 
 
 @dataclass(frozen=True)
@@ -106,14 +88,22 @@ class PrecisionZoomSpec:
 
 
 @dataclass(frozen=True)
+class PrecisionLagSummary:
+    lag: int
+    distances: tuple[float, ...]
+
+
+@dataclass(frozen=True)
 class PrecisionStoryPayload:
     encoding: str
     dust_depth: int
+    counting_bits: int
     initial_left_stack: str
     initial_right_stack: str
     states: tuple[PrecisionStoryState, ...]
     step_labels: tuple[str, ...]
-    zooms: tuple[PrecisionZoomSpec, ...]
+    milestone_step_indexes: tuple[int, ...]
+    lag_summaries: tuple[PrecisionLagSummary, ...]
 
 
 @dataclass(frozen=True)
@@ -124,7 +114,29 @@ class PrecisionVertexLabel:
 
 
 def precision_story_operations() -> tuple[PrecisionOperation, ...]:
-    return tuple(PrecisionOperation(action=action, label=label, bit=bit) for action, label, bit in PRECISION_STORY_OPERATIONS)
+    operations: list[PrecisionOperation] = []
+    current_state = TwoStackTapeState(
+        left_stack=PRECISION_INITIAL_LEFT_STACK,
+        right_stack=PRECISION_INITIAL_RIGHT_STACK,
+    )
+    for _target in range(1, 2**PRECISION_COUNT_BITS):
+        while current_state.right_stack[0] == "1":
+            operation = PrecisionOperation(action="write", label="write 0", bit=0)
+            current_state = apply_precision_operation(current_state, operation)
+            operations.append(operation)
+            move_left = PrecisionOperation(action="move_left", label="carry L", bit=None)
+            current_state = apply_precision_operation(current_state, move_left)
+            operations.append(move_left)
+        operation = PrecisionOperation(action="write", label="write 1", bit=1)
+        current_state = apply_precision_operation(current_state, operation)
+        operations.append(operation)
+        while len(current_state.right_stack) > 1:
+            move_right = PrecisionOperation(
+                action="move_right", label="return R", bit=None
+            )
+            current_state = apply_precision_operation(current_state, move_right)
+            operations.append(move_right)
+    return tuple(operations)
 
 
 def validate_binary_stack(stack: str) -> str:
@@ -164,7 +176,9 @@ def cantor_stack_pop(encoded: float, *, tolerance: float = 1e-12) -> float:
     return remainder
 
 
-def decode_binary_cantor_stack(encoded: float, *, tolerance: float = 1e-12, max_bits: int = 64) -> str:
+def decode_binary_cantor_stack(
+    encoded: float, *, tolerance: float = 1e-12, max_bits: int = 64
+) -> str:
     if encoded < -tolerance:
         raise ValueError("Encoded stack must be non-negative.")
     bits: list[str] = []
@@ -189,22 +203,34 @@ def write_tape_head(state: TwoStackTapeState, bit: int) -> TwoStackTapeState:
         raise ValueError("write_tape_head expects a binary bit.")
     if not state.right_stack:
         raise ValueError("Cannot write to an empty right stack.")
-    return TwoStackTapeState(left_stack=state.left_stack, right_stack=f"{bit}{state.right_stack[1:]}")
+    return TwoStackTapeState(
+        left_stack=state.left_stack, right_stack=f"{bit}{state.right_stack[1:]}"
+    )
 
 
 def move_tape_head_right(state: TwoStackTapeState) -> TwoStackTapeState:
     if len(state.right_stack) < 2:
-        raise ValueError("move_tape_head_right requires at least two symbols on the right stack.")
-    return TwoStackTapeState(left_stack=state.right_stack[0] + state.left_stack, right_stack=state.right_stack[1:])
+        raise ValueError(
+            "move_tape_head_right requires at least two symbols on the right stack."
+        )
+    return TwoStackTapeState(
+        left_stack=state.right_stack[0] + state.left_stack,
+        right_stack=state.right_stack[1:],
+    )
 
 
 def move_tape_head_left(state: TwoStackTapeState) -> TwoStackTapeState:
     if not state.left_stack:
         raise ValueError("move_tape_head_left requires a non-empty left stack.")
-    return TwoStackTapeState(left_stack=state.left_stack[1:], right_stack=state.left_stack[0] + state.right_stack)
+    return TwoStackTapeState(
+        left_stack=state.left_stack[1:],
+        right_stack=state.left_stack[0] + state.right_stack,
+    )
 
 
-def apply_precision_operation(state: TwoStackTapeState, operation: PrecisionOperation) -> TwoStackTapeState:
+def apply_precision_operation(
+    state: TwoStackTapeState, operation: PrecisionOperation
+) -> TwoStackTapeState:
     if operation.action == "write":
         assert operation.bit is not None
         return write_tape_head(state, operation.bit)
@@ -215,7 +241,9 @@ def apply_precision_operation(state: TwoStackTapeState, operation: PrecisionOper
     raise ValueError(f"Unhandled precision operation: {operation.action}")
 
 
-def precision_story_state(step_index: int, operation_label: str, state: TwoStackTapeState) -> PrecisionStoryState:
+def precision_story_state(
+    step_index: int, operation_label: str, state: TwoStackTapeState
+) -> PrecisionStoryState:
     return PrecisionStoryState(
         step_index=step_index,
         operation_label=operation_label,
@@ -295,7 +323,12 @@ def render_cantor_dust_image(
                 pixel_y0 = int(math.floor(((y_max - clipped_y1) / y_span) * size))
                 pixel_y1 = int(math.ceil(((y_max - clipped_y0) / y_span) * size))
                 draw.rectangle(
-                    [pixel_x0, pixel_y0, max(pixel_x0 + 1, pixel_x1), max(pixel_y0 + 1, pixel_y1)],
+                    [
+                        pixel_x0,
+                        pixel_y0,
+                        max(pixel_x0 + 1, pixel_x1),
+                        max(pixel_y0 + 1, pixel_y1),
+                    ],
                     fill=fill,
                     outline=outline,
                 )
@@ -310,155 +343,61 @@ def render_cantor_dust_image(
 
 
 def build_precision_story_payload() -> PrecisionStoryPayload:
-    current_state = TwoStackTapeState(left_stack=PRECISION_INITIAL_LEFT_STACK, right_stack=PRECISION_INITIAL_RIGHT_STACK)
+    current_state = TwoStackTapeState(
+        left_stack=PRECISION_INITIAL_LEFT_STACK,
+        right_stack=PRECISION_INITIAL_RIGHT_STACK,
+    )
     states = [precision_story_state(0, "start", current_state)]
+    milestone_steps = {0: 0}
+    current_value = 0
     for step_index, operation in enumerate(precision_story_operations(), start=1):
         current_state = apply_precision_operation(current_state, operation)
         states.append(precision_story_state(step_index, operation.label, current_state))
-    early_state = states[8]
-    late_state = states[-6]
-    zoom_depths = PRECISION_ZOOM_DEPTHS
-    zooms = (
-        PrecisionZoomSpec(
-            label="Level-2 zoom · the walk first branches",
-            depth=zoom_depths[0],
-            focus_step=early_state.step_index,
-            x_range=clamp_window(early_state.x_left, span=3.2 * (4.0 ** (-zoom_depths[0]))),
-            y_range=clamp_window(early_state.x_right, span=3.2 * (4.0 ** (-zoom_depths[0]))),
-        ),
-        PrecisionZoomSpec(
-            label="Level-6 zoom · the same move, much deeper",
-            depth=zoom_depths[1],
-            focus_step=late_state.step_index,
-            x_range=clamp_window(late_state.x_left, span=9.5 * (4.0 ** (-zoom_depths[1]))),
-            y_range=clamp_window(late_state.x_right, span=9.5 * (4.0 ** (-zoom_depths[1]))),
-        ),
+        tape_bits = current_state.left_stack[::-1] + current_state.right_stack
+        if len(current_state.right_stack) == 1:
+            new_value = int(tape_bits, 2)
+            if new_value != current_value:
+                current_value = new_value
+                milestone_steps[current_value] = step_index
+    lag_summaries = tuple(
+        PrecisionLagSummary(
+            lag=lag,
+            distances=tuple(
+                math.dist(
+                    (states[index].x_left, states[index].x_right),
+                    (states[index + lag].x_left, states[index + lag].x_right),
+                )
+                for index in range(len(states) - lag)
+            ),
+        )
+        for lag in PRECISION_LAGS
     )
     return PrecisionStoryPayload(
         encoding=PRECISION_STORY_MODE,
         dust_depth=PRECISION_DUST_DEPTH,
+        counting_bits=PRECISION_COUNT_BITS,
         initial_left_stack=PRECISION_INITIAL_LEFT_STACK,
         initial_right_stack=PRECISION_INITIAL_RIGHT_STACK,
         states=tuple(states),
         step_labels=tuple(state.operation_label for state in states),
-        zooms=zooms,
-    )
-
-
-def add_precision_path_trace(
-    figure: go.Figure,
-    *,
-    payload: PrecisionStoryPayload,
-    axis_suffix: str,
-    show_text: bool,
-    selected_step_indexes: tuple[int, ...] | None = None,
-    line_width: float = 4.0,
-    marker_size: float = 12.0,
-    text_color: str = "#f8fafc",
-) -> None:
-    step_color_map = precision_step_color_map(payload)
-    if selected_step_indexes is None:
-        states = list(payload.states)
-    else:
-        selected = set(selected_step_indexes)
-        states = [state for state in payload.states if state.step_index in selected]
-    customdata = [
-        [state.step_index, state.operation_label, state.left_stack, state.right_stack, state.tape_snapshot, state.x_left, state.x_right]
-        for state in states
-    ]
-    halo_trace = go.Scatter(
-        x=[state.x_left for state in states],
-        y=[state.x_right for state in states],
-        mode="lines",
-        line={"color": "rgba(248,250,252,0.88)", "width": line_width + 2.0},
-        hoverinfo="skip",
-        showlegend=False,
-    )
-    halo_trace.update(xaxis=f"x{axis_suffix}", yaxis=f"y{axis_suffix}")
-    figure.add_trace(halo_trace)
-    path_trace = go.Scatter(
-        x=[state.x_left for state in states],
-        y=[state.x_right for state in states],
-        mode="lines",
-        line={"color": "rgba(15,23,42,0.55)", "width": line_width},
-        hoverinfo="skip",
-        showlegend=False,
-    )
-    path_trace.update(xaxis=f"x{axis_suffix}", yaxis=f"y{axis_suffix}")
-    figure.add_trace(path_trace)
-    trace = go.Scatter(
-        x=[state.x_left for state in states],
-        y=[state.x_right for state in states],
-        mode="markers+text" if show_text else "markers",
-        text=[str(state.step_index) for state in states] if show_text else None,
-        textposition="top center",
-        textfont={"color": text_color, "size": 12 if show_text else 10},
-        marker={
-            "size": marker_size,
-            "color": [step_color_map[state.step_index] for state in states],
-            "line": {"color": "#ffffff", "width": 1.6},
-        },
-        customdata=customdata,
-        hovertemplate=(
-            "step %{customdata[0]}<br>"
-            "operation=%{customdata[1]}<br>"
-            "L=%{customdata[2]}<br>"
-            "R=%{customdata[3]}<br>"
-            "tape=%{customdata[4]}<br>"
-            "x_L=%{customdata[5]:.6f}<br>"
-            "x_R=%{customdata[6]:.6f}<extra></extra>"
+        milestone_step_indexes=tuple(
+            milestone_steps[count] for count in PRECISION_MILESTONE_COUNTS
         ),
-        showlegend=False,
+        lag_summaries=lag_summaries,
     )
-    trace.update(xaxis=f"x{axis_suffix}", yaxis=f"y{axis_suffix}")
-    figure.add_trace(trace)
 
 
-def precision_step_color_map(payload: PrecisionStoryPayload) -> dict[int, str]:
-    sample_positions = [index / max(1, len(payload.states) - 1) for index in range(len(payload.states))]
-    sampled = sample_colorscale(PRECISION_STEP_COLORS, sample_positions)
-    return {state.step_index: color for state, color in zip(payload.states, sampled, strict=True)}
-
-
-def paper_rect(
-    *,
-    x0: float,
-    y0: float,
-    x1: float,
-    y1: float,
-    fillcolor: str = "rgba(255,255,255,0.92)",
-    line_color: str = "#d6dae2",
-    line_width: float = 1.2,
-) -> dict[str, object]:
+def precision_step_color_map(
+    payload: PrecisionStoryPayload,
+) -> dict[int, tuple[float, float, float, float]]:
+    colormap = plt.get_cmap("cividis")
+    positions = [
+        index / max(1, len(payload.states) - 1) for index in range(len(payload.states))
+    ]
     return {
-        "type": "rect",
-        "xref": "paper",
-        "yref": "paper",
-        "x0": x0,
-        "y0": y0,
-        "x1": x1,
-        "y1": y1,
-        "fillcolor": fillcolor,
-        "line": {"color": line_color, "width": line_width},
-        "layer": "above",
+        state.step_index: colormap(position)
+        for state, position in zip(payload.states, positions, strict=True)
     }
-
-
-def add_stack_column_shapes(
-    shapes: list[dict[str, object]],
-    *,
-    bits: str,
-    x0: float,
-    x1: float,
-    y_top: float,
-    cell_height: float,
-    highlight_top: bool = False,
-) -> None:
-    for index, bit in enumerate(bits):
-        top = y_top - (index * cell_height)
-        bottom = top - cell_height
-        fill = "#fde68a" if highlight_top and index == 0 else ("#dbeafe" if bit == "0" else "#bbf7d0")
-        shapes.append(paper_rect(x0=x0, x1=x1, y0=bottom, y1=top, fillcolor=fill, line_color="#94a3b8", line_width=1.0))
 
 
 def visible_tape_window(
@@ -474,74 +413,67 @@ def visible_tape_window(
     return tape[start:end], head_index - start, start > 0, end < len(tape)
 
 
-def add_tape_strip_shapes(
-    shapes: list[dict[str, object]],
-    *,
-    bits: str,
-    head_index: int,
-    x0: float,
-    x1: float,
-    y_top: float,
-    cell_height: float,
-) -> None:
-    cell_width = (x1 - x0) / max(1, len(bits))
+def visible_tape_window_plain(state: PrecisionStoryState) -> str:
+    bits, head_index, has_left_more, has_right_more = visible_tape_window(state)
+    tokens: list[str] = []
+    if has_left_more:
+        tokens.append("...")
     for index, bit in enumerate(bits):
-        left = x0 + (index * cell_width)
-        right = left + cell_width
-        is_head = index == head_index
-        fill = "#fde68a" if is_head else ("#dbeafe" if bit == "0" else "#bbf7d0")
-        line_color = "#b45309" if is_head else "#94a3b8"
-        shapes.append(paper_rect(x0=left, x1=right, y0=y_top - cell_height, y1=y_top, fillcolor=fill, line_color=line_color, line_width=1.0))
+        tokens.append(f"[{bit}]" if index == head_index else bit)
+    if has_right_more:
+        tokens.append("...")
+    return "".join(tokens)
 
 
-def build_tape_strip_text(bits: str, head_index: int) -> str:
-    chars: list[str] = []
-    for index, bit in enumerate(bits):
-        if index == head_index:
-            chars.append(f"[{bit}]")
-        else:
-            chars.append(bit)
-    return "&nbsp;".join(chars)
+def _state_for_count(payload: PrecisionStoryPayload, count: int) -> PrecisionStoryState:
+    milestone_index = PRECISION_MILESTONE_COUNTS.index(count)
+    return payload.states[payload.milestone_step_indexes[milestone_index]]
 
 
-def zoom_step_indexes(payload: PrecisionStoryPayload, focus_step: int, *, radius: int) -> tuple[int, ...]:
-    lower = max(0, focus_step - radius)
-    upper = min(payload.states[-1].step_index, focus_step + radius)
-    return tuple(range(lower, upper + 1))
+def _carry_state_before_count(
+    payload: PrecisionStoryPayload, count: int
+) -> PrecisionStoryState:
+    target_step = _state_for_count(payload, count).step_index
+    for state in reversed(payload.states[: target_step + 1]):
+        if state.operation_label == "carry L":
+            return state
+    return _state_for_count(payload, count)
 
 
-def build_precision_legend_text(payload: PrecisionStoryPayload) -> str:
-    lines = ["<b>Flip a striped binary tape</b>"]
-    for state in payload.states[::2]:
-        line = f"{state.step_index:>2}. {state.operation_label:<7}  {state.tape_snapshot}".replace(" ", "&nbsp;")
-        lines.append("<span style='font-family:IBM Plex Mono, Aptos Mono, Cascadia Mono, Consolas, monospace'>" f"{line}" "</span>")
-    if payload.states[-1].step_index % 2 != 0:
-        final_state = payload.states[-1]
-        line = f"{final_state.step_index:>2}. {final_state.operation_label:<7}  {final_state.tape_snapshot}".replace(" ", "&nbsp;")
-        lines.append("<span style='font-family:IBM Plex Mono, Aptos Mono, Cascadia Mono, Consolas, monospace'>" f"{line}" "</span>")
-    return "<br>".join(lines)
-
-
-def build_vertex_label_groups(payload: PrecisionStoryPayload) -> tuple[PrecisionVertexLabel, ...]:
-    label_step_indexes = select_precision_label_step_indexes(payload)
-    grouped: dict[tuple[int, int, str], tuple[PrecisionStoryState, list[int]]] = {}
+def _first_state_after_step(
+    payload: PrecisionStoryPayload, *, start_step: int, operation_label: str
+) -> PrecisionStoryState:
     for state in payload.states:
-        if state.step_index not in label_step_indexes:
+        if state.step_index <= start_step:
             continue
-        tape_window = visible_tape_window_markup(state)
-        key = (round(state.x_left * 1_000_000), round(state.x_right * 1_000_000), tape_window)
-        if key not in grouped:
-            grouped[key] = (state, [])
-        grouped[key][1].append(state.step_index)
-    labels: list[PrecisionVertexLabel] = []
-    for state, step_indexes in grouped.values():
-        text = (
-            "<span style='font-family:IBM Plex Mono, Aptos Mono, Cascadia Mono, Consolas, monospace'>"
-            f"{visible_tape_window_markup(state)}"
-            "</span>"
-        )
-        labels.append(PrecisionVertexLabel(anchor_state=state, step_indexes=tuple(step_indexes), text=text))
-    return tuple(labels)
+        if state.operation_label == operation_label:
+            return state
+    return payload.states[-1]
+
+
+def _precision_label_specs(
+    payload: PrecisionStoryPayload,
+) -> tuple[tuple[PrecisionStoryState, str], ...]:
+    carry_state = _carry_state_before_count(payload, 8)
+    return_state = _first_state_after_step(
+        payload,
+        start_step=carry_state.step_index,
+        operation_label="return R",
+    )
+    return (
+        (
+            payload.states[0],
+            "start\n" + visible_tape_window_plain(payload.states[0]),
+        ),
+        (
+            carry_state,
+            "carry L\n000111 => 001000\n" + visible_tape_window_plain(carry_state),
+        ),
+        (
+            return_state,
+            "return R\nhead sweeps back\n" + visible_tape_window_plain(return_state),
+        ),
+    )
 
 
 def select_precision_label_step_indexes(payload: PrecisionStoryPayload) -> set[int]:
@@ -553,171 +485,247 @@ def select_precision_label_step_indexes(payload: PrecisionStoryPayload) -> set[i
     return label_step_indexes
 
 
-def precision_label_offsets(labels: tuple[PrecisionVertexLabel, ...]) -> dict[int, tuple[int, int, str]]:
-    y_slots = (0, -22, 22, -44, 44, -66, 66, -88, 88)
-    side_counts = {"west": 0, "east": 0}
-    offsets: dict[int, tuple[int, int, str]] = {}
-    for label in labels:
-        state = label.anchor_state
-        if state.x_left <= 0.42:
-            side = "west"
-        elif state.x_left >= 0.72:
-            side = "east"
-        else:
-            side = "west" if state.step_index % 2 == 0 else "east"
-        slot_index = side_counts[side]
-        side_counts[side] += 1
-        y_offset = y_slots[slot_index % len(y_slots)]
-        if side == "west":
-            offsets[state.step_index] = (-124, y_offset, "right")
-        else:
-            offsets[state.step_index] = (124, y_offset, "left")
-    return offsets
-
-
-def visible_tape_window_markup(state: PrecisionStoryState) -> str:
-    bits, head_index, has_left_more, has_right_more = visible_tape_window(state)
-    tokens: list[str] = []
-    if has_left_more:
-        tokens.append("...")
-    for index, bit in enumerate(bits):
-        if index == head_index:
-            tokens.append(f"<b>[{bit}]</b>")
-        else:
-            tokens.append(bit)
-    if has_right_more:
-        tokens.append("...")
-    return "".join(tokens)
-
-
-def build_precision_story_figure(payload: PrecisionStoryPayload) -> go.Figure:
-    main_domain_x = (0.09, 0.97)
-    main_domain_y = (0.12, 0.90)
-    main_image = render_cantor_dust_image(depth=payload.dust_depth, size=1400, x_range=(0.0, 1.0), y_range=(0.0, 1.0))
-    vertex_labels = build_vertex_label_groups(payload)
-    label_offsets = precision_label_offsets(vertex_labels)
-
-    figure = go.Figure()
-    figure.update_layout(
-        width=1600,
-        height=1200,
-        margin={"t": 92, "l": 38, "r": 32, "b": 40},
-        title={"text": "Patterned Tape Walk Through Cantor Dust", "y": 0.985},
-        showlegend=False,
-        **FIGURE_STYLE,
+def add_precision_path_trace(
+    axis: Axes,
+    *,
+    payload: PrecisionStoryPayload,
+    show_text: bool,
+    selected_step_indexes: tuple[int, ...] | None = None,
+    line_width: float = 2.3,
+    marker_size: float = 32.0,
+    text_color: str = "#f8fafc",
+) -> None:
+    step_color_map = precision_step_color_map(payload)
+    if selected_step_indexes is None:
+        states = list(payload.states)
+    else:
+        selected = set(selected_step_indexes)
+        states = [state for state in payload.states if state.step_index in selected]
+    xs = [state.x_left for state in states]
+    ys = [state.x_right for state in states]
+    axis.plot(xs, ys, color=(1.0, 1.0, 1.0, 0.86), linewidth=line_width + 1.6, zorder=2)
+    axis.plot(xs, ys, color=(0.06, 0.09, 0.16, 0.46), linewidth=line_width, zorder=3)
+    axis.scatter(
+        xs,
+        ys,
+        s=marker_size,
+        c=[step_color_map[state.step_index] for state in states],
+        edgecolors="white",
+        linewidths=0.8,
+        zorder=4,
     )
-    figure.update_layout(font={"family": "IBM Plex Sans, Aptos, Segoe UI, Helvetica, Arial, sans-serif", "color": "#1f2937", "size": 14})
-    figure.update_layout(
-        xaxis={
-            "domain": list(main_domain_x),
-            "range": [0.0, 1.0],
-            "title": {"text": "q(L) · left-stack coordinate", "font": {"color": "#334155"}},
-            "showgrid": False,
-            "zeroline": False,
-            "scaleanchor": "y",
-            "constrain": "domain",
-            "tickfont": {"color": "#475569"},
-        },
-        yaxis={
-            "domain": list(main_domain_y),
-            "range": [0.0, 1.0],
-            "title": {"text": "q(R) · right-stack coordinate", "font": {"color": "#334155"}},
-            "showgrid": False,
-            "zeroline": False,
-            "constrain": "domain",
-            "tickfont": {"color": "#475569"},
-        },
+    if show_text:
+        for state in states:
+            axis.text(
+                state.x_left,
+                state.x_right + 0.013,
+                str(state.step_index),
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color=text_color,
+                fontfamily="STIXGeneral",
+                zorder=5,
+            )
+
+
+def build_precision_story_figure(payload: PrecisionStoryPayload) -> Figure:
+    apply_static_rcparams()
+    figure = plt.figure(figsize=(9.2, 9.2))
+    figure.patch.set_facecolor(STATIC_FIGURE_BG)
+    grid = figure.add_gridspec(2, 1, height_ratios=[1.0, 0.24], hspace=0.18)
+    axis = figure.add_subplot(grid[0, 0])
+    lag_axis = figure.add_subplot(grid[1, 0])
+    style_static_axis(axis)
+    style_static_axis(lag_axis)
+
+    main_image = render_cantor_dust_image(
+        depth=payload.dust_depth,
+        size=1400,
+        x_range=(0.0, 1.0),
+        y_range=(0.0, 1.0),
     )
-    figure.add_layout_image(source=main_image, xref="x", yref="y", x=0.0, y=1.0, sizex=1.0, sizey=1.0, sizing="stretch", opacity=1.0, layer="below")
+    axis.imshow(main_image, extent=(0.0, 1.0, 0.0, 1.0), origin="lower", zorder=0)
+    xs = [state.x_left for state in payload.states]
+    ys = [state.x_right for state in payload.states]
+    axis.plot(xs, ys, color=(1.0, 1.0, 1.0, 0.82), linewidth=2.6, zorder=2)
+    axis.plot(xs, ys, color=PRECISION_PATH_COLOR, linewidth=1.12, zorder=3)
 
-    add_precision_path_trace(figure, payload=payload, axis_suffix="", show_text=False, line_width=1.7, marker_size=6.0, text_color="#0f172a")
-
-    start_state = payload.states[0]
-    end_state = payload.states[-1]
-    figure.add_trace(go.Scatter(x=[start_state.x_left], y=[start_state.x_right], mode="markers", marker={"size": 8.2, "symbol": "diamond", "color": "#0f172a", "line": {"color": "#ffffff", "width": 1.0}}, hovertemplate="start state<extra></extra>", showlegend=False))
-    figure.add_trace(go.Scatter(x=[end_state.x_left], y=[end_state.x_right], mode="markers", marker={"size": 9.2, "symbol": "star", "color": "#be123c", "line": {"color": "#ffffff", "width": 1.0}}, hovertemplate="final state<extra></extra>", showlegend=False))
-
-    for label in vertex_labels:
-        first_step = label.step_indexes[0]
-        ax, ay, xanchor = label_offsets[first_step]
-        border_color = "#94a3b8"
-        figure.add_annotation(
-            x=label.anchor_state.x_left,
-            y=label.anchor_state.x_right,
-            xref="x",
-            yref="y",
-            text=label.text,
-            showarrow=True,
-            arrowhead=0,
-            arrowwidth=0.8,
-            arrowcolor="rgba(100,116,139,0.42)",
-            ax=ax,
-            ay=ay,
-            xanchor=xanchor,
-            font={"size": 11, "color": "#0f172a"},
-            bgcolor="rgba(255,255,255,0.88)",
-            bordercolor=border_color,
-            borderwidth=1,
-            borderpad=4,
+    milestone_offsets = (
+        (0.07, 0.05),
+        (-0.11, 0.07),
+        (0.09, -0.08),
+    )
+    label_specs = _precision_label_specs(payload)
+    milestone_states = [state for state, _text in label_specs]
+    milestone_labels = [text for _state, text in label_specs]
+    axis.scatter(
+        [state.x_left for state in milestone_states],
+        [state.x_right for state in milestone_states],
+        s=26,
+        color=PRECISION_MARKER_COLOR,
+        edgecolors="white",
+        linewidths=0.50,
+        zorder=4,
+    )
+    for state, text, (dx, dy) in zip(
+        milestone_states, milestone_labels, milestone_offsets, strict=True
+    ):
+        label_x = min(0.96, max(0.04, state.x_left + dx))
+        label_y = min(0.96, max(0.04, state.x_right + dy))
+        axis.annotate(
+            text,
+            xy=(state.x_left, state.x_right),
+            xytext=(label_x, label_y),
+            textcoords="data",
+            ha="left" if dx >= 0 else "right",
+            va="center",
+            fontsize=7.8,
+            color=PRECISION_TEXT_INK,
+            fontfamily=FONT_STACK,
+            bbox={
+                "boxstyle": "round,pad=0.16",
+                "facecolor": "#e8edf3",
+                "edgecolor": "#cfd8e1",
+                "linewidth": 0.65,
+            },
+            arrowprops={
+                "arrowstyle": "-",
+                "linewidth": 0.5,
+                "color": (0.39, 0.46, 0.57, 0.48),
+                "shrinkA": 3,
+                "shrinkB": 3,
+            },
+            zorder=6,
         )
 
-    figure.add_annotation(
-        x=0.50,
-        y=0.955,
-        xref="paper",
-        yref="paper",
-        text="The head starts at the far left, sweeps right, edits, then doubles back; labels show local 10-bit tape windows.",
-        showarrow=False,
-        xanchor="center",
-        yanchor="top",
-        align="center",
-        font={"size": 13, "color": "#334155"},
-        bgcolor="rgba(255,255,255,0.80)",
-        bordercolor="#d6dae2",
-        borderwidth=1,
+    lag_colors = ("#314a66", "#6b7b8b", "#8a705f")
+    all_distances = [
+        distance
+        for summary in payload.lag_summaries
+        for distance in summary.distances
+    ]
+    distance_upper = max(all_distances) if all_distances else 1.0
+    bins = [distance_upper * index / 18.0 for index in range(19)]
+    for color, summary in zip(lag_colors, payload.lag_summaries, strict=True):
+        lag_axis.hist(
+            summary.distances,
+            bins=bins,
+            histtype="step",
+            linewidth=1.15,
+            color=color,
+            label=f"lag {summary.lag}",
+        )
+    lag_axis.set_title(
+        "Step distance by lag",
+        loc="left",
+        fontsize=8.5,
+        color=PRECISION_TEXT_INK,
+        fontfamily=FONT_STACK,
+        pad=4,
     )
-    figure.add_annotation(
-        x=0.97,
-        y=0.05,
-        xref="paper",
-        yref="paper",
-        text="Finite picture, infinite claim: the depth-6 dust is only a proxy for the indefinitely nested precision the construction relies on.",
-        showarrow=False,
-        xanchor="right",
-        yanchor="bottom",
-        align="right",
-        font={"size": 12, "color": "#334155"},
-        bgcolor="rgba(255,255,255,0.82)",
-        bordercolor="#d6dae2",
-        borderwidth=1,
+    lag_axis.set_xlabel(
+        "Euclidean step distance",
+        fontsize=8.6,
+        fontfamily=FONT_STACK,
+        color=PRECISION_TEXT_INK,
     )
+    lag_axis.set_ylabel(
+        "count",
+        fontsize=8.6,
+        fontfamily=FONT_STACK,
+        color=PRECISION_TEXT_INK,
+    )
+    lag_axis.tick_params(
+        axis="both", labelsize=7.4, colors=PRECISION_SUBTEXT_INK, width=0.55
+    )
+    for label in lag_axis.get_xticklabels() + lag_axis.get_yticklabels():
+        label.set_fontfamily(FONT_STACK)
+    lag_axis.spines["top"].set_visible(False)
+    lag_axis.spines["right"].set_visible(False)
+    lag_axis.spines["left"].set_color(STATIC_SPINE_INK)
+    lag_axis.spines["bottom"].set_color(STATIC_SPINE_INK)
+    lag_axis.spines["left"].set_linewidth(0.65)
+    lag_axis.spines["bottom"].set_linewidth(0.65)
+    lag_axis.legend(
+        frameon=False,
+        fontsize=7.3,
+        handlelength=1.8,
+        borderpad=0.1,
+        labelcolor=PRECISION_SUBTEXT_INK,
+        loc="upper right",
+    )
+
+    axis.set_xlim(0.0, 1.0)
+    axis.set_ylim(0.0, 1.0)
+    axis.set_aspect("equal", adjustable="box")
+    axis.set_xlabel(
+        "q(L) · left-stack coordinate",
+        fontsize=10.5,
+        fontfamily=FONT_STACK,
+        color=PRECISION_TEXT_INK,
+    )
+    axis.set_ylabel(
+        "q(R) · right-stack coordinate",
+        fontsize=10.5,
+        fontfamily=FONT_STACK,
+        color=PRECISION_TEXT_INK,
+    )
+    axis.tick_params(axis="both", labelsize=9.5, colors=PRECISION_SUBTEXT_INK, width=0.6)
+    for label in axis.get_xticklabels() + axis.get_yticklabels():
+        label.set_fontfamily(FONT_STACK)
+
+    figure.suptitle(
+        "Binary counting sweep through Cantor dust",
+        x=0.12,
+        y=0.95,
+        ha="left",
+        fontsize=12.8,
+        fontfamily=FONT_STACK,
+        color=PRECISION_TEXT_INK,
+    )
+    figure.subplots_adjust(left=0.12, right=0.88, top=0.90, bottom=0.11)
     return figure
 
 
-def render_precision_assets(*, output_dir: Path, write_html: bool) -> dict[str, object]:
+def render_precision_assets(*, output_dir: Path) -> dict[str, object]:
     payload = build_precision_story_payload()
     figure = build_precision_story_figure(payload)
-    files = write_figure(figure, output_dir=output_dir, stem=PRECISION_IMAGE_STEM, write_html=write_html)
+    files = write_matplotlib_figure(
+        figure,
+        output_dir=output_dir,
+        stem=PRECISION_IMAGE_STEM,
+    )
+    plt.close(figure)
     return {
         "files": files,
         "encoding": payload.encoding,
         "dust_depth": payload.dust_depth,
+        "counting_bits": payload.counting_bits,
         "initial_left_stack": payload.initial_left_stack,
         "initial_right_stack": payload.initial_right_stack,
         "step_labels": list(payload.step_labels),
-        "zoom_depths": [zoom.depth for zoom in payload.zooms],
+        "lag_distance_lags": [summary.lag for summary in payload.lag_summaries],
+        "milestone_step_indexes": list(payload.milestone_step_indexes),
+        "label_mode": "minimal_head_aware_callouts",
     }
 
 
 @app.command()
 def generate(
-    output_dir: Path = typer.Option(DEFAULT_OUTPUT_DIR, help="Directory where article-facing assets should be written."),
-    html: bool = typer.Option(True, "--html/--no-html", help="Whether to emit a Plotly HTML companion alongside the PNG."),
-    clean: bool = typer.Option(True, "--clean/--no-clean", help="Whether to clear the output directory before generating fresh artifacts."),
+    output_dir: Path = typer.Option(
+        DEFAULT_OUTPUT_DIR,
+        help="Directory where article-facing assets should be written.",
+    ),
+    clean: bool = typer.Option(
+        True,
+        "--clean/--no-clean",
+        help="Whether to clear the output directory before generating fresh artifacts.",
+    ),
 ) -> None:
     if clean:
         clean_output_dir(output_dir)
-    render_precision_assets(output_dir=output_dir, write_html=html)
+    render_precision_assets(output_dir=output_dir)
 
 
 def main() -> None:

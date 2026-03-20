@@ -226,7 +226,10 @@ def build_plan_widget(plan: AgentPlan) -> WidgetRoot:
             [
                 _divider_widget(spacing=4),
                 _text_widget("Success criteria", size="xs", weight="semibold"),
-                *(_text_widget(f"- {criterion}", size="xs") for criterion in success_criteria),
+                *(
+                    _text_widget(f"- {criterion}", size="xs")
+                    for criterion in success_criteria
+                ),
             ]
         )
 
@@ -235,7 +238,9 @@ def build_plan_widget(plan: AgentPlan) -> WidgetRoot:
             [
                 _divider_widget(spacing=4),
                 _text_widget("Suggested next tools", size="xs", weight="semibold"),
-                _text_widget(", ".join(follow_on_tool_hints), size="xs", color="secondary"),
+                _text_widget(
+                    ", ".join(follow_on_tool_hints), size="xs", color="secondary"
+                ),
             ]
         )
 
@@ -249,8 +254,12 @@ def build_plan_widget(plan: AgentPlan) -> WidgetRoot:
 
 def build_plan_copy_text(plan: AgentPlan) -> str:
     cleaned_steps = [step for step in plan.get("planned_steps", []) if step]
-    cleaned_success_criteria = [item for item in plan.get("success_criteria", []) if item]
-    cleaned_follow_on_tool_hints = [item for item in plan.get("follow_on_tool_hints", []) if item]
+    cleaned_success_criteria = [
+        item for item in plan.get("success_criteria", []) if item
+    ]
+    cleaned_follow_on_tool_hints = [
+        item for item in plan.get("follow_on_tool_hints", []) if item
+    ]
     focus = (plan.get("focus") or "").strip()
     return "\n".join(
         [
@@ -258,7 +267,11 @@ def build_plan_copy_text(plan: AgentPlan) -> str:
             *(f"{index}. {step}" for index, step in enumerate(cleaned_steps, start=1)),
         ]
         + (
-            ["", "Success criteria:", *[f"- {item}" for item in cleaned_success_criteria]]
+            [
+                "",
+                "Success criteria:",
+                *[f"- {item}" for item in cleaned_success_criteria],
+            ]
             if cleaned_success_criteria
             else []
         )

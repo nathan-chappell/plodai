@@ -10,3 +10,4 @@ class UserResponse(BaseModel):
     role: UserRole
     is_active: bool
     current_credit_usd: float
+    credit_floor_usd: float

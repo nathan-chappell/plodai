@@ -1,5 +1,9 @@
 from backend.app.agents.DatasetMetadata import DatasetMetadata
-from backend.app.agents.query_models import ChartPlan, ToolQueryPlan, build_query_plan_model
+from backend.app.agents.query_models import (
+    ChartPlan,
+    ToolQueryPlan,
+    build_query_plan_model,
+)
 
 
 def build_datasets() -> list[DatasetMetadata]:
@@ -32,7 +36,11 @@ def test_query_plan_accepts_valid_grouped_aggregate_plan() -> None:
                 }
             ],
             "aggregates": [
-                {"op": "sum", "as": "total_revenue", "expr": {"kind": "column", "column": "revenue"}},
+                {
+                    "op": "sum",
+                    "as": "total_revenue",
+                    "expr": {"kind": "column", "column": "revenue"},
+                },
                 {"op": "count", "as": "row_count"},
             ],
             "limit": 20,
@@ -82,7 +90,9 @@ def test_query_plan_restricts_describe_numeric_to_numeric_columns() -> None:
     valid_plan = query_plan_model.model_validate(
         {
             "dataset_id": "sales_csv",
-            "aggregates": [{"op": "describe_numeric", "column": "revenue", "prefix": "revenue"}],
+            "aggregates": [
+                {"op": "describe_numeric", "column": "revenue", "prefix": "revenue"}
+            ],
         }
     )
     assert valid_plan.model_dump(by_alias=True)["aggregates"][0]["column"] == "revenue"

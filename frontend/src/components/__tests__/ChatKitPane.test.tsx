@@ -123,6 +123,12 @@ vi.mock("../../lib/dev-logging", () => ({
 
 import { ChatKitHarness, ChatKitPane, buildChatKitRequestMetadata } from "../ChatKitPane";
 import type { CapabilityBundle, CapabilityClientTool } from "../../capabilities/types";
+import {
+  chartAgentCapability,
+  csvAgentCapability,
+  pdfAgentCapability,
+  reportAgentCapability,
+} from "../../capabilities/definitions";
 import type { ExecutionMode } from "../../types/analysis";
 import type { LocalWorkspaceFile } from "../../types/report";
 
@@ -372,25 +378,61 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(prompts.some((prompt) => prompt.includes("Focus on this goal"))).toBe(false);
   });
 
-  it("can hide inline run mode controls and use an icon-sized feedback affordance", async () => {
+  it("defaults to compact chrome and accepts capability-specific lead text", async () => {
     await renderPane("", {
-      showExecutionModeControls: false,
-      feedbackButtonVariant: "icon",
+      greeting: csvAgentCapability.chatkitLead,
+      composerPlaceholder: csvAgentCapability.chatkitPlaceholder,
+    });
+
+    expect(container.textContent).not.toContain("Analyst workspace");
+    expect(container.textContent).not.toContain("Investigate your files");
+    expect(container.textContent).not.toContain("Default model capability");
+    expect(container.textContent).not.toContain("files are ready");
+
+    const startScreen = latestChatKitOptions?.startScreen as { greeting?: string } | undefined;
+    const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
+
+    expect(startScreen?.greeting).toBe(csvAgentCapability.chatkitLead);
+    expect(composer?.placeholder).toBe(csvAgentCapability.chatkitPlaceholder);
+  });
+
+  it("can receive compact ChatKit copy for all core capability surfaces", async () => {
+    const capabilities = [
+      reportAgentCapability,
+      csvAgentCapability,
+      chartAgentCapability,
+      pdfAgentCapability,
+    ];
+
+    for (const capability of capabilities) {
+      await renderPane("", {
+        greeting: capability.chatkitLead,
+        composerPlaceholder: capability.chatkitPlaceholder,
+      });
+
+      const startScreen = latestChatKitOptions?.startScreen as { greeting?: string } | undefined;
+      const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
+
+      expect(startScreen?.greeting).toBe(capability.chatkitLead);
+      expect(composer?.placeholder).toBe(capability.chatkitPlaceholder);
+    }
+  });
+
+  it("renders quick actions, the run mode switch, and feedback together in the header row", async () => {
+    await renderPane("", {
+      quickActions: [{ label: "Run demo", prompt: "Run the scripted walkthrough." }],
       showChatKitHeader: false,
     });
 
-    await act(async () => {
-      latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
-    });
+    const controls = container.querySelector("[data-testid='chatkit-header-controls']");
+    const buttonLabels = Array.from(controls?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim());
 
-    expect(container.textContent).not.toContain("Run mode");
-    expect(container.querySelector("[data-testid='chatkit-provide-feedback']")).not.toBeNull();
+    expect(buttonLabels).toEqual(["Run demo", "Interactive", "Batch", "Feedback"]);
     expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
   });
 
-  it("keeps the run mode toggle beside feedback and disables both while a run is active", async () => {
+  it("keeps the run mode toggle and feedback together in the top row and disables both while a run is active", async () => {
     await renderPane("", {
-      feedbackButtonVariant: "icon",
       showChatKitHeader: false,
     });
 
@@ -400,14 +442,17 @@ describe("ChatKitHarness auto-scroll", () => {
     });
 
     const controls = container.querySelector("[data-testid='chatkit-execution-mode-controls']");
+    const topRow = container.querySelector("[data-testid='chatkit-top-row']");
     const feedbackButton = container.querySelector("[data-testid='chatkit-provide-feedback']") as HTMLButtonElement | null;
     const interactiveModeButton = container.querySelector(
       "[data-testid='chatkit-execution-mode-interactive']",
     ) as HTMLButtonElement | null;
 
     expect(controls).not.toBeNull();
-    expect(feedbackButton?.getAttribute("aria-label")).toBe("Open feedback flow");
-    expect(feedbackButton?.title).toBe("Open feedback flow");
+    expect(topRow?.contains(controls)).toBe(true);
+    expect(topRow?.contains(feedbackButton)).toBe(true);
+    expect(feedbackButton?.textContent).toBe("Feedback");
+    expect(feedbackButton?.title).toBe("Open the feedback flow for the latest assistant response in this thread.");
     expect(interactiveModeButton?.disabled).toBe(false);
 
     await act(async () => {
@@ -418,11 +463,10 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(interactiveModeButton?.disabled).toBe(true);
   });
 
-  it("asks for confirmation before starting the icon feedback flow", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("starts feedback flow directly from the labeled feedback button", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
 
     await renderPane("", {
-      feedbackButtonVariant: "icon",
       showChatKitHeader: false,
     });
 
@@ -439,17 +483,7 @@ describe("ChatKitHarness auto-scroll", () => {
       feedbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(confirmSpy).toHaveBeenCalledWith(
-      "Open the feedback flow for the latest assistant response in this thread?",
-    );
-    expect(container.textContent).toContain("Chat ready.");
-
-    confirmSpy.mockReturnValue(true);
-
-    await act(async () => {
-      feedbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
+    expect(confirmSpy).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Starting feedback flow.");
   });
 

@@ -6,7 +6,9 @@ import type { LocalWorkspaceFile } from "../types/report";
 import type {
   WorkspaceBreadcrumb,
   WorkspaceContext,
+  WorkspaceDescriptor,
   WorkspaceFilesystem,
+  WorkspaceKind,
   WorkspaceItem,
 } from "../types/workspace";
 
@@ -66,6 +68,8 @@ export type CapabilityDefinition = {
   title: string;
   eyebrow: string;
   description: string;
+  chatkitLead: string;
+  chatkitPlaceholder: string;
   tabs: CapabilityTab[];
 };
 
@@ -73,16 +77,29 @@ export type ShellWorkspaceRegistration = {
   capabilityId: string;
   title: string;
   description: string;
-  activePrefix: string;
-  cwdPath: string;
-  filesystem: WorkspaceFilesystem;
-  breadcrumbs: WorkspaceBreadcrumb[];
-  entries: WorkspaceItem[];
+  artifacts: ShellWorkspaceArtifact[];
+  workspaces: WorkspaceDescriptor[];
+  activeWorkspaceId: string;
+  activeWorkspaceName: string;
+  activeWorkspaceKind: WorkspaceKind;
   accept?: string;
   onSelectFiles: (files: FileList | null) => Promise<void>;
-  onCreateDirectory: (path: string) => void;
-  onChangeDirectory: (path: string) => void;
-  onRemoveEntry?: (entryId: string) => void;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onCreateWorkspace: (name: string) => WorkspaceDescriptor | null;
+  onClearWorkspace: () => void;
+  clearActionLabel: string;
+  clearActionDisabled?: boolean;
+  onRemoveArtifact?: (entryId: string) => void;
+};
+
+export type ShellWorkspaceArtifact = {
+  entryId: string;
+  path: string;
+  createdAt: string;
+  source: "uploaded" | "derived" | "demo";
+  producerKey: string;
+  producerLabel: string;
+  file: LocalWorkspaceFile;
 };
 
 export type CapabilityWorkspaceContext = {

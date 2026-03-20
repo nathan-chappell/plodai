@@ -30,7 +30,9 @@ class CreditService:
             select(UserCreditBalance).where(UserCreditBalance.user_id.in_(user_ids))
         )
         balances = result.scalars().all()
-        return {balance.user_id: float(balance.current_credit_usd) for balance in balances}
+        return {
+            balance.user_id: float(balance.current_credit_usd) for balance in balances
+        }
 
     async def grant_credit(
         self,

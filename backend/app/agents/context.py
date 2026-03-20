@@ -61,17 +61,17 @@ class ReportAgentContext:
 
     def get_dataset(self, dataset_id: str) -> DatasetMetadata | None:
         return next(
-            (dataset for dataset in self.available_datasets if dataset.id == dataset_id),
+            (
+                dataset
+                for dataset in self.available_datasets
+                if dataset.id == dataset_id
+            ),
             None,
         )
 
     def get_file(self, file_id: str) -> WorkspaceFileMetadata | None:
         return next(
-            (
-                file
-                for file in self.available_files
-                if file.id == file_id
-            ),
+            (file for file in self.available_files if file.id == file_id),
             None,
         )
 
@@ -83,9 +83,15 @@ class ReportAgentContext:
     @property
     def capability_spec(self) -> CapabilityAgentSpec | None:
         capability_id = self.capability_id
-        return self.get_capability_spec(capability_id) if capability_id is not None else None
+        return (
+            self.get_capability_spec(capability_id)
+            if capability_id is not None
+            else None
+        )
 
-    def get_capability_spec(self, capability_id: str | None) -> CapabilityAgentSpec | None:
+    def get_capability_spec(
+        self, capability_id: str | None
+    ) -> CapabilityAgentSpec | None:
         bundle = self.capability_bundle
         if bundle is None or capability_id is None:
             return None
@@ -123,3 +129,11 @@ class ReportAgentContext:
     @property
     def is_batch_mode(self) -> bool:
         return self.execution_mode == "batch"
+
+    @property
+    def workspace_agents_markdown(self) -> str | None:
+        workspace_state = self.thread_metadata.get("workspace_state")
+        if workspace_state is None:
+            return None
+        markdown = workspace_state.get("agents_markdown")
+        return markdown if isinstance(markdown, str) and markdown.strip() else None

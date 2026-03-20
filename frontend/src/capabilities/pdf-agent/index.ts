@@ -20,6 +20,8 @@ Important operating rules:
 5. Prefer section-based splits whenever inspection reveals clear structural boundaries.
 6. Use \`make_plan\` when it helps you structure the splitting task, then continue executing it.
 7. When the document structure is clear enough to act on, continue without asking for unnecessary confirmation.
+8. If the target sections, extraction outcome, or packaging goal are materially unclear, ask one concise clarifying question early.
+9. Once the objective is clear enough, keep moving through inspection and extraction instead of asking repeated follow-ups.
 `.trim();
 
 const pdfAgentModule: CapabilityModule = {

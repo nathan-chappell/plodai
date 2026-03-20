@@ -17,9 +17,10 @@ const CapabilitySurface = styled.section`
 export const CapabilityPage = styled.section`
   min-width: 0;
   min-height: 100%;
+  height: 100%;
   display: grid;
   gap: 0.7rem;
-  align-content: start;
+  align-content: stretch;
 
   @media (min-width: 1181px) {
     grid-template-rows: auto auto minmax(0, 1fr);
@@ -99,6 +100,7 @@ export const CapabilityTabButton = styled.button<{ $active: boolean }>`
 
 export const ReportWorkspaceLayout = styled.section`
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 400px;
   gap: 0.8rem;
@@ -113,6 +115,7 @@ export const ReportWorkspaceLayout = styled.section`
 export const ReportWorkspaceColumn = styled.div`
   min-width: 0;
   min-height: 0;
+  height: 100%;
   ${gridStackCss("0.6rem")};
 
   @media (min-width: 1181px) {
@@ -124,6 +127,7 @@ export const ReportWorkspaceColumn = styled.div`
 export const ReportChatColumn = styled.div`
   min-width: 0;
   min-height: 0;
+  height: 100%;
   width: 100%;
   display: flex;
   flex-direction: column;

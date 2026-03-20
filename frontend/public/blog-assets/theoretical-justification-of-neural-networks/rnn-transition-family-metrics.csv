@@ -1,0 +1,28 @@
+series,family_type,epoch,value
+broad rule family,ordinary,0,0.757812
+broad rule family,ordinary,10,0.820312
+broad rule family,ordinary,20,0.820312
+broad rule family,ordinary,30,0.820312
+broad rule family,ordinary,40,0.820312
+broad rule family,ordinary,50,0.820312
+broad rule family,ordinary,60,0.843750
+broad rule family,ordinary,70,0.828125
+broad rule family,ordinary,80,0.828125
+counterexample family,counterexample,0,0.604167
+counterexample family,counterexample,10,0.562500
+counterexample family,counterexample,20,0.562500
+counterexample family,counterexample,30,0.572917
+counterexample family,counterexample,40,0.562500
+counterexample family,counterexample,50,0.604167
+counterexample family,counterexample,60,0.635417
+counterexample family,counterexample,70,0.625000
+counterexample family,counterexample,80,0.614583
+near-boundary probe family,near-boundary,0,0.500000
+near-boundary probe family,near-boundary,10,0.583333
+near-boundary probe family,near-boundary,20,0.583333
+near-boundary probe family,near-boundary,30,0.500000
+near-boundary probe family,near-boundary,40,0.500000
+near-boundary probe family,near-boundary,50,0.583333
+near-boundary probe family,near-boundary,60,0.500000
+near-boundary probe family,near-boundary,70,0.500000
+near-boundary probe family,near-boundary,80,0.500000

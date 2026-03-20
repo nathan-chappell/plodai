@@ -46,8 +46,8 @@ describe("frontend smoke harness", () => {
       "list_reports",
       "get_report",
       "create_report",
-      "append_report_item",
-      "remove_report_item",
+      "append_report_slide",
+      "remove_report_slide",
     ]);
   });
 

@@ -44,7 +44,16 @@ AggregateOpLiteral: TypeAlias = Literal[
 ]
 ChartTypeLiteral: TypeAlias = Literal["bar", "line", "pie", "doughnut", "scatter"]
 ChartStylePresetLiteral: TypeAlias = Literal[
-    "editorial", "sunrise", "ocean", "forest", "mono", "ledger", "amber", "cobalt", "terracotta", "midnight"
+    "editorial",
+    "sunrise",
+    "ocean",
+    "forest",
+    "mono",
+    "ledger",
+    "amber",
+    "cobalt",
+    "terracotta",
+    "midnight",
 ]
 ChartLegendPositionLiteral: TypeAlias = Literal["top", "bottom", "left", "right"]
 ChartOrientationLiteral: TypeAlias = Literal["vertical", "horizontal"]

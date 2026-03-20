@@ -1,432 +1,486 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import styled from "styled-components";
 
-import {
-  DatasetInventoryButton,
-  DatasetInventoryCell,
-  DatasetInventoryHeader,
-  DatasetInventoryPanel,
-  DatasetInventoryScroller,
-  DatasetInventoryTable,
-  DatasetInventoryTd,
-  DatasetInventoryTh,
-  DatasetInventoryToolbar,
-  DatasetInventoryUploadInput,
-} from "./styles";
 import { MetaText } from "../app/styles";
 import { downloadWorkspaceFile, formatByteSize, openWorkspaceFileInNewTab } from "../lib/workspace-artifacts";
-import { normalizePathPrefix } from "../lib/workspace-fs";
+import type { ShellWorkspaceArtifact } from "../capabilities/types";
 import type { LocalWorkspaceFile } from "../types/report";
-import type { WorkspaceBreadcrumb, WorkspaceFileNode, WorkspaceFilesystem, WorkspaceItem } from "../types/workspace";
+import type { WorkspaceDescriptor, WorkspaceKind } from "../types/workspace";
 
-const CSV_PREVIEW_LIMIT = 6;
+const PAGE_SIZE = 10;
 const JSON_PREVIEW_LIMIT = 12;
 const TEXT_PREVIEW_LIMIT = 4_000;
 
-type WorkspaceBranchNode = {
-  id: string;
-  kind: "branch";
-  name: string;
-  path: string;
-  childBranchIds: string[];
-  childFileIds: string[];
+type TreeFolder = {
+  label: string;
+  folders: Map<string, TreeFolder>;
+  files: ShellWorkspaceArtifact[];
 };
 
-type WorkspaceTreeNode = WorkspaceBranchNode | WorkspaceFileNode;
+type TreeRow =
+  | {
+      kind: "folder";
+      key: string;
+      label: string;
+      depth: number;
+    }
+  | {
+      kind: "file";
+      key: string;
+      artifact: ShellWorkspaceArtifact;
+      depth: number;
+    };
 
-function withTrailingSlash(prefix: string): string {
-  if (!prefix || prefix === "/") {
-    return "/";
+type TreeGroup = {
+  key: string;
+  label: string;
+  rows: TreeRow[];
+};
+
+function compareArtifacts(left: ShellWorkspaceArtifact, right: ShellWorkspaceArtifact): number {
+  return left.file.name.localeCompare(right.file.name) || left.path.localeCompare(right.path);
+}
+
+function compareWorkspaces(left: WorkspaceDescriptor, right: WorkspaceDescriptor): number {
+  const order = (kind: WorkspaceKind): number => {
+    switch (kind) {
+      case "default":
+        return 0;
+      case "demo":
+        return 1;
+      case "user":
+        return 2;
+    }
+  };
+  return order(left.kind) - order(right.kind) || left.name.localeCompare(right.name);
+}
+
+function artifactSegments(artifact: ShellWorkspaceArtifact): string[] {
+  const segments = artifact.path.split("/").filter(Boolean);
+  if (segments[0] === artifact.producerKey) {
+    return segments.slice(1);
   }
-  return prefix.endsWith("/") ? prefix : `${prefix}/`;
-}
-
-function branchId(prefix: string): string {
-  return `branch:${withTrailingSlash(prefix)}`;
-}
-
-function branchName(prefix: string): string {
-  if (prefix === "/") {
-    return "/";
+  if (artifact.producerKey === "uploaded" && segments[0] === "uploaded") {
+    return segments.slice(1);
   }
-  return prefix.replace(/\/$/, "").split("/").filter(Boolean).at(-1) ?? "/";
+  return segments;
 }
 
-function parentPrefix(prefix: string): string | null {
-  const normalized = normalizePathPrefix(prefix);
-  if (normalized === "/") {
+function buildTreeGroups(artifacts: ShellWorkspaceArtifact[]): TreeGroup[] {
+  const groups = new Map<string, { label: string; root: TreeFolder }>();
+
+  for (const artifact of artifacts) {
+    const relativeSegments = artifactSegments(artifact);
+    const folderSegments = relativeSegments.slice(0, -1);
+    let group = groups.get(artifact.producerKey);
+    if (!group) {
+      group = {
+        label: artifact.producerLabel,
+        root: {
+          label: artifact.producerLabel,
+          folders: new Map(),
+          files: [],
+        },
+      };
+      groups.set(artifact.producerKey, group);
+    }
+    let cursor = group.root;
+    for (const segment of folderSegments) {
+      const existing = cursor.folders.get(segment);
+      if (existing) {
+        cursor = existing;
+        continue;
+      }
+      const nextFolder: TreeFolder = {
+        label: segment,
+        folders: new Map(),
+        files: [],
+      };
+      cursor.folders.set(segment, nextFolder);
+      cursor = nextFolder;
+    }
+    cursor.files.push(artifact);
+  }
+
+  function flattenRows(folder: TreeFolder, depth: number, parentKey: string): TreeRow[] {
+    const rows: TreeRow[] = [];
+    const folderEntries = Array.from(folder.folders.entries()).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    for (const [folderName, childFolder] of folderEntries) {
+      const key = `${parentKey}/${folderName}`;
+      rows.push({
+        kind: "folder",
+        key,
+        label: childFolder.label,
+        depth,
+      });
+      rows.push(...flattenRows(childFolder, depth + 1, key));
+    }
+    const fileRows = [...folder.files].sort(compareArtifacts).map(
+      (artifact): TreeRow => ({
+        kind: "file",
+        key: artifact.entryId,
+        artifact,
+        depth,
+      }),
+    );
+    rows.push(...fileRows);
+    return rows;
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, value]) => ({
+      key,
+      label: value.label,
+      rows: flattenRows(value.root, 0, key),
+    }))
+    .sort((left, right) => {
+      if (left.key === "uploaded") {
+        return -1;
+      }
+      if (right.key === "uploaded") {
+        return 1;
+      }
+      return left.label.localeCompare(right.label);
+    });
+}
+
+function fileKindLabel(file: LocalWorkspaceFile): string {
+  switch (file.kind) {
+    case "csv":
+      return "csv";
+    case "json":
+      return "json";
+    case "pdf":
+      return "pdf";
+    case "other":
+      return file.extension || "file";
+  }
+}
+
+function summarizeArtifactMeta(artifact: ShellWorkspaceArtifact): string {
+  const file = artifact.file;
+  const bits = [fileKindLabel(file)];
+  if (typeof file.byte_size === "number") {
+    bits.push(formatByteSize(file.byte_size));
+  }
+  if (file.kind === "csv" || file.kind === "json") {
+    bits.push(`${file.row_count} rows`);
+  }
+  if (file.kind === "pdf") {
+    bits.push(`${file.page_count} pages`);
+  }
+  return bits.join(" · ");
+}
+
+function canOpenInline(file: LocalWorkspaceFile): boolean {
+  return file.kind === "pdf" || file.kind === "json" || (file.kind === "other" && file.text_content != null);
+}
+
+function parseChartArtifact(file: LocalWorkspaceFile): {
+  title: string;
+  imageDataUrl: string | null;
+  chartPlanId: string | null;
+} | null {
+  if (file.kind !== "other" || !file.text_content) {
     return null;
   }
-  const parts = normalized.replace(/\/$/, "").split("/").filter(Boolean);
-  if (parts.length <= 1) {
-    return "/";
+  try {
+    const parsed = JSON.parse(file.text_content) as {
+      title?: unknown;
+      image_data_url?: unknown;
+      chart_plan_id?: unknown;
+      chart?: unknown;
+    };
+    if (!parsed || typeof parsed !== "object" || !("chart" in parsed)) {
+      return null;
+    }
+    return {
+      title: typeof parsed.title === "string" ? parsed.title : file.name,
+      imageDataUrl: typeof parsed.image_data_url === "string" ? parsed.image_data_url : null,
+      chartPlanId: typeof parsed.chart_plan_id === "string" ? parsed.chart_plan_id : null,
+    };
+  } catch {
+    return null;
   }
-  return `/${parts.slice(0, -1).join("/")}/`;
 }
 
-function parentPrefixForFile(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length <= 1) {
-    return "/";
-  }
-  return `/${parts.slice(0, -1).join("/")}/`;
-}
-
-function compareBranches(left: WorkspaceBranchNode, right: WorkspaceBranchNode): number {
-  if (left.path === "/") {
-    return -1;
-  }
-  if (right.path === "/") {
-    return 1;
-  }
-  return left.name.localeCompare(right.name);
-}
-
-function compareFiles(left: WorkspaceFileNode, right: WorkspaceFileNode): number {
-  return left.name.localeCompare(right.name);
-}
-
-function renderFilePreview(file: LocalWorkspaceFile) {
-  if (file.kind === "csv") {
-    const previewRows = file.preview_rows.slice(0, CSV_PREVIEW_LIMIT);
+function renderArtifactPreview(
+  file: LocalWorkspaceFile,
+  currentPage: number,
+  onSetPage: (nextPage: number) => void,
+) {
+  const chartArtifact = parseChartArtifact(file);
+  if (chartArtifact) {
     return (
-      <WorkspacePreviewSection>
-        <WorkspacePreviewSectionHeader>
+      <PreviewSection>
+        <PreviewSectionHeader>
+          <strong>Chart preview</strong>
+          <MetaText>
+            {chartArtifact.chartPlanId ? `Plan ${chartArtifact.chartPlanId}` : "Saved chart metadata"}
+          </MetaText>
+        </PreviewSectionHeader>
+        {chartArtifact.imageDataUrl ? (
+          <PreviewImage alt={chartArtifact.title} src={chartArtifact.imageDataUrl} />
+        ) : (
+          <MetaText>Open or download this artifact to inspect the full chart definition.</MetaText>
+        )}
+      </PreviewSection>
+    );
+  }
+
+  if (file.kind === "csv") {
+    const previewRows = file.preview_rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+    const pageCount = Math.max(1, Math.ceil(file.preview_rows.length / PAGE_SIZE));
+
+    return (
+      <PreviewSection>
+        <PreviewSectionHeader>
           <strong>Table preview</strong>
-          <MetaText>Showing the first {previewRows.length} preview rows.</MetaText>
-        </WorkspacePreviewSectionHeader>
-        <WorkspaceStatGrid>
-          <WorkspaceStatCard>
-            <strong>{file.row_count}</strong>
-            <MetaText>Rows</MetaText>
-          </WorkspaceStatCard>
-          <WorkspaceStatCard>
-            <strong>{file.columns.length}</strong>
-            <MetaText>Columns</MetaText>
-          </WorkspaceStatCard>
-          <WorkspaceStatCard>
-            <strong>{file.numeric_columns.length}</strong>
-            <MetaText>Numeric columns</MetaText>
-          </WorkspaceStatCard>
-        </WorkspaceStatGrid>
+          <MetaText>Showing captured preview rows for this CSV artifact.</MetaText>
+        </PreviewSectionHeader>
+        <PreviewInlineStats>
+          <PreviewInlineStat>{file.row_count} rows</PreviewInlineStat>
+          <PreviewInlineStat>{file.columns.length} columns</PreviewInlineStat>
+          <PreviewInlineStat>{file.numeric_columns.length} numeric</PreviewInlineStat>
+        </PreviewInlineStats>
         <MetaText>Columns: {file.columns.join(", ")}</MetaText>
-        <DatasetInventoryScroller>
-          <DatasetInventoryTable>
+        <PreviewTableScroller>
+          <PreviewTable>
             <thead>
               <tr>
                 {file.columns.map((column) => (
-                  <DatasetInventoryTh key={column}>{column}</DatasetInventoryTh>
+                  <PreviewTh key={column}>{column}</PreviewTh>
                 ))}
               </tr>
             </thead>
             <tbody>
               {previewRows.map((row, rowIndex) => (
-                <tr key={`${file.id}-${rowIndex}`}>
+                <tr key={`${file.id}-${currentPage}-${rowIndex}`}>
                   {file.columns.map((column) => (
-                    <DatasetInventoryTd key={`${file.id}-${rowIndex}-${column}`}>
-                      <DatasetInventoryCell>{row[column] ?? ""}</DatasetInventoryCell>
-                    </DatasetInventoryTd>
+                    <PreviewTd key={`${file.id}-${rowIndex}-${column}`}>{String(row[column] ?? "")}</PreviewTd>
                   ))}
                 </tr>
               ))}
             </tbody>
-          </DatasetInventoryTable>
-        </DatasetInventoryScroller>
-      </WorkspacePreviewSection>
+          </PreviewTable>
+        </PreviewTableScroller>
+        {pageCount > 1 ? (
+          <PreviewPager>
+            <PreviewPagerButton
+              disabled={currentPage === 0}
+              onClick={() => onSetPage(Math.max(0, currentPage - 1))}
+              type="button"
+            >
+              Previous
+            </PreviewPagerButton>
+            <MetaText>
+              Page {currentPage + 1} of {pageCount}
+            </MetaText>
+            <PreviewPagerButton
+              disabled={currentPage >= pageCount - 1}
+              onClick={() => onSetPage(Math.min(pageCount - 1, currentPage + 1))}
+              type="button"
+            >
+              Next
+            </PreviewPagerButton>
+          </PreviewPager>
+        ) : null}
+      </PreviewSection>
     );
   }
 
   if (file.kind === "json") {
     return (
-      <WorkspacePreviewSection>
-        <WorkspacePreviewSectionHeader>
+      <PreviewSection>
+        <PreviewSectionHeader>
           <strong>JSON preview</strong>
           <MetaText>Showing the first {Math.min(file.row_count, JSON_PREVIEW_LIMIT)} rows.</MetaText>
-        </WorkspacePreviewSectionHeader>
-        <WorkspaceStatGrid>
-          <WorkspaceStatCard>
-            <strong>{file.row_count}</strong>
-            <MetaText>Rows</MetaText>
-          </WorkspaceStatCard>
-          <WorkspaceStatCard>
-            <strong>{file.columns.length}</strong>
-            <MetaText>Columns</MetaText>
-          </WorkspaceStatCard>
-          <WorkspaceStatCard>
-            <strong>{formatByteSize(file.byte_size)}</strong>
-            <MetaText>Size</MetaText>
-          </WorkspaceStatCard>
-        </WorkspaceStatGrid>
-        <MetaText>Columns: {file.columns.join(", ")}</MetaText>
-        <WorkspaceCodeBlock>
-          {JSON.stringify(file.rows.slice(0, JSON_PREVIEW_LIMIT), null, 2)}
-        </WorkspaceCodeBlock>
-      </WorkspacePreviewSection>
+        </PreviewSectionHeader>
+        <PreviewInlineStats>
+          <PreviewInlineStat>{file.row_count} rows</PreviewInlineStat>
+          <PreviewInlineStat>{file.columns.length} columns</PreviewInlineStat>
+          <PreviewInlineStat>{formatByteSize(file.byte_size ?? 0)}</PreviewInlineStat>
+        </PreviewInlineStats>
+        <PreviewCode>{JSON.stringify(file.rows.slice(0, JSON_PREVIEW_LIMIT), null, 2)}</PreviewCode>
+      </PreviewSection>
     );
   }
 
   if (file.kind === "pdf") {
     return (
-      <WorkspacePreviewSection>
-        <WorkspacePreviewSectionHeader>
+      <PreviewSection>
+        <PreviewSectionHeader>
           <strong>PDF summary</strong>
-          <MetaText>Use "Open file" to inspect the document in a new tab.</MetaText>
-        </WorkspacePreviewSectionHeader>
-        <WorkspaceStatGrid>
-          <WorkspaceStatCard>
-            <strong>{file.page_count}</strong>
-            <MetaText>Pages</MetaText>
-          </WorkspaceStatCard>
-          <WorkspaceStatCard>
-            <strong>{formatByteSize(file.byte_size)}</strong>
-            <MetaText>Size</MetaText>
-          </WorkspaceStatCard>
-        </WorkspaceStatGrid>
-      </WorkspacePreviewSection>
+          <MetaText>Open the file in a new tab for a full document view.</MetaText>
+        </PreviewSectionHeader>
+        <PreviewInlineStats>
+          <PreviewInlineStat>{file.page_count} pages</PreviewInlineStat>
+          <PreviewInlineStat>{formatByteSize(file.byte_size ?? 0)}</PreviewInlineStat>
+        </PreviewInlineStats>
+      </PreviewSection>
     );
   }
 
   if (file.text_content != null) {
     return (
-      <WorkspacePreviewSection>
-        <WorkspacePreviewSectionHeader>
+      <PreviewSection>
+        <PreviewSectionHeader>
           <strong>Text preview</strong>
           <MetaText>Showing the first {Math.min(file.text_content.length, TEXT_PREVIEW_LIMIT)} characters.</MetaText>
-        </WorkspacePreviewSectionHeader>
-        <WorkspaceTextBlock>{file.text_content.slice(0, TEXT_PREVIEW_LIMIT)}</WorkspaceTextBlock>
-      </WorkspacePreviewSection>
+        </PreviewSectionHeader>
+        <PreviewText>{file.text_content.slice(0, TEXT_PREVIEW_LIMIT)}</PreviewText>
+      </PreviewSection>
     );
   }
 
   return (
-    <WorkspacePreviewSection>
-      <WorkspacePreviewSectionHeader>
+    <PreviewSection>
+      <PreviewSectionHeader>
         <strong>Binary file</strong>
         <MetaText>Download this file to inspect it locally.</MetaText>
-      </WorkspacePreviewSectionHeader>
-    </WorkspacePreviewSection>
+      </PreviewSectionHeader>
+    </PreviewSection>
   );
-}
-
-function buildTreeModel(filesystem: WorkspaceFilesystem, activePrefix: string): {
-  branchById: Map<string, WorkspaceBranchNode>;
-  fileById: Map<string, WorkspaceFileNode>;
-  rootBranch: WorkspaceBranchNode;
-} {
-  const branchById = new Map<string, WorkspaceBranchNode>();
-  const fileById = new Map<string, WorkspaceFileNode>();
-
-  function ensureBranch(prefix: string): WorkspaceBranchNode {
-    const normalizedPrefix = withTrailingSlash(normalizePathPrefix(prefix));
-    const id = branchId(normalizedPrefix);
-    const existing = branchById.get(id);
-    if (existing) {
-      return existing;
-    }
-    const nextBranch: WorkspaceBranchNode = {
-      id,
-      kind: "branch",
-      name: branchName(normalizedPrefix),
-      path: normalizedPrefix,
-      childBranchIds: [],
-      childFileIds: [],
-    };
-    branchById.set(id, nextBranch);
-    const parent = parentPrefix(normalizedPrefix);
-    if (parent) {
-      const parentBranch = ensureBranch(parent);
-      if (!parentBranch.childBranchIds.includes(id)) {
-        parentBranch.childBranchIds.push(id);
-      }
-    }
-    return nextBranch;
-  }
-
-  const rootBranch = ensureBranch("/");
-  const files = Object.values(filesystem.files_by_path ?? {}).sort((left, right) => left.path.localeCompare(right.path));
-
-  for (const file of files) {
-    fileById.set(file.id, file);
-    const parent = ensureBranch(parentPrefixForFile(file.path));
-    if (!parent.childFileIds.includes(file.id)) {
-      parent.childFileIds.push(file.id);
-    }
-  }
-
-  ensureBranch(activePrefix);
-
-  for (const branch of branchById.values()) {
-    branch.childBranchIds.sort((leftId, rightId) => {
-      const left = branchById.get(leftId);
-      const right = branchById.get(rightId);
-      return left && right ? compareBranches(left, right) : 0;
-    });
-    branch.childFileIds.sort((leftId, rightId) => {
-      const left = fileById.get(leftId);
-      const right = fileById.get(rightId);
-      return left && right ? compareFiles(left, right) : 0;
-    });
-  }
-
-  return { branchById, fileById, rootBranch };
 }
 
 export function WorkspaceInventoryPane({
-  activePrefix,
-  cwdPath,
-  filesystem,
-  breadcrumbs,
-  entries,
+  artifacts,
+  workspaces,
+  activeWorkspaceId,
+  activeWorkspaceName,
+  activeWorkspaceKind,
   accept,
   onSelectFiles,
-  onChangeDirectory,
-  onRemoveEntry,
+  onSelectWorkspace,
+  onCreateWorkspace,
+  onClearWorkspace,
+  clearActionLabel,
+  clearActionDisabled,
+  onRemoveArtifact,
 }: {
-  activePrefix: string;
-  cwdPath: string;
-  filesystem: WorkspaceFilesystem;
-  breadcrumbs: WorkspaceBreadcrumb[];
-  entries: WorkspaceItem[];
+  artifacts: ShellWorkspaceArtifact[];
+  workspaces: WorkspaceDescriptor[];
+  activeWorkspaceId: string;
+  activeWorkspaceName: string;
+  activeWorkspaceKind: WorkspaceKind;
   accept?: string;
   onSelectFiles: (files: FileList | null) => Promise<void>;
-  onCreateDirectory?: (path: string) => void;
-  onChangeDirectory: (path: string) => void;
-  onRemoveEntry?: (entryId: string) => void;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onCreateWorkspace: (name: string) => WorkspaceDescriptor | null;
+  onClearWorkspace: () => void;
+  clearActionLabel: string;
+  clearActionDisabled?: boolean;
+  onRemoveArtifact?: (entryId: string) => void;
 }) {
-  const normalizedActivePrefix = useMemo(() => withTrailingSlash(normalizePathPrefix(activePrefix || cwdPath)), [activePrefix, cwdPath]);
-  const [prefixInput, setPrefixInput] = useState("");
-  const { branchById, fileById, rootBranch } = useMemo(
-    () => buildTreeModel(filesystem, normalizedActivePrefix),
-    [filesystem, normalizedActivePrefix],
-  );
-  const activeBranchId = useMemo(() => branchId(normalizedActivePrefix), [normalizedActivePrefix]);
-  const [expandedBranchIds, setExpandedBranchIds] = useState<Set<string>>(
-    () => new Set([branchId("/"), activeBranchId]),
-  );
-  const [selectedNodeId, setSelectedNodeId] = useState<string>(activeBranchId);
-
-  const currentPathBranchIds = useMemo(() => {
-    const ids = new Set<string>([branchId("/")]);
-    let cursor: string | null = normalizedActivePrefix;
-    while (cursor) {
-      ids.add(branchId(cursor));
-      cursor = parentPrefix(cursor);
-    }
-    return ids;
-  }, [normalizedActivePrefix]);
+  const sortedWorkspaces = useMemo(() => [...workspaces].sort(compareWorkspaces), [workspaces]);
+  const treeGroups = useMemo(() => buildTreeGroups(artifacts), [artifacts]);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(artifacts[0]?.entryId ?? null);
+  const [pageByArtifactId, setPageByArtifactId] = useState<Record<string, number>>({});
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const uploadInputId = useId();
 
   useEffect(() => {
-    setExpandedBranchIds((current) => {
-      const next = new Set(current);
-      for (const id of currentPathBranchIds) {
-        next.add(id);
-      }
-      return next;
-    });
-  }, [currentPathBranchIds]);
-
-  useEffect(() => {
-    setSelectedNodeId((current) => {
-      if (current?.startsWith("branch:")) {
-        return branchById.has(current) ? current : activeBranchId;
-      }
-      return fileById.has(current) ? current : activeBranchId;
-    });
-  }, [activeBranchId, branchById, fileById]);
-
-  const treeRows = useMemo(() => {
-    const rows: Array<{ node: WorkspaceTreeNode; depth: number; expanded: boolean; childCount: number }> = [];
-
-    function walk(branch: WorkspaceBranchNode, depth: number) {
-      const expanded = branch.id === rootBranch.id || expandedBranchIds.has(branch.id);
-      const childCount = branch.childBranchIds.length + branch.childFileIds.length;
-      rows.push({ node: branch, depth, expanded, childCount });
-      if (!expanded) {
-        return;
-      }
-      for (const childBranchId of branch.childBranchIds) {
-        const childBranch = branchById.get(childBranchId);
-        if (childBranch) {
-          walk(childBranch, depth + 1);
-        }
-      }
-      for (const childFileId of branch.childFileIds) {
-        const childFile = fileById.get(childFileId);
-        if (childFile) {
-          rows.push({ node: childFile, depth: depth + 1, expanded: false, childCount: 0 });
-        }
-      }
-    }
-
-    walk(rootBranch, 0);
-    return rows;
-  }, [branchById, expandedBranchIds, fileById, rootBranch]);
-
-  const selectedNode = useMemo<WorkspaceTreeNode>(() => {
-    if (selectedNodeId.startsWith("branch:")) {
-      return branchById.get(selectedNodeId) ?? rootBranch;
-    }
-    return fileById.get(selectedNodeId) ?? branchById.get(activeBranchId) ?? rootBranch;
-  }, [activeBranchId, branchById, fileById, rootBranch, selectedNodeId]);
-
-  const selectedBranchChildren = useMemo(() => {
-    if (selectedNode.kind !== "branch") {
-      return { branches: [] as WorkspaceBranchNode[], files: [] as WorkspaceFileNode[] };
-    }
-    return {
-      branches: selectedNode.childBranchIds
-        .map((id) => branchById.get(id))
-        .filter((branch): branch is WorkspaceBranchNode => branch !== undefined),
-      files: selectedNode.childFileIds
-        .map((id) => fileById.get(id))
-        .filter((file): file is WorkspaceFileNode => file !== undefined),
-    };
-  }, [branchById, fileById, selectedNode]);
-
-  const selectedBranchSubtreeFiles = useMemo(() => {
-    if (selectedNode.kind !== "branch") {
-      return 0;
-    }
-    const normalizedPrefix = withTrailingSlash(selectedNode.path);
-    return Array.from(fileById.values()).filter((file) => file.path.startsWith(normalizedPrefix === "/" ? "/" : normalizedPrefix)).length;
-  }, [fileById, selectedNode]);
-
-  function toggleBranch(nodeId: string) {
-    if (nodeId === rootBranch.id || currentPathBranchIds.has(nodeId)) {
+    if (!artifacts.length) {
+      setSelectedArtifactId(null);
       return;
     }
-    setExpandedBranchIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
+    setSelectedArtifactId((current) => {
+      if (current && artifacts.some((artifact) => artifact.entryId === current)) {
+        return current;
       }
-      return next;
+      return artifacts[0].entryId;
     });
-  }
+  }, [artifacts]);
 
-  function handlePrefixSubmit() {
-    const trimmed = prefixInput.trim();
-    if (!trimmed) {
-      return;
-    }
-    const nextPrefix = trimmed.startsWith("/") ? trimmed : `${normalizedActivePrefix}${trimmed}`;
-    onChangeDirectory(nextPrefix);
-    setPrefixInput("");
-  }
+  const selectedArtifact = useMemo(
+    () => artifacts.find((artifact) => artifact.entryId === selectedArtifactId) ?? null,
+    [artifacts, selectedArtifactId],
+  );
+  const sourceCounts = useMemo(
+    () =>
+      artifacts.reduce<Record<ShellWorkspaceArtifact["source"], number>>(
+        (counts, artifact) => ({
+          ...counts,
+          [artifact.source]: counts[artifact.source] + 1,
+        }),
+        { uploaded: 0, derived: 0, demo: 0 },
+      ),
+    [artifacts],
+  );
 
   return (
-    <DatasetInventoryPanel>
-      <DatasetInventoryHeader>
-        <h2>Workspace files</h2>
-        <MetaText>
-          Browse the workspace from the root, synthesize a tree from file paths, and inspect the selected prefix or file beside the tree.
-        </MetaText>
-      </DatasetInventoryHeader>
+    <WorkspacePanel>
+      <WorkspaceHeader>
+        <div>
+          <WorkspaceTitle>Workspace artifacts</WorkspaceTitle>
+          <MetaText>
+            Browse the selected workspace, switch contexts, add files, and inspect the latest derived outputs.
+          </MetaText>
+        </div>
+        <WorkspaceCountPill>
+          {artifacts.length} artifact{artifacts.length === 1 ? "" : "s"}
+        </WorkspaceCountPill>
+      </WorkspaceHeader>
 
-      <DatasetInventoryToolbar>
-        <DatasetInventoryUploadInput
+      <WorkspaceToolbar>
+        <WorkspaceSelect
+          aria-label="Active workspace"
+          data-testid="workspace-select"
+          onChange={(event) => onSelectWorkspace(event.target.value)}
+          value={activeWorkspaceId}
+        >
+          {sortedWorkspaces.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.name}
+            </option>
+          ))}
+        </WorkspaceSelect>
+
+        {creatingWorkspace ? (
+          <WorkspaceCreateForm
+            onSubmit={(event) => {
+              event.preventDefault();
+              const created = onCreateWorkspace(newWorkspaceName);
+              if (created) {
+                setNewWorkspaceName("");
+                setCreatingWorkspace(false);
+              }
+            }}
+          >
+            <WorkspaceCreateInput
+              aria-label="New workspace name"
+              data-testid="workspace-new-input"
+              onChange={(event) => setNewWorkspaceName(event.target.value)}
+              placeholder="Workspace name"
+              value={newWorkspaceName}
+            />
+            <WorkspaceInlineButton type="submit">Create</WorkspaceInlineButton>
+            <WorkspaceInlineButton
+              onClick={() => {
+                setCreatingWorkspace(false);
+                setNewWorkspaceName("");
+              }}
+              type="button"
+            >
+              Cancel
+            </WorkspaceInlineButton>
+          </WorkspaceCreateForm>
+        ) : (
+          <WorkspaceInlineButton
+            data-testid="workspace-new-button"
+            onClick={() => setCreatingWorkspace(true)}
+            type="button"
+          >
+            New workspace
+          </WorkspaceInlineButton>
+        )}
+
+        <WorkspaceUploadLabel htmlFor={uploadInputId}>Add files</WorkspaceUploadLabel>
+        <WorkspaceUploadInput
+          id={uploadInputId}
           type="file"
           accept={accept}
           multiple
@@ -435,543 +489,541 @@ export function WorkspaceInventoryPane({
             event.currentTarget.value = "";
           }}
         />
-        <WorkspacePathBadge>Active prefix: {normalizedActivePrefix}</WorkspacePathBadge>
-        <WorkspacePathBadge>{entries.length} visible file{entries.length === 1 ? "" : "s"}</WorkspacePathBadge>
-      </DatasetInventoryToolbar>
 
-      <WorkspaceBreadcrumbRow aria-label="Workspace breadcrumbs">
-        {breadcrumbs.map((breadcrumb, index) => (
-          <WorkspaceBreadcrumbFragment key={breadcrumb.id}>
-            <WorkspaceBreadcrumbButton
-              type="button"
-              onClick={() => onChangeDirectory(breadcrumb.prefix)}
-              disabled={breadcrumb.prefix === normalizedActivePrefix}
-            >
-              {breadcrumb.name}
-            </WorkspaceBreadcrumbButton>
-            {index < breadcrumbs.length - 1 ? <WorkspaceBreadcrumbSeparator>/</WorkspaceBreadcrumbSeparator> : null}
-          </WorkspaceBreadcrumbFragment>
-        ))}
-      </WorkspaceBreadcrumbRow>
-
-      <DatasetInventoryToolbar>
-        <WorkspacePathButton
+        <WorkspaceInlineButton
+          data-testid="workspace-clear-button"
+          disabled={clearActionDisabled}
+          onClick={onClearWorkspace}
           type="button"
-          onClick={() => onChangeDirectory(parentPrefix(normalizedActivePrefix) ?? "/")}
-          disabled={normalizedActivePrefix === "/"}
         >
-          Up one level
-        </WorkspacePathButton>
-        <WorkspaceInput
-          type="text"
-          value={prefixInput}
-          onChange={(event) => setPrefixInput(event.target.value)}
-          placeholder="Focus another prefix"
-        />
-        <DatasetInventoryButton type="button" onClick={handlePrefixSubmit} disabled={!prefixInput.trim()}>
-          Set prefix
-        </DatasetInventoryButton>
-      </DatasetInventoryToolbar>
+          {clearActionLabel}
+        </WorkspaceInlineButton>
 
-      <WorkspaceBrowserLayout>
-        <WorkspaceBrowserTreePanel>
-          <WorkspacePanelHeader>
-            <strong>Path tree</strong>
-            <MetaText>Anchored at /. Branch nodes are derived from file paths and selecting one updates the active prefix.</MetaText>
-          </WorkspacePanelHeader>
-          <WorkspaceTreeScroller>
-            <WorkspaceTree role="tree" aria-label="Workspace filesystem tree">
-              {treeRows.map(({ node, depth, expanded, childCount }) => {
-                if (node.kind === "branch") {
-                  const isSelected = selectedNode.id === node.id;
-                  const isCurrentPrefix = node.path === normalizedActivePrefix;
-                  const isPinnedOpen = currentPathBranchIds.has(node.id);
-                  const expandable = childCount > 0;
-                  return (
-                    <WorkspaceTreeRow key={node.id}>
-                      <WorkspaceTreeRowInner>
-                        <WorkspaceTreeExpandButton
-                          type="button"
-                          onClick={() => toggleBranch(node.id)}
-                          disabled={!expandable || node.id === rootBranch.id || isPinnedOpen}
-                          aria-label={
-                            expandable
-                              ? `${expanded ? "Collapse" : "Expand"} ${node.name}`
-                              : `${node.name} has no children`
-                          }
-                        >
-                          {expandable ? (expanded ? "v" : ">") : ""}
-                        </WorkspaceTreeExpandButton>
-                        <WorkspaceTreeNodeButton
-                          type="button"
-                          role="treeitem"
-                          aria-selected={isSelected}
-                          aria-expanded={expanded}
-                          $depth={depth}
-                          $selected={isSelected}
-                          $currentDirectory={isCurrentPrefix}
-                          onClick={() => {
-                            setSelectedNodeId(node.id);
-                            onChangeDirectory(node.path);
-                          }}
-                        >
-                          <WorkspaceTreeLabelRow>
-                            <strong>{node.name}</strong>
-                            <WorkspaceInlineBadge $tone={isCurrentPrefix ? "accent" : "default"}>
-                              {isCurrentPrefix ? "active" : "prefix"}
-                            </WorkspaceInlineBadge>
-                          </WorkspaceTreeLabelRow>
-                          <MetaText as="span">{node.path}</MetaText>
-                        </WorkspaceTreeNodeButton>
-                      </WorkspaceTreeRowInner>
-                    </WorkspaceTreeRow>
-                  );
-                }
+        <WorkspaceSourceMeta>
+          {sourceCounts.uploaded} uploaded, {sourceCounts.derived} derived, {sourceCounts.demo} demo
+        </WorkspaceSourceMeta>
+      </WorkspaceToolbar>
 
-                const isSelected = selectedNode.id === node.id;
-                return (
-                  <WorkspaceTreeRow key={node.id}>
-                    <WorkspaceTreeRowInner>
-                      <WorkspaceTreeExpandButton type="button" disabled aria-label={`${node.name} has no children`} />
-                      <WorkspaceTreeNodeButton
+      <WorkspaceActiveMeta>
+        <strong>{activeWorkspaceName}</strong>
+        <MetaText>
+          {activeWorkspaceKind === "demo"
+            ? "Shared demo workspace"
+            : "Shared app workspace"}
+        </MetaText>
+      </WorkspaceActiveMeta>
+
+      <WorkspaceBrowser>
+        <WorkspaceTreePane data-testid="workspace-tree-pane">
+          {treeGroups.length ? (
+            treeGroups.map((group) => (
+              <WorkspaceGroup key={group.key}>
+                <WorkspaceGroupLabel>{group.label}</WorkspaceGroupLabel>
+                {group.rows.map((row) =>
+                  row.kind === "folder" ? (
+                    <WorkspaceFolderRow
+                      key={row.key}
+                      style={{ paddingLeft: `${0.9 + row.depth * 1.05}rem` }}
+                    >
+                      {row.label}
+                    </WorkspaceFolderRow>
+                  ) : (
+                    <WorkspaceFileRow
+                      key={row.key}
+                      $selected={row.artifact.entryId === selectedArtifactId}
+                    >
+                      <WorkspaceFileSelect
+                        onClick={() => setSelectedArtifactId(row.artifact.entryId)}
+                        style={{ paddingLeft: `${0.9 + row.depth * 1.05}rem` }}
                         type="button"
-                        role="treeitem"
-                        aria-selected={isSelected}
-                        $depth={depth}
-                        $selected={isSelected}
-                        $currentDirectory={false}
-                        onClick={() => setSelectedNodeId(node.id)}
                       >
-                        <WorkspaceTreeLabelRow>
-                          <strong>{node.file.name}</strong>
-                          <WorkspaceInlineBadge>{node.file.kind}</WorkspaceInlineBadge>
-                        </WorkspaceTreeLabelRow>
-                        <MetaText as="span">{node.path}</MetaText>
-                      </WorkspaceTreeNodeButton>
-                    </WorkspaceTreeRowInner>
-                  </WorkspaceTreeRow>
-                );
-              })}
-            </WorkspaceTree>
-          </WorkspaceTreeScroller>
-        </WorkspaceBrowserTreePanel>
+                        <WorkspaceFileLead>
+                          <WorkspaceFileName>{row.artifact.file.name}</WorkspaceFileName>
+                          <WorkspaceFileMeta>{summarizeArtifactMeta(row.artifact)}</WorkspaceFileMeta>
+                        </WorkspaceFileLead>
+                      </WorkspaceFileSelect>
+                      <WorkspaceFileActions>
+                        <WorkspaceRowAction
+                          onClick={(event) => {
+                            openWorkspaceFileInNewTab(row.artifact.file);
+                          }}
+                          type="button"
+                        >
+                          Open
+                        </WorkspaceRowAction>
+                        <WorkspaceRowAction
+                          onClick={(event) => {
+                            downloadWorkspaceFile(row.artifact.file);
+                          }}
+                          type="button"
+                        >
+                          Download
+                        </WorkspaceRowAction>
+                        {onRemoveArtifact ? (
+                          <WorkspaceRowAction
+                            onClick={(event) => {
+                              onRemoveArtifact(row.artifact.entryId);
+                            }}
+                            type="button"
+                          >
+                            Remove
+                          </WorkspaceRowAction>
+                        ) : null}
+                      </WorkspaceFileActions>
+                    </WorkspaceFileRow>
+                  ),
+                )}
+              </WorkspaceGroup>
+            ))
+          ) : (
+            <WorkspaceEmptyState>No artifacts yet. Add files or run an agent to populate this workspace.</WorkspaceEmptyState>
+          )}
+        </WorkspaceTreePane>
 
-        <WorkspaceBrowserPreviewPanel>
-          <WorkspacePanelHeader>
-            <strong>Selection preview</strong>
-            <MetaText>{selectedNode.kind === "branch" ? "Prefix details" : "File details and inline preview"}</MetaText>
-          </WorkspacePanelHeader>
-
-          <WorkspacePreviewScroller>
-            <WorkspacePreviewCard>
-              <WorkspacePreviewHero>
+        <WorkspacePreviewPane data-testid="workspace-preview-pane">
+          {selectedArtifact ? (
+            <>
+              <WorkspacePreviewHeader>
                 <div>
-                  <WorkspacePreviewTitle>{selectedNode.kind === "branch" ? selectedNode.name : selectedNode.file.name}</WorkspacePreviewTitle>
-                  <WorkspacePreviewPath>{selectedNode.path}</WorkspacePreviewPath>
+                  <WorkspacePreviewTitle>{selectedArtifact.file.name}</WorkspacePreviewTitle>
+                  <MetaText>{selectedArtifact.path}</MetaText>
                 </div>
-                <WorkspaceBadgeRow>
-                  <WorkspaceInlineBadge $tone={selectedNode.kind === "branch" && selectedNode.path === normalizedActivePrefix ? "accent" : "default"}>
-                    {selectedNode.kind === "branch" ? "prefix" : `${selectedNode.file.kind} file`}
-                  </WorkspaceInlineBadge>
-                  {selectedNode.kind === "branch" && selectedNode.path === normalizedActivePrefix ? (
-                    <WorkspaceInlineBadge $tone="accent">active prefix</WorkspaceInlineBadge>
-                  ) : null}
-                  {selectedNode.kind === "file" ? (
-                    <WorkspaceInlineBadge>{formatByteSize(selectedNode.file.byte_size)}</WorkspaceInlineBadge>
-                  ) : null}
-                </WorkspaceBadgeRow>
-              </WorkspacePreviewHero>
-
-              {selectedNode.kind === "branch" ? (
-                <>
-                  <WorkspaceStatGrid>
-                    <WorkspaceStatCard>
-                      <strong>{selectedBranchChildren.branches.length}</strong>
-                      <MetaText>Child prefixes</MetaText>
-                    </WorkspaceStatCard>
-                    <WorkspaceStatCard>
-                      <strong>{selectedBranchChildren.files.length}</strong>
-                      <MetaText>Direct files</MetaText>
-                    </WorkspaceStatCard>
-                    <WorkspaceStatCard>
-                      <strong>{selectedBranchSubtreeFiles}</strong>
-                      <MetaText>Files in subtree</MetaText>
-                    </WorkspaceStatCard>
-                  </WorkspaceStatGrid>
-
-                  <WorkspacePreviewNote>
-                    Uploads and new derived files resolve against the current active prefix: {normalizedActivePrefix}
-                  </WorkspacePreviewNote>
-
-                  <WorkspacePreviewSection>
-                    <WorkspacePreviewSectionHeader>
-                      <strong>Direct contents</strong>
-                      <MetaText>
-                        {selectedBranchChildren.branches.length || selectedBranchChildren.files.length
-                          ? "Selecting a prefix in the tree also scopes the visible file listing."
-                          : "No files currently live under this prefix."}
-                      </MetaText>
-                    </WorkspacePreviewSectionHeader>
-                    {selectedBranchChildren.branches.length || selectedBranchChildren.files.length ? (
-                      <WorkspaceMiniList>
-                        {selectedBranchChildren.branches.map((branch) => (
-                          <WorkspaceMiniListItem key={branch.id}>
-                            <span>{branch.name}/</span>
-                            <MetaText as="span">prefix</MetaText>
-                          </WorkspaceMiniListItem>
-                        ))}
-                        {selectedBranchChildren.files.map((file) => (
-                          <WorkspaceMiniListItem key={file.id}>
-                            <span>{file.file.name}</span>
-                            <MetaText as="span">{file.file.kind}</MetaText>
-                          </WorkspaceMiniListItem>
-                        ))}
-                      </WorkspaceMiniList>
-                    ) : null}
-                  </WorkspacePreviewSection>
-                </>
-              ) : (
-                <>
-                  <WorkspaceStatGrid>
-                    {selectedNode.file.kind === "csv" || selectedNode.file.kind === "json" ? (
-                      <>
-                        <WorkspaceStatCard>
-                          <strong>{selectedNode.file.row_count}</strong>
-                          <MetaText>Rows</MetaText>
-                        </WorkspaceStatCard>
-                        <WorkspaceStatCard>
-                          <strong>{selectedNode.file.columns.length}</strong>
-                          <MetaText>Columns</MetaText>
-                        </WorkspaceStatCard>
-                      </>
-                    ) : null}
-                    {selectedNode.file.kind === "pdf" ? (
-                      <WorkspaceStatCard>
-                        <strong>{selectedNode.file.page_count}</strong>
-                        <MetaText>Pages</MetaText>
-                      </WorkspaceStatCard>
-                    ) : null}
-                    <WorkspaceStatCard>
-                      <strong>{parentPrefixForFile(selectedNode.path)}</strong>
-                      <MetaText>Parent prefix</MetaText>
-                    </WorkspaceStatCard>
-                  </WorkspaceStatGrid>
-
-                  <DatasetInventoryToolbar>
-                    {selectedNode.file.kind === "pdf" ||
-                    selectedNode.file.kind === "json" ||
-                    (selectedNode.file.kind === "other" && selectedNode.file.text_content != null) ? (
-                      <DatasetInventoryButton onClick={() => openWorkspaceFileInNewTab(selectedNode.file)} type="button">
-                        Open file
-                      </DatasetInventoryButton>
-                    ) : null}
-                    <DatasetInventoryButton onClick={() => downloadWorkspaceFile(selectedNode.file)} type="button">
-                      Download file
-                    </DatasetInventoryButton>
-                    {onRemoveEntry ? (
-                      <DatasetInventoryButton type="button" onClick={() => onRemoveEntry(selectedNode.id)}>
-                        Remove file
-                      </DatasetInventoryButton>
-                    ) : null}
-                  </DatasetInventoryToolbar>
-
-                  {renderFilePreview(selectedNode.file)}
-                </>
+                <WorkspacePreviewMeta>
+                  <WorkspacePreviewBadge>{selectedArtifact.source}</WorkspacePreviewBadge>
+                  <WorkspacePreviewBadge>{fileKindLabel(selectedArtifact.file)}</WorkspacePreviewBadge>
+                </WorkspacePreviewMeta>
+              </WorkspacePreviewHeader>
+              <WorkspacePreviewMetaStrip>
+                <WorkspaceMetaChip>
+                  <WorkspaceMetaLabel>Producer</WorkspaceMetaLabel>
+                  <WorkspaceMetaValue>{selectedArtifact.producerLabel}</WorkspaceMetaValue>
+                </WorkspaceMetaChip>
+                <WorkspaceMetaChip>
+                  <WorkspaceMetaLabel>Size</WorkspaceMetaLabel>
+                  <WorkspaceMetaValue>{formatByteSize(selectedArtifact.file.byte_size ?? 0)}</WorkspaceMetaValue>
+                </WorkspaceMetaChip>
+                <WorkspaceMetaChip>
+                  <WorkspaceMetaLabel>Created</WorkspaceMetaLabel>
+                  <WorkspaceMetaValue>{new Date(selectedArtifact.createdAt).toLocaleDateString()}</WorkspaceMetaValue>
+                </WorkspaceMetaChip>
+              </WorkspacePreviewMetaStrip>
+              {renderArtifactPreview(
+                selectedArtifact.file,
+                pageByArtifactId[selectedArtifact.entryId] ?? 0,
+                (nextPage) =>
+                  setPageByArtifactId((current) => ({
+                    ...current,
+                    [selectedArtifact.entryId]: nextPage,
+                  })),
               )}
-            </WorkspacePreviewCard>
-          </WorkspacePreviewScroller>
-        </WorkspaceBrowserPreviewPanel>
-      </WorkspaceBrowserLayout>
-    </DatasetInventoryPanel>
+              {canOpenInline(selectedArtifact.file) ? null : (
+                <MetaText>
+                  Open or download this file for a fuller inspection path.
+                </MetaText>
+              )}
+            </>
+          ) : (
+            <WorkspaceEmptyState>Select an artifact to inspect its preview and actions.</WorkspaceEmptyState>
+          )}
+        </WorkspacePreviewPane>
+      </WorkspaceBrowser>
+    </WorkspacePanel>
   );
 }
 
-const WorkspaceInput = styled.input`
-  min-width: 220px;
-  padding: 0.72rem 0.85rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
-  color: var(--ink);
+const WorkspacePanel = styled.section`
+  display: grid;
+  gap: 0.8rem;
+  min-height: 0;
 `;
 
-const WorkspacePathBadge = styled.div`
-  padding: 0.72rem 0.85rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
-  color: var(--ink);
-  font: inherit;
-`;
-
-const WorkspacePathButton = styled(DatasetInventoryButton)``;
-
-const WorkspaceBreadcrumbRow = styled.nav`
+const WorkspaceHeader = styled.div`
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
 `;
 
-const WorkspaceBreadcrumbFragment = styled.div`
+const WorkspaceTitle = styled.h2`
+  margin: 0;
+  font-size: 1.05rem;
+`;
+
+const WorkspaceCountPill = styled.div`
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  padding: 0.34rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 0.76rem;
+  font-weight: 700;
 `;
 
-const WorkspaceBreadcrumbButton = styled.button`
-  border: none;
-  background: transparent;
-  color: var(--accent-deep);
-  font: inherit;
-  padding: 0;
-  cursor: pointer;
-
-  &:disabled {
-    color: var(--ink);
-    cursor: default;
-    font-weight: 600;
-  }
-`;
-
-const WorkspaceBreadcrumbSeparator = styled.span`
-  color: var(--muted);
-`;
-
-const WorkspaceBrowserLayout = styled.div`
-  display: grid;
-  grid-template-columns: minmax(280px, 0.95fr) minmax(360px, 1.25fr);
-  gap: 1rem;
-  min-height: 0;
-
-  @media (max-width: 980px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const WorkspaceBrowserTreePanel = styled.section`
-  display: grid;
-  gap: 0.75rem;
-  min-height: 0;
-`;
-
-const WorkspaceBrowserPreviewPanel = styled.section`
-  display: grid;
-  gap: 0.75rem;
-  min-height: 0;
-`;
-
-const WorkspacePanelHeader = styled.div`
-  display: grid;
-  gap: 0.25rem;
-`;
-
-const WorkspaceTreeScroller = styled.div`
-  min-height: 420px;
-  max-height: min(64vh, 720px);
-  overflow: auto;
-  border: 1px solid rgba(31, 41, 55, 0.1);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.7);
-`;
-
-const WorkspaceTree = styled.div`
-  display: grid;
-  gap: 0.2rem;
-  padding: 0.55rem;
-`;
-
-const WorkspaceTreeRow = styled.div`
-  display: grid;
-`;
-
-const WorkspaceTreeRowInner = styled.div`
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.2rem;
-  align-items: start;
-`;
-
-const WorkspaceTreeExpandButton = styled.button`
-  width: 1.8rem;
-  min-height: 2.45rem;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-
-  &:disabled {
-    cursor: default;
-    opacity: 0.45;
-  }
-`;
-
-const WorkspaceTreeNodeButton = styled.button<{
-  $depth: number;
-  $selected: boolean;
-  $currentDirectory: boolean;
-}>`
-  display: grid;
-  gap: 0.18rem;
-  width: 100%;
-  border: 1px solid
-    ${({ $selected, $currentDirectory }) =>
-      $selected
-        ? "color-mix(in srgb, var(--accent) 42%, rgba(31, 41, 55, 0.12))"
-        : $currentDirectory
-          ? "color-mix(in srgb, var(--accent-deep) 26%, rgba(31, 41, 55, 0.12))"
-          : "transparent"};
-  border-radius: var(--radius-md);
-  background: ${({ $selected, $currentDirectory }) =>
-    $selected
-      ? "color-mix(in srgb, var(--accent-soft) 62%, white 38%)"
-      : $currentDirectory
-        ? "color-mix(in srgb, var(--accent-soft) 35%, white 65%)"
-        : "transparent"};
-  color: var(--ink);
-  text-align: left;
-  padding: 0.55rem 0.7rem 0.55rem ${({ $depth }) => 0.7 + $depth * 0.85}rem;
-  cursor: pointer;
-`;
-
-const WorkspaceTreeLabelRow = styled.div`
+const WorkspaceToolbar = styled.div`
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
 `;
 
-const WorkspaceInlineBadge = styled.span<{ $tone?: "default" | "accent" }>`
+const WorkspaceSelect = styled.select`
+  min-width: 200px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0.5rem 0.8rem;
+  font: inherit;
+`;
+
+const WorkspaceCreateForm = styled.form`
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+`;
+
+const WorkspaceCreateInput = styled.input`
+  min-width: 180px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0.5rem 0.8rem;
+  font: inherit;
+`;
+
+const WorkspaceInlineButton = styled.button`
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.46;
+  }
+`;
+
+const WorkspaceUploadLabel = styled.label`
   display: inline-flex;
   align-items: center;
+  border: 1px solid rgba(31, 41, 55, 0.14);
   border-radius: 999px;
-  padding: 0.18rem 0.5rem;
-  border: 1px solid
-    ${({ $tone }) => ($tone === "accent" ? "color-mix(in srgb, var(--accent) 34%, rgba(31, 41, 55, 0.1))" : "var(--line)")};
-  background: ${({ $tone }) =>
-    $tone === "accent" ? "color-mix(in srgb, var(--accent-soft) 72%, white 28%)" : "rgba(255, 255, 255, 0.72)"};
-  color: ${({ $tone }) => ($tone === "accent" ? "var(--accent-deep)" : "var(--muted)")};
-  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  line-height: 1;
-  text-transform: lowercase;
+  cursor: pointer;
 `;
 
-const WorkspacePreviewScroller = styled.div`
-  min-height: 420px;
+const WorkspaceUploadInput = styled.input`
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+`;
+
+const WorkspaceSourceMeta = styled(MetaText)`
+  margin-left: auto;
+  white-space: nowrap;
+`;
+
+const WorkspaceActiveMeta = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+`;
+
+const WorkspaceBrowser = styled.div`
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(320px, 1.1fr);
+  gap: 0.8rem;
+  min-height: min(64vh, 720px);
+
+  @media (max-width: 980px) {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+`;
+
+const WorkspaceTreePane = styled.section`
+  min-height: 0;
   max-height: min(64vh, 720px);
   overflow: auto;
-  border: 1px solid rgba(31, 41, 55, 0.1);
+  border: 1px solid rgba(31, 41, 55, 0.08);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.74);
+  padding: 0.65rem;
 `;
 
-const WorkspacePreviewCard = styled.div`
+const WorkspacePreviewPane = styled.section`
+  min-height: 0;
+  max-height: min(64vh, 720px);
+  overflow: auto;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.74);
+  padding: 0.85rem;
   display: grid;
-  gap: 1rem;
-  padding: 1rem;
+  align-content: start;
+  gap: 0.8rem;
 `;
 
-const WorkspacePreviewHero = styled.div`
+const WorkspaceGroup = styled.section`
   display: grid;
-  gap: 0.65rem;
+  gap: 0.14rem;
+
+  & + & {
+    margin-top: 0.7rem;
+  }
+`;
+
+const WorkspaceGroupLabel = styled.div`
+  padding: 0.18rem 0.32rem 0.36rem;
+  color: var(--accent-deep);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+`;
+
+const WorkspaceFolderRow = styled.div`
+  padding-block: 0.34rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+`;
+
+const WorkspaceFileRow = styled.div<{ $selected: boolean }>`
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  border: 1px solid ${({ $selected }) => ($selected ? "rgba(201, 111, 59, 0.24)" : "transparent")};
+  border-radius: 12px;
+  background: ${({ $selected }) => ($selected ? "rgba(201, 111, 59, 0.08)" : "transparent")};
+`;
+
+const WorkspaceFileSelect = styled.button`
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding-block: 0.45rem;
+  text-align: left;
+  cursor: pointer;
+`;
+
+const WorkspaceFileLead = styled.div`
+  min-width: 0;
+  display: grid;
+  gap: 0.08rem;
+`;
+
+const WorkspaceFileName = styled.span`
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+`;
+
+const WorkspaceFileMeta = styled.span`
+  color: var(--muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+const WorkspaceFileActions = styled.div`
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+`;
+
+const WorkspaceRowAction = styled.button`
+  border: 0;
+  background: transparent;
+  color: var(--accent-deep);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.1rem 0.16rem;
+`;
+
+const WorkspacePreviewHeader = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.55rem;
 `;
 
 const WorkspacePreviewTitle = styled.h3`
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
 `;
 
-const WorkspacePreviewPath = styled(MetaText)`
-  word-break: break-word;
-`;
-
-const WorkspaceBadgeRow = styled.div`
-  display: flex;
+const WorkspacePreviewMeta = styled.div`
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.35rem;
 `;
 
-const WorkspaceStatGrid = styled.div`
+const WorkspacePreviewBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(201, 111, 59, 0.22);
+  background: rgba(201, 111, 59, 0.08);
+  padding: 0.18rem 0.46rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-deep);
+`;
+
+const WorkspaceEmptyState = styled.div`
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--muted);
+  font-size: 0.82rem;
+`;
+
+const PreviewSection = styled.section`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 0.75rem;
+  gap: 0.7rem;
 `;
 
-const WorkspaceStatCard = styled.div`
+const PreviewSectionHeader = styled.div`
   display: grid;
   gap: 0.15rem;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid rgba(31, 41, 55, 0.1);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.72);
-
-  strong {
-    font-size: 0.98rem;
-    word-break: break-word;
-  }
 `;
 
-const WorkspacePreviewSection = styled.section`
-  display: grid;
-  gap: 0.75rem;
-`;
-
-const WorkspacePreviewSectionHeader = styled.div`
-  display: grid;
-  gap: 0.2rem;
-`;
-
-const WorkspaceCodeBlock = styled.pre`
-  margin: 0;
-  max-height: 360px;
-  overflow: auto;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  background: rgba(20, 24, 31, 0.94);
-  color: #eff8ff;
-  padding: 0.85rem 0.95rem;
-  font-size: 0.76rem;
-  line-height: 1.45;
-`;
-
-const WorkspaceTextBlock = styled.pre`
-  margin: 0;
-  max-height: 360px;
-  overflow: auto;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  background: rgba(255, 255, 255, 0.84);
-  color: var(--ink);
-  padding: 0.85rem 0.95rem;
-  font-size: 0.76rem;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-`;
-
-const WorkspacePreviewNote = styled(MetaText)`
-  align-self: center;
-`;
-
-const WorkspaceMiniList = styled.div`
-  display: grid;
+const WorkspacePreviewMetaStrip = styled.div`
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
 `;
 
-const WorkspaceMiniListItem = styled.div`
+const WorkspaceMetaChip = styled.div`
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.38rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+`;
+
+const WorkspaceMetaLabel = styled.span`
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+`;
+
+const WorkspaceMetaValue = styled.span`
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink);
+`;
+
+const PreviewInlineStats = styled.div`
   display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.7rem 0.8rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+`;
+
+const PreviewInlineStat = styled.span`
+  display: inline-flex;
+  align-items: center;
+  padding: 0.24rem 0.48rem;
+  border-radius: 999px;
+  background: rgba(31, 41, 55, 0.06);
+  color: var(--muted);
+  font-size: 0.73rem;
+`;
+
+const PreviewTableScroller = styled.div`
+  overflow: auto;
+`;
+
+const PreviewTable = styled.table`
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+`;
+
+const PreviewTh = styled.th`
+  padding: 0.62rem 0.7rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(31, 41, 55, 0.04);
+  font-size: 0.78rem;
+`;
+
+const PreviewTd = styled.td`
+  padding: 0.62rem 0.7rem;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.06);
+  font-size: 0.78rem;
+  vertical-align: top;
+`;
+
+const PreviewPager = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const PreviewPagerButton = styled(WorkspaceInlineButton)`
+  padding-inline: 0.62rem;
+`;
+
+const PreviewCode = styled.pre`
+  margin: 0;
+  padding: 0.9rem;
+  border-radius: var(--radius-md);
+  background: #221f1b;
+  color: #f8f6f2;
+  overflow: auto;
+  font-size: 0.8rem;
+`;
+
+const PreviewText = styled.pre`
+  margin: 0;
+  padding: 0.9rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  white-space: pre-wrap;
+  overflow: auto;
+  font-size: 0.8rem;
+`;
+
+const PreviewImage = styled.img`
+  width: 100%;
   border-radius: var(--radius-md);
   border: 1px solid rgba(31, 41, 55, 0.08);
   background: rgba(255, 255, 255, 0.72);
-
-  span:first-child {
-    font-weight: 600;
-    word-break: break-word;
-  }
 `;

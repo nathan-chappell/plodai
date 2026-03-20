@@ -6,11 +6,7 @@ from threading import Lock
 from typing import Any
 
 from backend.app.core.config import get_settings
-
-try:
-    from colorlog import ColoredFormatter
-except ImportError:  # pragma: no cover - optional dependency behavior
-    ColoredFormatter = None
+from colorlog import ColoredFormatter
 
 APP_LOGGER_NAME = "report_foundry"
 EVENT_NAME_ATTR = "report_foundry_event_name"
@@ -212,7 +208,9 @@ class _BaseEventFormatter(logging.Formatter):
             event_fields = ()
         if not rendered_lines and not event_fields:
             return event_name
-        detail_lines = [f" > {line}" for line in rendered_lines if isinstance(line, str) and line]
+        detail_lines = [
+            f" > {line}" for line in rendered_lines if isinstance(line, str) and line
+        ]
         detail_lines.extend(
             f" > {key}={value}"
             for key, value in event_fields
@@ -231,8 +229,6 @@ def _build_plain_formatter() -> logging.Formatter:
 
 
 def _build_color_formatter() -> logging.Formatter:
-    if ColoredFormatter is None:
-        return _build_plain_formatter()
     class _ColorEventFormatter(_BaseEventFormatter, ColoredFormatter):
         pass
 
@@ -251,7 +247,9 @@ def _build_color_formatter() -> logging.Formatter:
 
 def configure_logging(level: int | None = None) -> None:
     settings = get_settings()
-    resolved_level = level if level is not None else resolve_log_level(settings.LOG_LEVEL)
+    resolved_level = (
+        level if level is not None else resolve_log_level(settings.LOG_LEVEL)
+    )
     external_level = resolve_external_log_level(resolved_level)
     openai_level = resolve_openai_log_level(resolved_level)
     chatkit_level = resolve_chatkit_log_level(resolved_level)
@@ -259,7 +257,9 @@ def configure_logging(level: int | None = None) -> None:
     sqlalchemy_level = resolve_sqlalchemy_log_level(resolved_level)
     quiet_library_level = resolve_quiet_library_log_level(resolved_level)
     root_level = external_level
-    formatter = _build_color_formatter() if settings.USE_COLORLOG else _build_plain_formatter()
+    formatter = (
+        _build_color_formatter() if settings.USE_COLORLOG else _build_plain_formatter()
+    )
 
     root_logger = logging.getLogger()
     root_logger.setLevel(root_level)

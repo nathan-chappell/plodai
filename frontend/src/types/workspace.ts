@@ -1,5 +1,7 @@
 import type { LocalWorkspaceFile } from "./report";
 
+export type WorkspaceKind = "default" | "demo" | "user";
+
 export type WorkspaceContext = {
   path_prefix: string;
   referenced_item_ids: string[];
@@ -28,6 +30,19 @@ export type WorkspaceItem = WorkspaceFileNode;
 
 export type WorkspaceFilesystem = {
   files_by_path: Record<string, WorkspaceFileNode>;
+};
+
+export type WorkspaceDescriptor = {
+  id: string;
+  name: string;
+  kind: WorkspaceKind;
+  created_at: string;
+};
+
+export type WorkspaceRegistry = {
+  version: "v1";
+  selected_workspace_id: string;
+  workspaces: WorkspaceDescriptor[];
 };
 
 export type WorkspaceSurfaceState = {

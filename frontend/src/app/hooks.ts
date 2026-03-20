@@ -3,8 +3,8 @@ import { useAuth } from "@clerk/react";
 
 import { DEFAULT_AUTHENTICATED_PATH, SIGN_IN_PATH } from "../lib/auth";
 import { ApiError, apiRequest, setClerkTokenGetter } from "../lib/api";
-import { BLOG_INDEX_PATH, isBlogPath } from "../lib/blog";
 import { navigate } from "../lib/router";
+import { WRITING_INDEX_PATH, isLegacyBlogPath, isWritingPath } from "../lib/writing";
 import type { AuthUser } from "../types/auth";
 import { subscribeToToasts, type AppToast } from "./toasts";
 
@@ -81,13 +81,17 @@ export function useAppRouteGuards({
   authError: string | null;
 }) {
   useEffect(() => {
+    if (isLegacyBlogPath(pathname)) {
+      navigate(WRITING_INDEX_PATH);
+      return;
+    }
     if (pathname === "/" && !hydrating) {
-      navigate(user ? DEFAULT_AUTHENTICATED_PATH : BLOG_INDEX_PATH);
+      navigate(user ? DEFAULT_AUTHENTICATED_PATH : SIGN_IN_PATH);
     }
   }, [hydrating, pathname, user]);
 
   useEffect(() => {
-    const isPublicRoute = isBlogPath(pathname) || pathname === SIGN_IN_PATH;
+    const isPublicRoute = isWritingPath(pathname) || isLegacyBlogPath(pathname) || pathname === SIGN_IN_PATH;
 
     if (hydrating) {
       return;

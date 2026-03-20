@@ -29,3 +29,9 @@ dev = [
 [build-system]
 requires = ["setuptools>=80.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+fix = true
+
+[tool.ruff.lint]
+fixable = ["F401"]

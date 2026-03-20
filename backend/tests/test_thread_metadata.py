@@ -42,11 +42,13 @@ def test_parse_thread_metadata_filters_expected_fields() -> None:
                         "report_id": "report-1",
                         "title": "Current report",
                         "item_count": 1,
+                        "slide_count": 1,
                         "updated_at": "2026-03-19T10:00:00Z",
                     }
                 ],
                 "current_report_id": "report-1",
                 "current_goal": "Investigate west region performance.",
+                "agents_markdown": "# AGENTS.md\n\n## Current Objective\nInvestigate west region performance.\n",
             },
             "openai_conversation_id": "conv_123",
             "openai_previous_response_id": "resp_456",
@@ -108,11 +110,13 @@ def test_parse_thread_metadata_filters_expected_fields() -> None:
                     "report_id": "report-1",
                     "title": "Current report",
                     "item_count": 1,
+                    "slide_count": 1,
                     "updated_at": "2026-03-19T10:00:00Z",
                 }
             ],
             "current_report_id": "report-1",
             "current_goal": "Investigate west region performance.",
+            "agents_markdown": "# AGENTS.md\n\n## Current Objective\nInvestigate west region performance.",
         },
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_456",
@@ -165,6 +169,7 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
                     }
                 ],
                 "reports": [],
+                "agents_markdown": "# AGENTS.md\n\nPrefer compact artifact names.",
             },
             "openai_previous_response_id": "resp_789",
             "execution_mode": "batch",
@@ -192,6 +197,7 @@ def test_merge_thread_metadata_allows_patch_and_removal() -> None:
                 }
             ],
             "reports": [],
+            "agents_markdown": "# AGENTS.md\n\nPrefer compact artifact names.",
         },
         "openai_conversation_id": "conv_123",
         "openai_previous_response_id": "resp_789",

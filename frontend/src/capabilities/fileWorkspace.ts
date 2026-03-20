@@ -1,15 +1,47 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppState } from "../app/context";
 import { useWorkspaceSurface } from "../app/workspace";
+import { listAllWorkspaceFileNodes } from "../lib/workspace-fs";
 import { loadCapabilityWorkspace, type CapabilityWorkspaceSnapshot } from "../lib/workspace-store";
 import type { ClientEffect, ExecutionMode } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import { useWorkspaceContract } from "./shared/useWorkspaceContract";
 import {
   buildWorkspaceStateMetadata,
+  isVisibleWorkspaceStatePath,
   syncWorkspaceToolCatalog,
 } from "../lib/workspace-contract";
+import type { ShellWorkspaceArtifact } from "./types";
+import { capabilityDefinitions } from "./definitions";
+
+const producerLabelById = new Map(
+  capabilityDefinitions.map((capability) => [capability.id, capability.navLabel]),
+);
+
+function resolveArtifactProducer(path: string, source: ShellWorkspaceArtifact["source"]): {
+  producerKey: string;
+  producerLabel: string;
+} {
+  const segments = path.split("/").filter(Boolean);
+  const firstSegment = segments[0];
+  if (source === "uploaded" || firstSegment === "uploaded") {
+    return {
+      producerKey: "uploaded",
+      producerLabel: "Uploaded",
+    };
+  }
+  if (firstSegment && producerLabelById.has(firstSegment)) {
+    return {
+      producerKey: firstSegment,
+      producerLabel: producerLabelById.get(firstSegment) ?? firstSegment,
+    };
+  }
+  return {
+    producerKey: firstSegment ?? "workspace",
+    producerLabel: firstSegment ? firstSegment.replace(/-/g, " ") : "Workspace",
+  };
+}
 
 export function useCapabilityFileWorkspace(options: {
   capabilityId: string;
@@ -28,6 +60,8 @@ export function useCapabilityFileWorkspace(options: {
   const allowedTabsKey = options.allowedTabs.join("|");
   const [status, setStatus] = useState(options.defaultStatus);
   const [legacySnapshot, setLegacySnapshot] = useState<CapabilityWorkspaceSnapshot | null>(null);
+  const [reportEffects, setReportEffects] = useState<ClientEffect[]>([]);
+  const demoWorkspaceOwnedRef = useRef(false);
 
   function normalizeTab(tab: string): string {
     return options.allowedTabs.includes(tab) ? tab : options.defaultTab;
@@ -37,6 +71,7 @@ export function useCapabilityFileWorkspace(options: {
     if (!user) {
       setStatus(options.defaultStatus);
       setLegacySnapshot(null);
+      setReportEffects([]);
       return;
     }
 
@@ -54,6 +89,9 @@ export function useCapabilityFileWorkspace(options: {
           ...snapshot,
           activeWorkspaceTab: normalizeTab(snapshot.activeWorkspaceTab),
         });
+        setReportEffects(snapshot.reportEffects);
+      } else {
+        setReportEffects([]);
       }
     })();
 
@@ -90,6 +128,26 @@ export function useCapabilityFileWorkspace(options: {
     legacySnapshot,
   });
 
+  useEffect(() => {
+    if (contract.activeWorkspaceTab === "demo") {
+      if (workspace.selectedWorkspaceKind !== "demo") {
+        workspace.activateDemoWorkspace();
+        demoWorkspaceOwnedRef.current = true;
+      }
+      return;
+    }
+
+    if (demoWorkspaceOwnedRef.current && workspace.selectedWorkspaceKind === "demo") {
+      workspace.restorePreviousWorkspace();
+    }
+    demoWorkspaceOwnedRef.current = false;
+  }, [
+    contract.activeWorkspaceTab,
+    workspace.activateDemoWorkspace,
+    workspace.restorePreviousWorkspace,
+    workspace.selectedWorkspaceKind,
+  ]);
+
   const handleFiles = useCallback(async (nextFiles: FileList | null) => {
     if (!nextFiles?.length) {
       return;
@@ -99,11 +157,9 @@ export function useCapabilityFileWorkspace(options: {
     await workspace.handleSelectFiles(nextFiles);
     const builtCount = nextFiles.length;
     setStatus(
-      `Added ${builtCount} workspace file${builtCount === 1 ? "" : "s"} under ${workspace.activePrefix}. ${
-        builtCount === 1 ? "The file is" : "The files are"
-      } ready for the agent.`,
+      `Added ${builtCount} file${builtCount === 1 ? "" : "s"} to ${workspace.selectedWorkspaceName}.`,
     );
-  }, [workspace.activePrefix, workspace.handleSelectFiles]);
+  }, [workspace.handleSelectFiles, workspace.selectedWorkspaceName]);
 
   const appendFiles = useCallback((nextFiles: LocalWorkspaceFile[]) => {
     if (!nextFiles.length) {
@@ -111,10 +167,10 @@ export function useCapabilityFileWorkspace(options: {
     }
     const storedFiles = workspace.appendFiles(nextFiles, "derived");
     setStatus(
-      `Added ${nextFiles.length} derived file${nextFiles.length === 1 ? "" : "s"} under ${workspace.activePrefix}.`,
+      `Added ${nextFiles.length} derived file${nextFiles.length === 1 ? "" : "s"} to ${workspace.selectedWorkspaceName}.`,
     );
     return storedFiles;
-  }, [workspace.activePrefix, workspace.appendFiles]);
+  }, [workspace.appendFiles, workspace.selectedWorkspaceName]);
 
   const setFiles = useCallback((nextFiles: LocalWorkspaceFile[]) => {
     workspace.replaceFiles(nextFiles, "demo");
@@ -122,15 +178,41 @@ export function useCapabilityFileWorkspace(options: {
 
   const handleRemoveEntry = useCallback((entryId: string) => {
     workspace.handleRemoveEntry(entryId);
-    contract.setReportEffects([]);
+    setReportEffects([]);
     setStatus("Removed the selected workspace entry.");
-  }, [contract.setReportEffects, workspace.handleRemoveEntry]);
+  }, [workspace.handleRemoveEntry]);
 
   const syncToolCatalog = useCallback((toolNames: string[]) => {
     workspace.updateFilesystem((filesystem) =>
       syncWorkspaceToolCatalog(filesystem, options.capabilityId, toolNames),
     );
   }, [options.capabilityId, workspace.updateFilesystem]);
+
+  const appendReportEffects = useCallback((effects: ClientEffect[]) => {
+    if (!effects.length) {
+      return;
+    }
+    setReportEffects((current) => [...current, ...effects]);
+  }, []);
+
+  const artifacts = useMemo<ShellWorkspaceArtifact[]>(
+    () =>
+      listAllWorkspaceFileNodes(workspace.filesystem)
+        .filter((node) => isVisibleWorkspaceStatePath(node.path))
+        .map((node) => {
+          const producer = resolveArtifactProducer(node.path, node.source);
+          return {
+            entryId: node.id,
+            path: node.path,
+            createdAt: node.created_at,
+            source: node.source,
+            producerKey: producer.producerKey,
+            producerLabel: producer.producerLabel,
+            file: node.file,
+          };
+        }),
+    [workspace.filesystem],
+  );
 
   const workspaceStateMetadata = buildWorkspaceStateMetadata(
     workspace.filesystem,
@@ -147,8 +229,16 @@ export function useCapabilityFileWorkspace(options: {
     workspaceHydrated: workspace.hydrated,
     breadcrumbs: workspace.breadcrumbs,
     getState: workspace.getState,
+    workspaces: workspace.workspaces,
+    selectedWorkspaceId: workspace.selectedWorkspaceId,
+    selectedWorkspaceName: workspace.selectedWorkspaceName,
+    selectedWorkspaceKind: workspace.selectedWorkspaceKind,
+    selectWorkspace: workspace.selectWorkspace,
+    createWorkspace: workspace.createWorkspace,
+    clearWorkspace: workspace.clearWorkspace,
     setFiles,
     appendFiles,
+    artifacts,
     status,
     setStatus,
     investigationBrief: contract.investigationBrief,
@@ -157,9 +247,9 @@ export function useCapabilityFileWorkspace(options: {
     setActiveWorkspaceTab: contract.setActiveWorkspaceTab,
     executionMode: contract.executionMode,
     setExecutionMode: contract.setExecutionMode,
-    reportEffects: contract.reportEffects,
-    setReportEffects: contract.setReportEffects,
-    appendReportEffects: contract.appendReportEffects,
+    reportEffects,
+    setReportEffects,
+    appendReportEffects,
     currentReportId: contract.currentReportId,
     reportIds: contract.reportIds,
     currentReport: contract.currentReport,
