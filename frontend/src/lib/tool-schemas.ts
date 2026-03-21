@@ -262,12 +262,33 @@ export const includeSamplesSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-export const inspectChartableFileSchemaToolSchema: JsonSchema = {
+export const listDemoScenariosToolSchema: JsonSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+export const launchDemoScenarioToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    file_id: { type: "string" },
+    scenario_id: { type: "string" },
   },
-  required: ["file_id"],
+  required: ["scenario_id"],
+  additionalProperties: false,
+};
+
+export const listImageFilesToolSchema: JsonSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+export const inspectDatasetSchemaToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    dataset_id: { type: "string" },
+  },
+  required: ["dataset_id"],
   additionalProperties: false,
 };
 
@@ -289,57 +310,39 @@ export const compactRunAggregateQueryToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-export const createCsvFileToolSchema: JsonSchema = {
+export const createDatasetToolSchema: JsonSchema = {
   type: "object",
   properties: {
     filename: { type: "string" },
+    format: { enum: ["csv", "json"] },
     query_plan: queryPlanSchema,
   },
-  required: ["filename", "query_plan"],
+  required: ["filename", "format", "query_plan"],
   additionalProperties: false,
 };
 
-export const compactCreateCsvFileToolSchema: JsonSchema = {
+export const compactCreateDatasetToolSchema: JsonSchema = {
   type: "object",
   properties: {
     filename: { type: "string" },
+    format: { enum: ["csv", "json"] },
     query_plan: compactAggregateQueryPlanSchema,
   },
-  required: ["filename", "query_plan"],
+  required: ["filename", "format", "query_plan"],
   additionalProperties: false,
 };
 
-export const createJsonFileToolSchema: JsonSchema = {
+export const renderChartFromDatasetToolSchema: JsonSchema = {
   type: "object",
   properties: {
-    filename: { type: "string" },
-    query_plan: queryPlanSchema,
-  },
-  required: ["filename", "query_plan"],
-  additionalProperties: false,
-};
-
-export const compactCreateJsonFileToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    filename: { type: "string" },
-    query_plan: compactAggregateQueryPlanSchema,
-  },
-  required: ["filename", "query_plan"],
-  additionalProperties: false,
-};
-
-export const renderChartFromFileToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    file_id: { type: "string" },
+    dataset_id: { type: "string" },
     chart_plan_id: { type: "string" },
     chart_plan: clientChartSpecSchema,
     x_key: { type: "string" },
     y_key: { type: "string" },
     series_key: { type: "string" },
   },
-  required: ["file_id", "chart_plan_id", "chart_plan", "x_key"],
+  required: ["dataset_id", "chart_plan_id", "chart_plan", "x_key"],
   additionalProperties: false,
 };
 
@@ -348,6 +351,16 @@ export const inspectPdfFileToolSchema: JsonSchema = {
   properties: {
     file_id: { type: "string" },
     max_pages: { type: "integer", minimum: 1, maximum: 30 },
+  },
+  required: ["file_id"],
+  additionalProperties: false,
+};
+
+export const inspectImageFileToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    file_id: { type: "string" },
+    max_dimension: { type: "integer", minimum: 256, maximum: 2048 },
   },
   required: ["file_id"],
   additionalProperties: false,
@@ -415,19 +428,38 @@ const reportChartPanelDraftSchema: JsonSchema = {
   properties: {
     type: { enum: ["chart"] },
     title: { type: "string" },
-    file_id: { type: "string" },
+    dataset_id: { type: "string" },
     chart_plan_id: { type: "string" },
     chart: clientChartSpecSchema,
     image_data_url: {
       anyOf: [{ type: "string" }, { type: "null" }],
     },
   },
-  required: ["type", "title", "file_id", "chart_plan_id", "chart"],
+  required: ["type", "title", "dataset_id", "chart_plan_id", "chart"],
+  additionalProperties: false,
+};
+
+const reportImagePanelDraftSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    type: { enum: ["image"] },
+    title: { type: "string" },
+    file_id: { type: "string" },
+    image_data_url: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    alt_text: { type: "string" },
+  },
+  required: ["type", "title", "file_id"],
   additionalProperties: false,
 };
 
 const reportSlidePanelDraftSchema: JsonSchema = {
-  anyOf: [reportNarrativePanelDraftSchema, reportChartPanelDraftSchema],
+  anyOf: [
+    reportNarrativePanelDraftSchema,
+    reportChartPanelDraftSchema,
+    reportImagePanelDraftSchema,
+  ],
 };
 
 function reportSlideDraftForLayout(

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-WorkspaceFileKind = Literal["csv", "json", "pdf", "other"]
+WorkspaceFileKind = Literal["csv", "json", "pdf", "image", "other"]
 
 
 @dataclass
@@ -26,6 +26,12 @@ class PdfWorkspaceMetadata:
 
 
 @dataclass
+class ImageWorkspaceMetadata:
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass
 class WorkspaceFileMetadata:
     id: str
     name: str
@@ -37,3 +43,4 @@ class WorkspaceFileMetadata:
     csv: CsvWorkspaceMetadata | None = None
     json: JsonWorkspaceMetadata | None = None
     pdf: PdfWorkspaceMetadata | None = None
+    image: ImageWorkspaceMetadata | None = None

@@ -36,7 +36,27 @@ class AgentPlan(TypedDict):
     planned_steps: list[str]
     success_criteria: NotRequired[list[str]]
     follow_on_tool_hints: NotRequired[list[str]]
+    execution_hints: NotRequired[list["AgentPlanExecutionHint"]]
     created_at: NotRequired[str]
+
+
+class AgentPlanExecutionHint(TypedDict, total=False):
+    done_when: str
+    preferred_tool_names: list[str]
+    preferred_handoff_tool_names: list[str]
+
+
+PlanExecutionStatus: TypeAlias = Literal["active", "completed", "cancelled"]
+
+
+class PlanExecution(TypedDict, total=False):
+    plan_id: str
+    status: PlanExecutionStatus
+    workflow_item_id: str
+    current_step_index: int
+    attempts_by_step: list[int]
+    step_notes: list[str | None]
+    step_started_after_item_id: str
 
 
 class ClientToolDefinition(TypedDict, total=False):
@@ -55,64 +75,58 @@ class ToolDisplaySpec(TypedDict, total=False):
     arg_labels: dict[str, str]
 
 
-class ToolProviderDelegationTarget(TypedDict):
-    tool_provider_id: str
+class AgentDelegationTarget(TypedDict):
+    agent_id: str
     tool_name: str
     description: str
 
 
-class ToolProviderAgentSpec(TypedDict):
-    tool_provider_id: str
+class AgentSpec(TypedDict):
+    agent_id: str
     agent_name: str
     instructions: str
     client_tools: list[ClientToolDefinition]
-    delegation_targets: list[ToolProviderDelegationTarget]
+    delegation_targets: list[AgentDelegationTarget]
 
 
-class ToolProviderBundle(TypedDict):
-    root_tool_provider_id: str
-    tool_providers: list[ToolProviderAgentSpec]
+class AgentBundle(TypedDict):
+    root_agent_id: str
+    agents: list[AgentSpec]
 
 
-class WorkspaceContext(TypedDict):
-    workspace_id: str
-    referenced_item_ids: list[str]
+class ShellStateAgentSummary(TypedDict, total=False):
+    agent_id: str
+    goal: str | None
+    resource_count: int
+    current_report_id: str | None
 
 
-class WorkspaceStateFileSummary(TypedDict, total=False):
+class ShellStateResourceSummary(TypedDict, total=False):
     id: str
-    name: str
-    bucket: str
-    producer_key: str
-    producer_label: str
-    source: Literal["uploaded", "derived", "demo"]
-    kind: Literal["csv", "json", "pdf", "other"]
-    extension: str
-    mime_type: NotRequired[str | None]
-    byte_size: NotRequired[int | None]
-    row_count: NotRequired[int]
-    columns: NotRequired[list[str]]
-    numeric_columns: NotRequired[list[str]]
-    sample_rows: NotRequired[list[dict[str, object]]]
-    page_count: NotRequired[int | None]
-
-
-class WorkspaceStateReportSummary(TypedDict):
-    report_id: str
+    owner_agent_id: str
+    kind: Literal["dataset", "chart", "document", "image", "report", "text", "blob"]
     title: str
-    item_count: int
-    slide_count: NotRequired[int]
-    updated_at: NotRequired[str | None]
+    created_at: str
+    summary: str | None
+    payload_ref: str
+    extension: str | None
+    mime_type: str | None
+    byte_size: int | None
+    row_count: int | None
+    columns: list[str]
+    numeric_columns: list[str]
+    sample_rows: list[dict[str, object]]
+    page_count: int | None
+    width: int | None
+    height: int | None
+    slide_count: int | None
 
 
-class WorkspaceState(TypedDict):
+class ShellState(TypedDict):
     version: Literal["v1"]
-    context: WorkspaceContext
-    files: list[WorkspaceStateFileSummary]
-    reports: list[WorkspaceStateReportSummary]
-    current_report_id: NotRequired[str | None]
-    current_goal: NotRequired[str | None]
-    agents_markdown: NotRequired[str | None]
+    active_agent_id: str
+    agents: list[ShellStateAgentSummary]
+    resources: list[ShellStateResourceSummary]
 
 
 class PendingFeedbackSession(TypedDict):
@@ -128,14 +142,15 @@ class ThreadMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
     plan: AgentPlan
+    plan_execution: PlanExecution
     chart_plan: AgentPlan
     chart_cache: dict[str, str]
     surface_key: str
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
-    tool_provider_bundle: ToolProviderBundle
-    workspace_state: WorkspaceState
+    agent_bundle: AgentBundle
+    shell_state: ShellState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
@@ -144,20 +159,25 @@ class AppThreadMetadata(TypedDict, total=False):
     title: str
     investigation_brief: str
     plan: AgentPlan
+    plan_execution: PlanExecution
     chart_plan: AgentPlan
     chart_cache: dict[str, str]
     surface_key: str
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: ThreadUsageTotals
-    tool_provider_bundle: ToolProviderBundle
-    workspace_state: WorkspaceState
+    agent_bundle: AgentBundle
+    shell_state: ShellState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
 
 class _MetadataModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+
+class _StrictMetadataModel(_MetadataModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 def _strip_string(value: object) -> str | None:
@@ -269,6 +289,7 @@ class AgentPlanModel(_MetadataModel):
     planned_steps: list[str]
     success_criteria: list[str] | None = None
     follow_on_tool_hints: list[str] | None = None
+    execution_hints: list["AgentPlanExecutionHintModel"] | None = None
     created_at: str | None = None
 
     @field_validator("id", "focus", mode="before")
@@ -303,10 +324,133 @@ class AgentPlanModel(_MetadataModel):
         ]
         return cleaned or None
 
+    @field_validator("execution_hints", mode="before")
+    @classmethod
+    def _execution_hints(
+        cls,
+        value: object,
+    ) -> list["AgentPlanExecutionHintModel"] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("execution_hints must be a list")
+        validated: list[AgentPlanExecutionHintModel] = []
+        for raw_item in value:
+            validated.append(AgentPlanExecutionHintModel.model_validate(raw_item))
+        return validated or None
+
     @model_validator(mode="after")
     def _require_planned_steps(self) -> "AgentPlanModel":
         if not self.planned_steps:
             raise ValueError("planned_steps must contain at least one step")
+        if self.execution_hints is not None and len(self.execution_hints) != len(
+            self.planned_steps
+        ):
+            raise ValueError(
+                "execution_hints must align one-to-one with planned_steps"
+            )
+        return self
+
+
+class AgentPlanExecutionHintModel(_StrictMetadataModel):
+    done_when: str | None = None
+    preferred_tool_names: list[str] | None = None
+    preferred_handoff_tool_names: list[str] | None = None
+
+    @field_validator("done_when", mode="before")
+    @classmethod
+    def _done_when(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+    @field_validator(
+        "preferred_tool_names",
+        "preferred_handoff_tool_names",
+        mode="before",
+    )
+    @classmethod
+    def _string_list(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("expected a list")
+        cleaned = [
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        ]
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def _require_some_hint(self) -> "AgentPlanExecutionHintModel":
+        if (
+            self.done_when is None
+            and not self.preferred_tool_names
+            and not self.preferred_handoff_tool_names
+        ):
+            raise ValueError("execution hint must include at least one field")
+        return self
+
+
+class PlanExecutionStateModel(_StrictMetadataModel):
+    plan_id: str
+    status: PlanExecutionStatus
+    workflow_item_id: str
+    current_step_index: int
+    attempts_by_step: list[int]
+    step_notes: list[str | None]
+    step_started_after_item_id: str | None = None
+
+    @field_validator(
+        "plan_id",
+        "workflow_item_id",
+        "step_started_after_item_id",
+        mode="before",
+    )
+    @classmethod
+    def _optional_or_required_string(cls, value: object, info) -> str | None:
+        text = _strip_string(value)
+        if info.field_name == "step_started_after_item_id":
+            return text
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("current_step_index", mode="before")
+    @classmethod
+    def _current_step_index(cls, value: object) -> int:
+        if not isinstance(value, int):
+            raise ValueError("current_step_index must be an integer")
+        return value
+
+    @field_validator("attempts_by_step", mode="before")
+    @classmethod
+    def _attempts_by_step(cls, value: object) -> list[int]:
+        if not isinstance(value, list):
+            raise ValueError("attempts_by_step must be a list")
+        attempts: list[int] = []
+        for raw_value in value:
+            if not isinstance(raw_value, int):
+                raise ValueError("attempts_by_step must contain integers")
+            attempts.append(raw_value)
+        return attempts
+
+    @field_validator("step_notes", mode="before")
+    @classmethod
+    def _step_notes(cls, value: object) -> list[str | None]:
+        if not isinstance(value, list):
+            raise ValueError("step_notes must be a list")
+        notes: list[str | None] = []
+        for raw_value in value:
+            if raw_value is None:
+                notes.append(None)
+                continue
+            notes.append(_strip_string(raw_value))
+        return notes
+
+    @model_validator(mode="after")
+    def _validate_lengths(self) -> "PlanExecutionStateModel":
+        if self.current_step_index < 0:
+            raise ValueError("current_step_index must be >= 0")
+        if len(self.attempts_by_step) != len(self.step_notes):
+            raise ValueError("attempts_by_step and step_notes must align")
         return self
 
 
@@ -389,12 +533,12 @@ class ToolDisplaySpecModel(_MetadataModel):
         return labels or None
 
 
-class ToolProviderDelegationTargetModel(_MetadataModel):
-    tool_provider_id: str
+class AgentDelegationTargetModel(_MetadataModel):
+    agent_id: str
     tool_name: str
     description: str
 
-    @field_validator("tool_provider_id", "tool_name", "description", mode="before")
+    @field_validator("agent_id", "tool_name", "description", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -403,16 +547,16 @@ class ToolProviderDelegationTargetModel(_MetadataModel):
         return text
 
 
-class ToolProviderAgentSpecModel(_MetadataModel):
-    tool_provider_id: str
+class AgentSpecModel(_MetadataModel):
+    agent_id: str
     agent_name: str
     instructions: str
     client_tools: list[ClientToolDefinitionModel] = Field(default_factory=list)
-    delegation_targets: list[ToolProviderDelegationTargetModel] = Field(
+    delegation_targets: list[AgentDelegationTargetModel] = Field(
         default_factory=list
     )
 
-    @field_validator("tool_provider_id", "agent_name", "instructions", mode="before")
+    @field_validator("agent_id", "agent_name", "instructions", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -436,90 +580,57 @@ class ToolProviderAgentSpecModel(_MetadataModel):
     def _delegation_targets(
         cls,
         value: object,
-    ) -> list[ToolProviderDelegationTargetModel]:
+    ) -> list[AgentDelegationTargetModel]:
         return cast(
-            list[ToolProviderDelegationTargetModel],
-            _validated_model_list(ToolProviderDelegationTargetModel, value),
+            list[AgentDelegationTargetModel],
+            _validated_model_list(AgentDelegationTargetModel, value),
         )
 
 
-class ToolProviderBundleModel(_MetadataModel):
-    root_tool_provider_id: str
-    tool_providers: list[ToolProviderAgentSpecModel]
+class AgentBundleModel(_MetadataModel):
+    root_agent_id: str
+    agents: list[AgentSpecModel]
 
-    @field_validator("root_tool_provider_id", mode="before")
+    @field_validator("root_agent_id", mode="before")
     @classmethod
-    def _root_tool_provider_id(cls, value: object) -> str:
+    def _root_agent_id(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
-            raise ValueError("expected a non-empty root_tool_provider_id")
+            raise ValueError("expected a non-empty root_agent_id")
         return text
 
-    @field_validator("tool_providers", mode="before")
+    @field_validator("agents", mode="before")
     @classmethod
-    def _tool_providers(
+    def _agents(
         cls,
         value: object,
-    ) -> list[ToolProviderAgentSpecModel]:
+    ) -> list[AgentSpecModel]:
         return cast(
-            list[ToolProviderAgentSpecModel],
-            _validated_model_list(ToolProviderAgentSpecModel, value),
+            list[AgentSpecModel],
+            _validated_model_list(AgentSpecModel, value),
         )
 
     @model_validator(mode="after")
-    def _validate_root_tool_provider(self) -> "ToolProviderBundleModel":
-        if not self.tool_providers:
-            raise ValueError("tool_providers must not be empty")
-        tool_provider_ids = {
-            tool_provider.tool_provider_id for tool_provider in self.tool_providers
+    def _validate_root_agent(self) -> "AgentBundleModel":
+        if not self.agents:
+            raise ValueError("agents must not be empty")
+        agent_ids = {
+            agent.agent_id for agent in self.agents
         }
-        if self.root_tool_provider_id not in tool_provider_ids:
+        if self.root_agent_id not in agent_ids:
             raise ValueError(
-                "root_tool_provider_id must be present in tool_providers"
+                "root_agent_id must be present in agents"
             )
         return self
 
 
-class WorkspaceContextModel(_MetadataModel):
-    workspace_id: str
-    referenced_item_ids: list[str]
+class ShellStateAgentSummaryModel(_MetadataModel):
+    agent_id: str
+    goal: str | None = None
+    resource_count: int = 0
+    current_report_id: str | None = None
 
-    @field_validator("workspace_id", mode="before")
-    @classmethod
-    def _workspace_id(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty workspace_id")
-        return text
-
-    @field_validator("referenced_item_ids", mode="before")
-    @classmethod
-    def _referenced_item_ids(cls, value: object) -> list[str]:
-        if not isinstance(value, list):
-            raise ValueError("expected a list")
-        return [
-            item.strip() for item in value if isinstance(item, str) and item.strip()
-        ]
-
-
-class WorkspaceStateFileSummaryModel(_MetadataModel):
-    id: str
-    name: str
-    bucket: str | None = None
-    producer_key: str | None = None
-    producer_label: str | None = None
-    source: Literal["uploaded", "derived", "demo"] | None = None
-    kind: Literal["csv", "json", "pdf", "other"]
-    extension: str
-    mime_type: str | None = None
-    byte_size: int | None = None
-    row_count: int | None = None
-    columns: list[str] | None = None
-    numeric_columns: list[str] | None = None
-    sample_rows: list[dict[str, object]] | None = None
-    page_count: int | None = None
-
-    @field_validator("id", "name", "extension", mode="before")
+    @field_validator("agent_id", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -527,17 +638,66 @@ class WorkspaceStateFileSummaryModel(_MetadataModel):
             raise ValueError("expected a non-empty string")
         return text
 
-    @field_validator("bucket", "producer_key", "producer_label", mode="before")
-    @classmethod
-    def _optional_required_string(cls, value: object) -> str | None:
-        return _strip_string(value)
-
-    @field_validator("mime_type", mode="before")
+    @field_validator("goal", "current_report_id", mode="before")
     @classmethod
     def _optional_string(cls, value: object) -> str | None:
         return _strip_string(value)
 
-    @field_validator("byte_size", "row_count", "page_count", mode="before")
+    @field_validator("resource_count", mode="before")
+    @classmethod
+    def _resource_count(cls, value: object) -> int:
+        return value if isinstance(value, int) and value >= 0 else 0
+
+
+class ShellStateResourceSummaryModel(_MetadataModel):
+    id: str
+    owner_agent_id: str
+    kind: Literal["dataset", "chart", "document", "image", "report", "text", "blob"]
+    title: str
+    created_at: str
+    summary: str | None = None
+    payload_ref: str
+    extension: str | None = None
+    mime_type: str | None = None
+    byte_size: int | None = None
+    row_count: int | None = None
+    columns: list[str] | None = None
+    numeric_columns: list[str] | None = None
+    sample_rows: list[dict[str, object]] | None = None
+    page_count: int | None = None
+    width: int | None = None
+    height: int | None = None
+    slide_count: int | None = None
+
+    @field_validator(
+        "id",
+        "owner_agent_id",
+        "title",
+        "created_at",
+        "payload_ref",
+        mode="before",
+    )
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("summary", "extension", "mime_type", mode="before")
+    @classmethod
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
+
+    @field_validator(
+        "byte_size",
+        "row_count",
+        "page_count",
+        "width",
+        "height",
+        "slide_count",
+        mode="before",
+    )
     @classmethod
     def _optional_int(cls, value: object) -> int | None:
         return value if isinstance(value, int) else None
@@ -565,75 +725,41 @@ class WorkspaceStateFileSummaryModel(_MetadataModel):
         return rows or None
 
 
-class WorkspaceStateReportSummaryModel(_MetadataModel):
-    report_id: str
-    title: str
-    item_count: int
-    slide_count: int | None = None
-    updated_at: str | None = None
+class ShellStateModel(_MetadataModel):
+    version: Literal["v1"]
+    active_agent_id: str
+    agents: list[ShellStateAgentSummaryModel] = Field(default_factory=list)
+    resources: list[ShellStateResourceSummaryModel] = Field(default_factory=list)
 
-    @field_validator("report_id", "title", mode="before")
+    @field_validator("active_agent_id", mode="before")
     @classmethod
-    def _required_string(cls, value: object) -> str:
+    def _active_agent_id(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
             raise ValueError("expected a non-empty string")
         return text
 
-    @field_validator("updated_at", mode="before")
+    @field_validator("agents", mode="before")
     @classmethod
-    def _optional_string(cls, value: object) -> str | None:
-        return _strip_string(value)
-
-
-class WorkspaceStateModel(_MetadataModel):
-    version: Literal["v1"]
-    context: WorkspaceContextModel
-    files: list[WorkspaceStateFileSummaryModel] = Field(default_factory=list)
-    reports: list[WorkspaceStateReportSummaryModel] = Field(default_factory=list)
-    current_report_id: str | None = None
-    current_goal: str | None = None
-    agents_markdown: str | None = None
-
-    @field_validator("context", mode="before")
-    @classmethod
-    def _context(cls, value: object) -> WorkspaceContextModel:
-        validated = _validated_model_or_none(WorkspaceContextModel, value)
-        if not isinstance(validated, WorkspaceContextModel):
-            raise ValueError("expected a valid workspace context")
-        return validated
-
-    @field_validator("files", mode="before")
-    @classmethod
-    def _files(
+    def _agents(
         cls,
         value: object,
-    ) -> list[WorkspaceStateFileSummaryModel]:
+    ) -> list[ShellStateAgentSummaryModel]:
         return cast(
-            list[WorkspaceStateFileSummaryModel],
-            _validated_model_list(WorkspaceStateFileSummaryModel, value),
+            list[ShellStateAgentSummaryModel],
+            _validated_model_list(ShellStateAgentSummaryModel, value),
         )
 
-    @field_validator("reports", mode="before")
+    @field_validator("resources", mode="before")
     @classmethod
-    def _reports(
+    def _resources(
         cls,
         value: object,
-    ) -> list[WorkspaceStateReportSummaryModel]:
+    ) -> list[ShellStateResourceSummaryModel]:
         return cast(
-            list[WorkspaceStateReportSummaryModel],
-            _validated_model_list(WorkspaceStateReportSummaryModel, value),
+            list[ShellStateResourceSummaryModel],
+            _validated_model_list(ShellStateResourceSummaryModel, value),
         )
-
-    @field_validator(
-        "current_report_id",
-        "current_goal",
-        "agents_markdown",
-        mode="before",
-    )
-    @classmethod
-    def _optional_string(cls, value: object) -> str | None:
-        return _strip_string(value)
 
 
 class PendingFeedbackSessionModel(_MetadataModel):
@@ -691,14 +817,15 @@ class AppThreadMetadataModel(_MetadataModel):
     title: str | None = None
     investigation_brief: str | None = None
     plan: AgentPlanModel | None = None
+    plan_execution: PlanExecutionStateModel | None = None
     chart_plan: AgentPlanModel | None = None
     chart_cache: dict[str, str] | None = None
     surface_key: str | None = None
     openai_conversation_id: str | None = None
     openai_previous_response_id: str | None = None
     usage: ThreadUsageTotalsModel | None = None
-    tool_provider_bundle: ToolProviderBundleModel | None = None
-    workspace_state: WorkspaceStateModel | None = None
+    agent_bundle: AgentBundleModel | None = None
+    shell_state: ShellStateModel | None = None
     origin: FeedbackOrigin | None = None
     feedback_session: PendingFeedbackSessionModel | None = None
 
@@ -731,25 +858,34 @@ class AppThreadMetadataModel(_MetadataModel):
         validated = _validated_model_or_none(AgentPlanModel, value)
         return cast(AgentPlanModel | None, validated)
 
+    @field_validator("plan_execution", mode="before")
+    @classmethod
+    def _plan_execution(
+        cls,
+        value: object,
+    ) -> PlanExecutionStateModel | None:
+        validated = _validated_model_or_none(PlanExecutionStateModel, value)
+        return cast(PlanExecutionStateModel | None, validated)
+
     @field_validator("usage", mode="before")
     @classmethod
     def _thread_usage(cls, value: object) -> ThreadUsageTotalsModel | None:
         validated = _validated_model_or_none(ThreadUsageTotalsModel, value)
         return cast(ThreadUsageTotalsModel | None, validated)
 
-    @field_validator("tool_provider_bundle", mode="before")
+    @field_validator("agent_bundle", mode="before")
     @classmethod
-    def _tool_provider_bundle(
+    def _agent_bundle(
         cls, value: object
-    ) -> ToolProviderBundleModel | None:
-        validated = _validated_model_or_none(ToolProviderBundleModel, value)
-        return cast(ToolProviderBundleModel | None, validated)
+    ) -> AgentBundleModel | None:
+        validated = _validated_model_or_none(AgentBundleModel, value)
+        return cast(AgentBundleModel | None, validated)
 
-    @field_validator("workspace_state", mode="before")
+    @field_validator("shell_state", mode="before")
     @classmethod
-    def _workspace_state(cls, value: object) -> WorkspaceStateModel | None:
-        validated = _validated_model_or_none(WorkspaceStateModel, value)
-        return cast(WorkspaceStateModel | None, validated)
+    def _shell_state(cls, value: object) -> ShellStateModel | None:
+        validated = _validated_model_or_none(ShellStateModel, value)
+        return cast(ShellStateModel | None, validated)
 
     @field_validator("feedback_session", mode="before")
     @classmethod
@@ -783,3 +919,20 @@ def merge_thread_metadata(
         else:
             merged[key] = value
     return merged
+
+
+def active_plan_execution(
+    metadata: object | None,
+) -> PlanExecution | None:
+    if not isinstance(metadata, dict):
+        return None
+    execution = metadata.get("plan_execution")
+    if not isinstance(execution, dict):
+        return None
+    if execution.get("status") != "active":
+        return None
+    if not isinstance(execution.get("workflow_item_id"), str):
+        return None
+    if not isinstance(execution.get("plan_id"), str):
+        return None
+    return cast(PlanExecution, execution)

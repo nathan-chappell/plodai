@@ -61,7 +61,7 @@ def test_event_formatter_renders_multiline_fields() -> None:
     log_event(
         logger,
         logging.INFO,
-        "agent.capability_compiled",
+        "agent.agent_compiled",
         rendered=[
             "Feedback Agent(Chart Agent):",
             "- create_report(title)",
@@ -71,7 +71,7 @@ def test_event_formatter_renders_multiline_fields() -> None:
     )
 
     output = stream.getvalue()
-    assert "agent.capability_compiled" in output
+    assert "agent.agent_compiled" in output
     assert "\n > Feedback Agent(Chart Agent):" in output
     assert "\n > - create_report(title)" in output
     assert "\n > thread_id=thr_123" in output
@@ -92,7 +92,7 @@ def test_event_formatter_omits_empty_fields_and_preserves_legacy_messages() -> N
         logger,
         logging.INFO,
         "tool.start",
-        tool_name="render_chart_from_file",
+        tool_name="render_chart_from_dataset",
         empty_string="",
         none_value=None,
         false_value=False,
@@ -181,7 +181,7 @@ def test_client_tool_output_received_log_uses_summaries() -> None:
             },
         },
         call_id="call_123",
-        name="render_chart_from_file",
+        name="render_chart_from_dataset",
     )
 
     try:
@@ -202,7 +202,7 @@ def test_client_tool_output_received_log_uses_summaries() -> None:
     }
     captured = stream.getvalue()
     assert "tool.output.received" in captured
-    assert "render_chart_from_file [id=call_123 status=completed]" in captured
+    assert "render_chart_from_dataset [id=call_123 status=completed]" in captured
     assert "result=keys=file_input,imageDataUrl,row_count,rows" in captured
     assert "row_count=3" in captured
     assert "rows=1" in captured
@@ -308,7 +308,7 @@ def test_client_tool_converter_uses_uploaded_file_ids() -> None:
                 }
             },
             call_id="call_upload",
-            tool_name="create_csv_file",
+            tool_name="create_dataset",
         )
     )
 
@@ -465,11 +465,11 @@ def test_client_tool_schema_summary_rejects_non_closed_object_schema() -> None:
 
 def test_agent_compile_log_renders_human_readable_tool_block() -> None:
     clear_log_event_dedupe_cache()
-    tool_provider_bundle = {
-        "root_tool_provider_id": "report-agent",
-        "tool_providers": [
+    agent_bundle = {
+        "root_agent_id": "report-agent",
+        "agents": [
             {
-                "tool_provider_id": "report-agent",
+                "agent_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [
@@ -490,14 +490,14 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
                 ],
                 "delegation_targets": [
                     {
-                        "tool_provider_id": "chart-agent",
+                        "agent_id": "chart-agent",
                         "tool_name": "delegate_to_chart_agent",
                         "description": "Delegate chart work.",
                     }
                 ],
             },
             {
-                "tool_provider_id": "chart-agent",
+                "agent_id": "chart-agent",
                 "agent_name": "Chart Agent",
                 "instructions": "Render charts.",
                 "client_tools": [],
@@ -510,7 +510,7 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
     )
     stream = StringIO()
     logger = logging.getLogger("report_foundry.agents.agent_builder")
@@ -524,14 +524,14 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
     try:
         _build_agent_graph(
             context,
-            tool_provider_bundle=tool_provider_bundle,
+            agent_bundle=agent_bundle,
             model=None,
         )
     finally:
         clear_log_event_dedupe_cache()
 
     output = stream.getvalue()
-    assert "agent.tool_provider_compiled" in output
+    assert "agent.compiled" in output
     assert "\n > Report Agent(Chart Agent):" in output
     assert "\n > - name_current_thread(title)" in output
     assert "\n > - make_plan(" in output

@@ -3,23 +3,26 @@ import type {
   ClientEffect,
   ClientToolCall,
   ClientToolName,
-  CreateCsvFileToolArgs,
-  CreateJsonFileToolArgs,
+  CreateDatasetToolArgs,
   CreateReportToolArgs,
   DataRow,
   GetReportToolArgs,
-  ListLoadedDatasetsToolArgs,
+  InspectDatasetSchemaToolArgs,
+  InspectImageFileToolArgs,
+  ListDatasetsToolArgs,
+  ListImageFilesToolArgs,
   ListReportsToolArgs,
   ListWorkspaceFilesToolArgs,
   RemoveReportSlideToolArgs,
-  RenderChartFromFileToolArgs,
-  RunLocalQueryToolArgs,
+  RenderChartFromDatasetToolArgs,
+  RunAggregateQueryToolArgs,
 } from "../types/analysis";
-import type { LocalChartableFile, LocalDataset } from "../types/report";
+import type { LocalDataset, LocalWorkspaceFile } from "../types/report";
 
 import { executeQueryPlan } from "./analysis";
 import { renderChartToDataUrl } from "./chart";
 import { parseCsvText } from "./csv";
+import { buildImageDataUrlFromBase64 } from "./image";
 import { parseJsonText } from "./json";
 import { rowsToCsv, rowsToJson } from "./workspace-files";
 
@@ -29,6 +32,14 @@ export type ClientToolExecutionResult = {
   payload: Record<string, unknown>;
   effects: ClientEffect[];
 };
+
+function findImageFile(files: LocalWorkspaceFile[], fileId: string) {
+  const file = files.find((candidate) => candidate.id === fileId);
+  if (!file || file.kind !== "image") {
+    throw new Error(`Unknown image file: ${fileId}`);
+  }
+  return file;
+}
 
 function buildWorkspaceContextPayload(
   datasets: LoadedDataset[],
@@ -47,8 +58,8 @@ function summarizeDataset(dataset: LoadedDataset, includeSamples: boolean): Reco
     producer_key: "uploaded",
     producer_label: "Uploaded",
     source: "uploaded",
-    kind: "csv",
-    extension: "csv",
+    kind: dataset.kind,
+    extension: dataset.extension,
     row_count: dataset.row_count,
     columns: dataset.columns,
     numeric_columns: dataset.numeric_columns,
@@ -71,32 +82,17 @@ export async function executeClientTool<Name extends ClientToolName>(
   datasets: LoadedDataset[],
 ): Promise<ClientToolExecutionResult> {
   switch (toolCall.name) {
-    case "list_csv_files": {
-      const args = toolCall.arguments as ListLoadedDatasetsToolArgs;
-      const csvFiles = datasets.map((dataset) =>
+    case "list_datasets": {
+      const args = toolCall.arguments as ListDatasetsToolArgs;
+      const summarizedDatasets = datasets.map((dataset) =>
         summarizeDataset(dataset, args.includeSamples ?? true),
       );
       return {
         payload: {
           workspace_id: "smoke",
           workspace_context: buildWorkspaceContextPayload(datasets),
-          csv_files: csvFiles,
-          files: csvFiles,
-        },
-        effects: [],
-      };
-    }
-    case "list_chartable_files": {
-      const args = toolCall.arguments as ListWorkspaceFilesToolArgs;
-      const chartableFiles = datasets.map((dataset) =>
-        summarizeDataset(dataset, args.includeSamples ?? true),
-      );
-      return {
-        payload: {
-          workspace_id: "smoke",
-          workspace_context: buildWorkspaceContextPayload(datasets),
-          chartable_files: chartableFiles,
-          files: chartableFiles,
+          datasets: summarizedDatasets,
+          files: summarizedDatasets,
         },
         effects: [],
       };
@@ -113,8 +109,25 @@ export async function executeClientTool<Name extends ClientToolName>(
         effects: [],
       };
     }
+    case "list_image_files": {
+      void (toolCall.arguments as ListImageFilesToolArgs);
+      const imageFiles = (datasets as unknown as LocalWorkspaceFile[]).filter(
+        (
+          file,
+        ): file is Extract<LocalWorkspaceFile, { kind: "image" }> => file.kind === "image",
+      );
+      return {
+        payload: {
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
+          image_files: imageFiles,
+          files: imageFiles,
+        },
+        effects: [],
+      };
+    }
     case "run_aggregate_query": {
-      const args = toolCall.arguments as RunLocalQueryToolArgs;
+      const args = toolCall.arguments as RunAggregateQueryToolArgs;
       const dataset = findDataset(datasets, args.query_plan.dataset_id);
       const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
       return {
@@ -125,25 +138,32 @@ export async function executeClientTool<Name extends ClientToolName>(
         effects: [],
       };
     }
-    case "create_csv_file": {
-      const args = toolCall.arguments as CreateCsvFileToolArgs;
+    case "create_dataset": {
+      const args = toolCall.arguments as CreateDatasetToolArgs;
       const dataset = findDataset(datasets, args.query_plan.dataset_id);
       const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
-      const csvText = rowsToCsv(result.rows);
-      const preview = parseCsvText(csvText);
+      const serializedText =
+        args.format === "json" ? rowsToJson(result.rows) : rowsToCsv(result.rows);
+      const preview =
+        args.format === "json"
+          ? parseJsonText(serializedText)
+          : parseCsvText(serializedText);
       return {
         payload: {
           workspace_id: "smoke",
           workspace_context: buildWorkspaceContextPayload(datasets),
           created_file: {
-            id: "smoke-csv",
-            name: ensureCsvFilename(args.filename),
+            id: `smoke-${args.format}`,
+            name:
+              args.format === "json"
+                ? ensureJsonFilename(args.filename)
+                : ensureCsvFilename(args.filename),
             bucket: "data",
             producer_key: "smoke",
             producer_label: "Smoke",
             source: "derived",
-            kind: "csv",
-            extension: "csv",
+            kind: args.format,
+            extension: args.format,
             row_count: preview.rowCount,
             columns: preview.columns,
             numeric_columns: preview.numericColumns,
@@ -154,38 +174,24 @@ export async function executeClientTool<Name extends ClientToolName>(
         effects: [],
       };
     }
-    case "create_json_file": {
-      const args = toolCall.arguments as CreateJsonFileToolArgs;
-      const dataset = findDataset(datasets, args.query_plan.dataset_id);
-      const result = executeQueryPlan(dataset.rows as DataRow[], args.query_plan);
-      const jsonText = rowsToJson(result.rows);
-      const preview = parseJsonText(jsonText);
+    case "inspect_dataset_schema": {
+      const args = toolCall.arguments as InspectDatasetSchemaToolArgs;
+      const dataset = findDataset(datasets, args.dataset_id);
       return {
         payload: {
-          workspace_id: "smoke",
-          workspace_context: buildWorkspaceContextPayload(datasets),
-          created_file: {
-            id: "smoke-json",
-            name: ensureJsonFilename(args.filename),
-            bucket: "data",
-            producer_key: "smoke",
-            producer_label: "Smoke",
-            source: "derived",
-            kind: "json",
-            extension: "json",
-            row_count: preview.rowCount,
-            columns: preview.columns,
-            numeric_columns: preview.numericColumns,
-            sample_rows: preview.sampleRows,
-          },
-          row_count: result.rows.length,
+          dataset_id: dataset.id,
+          kind: dataset.kind,
+          row_count: dataset.row_count,
+          columns: dataset.columns,
+          numeric_columns: dataset.numeric_columns,
+          sample_rows: dataset.sample_rows,
         },
         effects: [],
       };
     }
-    case "render_chart_from_file": {
-      const args = toolCall.arguments as RenderChartFromFileToolArgs;
-      const dataset = findChartableFile(datasets, args.file_id);
+    case "render_chart_from_dataset": {
+      const args = toolCall.arguments as RenderChartFromDatasetToolArgs;
+      const dataset = findDataset(datasets, args.dataset_id);
       const chartPlan = {
         ...args.chart_plan,
         label_key: args.x_key,
@@ -197,20 +203,37 @@ export async function executeClientTool<Name extends ClientToolName>(
           rows: dataset.rows,
           row_count: dataset.rows.length,
           chart: chartPlan,
-          file_id: args.file_id,
+          dataset_id: args.dataset_id,
           chart_plan_id: args.chart_plan_id,
           imageDataUrl,
         },
         effects: [
           {
             type: "chart_rendered",
-            fileId: args.file_id,
+            datasetId: args.dataset_id,
             chartPlanId: args.chart_plan_id,
             chart: chartPlan,
             imageDataUrl: imageDataUrl ?? undefined,
             rows: dataset.rows,
           },
         ],
+      };
+    }
+    case "inspect_image_file": {
+      const args = toolCall.arguments as InspectImageFileToolArgs;
+      const file = findImageFile(datasets as unknown as LocalWorkspaceFile[], args.file_id);
+      return {
+        payload: {
+          workspace_id: "smoke",
+          workspace_context: buildWorkspaceContextPayload(datasets),
+          file_id: file.id,
+          kind: file.kind,
+          width: file.width,
+          height: file.height,
+          mime_type: file.mime_type,
+          imageDataUrl: buildImageDataUrlFromBase64(file.bytes_base64, file.mime_type),
+        },
+        effects: [],
       };
     }
     case "list_reports": {
@@ -289,12 +312,4 @@ function findDataset(datasets: LoadedDataset[], datasetId: string): LoadedDatase
     throw new Error(`Unknown dataset: ${datasetId}`);
   }
   return dataset;
-}
-
-function findChartableFile(files: LocalChartableFile[], fileId: string): LocalChartableFile {
-  const file = files.find((candidate) => candidate.id === fileId);
-  if (!file) {
-    throw new Error(`Unknown chartable file: ${fileId}`);
-  }
-  return file;
 }

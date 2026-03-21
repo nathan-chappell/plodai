@@ -21,7 +21,7 @@ Mar,West,8,4.8
 export type FrontendSmokeResult = {
   ok: boolean;
   datasets: LocalDataset[];
-  listedCsvFileCount: number;
+  listedDatasetCount: number;
   aggregateRowsByChart: Record<string, Record<string, unknown>[]>;
   chartEffects: ChartRenderedEffect[];
   assertions: Array<{ label: string; ok: boolean; detail: string }>;
@@ -40,16 +40,18 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
 
   const listResult = await executeSmokeTool(
     {
-      name: "list_csv_files",
+      name: "list_datasets",
       arguments: { includeSamples: true },
     },
     datasets,
   );
-  const csvFiles = Array.isArray(listResult.payload.csv_files) ? listResult.payload.csv_files : [];
+  const listedDatasets = Array.isArray(listResult.payload.datasets)
+    ? listResult.payload.datasets
+    : [];
   assertions.push({
-    label: "Lists bundled CSV fixtures",
-    ok: csvFiles.length === datasets.length,
-    detail: `Expected ${datasets.length} files, received ${csvFiles.length}.`,
+    label: "Lists bundled dataset fixtures",
+    ok: listedDatasets.length === datasets.length,
+    detail: `Expected ${datasets.length} datasets, received ${listedDatasets.length}.`,
   });
 
   const chartSpecs: Array<{
@@ -123,9 +125,9 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
   for (const chartSpec of chartSpecs) {
     const chartResult = await executeSmokeTool(
       {
-        name: "render_chart_from_file",
+        name: "render_chart_from_dataset",
         arguments: {
-          file_id: chartSpec.fileId,
+          dataset_id: chartSpec.fileId,
           chart_plan_id: chartSpec.chartPlanId,
           chart_plan: chartSpec.chartPlan,
           x_key: chartSpec.chartPlan.label_key,
@@ -162,12 +164,12 @@ export async function runFrontendSmokeTest(): Promise<FrontendSmokeResult> {
 
   return {
     ok:
-      csvFiles.length === datasets.length &&
+      listedDatasets.length === datasets.length &&
       barTopRow?.region === "West" &&
       barTopRow?.total_revenue === 360 &&
       new Set(chartEffects.map((effect) => effect.chart.type)).size === 3,
     datasets,
-    listedCsvFileCount: csvFiles.length,
+    listedDatasetCount: listedDatasets.length,
     aggregateRowsByChart,
     chartEffects,
     assertions,

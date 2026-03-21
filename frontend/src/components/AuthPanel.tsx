@@ -61,11 +61,13 @@ export function AuthPanel({
   heading,
   subtitle,
   blendWithShell = false,
+  compact = false,
 }: {
   mode?: "login" | "account";
   heading?: string;
   subtitle?: string;
   blendWithShell?: boolean;
+  compact?: boolean;
 }) {
   const { user, setUser } = useAppState();
   const { signOut } = useClerk();
@@ -97,7 +99,7 @@ export function AuthPanel({
       <AccountCard $blend={blendWithShell}>
         <AccountTopRow>
           <AccountIdentityBlock>
-            <AccountHeading>{heading ?? "Signed in"}</AccountHeading>
+            {!compact || heading ? <AccountHeading>{heading ?? "Signed in"}</AccountHeading> : null}
             <AccountName>{displayName}</AccountName>
             <AccountSubline>{identityLine}</AccountSubline>
           </AccountIdentityBlock>

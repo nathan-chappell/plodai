@@ -4,6 +4,13 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  authenticatedFetch,
+  getChatKitConfig,
+  setChatKitMetadataGetter,
+  setChatKitNativeFeedbackHandler,
+} from "../../lib/api";
+
 let latestHandlers: Record<string, (...args: any[]) => void> | null = null;
 let latestChatKitOptions: Record<string, unknown> | null = null;
 let latestChatKitApi: Record<string, unknown> | null = null;
@@ -122,14 +129,16 @@ vi.mock("../../lib/dev-logging", () => ({
 }));
 
 import { ChatKitHarness, ChatKitPane, buildChatKitRequestMetadata } from "../ChatKitPane";
-import type { CapabilityBundle, CapabilityClientTool } from "../../capabilities/types";
+import type { AgentBundle, AgentClientTool } from "../../agents/types";
 import {
-  dataAgentCapability,
-  pdfAgentCapability,
-  reportAgentCapability,
-  workspaceAgentCapability,
-} from "../../capabilities/definitions";
+  agricultureAgentDefinition,
+  analysisAgentDefinition,
+  documentAgentDefinition,
+  helpAgentDefinition,
+  reportAgentDefinition,
+} from "../../agents/definitions";
 import type { LocalWorkspaceFile } from "../../types/report";
+import type { ShellStateMetadata } from "../../types/shell";
 
 function setScrollMetrics(
   element: HTMLElement,
@@ -153,11 +162,11 @@ function setScrollMetrics(
   });
 }
 
-const capabilityBundle: CapabilityBundle = {
-  root_tool_provider_id: "report-agent",
-  tool_providers: [
+const agentBundle: AgentBundle = {
+  root_agent_id: "report-agent",
+  agents: [
     {
-      tool_provider_id: "report-agent",
+      agent_id: "report-agent",
       agent_name: "Report Agent",
       instructions: "Inspect files.",
       client_tools: [],
@@ -181,23 +190,26 @@ const files: LocalWorkspaceFile[] = [
   },
 ];
 
-const workspaceContext = {
-  workspace_id: "workspace-default",
-  referenced_item_ids: ["file_csv"],
-} as const;
-
-const workspaceState = {
+const shellState: ShellStateMetadata = {
   version: "v1" as const,
-  context: workspaceContext,
-  files: [
+  active_agent_id: "report-agent",
+  agents: [
+    {
+      agent_id: "report-agent",
+      goal: null,
+      resource_count: 1,
+      current_report_id: "report-1",
+    },
+  ],
+  resources: [
     {
       id: "file_csv",
-      name: "sales.csv",
-      bucket: "uploaded",
-      producer_key: "uploaded",
-      producer_label: "Uploaded",
-      source: "uploaded" as const,
-      kind: "csv" as const,
+      owner_agent_id: "report-agent",
+      kind: "dataset",
+      title: "sales.csv",
+      created_at: "2026-03-21T12:00:00.000Z",
+      summary: "1 row · 1 column",
+      payload_ref: "file_csv",
       extension: "csv",
       row_count: 1,
       columns: ["region"],
@@ -205,9 +217,6 @@ const workspaceState = {
       sample_rows: [{ region: "West" }],
     },
   ],
-  reports: [],
-  current_report_id: "report-1",
-  current_goal: null,
 };
 
 describe("ChatKitHarness auto-scroll", () => {
@@ -236,17 +245,19 @@ describe("ChatKitHarness auto-scroll", () => {
       root.unmount();
     });
     container.remove();
+    setChatKitMetadataGetter(null);
+    setChatKitNativeFeedbackHandler(null);
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
     vi.restoreAllMocks();
   });
 
-  async function renderHarness(clientTools: CapabilityClientTool[] = []) {
+  async function renderHarness(clientTools: AgentClientTool[] = []) {
     await act(async () => {
       root.render(
         <ChatKitHarness
-          capabilityBundle={capabilityBundle}
+          agentBundle={agentBundle}
           files={files}
-          workspaceState={workspaceState}
+          shellState={shellState}
           investigationBrief=""
           clientTools={clientTools}
           onEffects={() => {}}
@@ -262,10 +273,10 @@ describe("ChatKitHarness auto-scroll", () => {
     await act(async () => {
       root.render(
         <ChatKitPane
-          capabilityBundle={capabilityBundle}
+          agentBundle={agentBundle}
           enabled
           files={files}
-          workspaceState={workspaceState}
+          shellState={shellState}
           investigationBrief={investigationBrief}
           clientTools={[]}
           onEffects={() => {}}
@@ -334,21 +345,21 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(latestScrollTarget!.scrollTop).toBe(1000);
   });
 
-  it("disables built-in feedback actions and includes the investigation brief in metadata", async () => {
+  it("enables built-in feedback actions and includes the investigation brief in metadata", async () => {
     await renderHarness([]);
 
-    expect(latestChatKitOptions?.threadItemActions).toEqual({ feedback: false });
+    expect(latestChatKitOptions?.threadItemActions).toEqual({ feedback: true });
     expect(
       buildChatKitRequestMetadata({
-        capabilityBundle,
-        workspaceState,
+        agentBundle,
+        shellState,
         investigationBrief: "Render the chart before stopping.",
         threadOrigin: "interactive",
       }),
     ).toMatchObject({
       investigation_brief: "Render the chart before stopping.",
-      tool_provider_bundle: capabilityBundle,
-      workspace_state: workspaceState,
+      agent_bundle: agentBundle,
+      shell_state: shellState,
       origin: "interactive",
     });
   });
@@ -373,59 +384,60 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(prompts.some((prompt) => prompt.includes("Focus on this goal"))).toBe(false);
   });
 
-  it("defaults to compact chrome and accepts capability-specific lead text", async () => {
+  it("defaults to compact chrome and accepts agent-specific lead text", async () => {
     await renderPane("", {
-      greeting: dataAgentCapability.chatkitLead,
-      composerPlaceholder: dataAgentCapability.chatkitPlaceholder,
+      greeting: analysisAgentDefinition.chatkitLead,
+      composerPlaceholder: analysisAgentDefinition.chatkitPlaceholder,
     });
 
     expect(container.textContent).not.toContain("Analyst workspace");
     expect(container.textContent).not.toContain("Investigate your files");
-    expect(container.textContent).not.toContain("Default model capability");
+    expect(container.textContent).not.toContain("Default model agent");
     expect(container.textContent).not.toContain("files are ready");
 
     const startScreen = latestChatKitOptions?.startScreen as { greeting?: string } | undefined;
     const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
 
-    expect(startScreen?.greeting).toBe(dataAgentCapability.chatkitLead);
-    expect(composer?.placeholder).toBe(dataAgentCapability.chatkitPlaceholder);
+    expect(startScreen?.greeting).toBe(analysisAgentDefinition.chatkitLead);
+    expect(composer?.placeholder).toBe(analysisAgentDefinition.chatkitPlaceholder);
   });
 
-  it("can receive compact ChatKit copy for all core capability surfaces", async () => {
-    const capabilities = [
-      workspaceAgentCapability,
-      reportAgentCapability,
-      dataAgentCapability,
-      pdfAgentCapability,
+  it("can receive compact ChatKit copy for all core agent surfaces", async () => {
+    const agents = [
+      helpAgentDefinition,
+      reportAgentDefinition,
+      analysisAgentDefinition,
+      documentAgentDefinition,
+      agricultureAgentDefinition,
     ];
 
-    for (const capability of capabilities) {
+    for (const agent of agents) {
       await renderPane("", {
-        greeting: capability.chatkitLead,
-        composerPlaceholder: capability.chatkitPlaceholder,
+        greeting: agent.chatkitLead,
+        composerPlaceholder: agent.chatkitPlaceholder,
       });
 
       const startScreen = latestChatKitOptions?.startScreen as { greeting?: string } | undefined;
       const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
 
-      expect(startScreen?.greeting).toBe(capability.chatkitLead);
-      expect(composer?.placeholder).toBe(capability.chatkitPlaceholder);
+      expect(startScreen?.greeting).toBe(agent.chatkitLead);
+      expect(composer?.placeholder).toBe(agent.chatkitPlaceholder);
     }
   });
 
-  it("uses capability-level composer tools instead of raw client function names", async () => {
-    const bundleWithSpecialists: CapabilityBundle = {
-      root_tool_provider_id: "workspace-agent",
-      tool_providers: [
+  it("hides agent composer tools when the shared workspace drives mode selection", async () => {
+    const bundleWithSpecialists: AgentBundle = {
+      root_agent_id: "help-agent",
+      agents: [
         {
-          tool_provider_id: "workspace-agent",
-          agent_name: "Workspace Agent",
+          agent_id: "help-agent",
+          agent_name: "Help Agent",
           instructions: "Route work.",
           client_tools: [],
           delegation_targets: [],
         },
         {
-          tool_provider_id: "report-agent",
+          agent_id: "report-agent",
           agent_name: "Report Agent",
           instructions: "Build reports.",
           client_tools: [
@@ -443,14 +455,14 @@ describe("ChatKitHarness auto-scroll", () => {
           delegation_targets: [],
         },
         {
-          tool_provider_id: "data-agent",
-          agent_name: "Data Agent",
+          agent_id: "analysis-agent",
+          agent_name: "Analysis Agent",
           instructions: "Analyze data and coordinate charts.",
           client_tools: [
             {
               type: "function",
-              name: "list_csv_files",
-              description: "List CSV files.",
+              name: "list_datasets",
+              description: "List datasets.",
               parameters: {
                 type: "object",
                 properties: {},
@@ -464,31 +476,13 @@ describe("ChatKitHarness auto-scroll", () => {
           delegation_targets: [],
         },
         {
-          tool_provider_id: "csv-agent",
-          agent_name: "CSV Agent",
-          instructions: "Analyze CSVs.",
-          client_tools: [
-            {
-              type: "function",
-              name: "create_csv_file",
-              description: "Create a CSV file.",
-              parameters: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-            },
-          ],
-          delegation_targets: [],
-        },
-        {
-          tool_provider_id: "chart-agent",
+          agent_id: "chart-agent",
           agent_name: "Chart Agent",
           instructions: "Render charts.",
           client_tools: [
             {
               type: "function",
-              name: "render_chart_from_file",
+              name: "render_chart_from_dataset",
               description: "Render a chart.",
               parameters: {
                 type: "object",
@@ -500,8 +494,8 @@ describe("ChatKitHarness auto-scroll", () => {
           delegation_targets: [],
         },
         {
-          tool_provider_id: "pdf-agent",
-          agent_name: "PDF Agent",
+          agent_id: "document-agent",
+          agent_name: "Document Agent",
           instructions: "Inspect PDFs.",
           client_tools: [
             {
@@ -517,11 +511,29 @@ describe("ChatKitHarness auto-scroll", () => {
           ],
           delegation_targets: [],
         },
+        {
+          agent_id: "agriculture-agent",
+          agent_name: "Agriculture Agent",
+          instructions: "Inspect plant photos.",
+          client_tools: [
+            {
+              type: "function",
+              name: "inspect_image_file",
+              description: "Inspect an image.",
+              parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+          ],
+          delegation_targets: [],
+        },
       ],
     };
 
     await renderPane("", {
-      capabilityBundle: bundleWithSpecialists,
+      agentBundle: bundleWithSpecialists,
     });
 
     const composer = latestChatKitOptions?.composer as
@@ -536,32 +548,67 @@ describe("ChatKitHarness auto-scroll", () => {
         }
       | undefined;
 
-    expect(composer?.tools).toEqual([
-      {
-        id: "report-agent",
-        label: "Report",
-        shortLabel: "Report",
-        placeholderOverride: "Use the report specialist for narrative investigations and saved slides.",
-        icon: "document",
-      },
-      {
-        id: "data-agent",
-        label: "Data",
-        shortLabel: "Data",
-        placeholderOverride: "Use the data tool for grouped analysis, reusable artifacts, and chart follow-through.",
-        icon: "analytics",
-      },
-      {
-        id: "pdf-agent",
-        label: "PDF",
-        shortLabel: "PDF",
-        placeholderOverride: "Use the PDF specialist for inspection, extraction, and smart splits.",
-        icon: "document",
-      },
-    ]);
+    expect(composer?.tools).toEqual([]);
   });
 
-  it("renders quick actions and feedback together in the header row", async () => {
+  it("uses composer tool overrides to expose workspace agent switching and routes onToolChange", async () => {
+    const onSelectAgent = vi.fn();
+
+    await renderPane("", {
+      agentBundle: {
+        root_agent_id: "help-agent",
+        agents: [
+          {
+            agent_id: "help-agent",
+            agent_name: "Help Agent",
+            instructions: "Route work.",
+            client_tools: [],
+            delegation_targets: [],
+          },
+        ],
+      },
+      composerToolIds: [
+        "help-agent",
+        "report-agent",
+        "analysis-agent",
+        "chart-agent",
+        "document-agent",
+        "agriculture-agent",
+      ],
+      onSelectAgent,
+    });
+
+    const composer = latestChatKitOptions?.composer as
+      | {
+          tools?: Array<{
+            id: string;
+            label: string;
+            persistent?: boolean;
+          }>;
+        }
+      | undefined;
+
+    expect(composer?.tools?.map((tool) => ({
+      id: tool.id,
+      label: tool.label,
+      persistent: tool.persistent,
+    }))).toEqual([
+      { id: "help-agent", label: "Help", persistent: true },
+      { id: "report-agent", label: "Report", persistent: true },
+      { id: "analysis-agent", label: "Analysis", persistent: true },
+      { id: "chart-agent", label: "Charts", persistent: true },
+      { id: "document-agent", label: "Documents", persistent: true },
+      { id: "agriculture-agent", label: "Agriculture", persistent: true },
+    ]);
+
+    await act(async () => {
+      latestHandlers?.onToolChange?.({ toolId: "report-agent" });
+    });
+
+    expect(onSelectAgent).toHaveBeenCalledWith("report-agent");
+  });
+
+  it("renders quick actions in the header row when the custom feedback button is removed", async () => {
     await renderPane("", {
       quickActions: [{ label: "Run demo", prompt: "Run the scripted walkthrough." }],
       showChatKitHeader: false,
@@ -570,7 +617,7 @@ describe("ChatKitHarness auto-scroll", () => {
     const controls = container.querySelector("[data-testid='chatkit-header-controls']");
     const buttonLabels = Array.from(controls?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim());
 
-    expect(buttonLabels).toEqual(["Run demo", "Feedback"]);
+    expect(buttonLabels).toEqual(["Run demo"]);
     expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
   });
 
@@ -609,52 +656,52 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(sendUserMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the feedback control in the top row and disables it while a run is active", async () => {
+  it("does not render a custom feedback control in the top row", async () => {
     await renderPane("", {
       showChatKitHeader: false,
     });
 
-    await act(async () => {
-      latestHandlers?.onReady?.();
-      latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
-    });
-
-    const topRow = container.querySelector("[data-testid='chatkit-top-row']");
-    const feedbackButton = container.querySelector("[data-testid='chatkit-provide-feedback']") as HTMLButtonElement | null;
-
-    expect(topRow?.contains(feedbackButton)).toBe(true);
-    expect(feedbackButton?.textContent).toBe("Feedback");
-    expect(feedbackButton?.title).toBe("Open the feedback flow for the latest assistant response in this thread.");
-    expect(feedbackButton?.disabled).toBe(false);
-
-    await act(async () => {
-      latestHandlers?.onResponseStart?.();
-    });
-
-    expect(feedbackButton?.disabled).toBe(true);
+    expect(container.querySelector("[data-testid='chatkit-provide-feedback']")).toBeNull();
   });
 
-  it("starts feedback flow directly from the labeled feedback button", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm");
+  it("routes intercepted native feedback into the seeded feedback flow", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
 
     await renderPane("", {
       showChatKitHeader: false,
     });
 
     await act(async () => {
-      latestHandlers?.onReady?.();
-      latestHandlers?.onThreadChange?.({ threadId: "thread_feedback" });
+      await authenticatedFetch(getChatKitConfig().url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "items.feedback",
+          params: {
+            thread_id: "thread_feedback",
+            item_ids: ["msg_123"],
+            kind: "positive",
+          },
+        }),
+      });
     });
 
-    const feedbackButton = container.querySelector("[data-testid='chatkit-provide-feedback']") as HTMLButtonElement | null;
-    expect(feedbackButton).not.toBeNull();
-    expect(container.textContent).toContain("Chat ready.");
-
-    await act(async () => {
-      feedbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const sendUserMessage = latestChatKitApi?.sendUserMessage as ReturnType<typeof vi.fn> | undefined;
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sendUserMessage).toHaveBeenCalledOnce();
+    expect(sendUserMessage).toHaveBeenCalledWith({
+      text: expect.stringContaining('sentiment: "thumbs up"'),
+      newThread: false,
     });
-
-    expect(confirmSpy).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Starting feedback flow.");
   });
 

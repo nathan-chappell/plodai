@@ -1,6 +1,6 @@
 import {
-  useCallback,
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -11,114 +11,133 @@ import {
 
 import { useAppState } from "./context";
 import {
-  DEMO_WORKSPACE_ID,
-  DEFAULT_WORKSPACE_ID,
-  addWorkspaceFiles,
-  addWorkspaceFilesWithResult,
-  createWorkspaceDescriptor,
-  createWorkspaceFilesystem,
-  createWorkspaceRegistry,
-  getWorkspaceContext,
-  listAllWorkspaceFileNodes,
-  loadWorkspaceFilesystem,
-  loadWorkspaceRegistry,
-  loadWorkspaceSurfaceState,
-  removeWorkspaceEntry,
-  replaceWorkspaceFiles,
-  saveWorkspaceFilesystem,
-  saveWorkspaceRegistry,
-  saveWorkspaceSurfaceState,
-} from "../lib/workspace-fs";
-import { devLogger } from "../lib/dev-logging";
+  clearAgentShellState,
+  clearLegacyWorkspaceState,
+  loadAgentShellState,
+  loadSelectedAgentId,
+  saveAgentShellState,
+  saveSelectedAgentId,
+} from "../lib/agent-shell-store";
+import { buildShellStateMetadata } from "../lib/shell-metadata";
+import {
+  buildResourceFromFile,
+  buildAgentPreviewModel,
+  createEmptyAgentShellState,
+  listFileResources,
+  normalizeAgentShellState,
+  replaceAgentResources,
+  sortResources,
+} from "../lib/shell-resources";
 import { buildWorkspaceFile } from "../lib/workspace-files";
+import { getAgentDefinition, runtimeAgentDefinitions } from "../agents/definitions";
+import type { AgentDefinition } from "../agents/types";
 import type { LocalWorkspaceFile } from "../types/report";
 import type {
-  WorkspaceContext,
-  WorkspaceDescriptor,
-  WorkspaceFilesystem,
-  WorkspaceItem,
-  WorkspaceRegistry,
-} from "../types/workspace";
+  AgentPreviewModel,
+  AgentResourceRecord,
+  AgentShellState,
+  ShellStateMetadata,
+} from "../types/shell";
 
-type WorkspaceStoreContextValue = {
+const DEFAULT_AGENT_ID = "help-agent";
+const PERSISTED_AGENT_IDS = runtimeAgentDefinitions
+  .filter((agent) => agent.id !== "feedback-agent")
+  .map((agent) => agent.id);
+
+type AgentShellContextValue = {
   currentUserId: string | null;
-  filesystemHydrated: boolean;
-  filesystemsByWorkspaceId: Record<string, WorkspaceFilesystem>;
-  workspaces: WorkspaceDescriptor[];
-  selectedWorkspaceId: string;
-  selectedWorkspace: WorkspaceDescriptor;
-  setWorkspaceFilesystem: (
-    workspaceId: string,
-    updater: WorkspaceFilesystem | ((filesystem: WorkspaceFilesystem) => WorkspaceFilesystem),
+  hydrated: boolean;
+  selectedAgentId: string;
+  selectedAgentDefinition: AgentDefinition;
+  selectedAgentState: AgentShellState;
+  selectedAgentResources: AgentResourceRecord[];
+  selectedAgentFiles: LocalWorkspaceFile[];
+  selectedAgentPreview: AgentPreviewModel;
+  sharedResources: AgentResourceRecord[];
+  shellStateMetadata: ShellStateMetadata;
+  selectAgent: (agentId: string) => void;
+  getAgentState: (agentId: string) => AgentShellState;
+  updateAgentState: (
+    agentId: string,
+    updater: (state: AgentShellState) => AgentShellState,
   ) => void;
-  selectWorkspace: (workspaceId: string) => void;
-  createWorkspace: (name: string) => WorkspaceDescriptor | null;
-  clearWorkspace: (workspaceId: string) => void;
-  activateDemoWorkspace: () => void;
-  restorePreviousWorkspace: () => void;
+  replaceAgentResources: (agentId: string, resources: AgentResourceRecord[]) => void;
+  clearAgentState: (agentId: string) => void;
+  clearSelectedAgentState: () => void;
+  handleSelectFiles: (agentId: string, files: FileList | null) => Promise<void>;
+  resolveResource: (resourceId: string) => AgentResourceRecord | null;
+  getPreviewResources: (agentId: string) => AgentResourceRecord[];
 };
 
-const WorkspaceStoreContext = createContext<WorkspaceStoreContextValue | null>(null);
+const AgentShellContext = createContext<AgentShellContextValue | null>(null);
 
-function normalizeFilesystems(
-  registry: WorkspaceRegistry,
-  filesystems: Record<string, WorkspaceFilesystem>,
-): Record<string, WorkspaceFilesystem> {
+function buildInitialStates(): Record<string, AgentShellState> {
   return Object.fromEntries(
-    registry.workspaces.map((workspace) => [
-      workspace.id,
-      filesystems[workspace.id] ?? createWorkspaceFilesystem(),
-    ]),
+    PERSISTED_AGENT_IDS.map((agentId) => [agentId, createEmptyAgentShellState()]),
   );
 }
 
-function listVisibleEntries(filesystem: WorkspaceFilesystem): WorkspaceItem[] {
-  return listAllWorkspaceFileNodes(filesystem);
+function normalizeSelectedAgentId(value: string | null | undefined): string {
+  return value && PERSISTED_AGENT_IDS.includes(value) ? value : DEFAULT_AGENT_ID;
+}
+
+function normalizeStates(
+  statesByAgentId: Record<string, AgentShellState>,
+): Record<string, AgentShellState> {
+  return Object.fromEntries(
+    PERSISTED_AGENT_IDS.map((agentId) => [
+      agentId,
+      normalizeAgentShellState(statesByAgentId[agentId]),
+    ]),
+  );
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user } = useAppState();
   const currentUserId = user?.id ?? null;
-  const [registry, setRegistry] = useState<WorkspaceRegistry>(() => createWorkspaceRegistry());
-  const [filesystemsByWorkspaceId, setFilesystemsByWorkspaceId] = useState<Record<string, WorkspaceFilesystem>>({
-    [DEFAULT_WORKSPACE_ID]: createWorkspaceFilesystem(),
-    [DEMO_WORKSPACE_ID]: createWorkspaceFilesystem(),
-  });
-  const [filesystemHydrated, setFilesystemHydrated] = useState(false);
-  const previousNonDemoWorkspaceIdRef = useRef(DEFAULT_WORKSPACE_ID);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(DEFAULT_AGENT_ID);
+  const [statesByAgentId, setStatesByAgentId] = useState<Record<string, AgentShellState>>(
+    buildInitialStates(),
+  );
+  const [hydrated, setHydrated] = useState(false);
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    hydratedRef.current = hydrated;
+  }, [hydrated]);
 
   useEffect(() => {
     if (!currentUserId) {
-      const nextRegistry = createWorkspaceRegistry();
-      setRegistry(nextRegistry);
-      setFilesystemsByWorkspaceId(normalizeFilesystems(nextRegistry, {}));
-      setFilesystemHydrated(false);
-      previousNonDemoWorkspaceIdRef.current = DEFAULT_WORKSPACE_ID;
+      setSelectedAgentId(DEFAULT_AGENT_ID);
+      setStatesByAgentId(buildInitialStates());
+      setHydrated(false);
       return;
     }
 
     let cancelled = false;
-    setFilesystemHydrated(false);
+    setHydrated(false);
 
     void (async () => {
-      const nextRegistry = await loadWorkspaceRegistry(currentUserId);
-      const loadedFilesystems = await Promise.all(
-        nextRegistry.workspaces.map(async (workspace) => [
-          workspace.id,
-          await loadWorkspaceFilesystem(currentUserId, workspace.id),
-        ] as const),
-      );
+      await clearLegacyWorkspaceState(currentUserId, PERSISTED_AGENT_IDS);
+      const [storedSelectedAgentId, ...storedStates] = await Promise.all([
+        loadSelectedAgentId(currentUserId),
+        ...PERSISTED_AGENT_IDS.map((agentId) => loadAgentShellState(currentUserId, agentId)),
+      ]);
       if (cancelled) {
         return;
       }
-      const nextFilesystems = Object.fromEntries(loadedFilesystems);
-      setRegistry(nextRegistry);
-      setFilesystemsByWorkspaceId(normalizeFilesystems(nextRegistry, nextFilesystems));
-      previousNonDemoWorkspaceIdRef.current =
-        nextRegistry.workspaces.find((workspace) => workspace.id === nextRegistry.selected_workspace_id)?.kind === "demo"
-          ? DEFAULT_WORKSPACE_ID
-          : nextRegistry.selected_workspace_id;
-      setFilesystemHydrated(true);
+      setSelectedAgentId(normalizeSelectedAgentId(storedSelectedAgentId));
+      setStatesByAgentId(
+        normalizeStates(
+          Object.fromEntries(
+            PERSISTED_AGENT_IDS.map((agentId, index) => [
+              agentId,
+              storedStates[index] ?? createEmptyAgentShellState(),
+            ]),
+          ),
+        ),
+      );
+      setHydrated(true);
     })();
 
     return () => {
@@ -127,436 +146,185 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!currentUserId || !filesystemHydrated) {
+    if (!currentUserId || !hydrated) {
       return;
     }
 
+    const normalizedStates = normalizeStates(statesByAgentId);
     const timeoutId = window.setTimeout(() => {
-      const normalizedFilesystems = normalizeFilesystems(registry, filesystemsByWorkspaceId);
       void Promise.all([
-        saveWorkspaceRegistry(currentUserId, registry),
-        ...registry.workspaces.map((workspace) =>
-          saveWorkspaceFilesystem(
-            currentUserId,
-            workspace.id,
-            normalizedFilesystems[workspace.id] ?? createWorkspaceFilesystem(),
-          ),
+        saveSelectedAgentId(currentUserId, selectedAgentId),
+        ...PERSISTED_AGENT_IDS.map((agentId) =>
+          saveAgentShellState(currentUserId, agentId, normalizedStates[agentId]),
         ),
       ]).catch(() => undefined);
     }, 180);
 
     return () => window.clearTimeout(timeoutId);
-  }, [currentUserId, filesystemHydrated, filesystemsByWorkspaceId, registry]);
+  }, [currentUserId, hydrated, selectedAgentId, statesByAgentId]);
 
-  const selectedWorkspace = useMemo(
-    () =>
-      registry.workspaces.find((workspace) => workspace.id === registry.selected_workspace_id) ??
-      registry.workspaces[0] ??
-      createWorkspaceDescriptor("Default workspace", "default"),
-    [registry],
-  );
-
-  useEffect(() => {
-    if (selectedWorkspace.kind !== "demo") {
-      previousNonDemoWorkspaceIdRef.current = selectedWorkspace.id;
-    }
-  }, [selectedWorkspace]);
-
-  const setWorkspaceFilesystem = useCallback(
-    (
-      workspaceId: string,
-      updater: WorkspaceFilesystem | ((filesystem: WorkspaceFilesystem) => WorkspaceFilesystem),
-    ) => {
-      setFilesystemsByWorkspaceId((current) => {
-        const currentFilesystem = current[workspaceId] ?? createWorkspaceFilesystem();
-        const nextFilesystem =
-          typeof updater === "function"
-            ? (updater as (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem)(currentFilesystem)
-            : updater;
+  const updateAgentState = useCallback(
+    (agentId: string, updater: (state: AgentShellState) => AgentShellState) => {
+      const resolvedAgentId = normalizeSelectedAgentId(agentId);
+      setStatesByAgentId((current) => {
+        const currentState = normalizeAgentShellState(current[resolvedAgentId]);
+        const nextState = normalizeAgentShellState(updater(currentState));
         return {
           ...current,
-          [workspaceId]: nextFilesystem,
+          [resolvedAgentId]: nextState,
         };
       });
     },
     [],
   );
 
-  const selectWorkspace = useCallback((workspaceId: string) => {
-    setRegistry((current) => {
-      if (!current.workspaces.some((workspace) => workspace.id === workspaceId)) {
-        return current;
-      }
-      return {
+  const replaceResourcesForAgent = useCallback(
+    (agentId: string, resources: AgentResourceRecord[]) => {
+      updateAgentState(agentId, (state) => replaceAgentResources(state, resources));
+    },
+    [updateAgentState],
+  );
+
+  const clearAgentStateById = useCallback(
+    (agentId: string) => {
+      const resolvedAgentId = normalizeSelectedAgentId(agentId);
+      setStatesByAgentId((current) => ({
         ...current,
-        selected_workspace_id: workspaceId,
-      };
-    });
-  }, []);
+        [resolvedAgentId]: createEmptyAgentShellState(),
+      }));
+      if (currentUserId && hydratedRef.current) {
+        void clearAgentShellState(currentUserId, resolvedAgentId).catch(() => undefined);
+      }
+    },
+    [currentUserId],
+  );
 
-  const createWorkspace = useCallback((name: string) => {
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      return null;
-    }
-    const descriptor = createWorkspaceDescriptor(trimmedName, "user");
-    setRegistry((current) => ({
-      ...current,
-      selected_workspace_id: descriptor.id,
-      workspaces: [...current.workspaces, descriptor],
-    }));
-    setFilesystemsByWorkspaceId((current) => ({
-      ...current,
-      [descriptor.id]: createWorkspaceFilesystem(),
-    }));
-    previousNonDemoWorkspaceIdRef.current = descriptor.id;
-    return descriptor;
-  }, []);
+  const handleSelectFiles = useCallback(
+    async (agentId: string, nextFiles: FileList | null) => {
+      if (!nextFiles?.length) {
+        return;
+      }
+      const ownerAgentId = normalizeSelectedAgentId(agentId);
+      const builtFiles = await Promise.all(
+        Array.from(nextFiles).map((file) => buildWorkspaceFile(file)),
+      );
+      const builtResources = builtFiles.map((file) => buildResourceFromFile(ownerAgentId, file));
+      updateAgentState(ownerAgentId, (state) => ({
+        ...state,
+        resources: sortResources([...normalizeAgentShellState(state).resources, ...builtResources]),
+      }));
+    },
+    [updateAgentState],
+  );
 
-  const clearWorkspace = useCallback((workspaceId: string) => {
-    setWorkspaceFilesystem(workspaceId, createWorkspaceFilesystem());
-  }, [setWorkspaceFilesystem]);
+  const normalizedStates = useMemo(
+    () => normalizeStates(statesByAgentId),
+    [statesByAgentId],
+  );
+  const selectedAgentDefinition =
+    getAgentDefinition(selectedAgentId) ?? getAgentDefinition(DEFAULT_AGENT_ID)!;
 
-  const activateDemoWorkspace = useCallback(() => {
-    if (selectedWorkspace.kind !== "demo") {
-      previousNonDemoWorkspaceIdRef.current = selectedWorkspace.id;
-    }
-    selectWorkspace(DEMO_WORKSPACE_ID);
-  }, [selectWorkspace, selectedWorkspace]);
+  const sharedResources = useMemo(
+    () =>
+      Object.values(normalizedStates)
+        .flatMap((state) => state.resources)
+        .sort((left, right) => right.created_at.localeCompare(left.created_at) || left.title.localeCompare(right.title)),
+    [normalizedStates],
+  );
 
-  const restorePreviousWorkspace = useCallback(() => {
-    const targetWorkspaceId = previousNonDemoWorkspaceIdRef.current || DEFAULT_WORKSPACE_ID;
-    selectWorkspace(targetWorkspaceId);
-  }, [selectWorkspace]);
+  const resolveResource = useCallback(
+    (resourceId: string) =>
+      sharedResources.find((resource) => resource.id === resourceId) ?? null,
+    [sharedResources],
+  );
 
-  const value = useMemo(
+  const getPreviewResources = useCallback(
+    (agentId: string) =>
+      agentId === DEFAULT_AGENT_ID
+        ? sharedResources
+        : normalizeAgentShellState(normalizedStates[normalizeSelectedAgentId(agentId)]).resources,
+    [normalizedStates, sharedResources],
+  );
+
+  const selectedAgentState = normalizeAgentShellState(normalizedStates[selectedAgentId]);
+  const selectedAgentResources = getPreviewResources(selectedAgentId);
+  const selectedAgentFiles = useMemo(
+    () => listFileResources(selectedAgentResources),
+    [selectedAgentResources],
+  );
+  const selectedAgentPreview = useMemo(
+    () =>
+      buildAgentPreviewModel({
+        agentId: selectedAgentId,
+        title: selectedAgentDefinition.title,
+        resources: selectedAgentResources,
+      }),
+    [selectedAgentDefinition.title, selectedAgentId, selectedAgentResources],
+  );
+  const shellStateMetadata = useMemo(
+    () =>
+      buildShellStateMetadata({
+        activeAgentId: selectedAgentId,
+        statesByAgentId: normalizedStates,
+      }),
+    [normalizedStates, selectedAgentId],
+  );
+
+  const value = useMemo<AgentShellContextValue>(
     () => ({
       currentUserId,
-      filesystemHydrated,
-      filesystemsByWorkspaceId: normalizeFilesystems(registry, filesystemsByWorkspaceId),
-      workspaces: registry.workspaces,
-      selectedWorkspaceId: selectedWorkspace.id,
-      selectedWorkspace,
-      setWorkspaceFilesystem,
-      selectWorkspace,
-      createWorkspace,
-      clearWorkspace,
-      activateDemoWorkspace,
-      restorePreviousWorkspace,
+      hydrated,
+      selectedAgentId,
+      selectedAgentDefinition,
+      selectedAgentState,
+      selectedAgentResources,
+      selectedAgentFiles,
+      selectedAgentPreview,
+      sharedResources,
+      shellStateMetadata,
+      selectAgent: (agentId: string) => setSelectedAgentId(normalizeSelectedAgentId(agentId)),
+      getAgentState: (agentId: string) =>
+        normalizeAgentShellState(normalizedStates[normalizeSelectedAgentId(agentId)]),
+      updateAgentState,
+      replaceAgentResources: replaceResourcesForAgent,
+      clearAgentState: clearAgentStateById,
+      clearSelectedAgentState: () => clearAgentStateById(selectedAgentId),
+      handleSelectFiles,
+      resolveResource,
+      getPreviewResources,
     }),
     [
-      activateDemoWorkspace,
-      clearWorkspace,
-      createWorkspace,
+      clearAgentStateById,
       currentUserId,
-      filesystemHydrated,
-      filesystemsByWorkspaceId,
-      registry,
-      restorePreviousWorkspace,
-      selectWorkspace,
-      selectedWorkspace,
-      setWorkspaceFilesystem,
+      getPreviewResources,
+      handleSelectFiles,
+      hydrated,
+      normalizedStates,
+      replaceResourcesForAgent,
+      resolveResource,
+      selectedAgentDefinition,
+      selectedAgentFiles,
+      selectedAgentId,
+      selectedAgentPreview,
+      selectedAgentResources,
+      selectedAgentState,
+      sharedResources,
+      shellStateMetadata,
+      updateAgentState,
     ],
   );
 
-  return <WorkspaceStoreContext.Provider value={value}>{children}</WorkspaceStoreContext.Provider>;
+  return <AgentShellContext.Provider value={value}>{children}</AgentShellContext.Provider>;
 }
 
-function useWorkspaceStore() {
-  const context = useContext(WorkspaceStoreContext);
+export function useAgentShell() {
+  const context = useContext(AgentShellContext);
   if (!context) {
-    throw new Error("useWorkspaceStore must be used within WorkspaceProvider.");
+    throw new Error("useAgentShell must be used within WorkspaceProvider.");
   }
   return context;
 }
 
-export function useWorkspaceSurface(options: {
-  surfaceKey: string;
-  defaultCwdPath?: string;
-}) {
-  const {
-    currentUserId,
-    filesystemHydrated,
-    filesystemsByWorkspaceId,
-    workspaces,
-    selectedWorkspace,
-    selectedWorkspaceId,
-    setWorkspaceFilesystem,
-    selectWorkspace,
-    createWorkspace,
-    clearWorkspace,
-    activateDemoWorkspace,
-    restorePreviousWorkspace,
-  } = useWorkspaceStore();
-  const [activeSurfaceTab, setActiveSurfaceTab] = useState<string | null>(null);
-  const [hydratedWorkspaceId, setHydratedWorkspaceId] = useState<string | null>(null);
-  const stateRef = useRef({
-    workspaceId: selectedWorkspaceId,
-    files: [] as LocalWorkspaceFile[],
-    entries: [] as WorkspaceItem[],
-    filesystem: createWorkspaceFilesystem(),
-    workspaceContext: {
-      workspace_id: selectedWorkspaceId,
-      referenced_item_ids: [] as string[],
-    } satisfies WorkspaceContext,
-  });
-
-  useEffect(() => {
-    setHydratedWorkspaceId(null);
-    if (!currentUserId) {
-      setActiveSurfaceTab(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    void (async () => {
-      const storedState = await loadWorkspaceSurfaceState(currentUserId, selectedWorkspaceId, options.surfaceKey);
-      if (cancelled) {
-        return;
-      }
-      setActiveSurfaceTab(storedState?.active_tab ?? null);
-      setHydratedWorkspaceId(selectedWorkspaceId);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUserId, options.surfaceKey, selectedWorkspaceId]);
-
-  const surfaceHydrated = hydratedWorkspaceId === selectedWorkspaceId;
-
-  const resolvedFilesystem = useMemo(
-    () => filesystemsByWorkspaceId[selectedWorkspaceId] ?? createWorkspaceFilesystem(),
-    [filesystemsByWorkspaceId, selectedWorkspaceId],
-  );
-  const entries = useMemo(() => listVisibleEntries(resolvedFilesystem), [resolvedFilesystem]);
-  const files = useMemo(() => entries.map((item) => item.file), [entries]);
-  const workspaceContext = useMemo<WorkspaceContext>(
-    () => getWorkspaceContext(resolvedFilesystem, selectedWorkspaceId),
-    [resolvedFilesystem, selectedWorkspaceId],
-  );
-
-  useEffect(() => {
-    stateRef.current = {
-      workspaceId: selectedWorkspaceId,
-      files,
-      entries,
-      filesystem: resolvedFilesystem,
-      workspaceContext,
-    };
-  }, [entries, files, resolvedFilesystem, selectedWorkspaceId, workspaceContext]);
-
-  useEffect(() => {
-    if (!currentUserId || !surfaceHydrated) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      void saveWorkspaceSurfaceState(currentUserId, selectedWorkspaceId, {
-        surface_key: options.surfaceKey,
-        active_tab: activeSurfaceTab,
-      });
-    }, 120);
-    return () => window.clearTimeout(timeoutId);
-  }, [
-    activeSurfaceTab,
-    currentUserId,
-    options.surfaceKey,
-    selectedWorkspaceId,
-    surfaceHydrated,
-  ]);
-
-  useEffect(() => {
-    if (!currentUserId) {
-      return;
-    }
-    devLogger.workspaceEvent({
-      surfaceKey: options.surfaceKey,
-      event: "surface.state",
-      pathPrefix: selectedWorkspaceId,
-      entryCount: entries.length,
-      fileCount: files.length,
-      detail: {
-        filesystemHydrated,
-        surfaceHydrated,
-        selectedWorkspaceId,
-        selectedWorkspaceKind: selectedWorkspace.kind,
-      },
-    });
-  }, [
-    currentUserId,
-    entries.length,
-    files.length,
-    filesystemHydrated,
-    options.surfaceKey,
-    selectedWorkspace.id,
-    selectedWorkspace.kind,
-    selectedWorkspaceId,
-    surfaceHydrated,
-  ]);
-
-  const syncState = useCallback(
-    (nextFilesystem: WorkspaceFilesystem, workspaceId = selectedWorkspaceId) => {
-      stateRef.current = {
-        workspaceId,
-        files: listVisibleEntries(nextFilesystem).map((item) => item.file),
-        entries: listVisibleEntries(nextFilesystem),
-        filesystem: nextFilesystem,
-        workspaceContext: getWorkspaceContext(nextFilesystem, workspaceId),
-      };
-    },
-    [selectedWorkspaceId],
-  );
-
-  function summarizeFiles(nextFiles: LocalWorkspaceFile[]): Record<string, unknown> {
-    return {
-      ids: nextFiles.map((file) => file.id),
-      names: nextFiles.map((file) => file.name),
-    };
-  }
-
-  const handleSelectFiles = useCallback(
-    async (nextFiles: FileList | null) => {
-      if (!nextFiles?.length) {
-        return;
-      }
-      const builtFiles = await Promise.all(Array.from(nextFiles).map((file) => buildWorkspaceFile(file)));
-      setWorkspaceFilesystem(selectedWorkspaceId, (currentFilesystem) => {
-        const nextFilesystem = addWorkspaceFiles(currentFilesystem, builtFiles, "uploaded", {
-          bucket: "uploaded",
-          producer_key: "uploaded",
-          producer_label: "Uploaded",
-        });
-        syncState(nextFilesystem);
-        return nextFilesystem;
-      });
-      devLogger.workspaceEvent({
-        surfaceKey: options.surfaceKey,
-        event: "files.uploaded",
-        pathPrefix: selectedWorkspaceId,
-        fileCount: builtFiles.length,
-        detail: {
-          ...summarizeFiles(builtFiles),
-          workspaceId: selectedWorkspaceId,
-        },
-      });
-    },
-    [options.surfaceKey, selectedWorkspaceId, setWorkspaceFilesystem, syncState],
-  );
-
-  const appendFiles = useCallback(
-    (nextFiles: LocalWorkspaceFile[], source: "derived" | "demo" = "derived") => {
-      let storedFiles: LocalWorkspaceFile[] = [];
-      setWorkspaceFilesystem(selectedWorkspaceId, (currentFilesystem) => {
-        const result = addWorkspaceFilesWithResult(currentFilesystem, nextFiles, source, {
-          bucket: source === "derived" ? undefined : "uploaded",
-          producer_key: source === "derived" ? options.surfaceKey : "uploaded",
-          producer_label: source === "derived" ? selectedWorkspace.name : "Uploaded",
-        });
-        storedFiles = result.files;
-        syncState(result.filesystem);
-        return result.filesystem;
-      });
-      devLogger.workspaceEvent({
-        surfaceKey: options.surfaceKey,
-        event: source === "demo" ? "files.demo_appended" : "files.appended",
-        pathPrefix: selectedWorkspaceId,
-        fileCount: storedFiles.length,
-        detail: {
-          ...summarizeFiles(storedFiles),
-          workspaceId: selectedWorkspaceId,
-        },
-      });
-      return storedFiles;
-    },
-    [options.surfaceKey, selectedWorkspace.name, selectedWorkspaceId, setWorkspaceFilesystem, syncState],
-  );
-
-  const replaceFiles = useCallback(
-    (nextFiles: LocalWorkspaceFile[], source: "demo" | "derived" = "demo") => {
-      setWorkspaceFilesystem(selectedWorkspaceId, (currentFilesystem) => {
-        const nextFilesystem = replaceWorkspaceFiles(currentFilesystem, nextFiles, source, {
-          bucket: source === "demo" ? "uploaded" : undefined,
-          producer_key: source === "demo" ? "uploaded" : options.surfaceKey,
-          producer_label: source === "demo" ? "Uploaded" : selectedWorkspace.name,
-        });
-        syncState(nextFilesystem);
-        return nextFilesystem;
-      });
-      devLogger.workspaceEvent({
-        surfaceKey: options.surfaceKey,
-        event: source === "demo" ? "workspace.reset.demo" : "workspace.reset.derived",
-        pathPrefix: selectedWorkspaceId,
-        fileCount: nextFiles.length,
-        detail: {
-          ...summarizeFiles(nextFiles),
-          workspaceId: selectedWorkspaceId,
-        },
-      });
-    },
-    [options.surfaceKey, selectedWorkspace.name, selectedWorkspaceId, setWorkspaceFilesystem, syncState],
-  );
-
-  const handleRemoveEntry = useCallback(
-    (entryId: string) => {
-      setWorkspaceFilesystem(selectedWorkspaceId, (currentFilesystem) => {
-        const nextFilesystem = removeWorkspaceEntry(currentFilesystem, entryId);
-        syncState(nextFilesystem);
-        return nextFilesystem;
-      });
-      devLogger.workspaceEvent({
-        surfaceKey: options.surfaceKey,
-        event: "entry.removed",
-        pathPrefix: selectedWorkspaceId,
-        detail: { entryId, workspaceId: selectedWorkspaceId },
-      });
-    },
-    [options.surfaceKey, selectedWorkspaceId, setWorkspaceFilesystem, syncState],
-  );
-
-  const updateFilesystem = useCallback(
-    (updater: (filesystem: WorkspaceFilesystem) => WorkspaceFilesystem) => {
-      setWorkspaceFilesystem(selectedWorkspaceId, (currentFilesystem) => {
-        const nextFilesystem = updater(currentFilesystem);
-        syncState(nextFilesystem);
-        return nextFilesystem;
-      });
-      devLogger.workspaceEvent({
-        surfaceKey: options.surfaceKey,
-        event: "filesystem.updated",
-        pathPrefix: selectedWorkspaceId,
-        detail: { workspaceId: selectedWorkspaceId },
-      });
-    },
-    [options.surfaceKey, selectedWorkspaceId, setWorkspaceFilesystem, syncState],
-  );
-
-  const getState = useCallback(() => stateRef.current, []);
-
-  return {
-    files,
-    entries,
-    filesystem: resolvedFilesystem,
-    workspaceContext,
-    hydrated: filesystemHydrated && surfaceHydrated,
-    filesystemHydrated,
-    surfaceHydrated,
-    workspaces,
-    selectedWorkspaceId,
-    selectedWorkspaceName: selectedWorkspace.name,
-    selectedWorkspaceKind: selectedWorkspace.kind,
-    activeSurfaceTab,
-    appendFiles,
-    replaceFiles,
-    handleSelectFiles,
-    handleRemoveEntry,
-    updateFilesystem,
-    getState,
-    selectWorkspace,
-    createWorkspace,
-    clearWorkspace: () => clearWorkspace(selectedWorkspaceId),
-    activateDemoWorkspace,
-    restorePreviousWorkspace,
-    setActiveSurfaceTab,
-  };
+export function useOptionalAgentShell() {
+  return useContext(AgentShellContext);
 }

@@ -4,14 +4,14 @@ type ConsoleLike = Pick<
 >;
 
 type ClientToolLogContext = {
-  capabilityId: string;
+  agentId: string;
   fileCount: number;
   threadId: string | null;
   toolName: string;
 };
 
 type ClientToolSuccessLog = ClientToolLogContext & {
-  appendedFileCount: number;
+  appendedFileCount?: number;
   durationMs: number;
   effectCount: number;
   result: unknown;
@@ -23,14 +23,14 @@ type ClientToolErrorLog = ClientToolLogContext & {
 };
 
 type ResponseLog = {
-  capabilityId: string;
+  agentId: string;
   fileCount: number;
   running: boolean;
   threadId: string | null;
 };
 
 type ChatKitGateLog = {
-  capabilityId: string;
+  agentId: string;
   clientToolCount: number;
   enabled: boolean;
   canInvestigate: boolean;
@@ -39,7 +39,7 @@ type ChatKitGateLog = {
 };
 
 type DemoStateLog = {
-  capabilityId: string;
+  agentId: string;
   active: boolean;
   ready: boolean;
   loading: boolean;
@@ -140,8 +140,7 @@ function summarizeClientToolResult(result: unknown): Record<string, unknown> {
   }
   const rows = result.rows;
   const files = result.files;
-  const csvFiles = result.csv_files;
-  const chartableFiles = result.chartable_files;
+  const datasets = result.datasets;
   const createdFile = result.created_file;
   const chart = result.chart;
   const fileInput = result.file_input;
@@ -154,8 +153,7 @@ function summarizeClientToolResult(result: unknown): Record<string, unknown> {
           ? rows.length
           : undefined,
     filesCount: Array.isArray(files) ? files.length : undefined,
-    csvFilesCount: Array.isArray(csvFiles) ? csvFiles.length : undefined,
-    chartableFilesCount: Array.isArray(chartableFiles) ? chartableFiles.length : undefined,
+    datasetsCount: Array.isArray(datasets) ? datasets.length : undefined,
     hasImageDataUrl:
       typeof result.imageDataUrl === "string" || typeof result.image_data_url === "string"
         ? true
@@ -224,7 +222,7 @@ export function createDevLogger({
     },
     clientToolStart(payload) {
       writeGroup(sink, "info", `[chatkit] client_tool.start ${payload.toolName}`, {
-        capabilityId: payload.capabilityId,
+        agentId: payload.agentId,
         fileCount: payload.fileCount,
         threadId: payload.threadId,
         toolName: payload.toolName,
@@ -233,7 +231,7 @@ export function createDevLogger({
     },
     clientToolSuccess(payload) {
       writeGroup(sink, "info", `[chatkit] client_tool.success ${payload.toolName}`, {
-        capabilityId: payload.capabilityId,
+        agentId: payload.agentId,
         fileCount: payload.fileCount,
         threadId: payload.threadId,
         toolName: payload.toolName,
@@ -245,7 +243,7 @@ export function createDevLogger({
     },
     clientToolError(payload) {
       writeGroup(sink, "warn", `[chatkit] client_tool.error ${payload.toolName}`, {
-        capabilityId: payload.capabilityId,
+        agentId: payload.agentId,
         fileCount: payload.fileCount,
         threadId: payload.threadId,
         toolName: payload.toolName,

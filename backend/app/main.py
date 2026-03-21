@@ -93,7 +93,7 @@ if settings.OPENAI_API_KEY:
 app = FastAPI(
     title="AI Portfolio API",
     version="0.8.3",
-    description="Agentic capability platform backend.",
+    description="Agentic agent platform backend.",
     lifespan=lifespan,
 )
 

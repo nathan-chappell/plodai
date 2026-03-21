@@ -35,7 +35,7 @@ def test_build_plan_widget_includes_plan_sections() -> None:
                 "Run grouped revenue totals by region and month",
             ],
             "success_criteria": ["Explain the strongest driver of the drop"],
-            "follow_on_tool_hints": ["run_aggregate_query", "render_chart_from_file"],
+            "follow_on_tool_hints": ["run_aggregate_query", "render_chart_from_dataset"],
         }
     )
 
@@ -49,7 +49,7 @@ def test_build_plan_widget_includes_plan_sections() -> None:
     assert "Success criteria" in text_values
     assert "- Explain the strongest driver of the drop" in text_values
     assert "Suggested next tools" in text_values
-    assert "run_aggregate_query, render_chart_from_file" in text_values
+    assert "run_aggregate_query, render_chart_from_dataset" in text_values
 
 
 def test_build_tool_trace_widget_shows_compact_details_and_copy_text() -> None:
@@ -74,21 +74,21 @@ def test_build_tool_trace_widget_shows_compact_details_and_copy_text() -> None:
 
 def test_build_tool_trace_widget_uses_explicit_title_when_provided() -> None:
     widget = build_tool_trace_widget(
-        "create_csv_file",
-        "Derived CSV artifact",
-        ["Path: aggregated_sales_by_month_category.csv"],
-        title="Create CSV File(aggregated_sales_by_month_category.csv)",
+        "create_dataset",
+        "Derived dataset artifact",
+        ["File: aggregated_sales_by_month_category.csv", "Format: csv"],
+        title="Create Dataset(aggregated_sales_by_month_category.csv)",
     )
     copy_text = build_tool_trace_copy_text(
-        "create_csv_file",
-        "Derived CSV artifact",
-        ["Path: aggregated_sales_by_month_category.csv"],
-        title="Create CSV File(aggregated_sales_by_month_category.csv)",
+        "create_dataset",
+        "Derived dataset artifact",
+        ["File: aggregated_sales_by_month_category.csv", "Format: csv"],
+        title="Create Dataset(aggregated_sales_by_month_category.csv)",
     )
 
     text_values = collect_text_values(widget["children"])
-    assert "Create CSV File(aggregated_sales_by_month_category.csv)" in text_values
-    assert copy_text == "Create CSV File(aggregated_sales_by_month_category.csv)"
+    assert "Create Dataset(aggregated_sales_by_month_category.csv)" in text_values
+    assert copy_text == "Create Dataset(aggregated_sales_by_month_category.csv)"
 
 
 def test_build_handoff_trace_widget_and_copy_text_include_agents() -> None:
@@ -106,7 +106,7 @@ def test_build_handoff_trace_widget_and_copy_text_include_agents() -> None:
     )
 
     assert widget["type"] == "Card"
-    assert widget["status"] == {"text": "Agent handoff", "icon": "agent"}
+    assert "status" not in widget
     text_values = collect_text_values(widget["children"])
     assert "Report Agent -> Chart Agent" in text_values
     assert "Delegate chart work." not in text_values

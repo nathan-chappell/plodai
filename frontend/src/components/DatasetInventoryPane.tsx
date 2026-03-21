@@ -60,12 +60,12 @@ export function DatasetInventoryPane({
     <DatasetInventoryPanel>
       <DatasetInventoryHeader>
         <h2>Dataset inventory</h2>
-        <MetaText>Select one or more CSV files. Click a file to inspect columns and preview rows 10 at a time.</MetaText>
+        <MetaText>Select one or more CSV or tabular JSON files. Click a dataset to inspect columns and preview rows 10 at a time.</MetaText>
       </DatasetInventoryHeader>
       <DatasetInventoryToolbar>
-        <DatasetInventoryUploadInput type="file" accept=".csv" multiple onChange={(event) => void onSelectFiles(event.target.files)} />
+        <DatasetInventoryUploadInput type="file" accept=".csv,.json,application/json,text/csv" multiple onChange={(event) => void onSelectFiles(event.target.files)} />
         <DatasetInventoryButton disabled={!datasets.length} onClick={onClearDatasets} type="button">
-          Clear files
+          Clear datasets
         </DatasetInventoryButton>
       </DatasetInventoryToolbar>
       {datasets.length ? (
@@ -135,7 +135,7 @@ export function DatasetInventoryPane({
           })}
         </DatasetInventoryList>
       ) : (
-        <MetaText>No files selected yet.</MetaText>
+        <MetaText>No datasets selected yet.</MetaText>
       )}
     </DatasetInventoryPanel>
   );

@@ -22,7 +22,7 @@ describe("dev logger", () => {
     const logger = createDevLogger({ enabled: false, sink });
 
     logger.responseStart({
-      capabilityId: "report-agent",
+      agentId: "report-agent",
       fileCount: 2,
       running: true,
       threadId: "thr_123",
@@ -97,10 +97,10 @@ describe("dev logger", () => {
     const logger = createDevLogger({ enabled: true, sink });
 
     logger.clientToolSuccess({
-      capabilityId: "report-agent",
+      agentId: "report-agent",
       fileCount: 3,
       threadId: "thr_789",
-      toolName: "render_chart_from_file",
+      toolName: "render_chart_from_dataset",
       durationMs: 41,
       effectCount: 1,
       appendedFileCount: 0,
@@ -112,13 +112,13 @@ describe("dev logger", () => {
     });
 
     expect(sink.groupCollapsed).toHaveBeenCalledWith(
-      "[chatkit] client_tool.success render_chart_from_file",
+      "[chatkit] client_tool.success render_chart_from_dataset",
     );
     expect(sink.info).toHaveBeenCalledWith({
-      capabilityId: "report-agent",
+      agentId: "report-agent",
       fileCount: 3,
       threadId: "thr_789",
-      toolName: "render_chart_from_file",
+      toolName: "render_chart_from_dataset",
       durationMs: 41,
       effectCount: 1,
       appendedFileCount: 0,

@@ -5,6 +5,17 @@ const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BAS
 const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce2224e586b";
 let clerkTokenGetter: (() => Promise<string | null>) | null = null;
 let chatKitMetadataGetter: (() => Record<string, unknown> | null) | null = null;
+let chatKitNativeFeedbackHandler:
+  | ((payload: ChatKitNativeFeedbackPayload) => Promise<void> | void)
+  | null = null;
+
+export type ChatKitNativeFeedbackKind = "positive" | "negative";
+
+export type ChatKitNativeFeedbackPayload = {
+  threadId: string;
+  itemIds: string[];
+  kind: ChatKitNativeFeedbackKind;
+};
 
 export class ApiError extends Error {
   status: number;
@@ -24,6 +35,12 @@ export function setChatKitMetadataGetter(getter: (() => Record<string, unknown> 
   chatKitMetadataGetter = getter;
 }
 
+export function setChatKitNativeFeedbackHandler(
+  handler: ((payload: ChatKitNativeFeedbackPayload) => Promise<void> | void) | null,
+): void {
+  chatKitNativeFeedbackHandler = handler;
+}
+
 export function getChatKitConfig() {
   return {
     url: CHATKIT_URL,
@@ -39,6 +56,10 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
   }
 
   const nextInit = maybeAttachChatKitMetadata(input, init);
+  const interceptedNativeFeedback = await maybeHandleChatKitNativeFeedback(input, nextInit);
+  if (interceptedNativeFeedback) {
+    return interceptedNativeFeedback;
+  }
 
   const response = await fetch(input, {
     ...nextInit,
@@ -147,6 +168,70 @@ function maybeAttachChatKitMetadata(input: RequestInfo | URL, init?: RequestInit
   } catch {
     return init;
   }
+}
+
+async function maybeHandleChatKitNativeFeedback(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response | null> {
+  if (!chatKitNativeFeedbackHandler || !isChatKitRequest(input) || typeof init?.body !== "string") {
+    return null;
+  }
+
+  const payload = parseChatKitNativeFeedbackPayload(init.body);
+  if (!payload) {
+    return null;
+  }
+
+  await chatKitNativeFeedbackHandler(payload);
+  return new Response("{}", {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function parseChatKitNativeFeedbackPayload(body: string): ChatKitNativeFeedbackPayload | null {
+  try {
+    const payload = JSON.parse(body) as {
+      type?: unknown;
+      params?: {
+        thread_id?: unknown;
+        item_ids?: unknown;
+        kind?: unknown;
+      };
+    };
+
+    if (payload?.type !== "items.feedback") {
+      return null;
+    }
+
+    const threadId =
+      typeof payload.params?.thread_id === "string" ? payload.params.thread_id.trim() : "";
+    const itemIds = Array.isArray(payload.params?.item_ids)
+      ? payload.params.item_ids.filter(
+          (item): item is string => typeof item === "string" && item.trim().length > 0,
+        )
+      : [];
+    const kind = normalizeChatKitNativeFeedbackKind(payload.params?.kind);
+
+    if (!threadId || !itemIds.length || !kind) {
+      return null;
+    }
+
+    return {
+      threadId,
+      itemIds,
+      kind,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeChatKitNativeFeedbackKind(value: unknown): ChatKitNativeFeedbackKind | null {
+  return value === "positive" || value === "negative" ? value : null;
 }
 
 function isChatKitRequest(input: RequestInfo | URL): boolean {

@@ -1,5 +1,3 @@
-import type { PdfSmartSplitBundleView } from "../tools/types";
-
 export const WORKSPACE_CONTRACT_VERSION = "v1" as const;
 
 export const WORKSPACE_ARTIFACT_BUCKET_VALUES = [
@@ -17,7 +15,7 @@ export const REPORT_ITEM_TYPE_VALUES = [
   "tool_result",
 ] as const;
 export const REPORT_SLIDE_LAYOUT_VALUES = ["1x1", "1x2", "2x2"] as const;
-export const REPORT_SLIDE_PANEL_TYPE_VALUES = ["narrative", "chart"] as const;
+export const REPORT_SLIDE_PANEL_TYPE_VALUES = ["narrative", "chart", "image"] as const;
 
 export type WorkspaceContractVersion = typeof WORKSPACE_CONTRACT_VERSION;
 export type WorkspaceArtifactBucket = (typeof WORKSPACE_ARTIFACT_BUCKET_VALUES)[number];
@@ -27,7 +25,7 @@ export type ReportSlidePanelType = (typeof REPORT_SLIDE_PANEL_TYPE_VALUES)[numbe
 
 export type WorkspaceAppStateV1 = {
   version: WorkspaceContractVersion;
-  active_tool_provider_id: string | null;
+  active_agent_id: string | null;
   active_workspace_tab: string | null;
   current_report_id: string | null;
   current_goal: string | null;
@@ -52,7 +50,7 @@ export type ReportChartItemV1 = {
   type: "chart";
   created_at: string;
   title: string;
-  file_id: string;
+  dataset_id: string;
   chart_plan_id: string;
   chart: Record<string, unknown>;
   image_data_url?: string | null;
@@ -116,13 +114,25 @@ export type ReportChartPanelV1 = {
   id: string;
   type: "chart";
   title: string;
-  file_id: string;
+  dataset_id: string;
   chart_plan_id: string;
   chart: Record<string, unknown>;
   image_data_url?: string | null;
 };
 
-export type ReportSlidePanelV1 = ReportNarrativePanelV1 | ReportChartPanelV1;
+export type ReportImagePanelV1 = {
+  id: string;
+  type: "image";
+  title: string;
+  file_id: string;
+  image_data_url?: string | null;
+  alt_text?: string | null;
+};
+
+export type ReportSlidePanelV1 =
+  | ReportNarrativePanelV1
+  | ReportChartPanelV1
+  | ReportImagePanelV1;
 
 export type ReportSlideV1 = {
   id: string;
@@ -152,7 +162,7 @@ export type WorkspaceReportV1 = {
 
 export type WorkspaceToolCatalogV1 = {
   version: WorkspaceContractVersion;
-  tool_provider_id: string | null;
+  agent_id: string | null;
   tool_names: string[];
 };
 
@@ -160,11 +170,6 @@ export type WorkspaceIndexV1 = {
   version: WorkspaceContractVersion;
   report_ids: string[];
   current_report_id: string | null;
-};
-
-export type WorkspacePdfSmartSplitRegistryV1 = {
-  version: WorkspaceContractVersion;
-  bundles: PdfSmartSplitBundleView[];
 };
 
 export type AgentsFileSummary = {
@@ -185,7 +190,7 @@ export function buildDefaultWorkspaceAppState(
 ): WorkspaceAppStateV1 {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    active_tool_provider_id: defaults.active_tool_provider_id ?? null,
+    active_agent_id: defaults.active_agent_id ?? null,
     active_workspace_tab: defaults.active_workspace_tab ?? null,
     current_report_id: defaults.current_report_id ?? null,
     current_goal: defaults.current_goal ?? null,
@@ -217,7 +222,7 @@ export function buildDefaultWorkspaceToolCatalog(
 ): WorkspaceToolCatalogV1 {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    tool_provider_id: defaults.tool_provider_id ?? null,
+    agent_id: defaults.agent_id ?? null,
     tool_names: defaults.tool_names ?? [],
   };
 }
@@ -232,11 +237,34 @@ export function buildDefaultWorkspaceReport(options?: {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
     report_id: reportId,
-    title: options?.title?.trim() || "Untitled report",
+    title: defaultWorkspaceReportTitle({
+      reportId,
+      title: options?.title,
+    }),
     created_at: createdAt,
     updated_at: createdAt,
     slides: [],
   };
+}
+
+function defaultWorkspaceReportTitle(options: {
+  reportId: string;
+  title?: string;
+}): string {
+  const explicitTitle = options.title?.trim();
+  if (explicitTitle) {
+    return explicitTitle;
+  }
+
+  if (options.reportId === "report" || /^report-\d+$/.test(options.reportId)) {
+    return "Workspace report";
+  }
+
+  return options.reportId
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function normalizeReportId(input: string): string {
@@ -248,7 +276,7 @@ export function normalizeReportId(input: string): string {
 }
 
 export function buildDefaultAgentsFileContent(options: {
-  toolProviderTitle: string;
+  agentTitle: string;
   currentGoal: string;
 }): string {
   return [
@@ -256,7 +284,7 @@ export function buildDefaultAgentsFileContent(options: {
     "",
     `Workspace contract version: ${WORKSPACE_CONTRACT_VERSION}`,
     "Do not progress this workspace contract to v2 until the user explicitly says so.",
-    `This workspace is shared across tools. Use the active tool together with the ${options.toolProviderTitle} workflow.`,
+    `This workspace is shared across tools. Use the active tool together with the ${options.agentTitle} workflow.`,
     "",
     "## Current Objective",
     options.currentGoal.trim() || "No explicit objective has been recorded yet.",

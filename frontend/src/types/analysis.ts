@@ -1,3 +1,5 @@
+import type { ShellStateMetadata } from "./shell";
+
 export type PrimitiveValue = string | number | boolean | null;
 export type DataRow = Record<string, PrimitiveValue>;
 
@@ -26,7 +28,15 @@ export type RowExpr =
     }
   | {
       kind: "call";
-      fn: "lower" | "upper" | "trim" | "abs" | "round" | "floor" | "ceil" | "coalesce";
+      fn:
+        | "lower"
+        | "upper"
+        | "trim"
+        | "abs"
+        | "round"
+        | "floor"
+        | "ceil"
+        | "coalesce";
       args: RowExpr[];
     };
 
@@ -45,7 +55,16 @@ export type AggregateSpec =
   | { op: "null_count"; as: string; expr: RowExpr }
   | { op: "count_distinct"; as: string; expr: RowExpr }
   | {
-      op: "sum" | "avg" | "min" | "max" | "first" | "last" | "median" | "variance" | "stddev";
+      op:
+        | "sum"
+        | "avg"
+        | "min"
+        | "max"
+        | "first"
+        | "last"
+        | "median"
+        | "variance"
+        | "stddev";
       as: string;
       expr: RowExpr;
     }
@@ -82,7 +101,6 @@ export type ChartStylePreset =
   | "cobalt"
   | "terracotta"
   | "midnight";
-
 export type ChartLegendPosition = "top" | "bottom" | "left" | "right";
 export type ChartOrientation = "vertical" | "horizontal";
 export type ChartValueFormat =
@@ -121,17 +139,34 @@ export type AgentPlan = {
   planned_steps: string[];
   success_criteria?: string[];
   follow_on_tool_hints?: string[];
+  execution_hints?: AgentPlanExecutionHint[];
   created_at?: string;
 };
 
-export type ToolProviderDelegationTargetMetadata = {
-  tool_provider_id: string;
+export type AgentPlanExecutionHint = {
+  done_when?: string;
+  preferred_tool_names?: string[];
+  preferred_handoff_tool_names?: string[];
+};
+
+export type PlanExecution = {
+  plan_id: string;
+  status: "active" | "completed" | "cancelled";
+  workflow_item_id: string;
+  current_step_index: number;
+  attempts_by_step: number[];
+  step_notes: Array<string | null>;
+  step_started_after_item_id?: string;
+};
+
+export type AgentDelegationTargetMetadata = {
+  agent_id: string;
   tool_name: string;
   description: string;
 };
 
-export type ToolProviderSpecMetadata = {
-  tool_provider_id: string;
+export type AgentSpecMetadata = {
+  agent_id: string;
   agent_name: string;
   instructions: string;
   client_tools: Array<{
@@ -147,12 +182,12 @@ export type ToolProviderSpecMetadata = {
       arg_labels?: Record<string, string>;
     };
   }>;
-  delegation_targets: ToolProviderDelegationTargetMetadata[];
+  delegation_targets: AgentDelegationTargetMetadata[];
 };
 
-export type ToolProviderBundleMetadata = {
-  root_tool_provider_id: string;
-  tool_providers: ToolProviderSpecMetadata[];
+export type AgentBundleMetadata = {
+  root_agent_id: string;
+  agents: AgentSpecMetadata[];
 };
 
 export type FeedbackOrigin = "interactive" | "ui_integration_test";
@@ -161,33 +196,26 @@ export type AppThreadMetadata = {
   title?: string;
   investigation_brief?: string;
   plan?: AgentPlan;
+  plan_execution?: PlanExecution;
   chart_plan?: AgentPlan;
   chart_cache?: Record<string, string>;
   surface_key?: string;
-  tool_provider_bundle?: ToolProviderBundleMetadata;
-  workspace_state?: WorkspaceState;
+  agent_bundle?: AgentBundleMetadata;
+  shell_state?: ShellStateMetadata;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
   origin?: FeedbackOrigin;
 };
 
-export type CapabilityHandoffTargetMetadata = ToolProviderDelegationTargetMetadata;
-export type CapabilityAgentSpecMetadata = ToolProviderSpecMetadata;
-export type CapabilityBundleMetadata = ToolProviderBundleMetadata;
-
 export type UpdateThreadMetadataPayload = Partial<AppThreadMetadata>;
 
-export type RunLocalQueryToolArgs = {
+export type RunAggregateQueryToolArgs = {
   query_plan: QueryPlan;
 };
 
-export type CreateCsvFileToolArgs = {
+export type CreateDatasetToolArgs = {
   filename: string;
-  query_plan: QueryPlan;
-};
-
-export type CreateJsonFileToolArgs = {
-  filename: string;
+  format: "csv" | "json";
   query_plan: QueryPlan;
 };
 
@@ -201,16 +229,24 @@ export type GetPdfPageRangeToolArgs = {
   end_page: number;
 };
 
-export type ListLoadedDatasetsToolArgs = {
+export type ListDatasetsToolArgs = {
   includeSamples?: boolean;
 };
 
-export type InspectChartableFileSchemaToolArgs = {
-  file_id: string;
+export type ListDemoScenariosToolArgs = Record<string, never>;
+
+export type LaunchDemoScenarioToolArgs = {
+  scenario_id: string;
 };
 
-export type RenderChartFromFileToolArgs = {
-  file_id: string;
+export type ListImageFilesToolArgs = Record<string, never>;
+
+export type InspectDatasetSchemaToolArgs = {
+  dataset_id: string;
+};
+
+export type RenderChartFromDatasetToolArgs = {
+  dataset_id: string;
   chart_plan_id: string;
   chart_plan: ClientChartSpec;
   x_key: string;
@@ -226,6 +262,11 @@ export type InspectPdfFileToolArgs = {
 export type SmartSplitPdfToolArgs = {
   file_id: string;
   goal?: string;
+};
+
+export type InspectImageFileToolArgs = {
+  file_id: string;
+  max_dimension?: number;
 };
 
 export type ListReportsToolArgs = Record<string, never>;
@@ -248,10 +289,17 @@ export type ReportSlidePanelDraft =
   | {
       type: "chart";
       title: string;
-      file_id: string;
+      dataset_id: string;
       chart_plan_id: string;
       chart: ClientChartSpec;
       image_data_url?: string | null;
+    }
+  | {
+      type: "image";
+      title: string;
+      file_id: string;
+      image_data_url?: string | null;
+      alt_text?: string;
     };
 
 export type ReportSlideDraft = {
@@ -271,15 +319,17 @@ export type RemoveReportSlideToolArgs = {
 };
 
 export type ClientToolArgsMap = {
-  list_csv_files: ListLoadedDatasetsToolArgs;
-  run_aggregate_query: RunLocalQueryToolArgs;
-  create_csv_file: CreateCsvFileToolArgs;
-  create_json_file: CreateJsonFileToolArgs;
-  list_chartable_files: ListWorkspaceFilesToolArgs;
+  list_demo_scenarios: ListDemoScenariosToolArgs;
+  launch_demo_scenario: LaunchDemoScenarioToolArgs;
+  list_datasets: ListDatasetsToolArgs;
+  list_image_files: ListImageFilesToolArgs;
+  run_aggregate_query: RunAggregateQueryToolArgs;
+  create_dataset: CreateDatasetToolArgs;
   list_pdf_files: ListWorkspaceFilesToolArgs;
-  inspect_chartable_file_schema: InspectChartableFileSchemaToolArgs;
-  render_chart_from_file: RenderChartFromFileToolArgs;
+  inspect_dataset_schema: InspectDatasetSchemaToolArgs;
+  render_chart_from_dataset: RenderChartFromDatasetToolArgs;
   inspect_pdf_file: InspectPdfFileToolArgs;
+  inspect_image_file: InspectImageFileToolArgs;
   get_pdf_page_range: GetPdfPageRangeToolArgs;
   smart_split_pdf: SmartSplitPdfToolArgs;
   list_reports: ListReportsToolArgs;
@@ -298,7 +348,7 @@ export type ClientToolCall<Name extends ClientToolName = ClientToolName> = {
 
 export type ChartRenderedEffect = {
   type: "chart_rendered";
-  fileId: string;
+  datasetId: string;
   chartPlanId: string;
   chart: ClientChartSpec;
   imageDataUrl?: string;
@@ -318,47 +368,6 @@ export type SmartSplitEntry = {
   startPage: number;
   endPage: number;
   pageCount: number;
-};
-
-export type WorkspaceThreadContext = {
-  workspace_id: string;
-  referenced_item_ids: string[];
-};
-
-export type WorkspaceStateFileSummary = {
-  id: string;
-  name: string;
-  bucket: "uploaded" | "data" | "chart" | "pdf";
-  producer_key: string;
-  producer_label: string;
-  source: "uploaded" | "derived" | "demo";
-  kind: "csv" | "json" | "pdf" | "other";
-  extension: string;
-  mime_type?: string;
-  byte_size?: number;
-  row_count?: number;
-  columns?: string[];
-  numeric_columns?: string[];
-  sample_rows?: DataRow[];
-  page_count?: number;
-};
-
-export type WorkspaceStateReportSummary = {
-  report_id: string;
-  title: string;
-  item_count: number;
-  slide_count: number;
-  updated_at: string | null;
-};
-
-export type WorkspaceState = {
-  version: "v1";
-  context: WorkspaceThreadContext;
-  files: WorkspaceStateFileSummary[];
-  reports: WorkspaceStateReportSummary[];
-  current_report_id: string | null;
-  current_goal: string | null;
-  agents_markdown?: string | null;
 };
 
 export type PdfSmartSplitEffect = {

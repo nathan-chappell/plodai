@@ -8,11 +8,13 @@ export type FeedbackSessionActionPayload = {
   message?: string;
 };
 
-export function buildProvideFeedbackPrompt(): string {
+export function buildNativeFeedbackPrompt(kind: FeedbackKind): string {
+  const sentiment = kind === "positive" ? "thumbs up" : "thumbs down";
   return [
     "Please hand off to the feedback agent.",
-    "I want to provide feedback on the latest assistant response in this thread.",
-    "I have not written the feedback yet, so the feedback agent should start by gathering it.",
+    `The user clicked the native ChatKit feedback button with sentiment: "${sentiment}".`,
+    "Treat this as feedback on the latest assistant response in this thread.",
+    "The user has not written the feedback yet, so the feedback agent should start by gathering it.",
     "Call get_feedback first and open the structured widget immediately.",
     "Do not ask me to type feedback in chat before opening the widget.",
     "Keep the exchange brief and focused on capturing feedback only.",

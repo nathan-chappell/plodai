@@ -1,11 +1,16 @@
 import { parseCsvPreview } from "./csv";
 import { parseJsonPreview } from "./json";
 import { encodeBytesToBase64 } from "./base64";
+import {
+  isImageExtension,
+  isImageMimeType,
+  normalizeImageMimeType,
+  readImageDimensionsFromFile,
+} from "./image";
 import { inspectPdfBytes } from "./pdf";
 import type {
-  LocalChartableFile,
   LocalDataset,
-  LocalJsonFile,
+  LocalImageFile,
   LocalOtherFile,
   LocalPdfFile,
   LocalWorkspaceFile,
@@ -48,7 +53,7 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
       preview_rows: preview.previewRows,
       json_text: preview.jsonText,
       mime_type: file.type || "application/json",
-    } satisfies LocalJsonFile;
+    } satisfies LocalDataset;
   }
 
   if (extension === "pdf") {
@@ -62,22 +67,41 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
     } satisfies LocalPdfFile;
   }
 
+  if (isImageExtension(extension) || isImageMimeType(file.type)) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const dimensions = await readImageDimensionsFromFile(file);
+    return {
+      ...baseFields,
+      kind: "image",
+      mime_type: normalizeImageMimeType(file.type, extension),
+      width: dimensions.width,
+      height: dimensions.height,
+      bytes_base64: encodeBytesToBase64(bytes),
+    } satisfies LocalImageFile;
+  }
+
   return {
     ...baseFields,
     kind: "other",
   } satisfies LocalOtherFile;
 }
 
-export function getCsvFiles(files: LocalWorkspaceFile[]): LocalDataset[] {
-  return files.filter((file): file is LocalDataset => file.kind === "csv");
+export function getDatasets(files: LocalWorkspaceFile[]): LocalDataset[] {
+  return files.filter(
+    (file): file is LocalDataset => file.kind === "csv" || file.kind === "json",
+  );
 }
 
-export function getChartableFiles(files: LocalWorkspaceFile[]): LocalChartableFile[] {
-  return files.filter((file): file is LocalChartableFile => file.kind === "csv" || file.kind === "json");
+export function getCsvDatasets(files: LocalWorkspaceFile[]): LocalDataset[] {
+  return files.filter((file): file is LocalDataset => file.kind === "csv");
 }
 
 export function getPdfFiles(files: LocalWorkspaceFile[]): LocalPdfFile[] {
   return files.filter((file): file is LocalPdfFile => file.kind === "pdf");
+}
+
+export function getImageFiles(files: LocalWorkspaceFile[]): LocalImageFile[] {
+  return files.filter((file): file is LocalImageFile => file.kind === "image");
 }
 
 export function getFileExtension(filename: string): string {
@@ -111,6 +135,12 @@ export function summarizeWorkspaceFiles(
     ...(file.kind === "pdf"
       ? {
           page_count: file.page_count,
+        }
+      : {}),
+    ...(file.kind === "image"
+      ? {
+          width: file.width,
+          height: file.height,
         }
       : {}),
   }));

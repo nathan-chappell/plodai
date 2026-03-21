@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
-import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
-import { getToolProviderDefinition } from "../tools/definitions";
+import {
+  authenticatedFetch,
+  getChatKitConfig,
+  setChatKitMetadataGetter,
+  setChatKitNativeFeedbackHandler,
+} from "../lib/api";
+import { getAgentDefinition } from "../agents/definitions";
 import {
   buildFeedbackSubmissionPrompt,
-  buildProvideFeedbackPrompt,
+  buildNativeFeedbackPrompt,
   type FeedbackSessionActionPayload,
   type FeedbackOrigin,
 } from "../lib/chatkit-feedback";
 import { devLogger } from "../lib/dev-logging";
 import { findChatKitScrollTarget, isNearScrollBottom } from "../lib/chatkit-autoscroll";
-import type { ToolProviderBundle, ToolProviderClientTool } from "../tools/types";
+import type { AgentBundle, AgentClientTool } from "../agents/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
-  ChatKitPaneFeedbackButton,
   ChatKitPaneHarness,
   ChatKitPaneMeta,
   ChatKitPanePill,
@@ -31,9 +35,9 @@ import type {
   ClientEffect,
   ClientToolCall,
   ClientToolName,
-  WorkspaceState,
 } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
+import type { AgentResourceRecord, ShellStateMetadata } from "../types/shell";
 
 type ChatKitStarterPrompt = {
   label: string;
@@ -44,6 +48,11 @@ type ChatKitStarterPrompt = {
 export type ActiveToolInvocation = {
   name: string;
   params: Record<string, unknown>;
+};
+
+type QueuedPrompt = {
+  prompt: string;
+  model?: string;
 };
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
@@ -72,23 +81,6 @@ function formatToolLabel(tool: string): string {
     .join(" ");
 }
 
-function listBundleToolDefinitions(capabilityBundle: ToolProviderBundle) {
-  const seen = new Set<string>();
-  const toolDefinitions: Array<ToolProviderBundle["tool_providers"][number]["client_tools"][number]> = [];
-
-  for (const capability of capabilityBundle.tool_providers) {
-    for (const tool of capability.client_tools) {
-      if (seen.has(tool.name)) {
-        continue;
-      }
-      seen.add(tool.name);
-      toolDefinitions.push(tool);
-    }
-  }
-
-  return toolDefinitions;
-}
-
 type ComposerToolOption = {
   id: string;
   label: string;
@@ -97,40 +89,53 @@ type ComposerToolOption = {
   placeholderOverride?: string;
 };
 
-function listBundleComposerTools(capabilityBundle: ToolProviderBundle): ComposerToolOption[] {
-  const capabilityComposerTools: Array<ComposerToolOption & { order: number }> = [];
+function buildComposerToolOption(agentId: string): (ComposerToolOption & { order: number }) | null {
+  const definition = getAgentDefinition(agentId);
+  if (!definition) {
+    return null;
+  }
+  return {
+    id: agentId,
+    label: definition.composerLabel ?? definition.title,
+    shortLabel: definition.composerShortLabel,
+    placeholderOverride: definition.composerPlaceholder ?? definition.chatkitPlaceholder,
+    icon: definition.composerIcon ?? "cube",
+    order: definition.composerOrder ?? Number.MAX_SAFE_INTEGER,
+  };
+}
 
-  for (const capability of capabilityBundle.tool_providers) {
-    const definition = getToolProviderDefinition(capability.tool_provider_id);
-    if (!definition?.showInComposer) {
+function listAgentComposerTools(agentIds: string[]): ComposerToolOption[] {
+  const agentComposerTools: Array<ComposerToolOption & { order: number }> = [];
+  const seenAgentIds = new Set<string>();
+
+  for (const agentId of agentIds) {
+    if (seenAgentIds.has(agentId)) {
       continue;
     }
-    capabilityComposerTools.push({
-      id: capability.tool_provider_id,
-      label: definition.composerLabel ?? definition.title,
-      shortLabel: definition.composerShortLabel,
-      placeholderOverride: definition.composerPlaceholder ?? definition.chatkitPlaceholder,
-      icon: definition.composerIcon ?? "cube",
-      order: definition.composerOrder ?? Number.MAX_SAFE_INTEGER,
-    });
+    seenAgentIds.add(agentId);
+    const tool = buildComposerToolOption(agentId);
+    if (!tool) {
+      continue;
+    }
+    agentComposerTools.push(tool);
   }
 
-  capabilityComposerTools.sort((left, right) => {
+  agentComposerTools.sort((left, right) => {
     if (left.order !== right.order) {
       return left.order - right.order;
     }
     return left.label.localeCompare(right.label);
   });
 
-  if (capabilityComposerTools.length > 0) {
-    return capabilityComposerTools.map(({ order: _order, ...tool }) => tool);
-  }
+  return agentComposerTools.map(({ order: _order, ...tool }) => tool);
+}
 
-  return listBundleToolDefinitions(capabilityBundle).map((tool) => ({
-    id: tool.name as ClientToolName,
-    label: tool.display?.label ?? formatToolLabel(tool.name),
-    icon: toolIcon(tool.name as ClientToolName),
-  }));
+function listBundleComposerTools(agentBundle: AgentBundle): ComposerToolOption[] {
+  return listAgentComposerTools(
+    agentBundle.agents
+      .map((agent) => agent.agent_id)
+      .filter((agentId) => Boolean(getAgentDefinition(agentId)?.showInComposer)),
+  );
 }
 
 function slugifyLabel(value: string): string {
@@ -147,20 +152,22 @@ function scrollElementToBottom(element: HTMLElement): void {
 
 function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
   switch (tool) {
-    case "list_csv_files":
-    case "list_chartable_files":
-    case "inspect_chartable_file_schema":
+    case "list_demo_scenarios":
+    case "launch_demo_scenario":
+    case "list_datasets":
+    case "inspect_dataset_schema":
     case "list_reports":
     case "get_report":
     case "create_report":
     case "append_report_slide":
     case "remove_report_slide":
+    case "list_image_files":
+    case "inspect_image_file":
       return "cube";
     case "run_aggregate_query":
-    case "create_csv_file":
-    case "create_json_file":
+    case "create_dataset":
       return "analytics";
-    case "render_chart_from_file":
+    case "render_chart_from_dataset":
       return "chart";
     case "list_pdf_files":
     case "inspect_pdf_file":
@@ -199,8 +206,8 @@ export type ChatKitQuickAction = {
 };
 
 export function buildChatKitRequestMetadata(options: {
-  capabilityBundle: ToolProviderBundle;
-  workspaceState?: WorkspaceState;
+  agentBundle: AgentBundle;
+  shellState?: ShellStateMetadata;
   investigationBrief?: string;
   threadOrigin: FeedbackOrigin;
 }): AppThreadMetadata {
@@ -209,22 +216,21 @@ export function buildChatKitRequestMetadata(options: {
     surface_key:
       typeof window !== "undefined"
         ? window.location.pathname
-        : options.capabilityBundle.root_tool_provider_id,
-    tool_provider_bundle: options.capabilityBundle,
-    workspace_state: options.workspaceState,
+        : options.agentBundle.root_agent_id,
+    agent_bundle: options.agentBundle,
+    shell_state: options.shellState,
     origin: options.threadOrigin,
   };
 }
 
-const FEEDBACK_ACTION_LABEL = "Feedback";
-
 export function ChatKitHarness({
-  capabilityBundle,
+  agentBundle,
   files,
-  workspaceState,
+  shellState,
   investigationBrief,
   onEffects,
-  onFilesAdded,
+  onSelectAgent,
+  onReplaceAgentResources,
   clientTools,
   headerTitle = "AI Portfolio",
   greeting,
@@ -236,15 +242,19 @@ export function ChatKitHarness({
   showDictation = true,
   surfaceMinHeight,
   showChatKitHeader = true,
+  showComposerTools = true,
+  composerToolIds,
   onToolActivity,
+  onRunStart,
 }: {
-  capabilityBundle: ToolProviderBundle;
+  agentBundle: AgentBundle;
   files: LocalWorkspaceFile[];
-  workspaceState?: WorkspaceState;
+  shellState?: ShellStateMetadata;
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
-  onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
-  clientTools: ToolProviderClientTool[];
+  onSelectAgent?: (agentId: string) => void;
+  onReplaceAgentResources?: (agentId: string, resources: AgentResourceRecord[]) => void;
+  clientTools: AgentClientTool[];
   headerTitle?: string;
   greeting?: string;
   prompts?: readonly ChatKitStarterPrompt[];
@@ -255,14 +265,20 @@ export function ChatKitHarness({
   showDictation?: boolean;
   surfaceMinHeight?: number;
   showChatKitHeader?: boolean;
+  showComposerTools?: boolean;
+  composerToolIds?: string[];
   onToolActivity?: (activity: ActiveToolInvocation | null) => void;
+  onRunStart?: () => void;
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [activeClientToolName, setActiveClientToolName] = useState<string | null>(null);
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const [dispatchingQueuedPrompt, setDispatchingQueuedPrompt] = useState(false);
   const onEffectsRef = useRef(onEffects);
-  const onFilesAddedRef = useRef(onFilesAdded);
+  const onSelectAgentRef = useRef(onSelectAgent);
+  const onReplaceAgentResourcesRef = useRef(onReplaceAgentResources);
   const clientToolsRef = useRef(clientTools);
   const threadIdRef = useRef<string | null>(null);
   const chatKitRef = useRef<ReturnType<typeof useChatKit> | null>(null);
@@ -274,8 +290,8 @@ export function ChatKitHarness({
   const runningRef = useRef(false);
   const activeClientToolRef = useRef<string | null>(null);
   const finishStatusTimeoutRef = useRef<number | null>(null);
-  const capabilityBundleRef = useRef(capabilityBundle);
-  const workspaceStateRef = useRef(workspaceState);
+  const agentBundleRef = useRef(agentBundle);
+  const shellStateRef = useRef(shellState);
   const investigationBriefRef = useRef(investigationBrief);
   const threadOriginRef = useRef(threadOrigin);
 
@@ -284,12 +300,16 @@ export function ChatKitHarness({
   }, [onEffects]);
 
   useEffect(() => {
-    onFilesAddedRef.current = onFilesAdded;
-  }, [onFilesAdded]);
-
-  useEffect(() => {
     clientToolsRef.current = clientTools;
   }, [clientTools]);
+
+  useEffect(() => {
+    onSelectAgentRef.current = onSelectAgent;
+  }, [onSelectAgent]);
+
+  useEffect(() => {
+    onReplaceAgentResourcesRef.current = onReplaceAgentResources;
+  }, [onReplaceAgentResources]);
 
   useEffect(() => {
     threadIdRef.current = threadId;
@@ -300,12 +320,12 @@ export function ChatKitHarness({
   }, [activeClientToolName]);
 
   useEffect(() => {
-    capabilityBundleRef.current = capabilityBundle;
-  }, [capabilityBundle]);
+    agentBundleRef.current = agentBundle;
+  }, [agentBundle]);
 
   useEffect(() => {
-    workspaceStateRef.current = workspaceState;
-  }, [workspaceState]);
+    shellStateRef.current = shellState;
+  }, [shellState]);
 
   useEffect(() => {
     investigationBriefRef.current = investigationBrief;
@@ -339,14 +359,28 @@ export function ChatKitHarness({
   useEffect(() => {
     setChatKitMetadataGetter(() =>
       buildChatKitRequestMetadata({
-        capabilityBundle: capabilityBundleRef.current,
-        workspaceState: workspaceStateRef.current,
+        agentBundle: agentBundleRef.current,
+        shellState: shellStateRef.current,
         investigationBrief: investigationBriefRef.current,
         threadOrigin: threadOriginRef.current,
       }),
     );
     return () => {
       setChatKitMetadataGetter(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    setChatKitNativeFeedbackHandler(async ({ kind }) => {
+      clearFinishStatusTimeout();
+      setStatus("Starting feedback flow.");
+      await chatKitRef.current?.sendUserMessage({
+        text: buildNativeFeedbackPrompt(kind),
+        newThread: false,
+      });
+    });
+    return () => {
+      setChatKitNativeFeedbackHandler(null);
     };
   }, []);
 
@@ -400,9 +434,16 @@ export function ChatKitHarness({
 
   const starterPrompts = useMemo(() => prompts ?? buildStarterPrompts(), [prompts]);
   const composerTools = useMemo(
-    () => listBundleComposerTools(capabilityBundle),
-    [capabilityBundle],
+    () =>
+      !showComposerTools
+        ? []
+        : composerToolIds?.length
+          ? listAgentComposerTools(composerToolIds)
+          : listBundleComposerTools(agentBundle),
+    [agentBundle, composerToolIds, showComposerTools],
   );
+  const activeComposerToolId =
+    composerTools.find((tool) => tool.id === agentBundle.root_agent_id)?.id ?? null;
   const options = useMemo<UseChatKitOptions>(
     () => ({
       api: {
@@ -424,7 +465,7 @@ export function ChatKitHarness({
         showRename: true,
       },
       threadItemActions: {
-        feedback: false,
+        feedback: true,
       },
       header: showChatKitHeader
         ? {
@@ -477,6 +518,7 @@ export function ChatKitHarness({
           icon: tool.icon,
           shortLabel: tool.shortLabel,
           placeholderOverride: tool.placeholderOverride,
+          persistent: true,
         })),
       },
       onReady: () => {
@@ -484,14 +526,20 @@ export function ChatKitHarness({
         setStatus("Chat ready.");
         resolveScrollTarget();
         scheduleScrollToBottom(true);
+        if (activeComposerToolId) {
+          void chatKitRef.current?.setComposerValue({
+            selectedToolId: activeComposerToolId,
+          });
+        }
       },
       onResponseStart: () => {
         clearFinishStatusTimeout();
         runningRef.current = true;
         setRunning(true);
+        onRunStart?.();
         setStatus("Agent run in progress.");
         devLogger.responseStart({
-          capabilityId: capabilityBundle.root_tool_provider_id,
+          agentId: agentBundle.root_agent_id,
           fileCount: files.length,
           running: true,
           threadId: threadIdRef.current,
@@ -507,7 +555,7 @@ export function ChatKitHarness({
           scheduleIdleStatus("Agent run finished.");
         }
         devLogger.responseEnd({
-          capabilityId: capabilityBundle.root_tool_provider_id,
+          agentId: agentBundle.root_agent_id,
           fileCount: files.length,
           running: false,
           threadId: threadIdRef.current,
@@ -524,6 +572,12 @@ export function ChatKitHarness({
         resolveScrollTarget();
         scheduleScrollToBottom(true);
       },
+      onToolChange: ({ toolId }) => {
+        if (!toolId || !composerTools.some((tool) => tool.id === toolId)) {
+          return;
+        }
+        onSelectAgentRef.current?.(toolId);
+      },
       onClientTool: async ({ name, params }) => {
         const tool = clientToolsRef.current.find((candidate) => candidate.name === name);
         if (!tool) {
@@ -539,9 +593,8 @@ export function ChatKitHarness({
         setStatus(`Running ${formatToolLabel(name)} locally.`);
         const startedAt = nowMs();
         let effectCount = 0;
-        let appendedFileCount = 0;
         devLogger.clientToolStart({
-          capabilityId: capabilityBundle.root_tool_provider_id,
+          agentId: agentBundle.root_agent_id,
           fileCount: files.length,
           threadId: threadIdRef.current,
           toolName: name,
@@ -559,22 +612,28 @@ export function ChatKitHarness({
                 onEffectsRef.current(effects);
               }
             },
-            appendFiles: (nextFiles): LocalWorkspaceFile[] => {
-              appendedFileCount += nextFiles.length;
-              if (nextFiles.length) {
-                return onFilesAddedRef.current?.(nextFiles) ?? nextFiles;
+            selectAgent: (agentId) => {
+              onSelectAgentRef.current?.(agentId);
+            },
+            replaceAgentResources: (agentId, resources) => {
+              onReplaceAgentResourcesRef.current?.(agentId, resources);
+            },
+            schedulePrompt: (prompt, model) => {
+              const trimmedPrompt = prompt.trim();
+              if (!trimmedPrompt) {
+                return;
               }
-              return nextFiles;
+              setQueuedPrompts((current) => [...current, { prompt: trimmedPrompt, model }]);
+              setStatus("Demo workspace is ready. Continuing automatically.");
             },
           });
           devLogger.clientToolSuccess({
-            capabilityId: capabilityBundle.root_tool_provider_id,
+            agentId: agentBundle.root_agent_id,
             fileCount: files.length,
             threadId: threadIdRef.current,
             toolName: name,
             durationMs: Math.round(nowMs() - startedAt),
             effectCount,
-            appendedFileCount,
             result,
           });
           setStatus(`Sent ${formatToolLabel(name)} back to the agent.`);
@@ -584,7 +643,7 @@ export function ChatKitHarness({
           return result;
         } catch (error) {
           devLogger.clientToolError({
-            capabilityId: capabilityBundle.root_tool_provider_id,
+            agentId: agentBundle.root_agent_id,
             fileCount: files.length,
             threadId: threadIdRef.current,
             toolName: name,
@@ -618,7 +677,8 @@ export function ChatKitHarness({
       composerTools,
       colorScheme,
       composerPlaceholder,
-      capabilityBundle.root_tool_provider_id,
+      agentBundle.root_agent_id,
+      activeComposerToolId,
       files.length,
       greeting,
       headerTitle,
@@ -627,6 +687,7 @@ export function ChatKitHarness({
       starterPrompts,
       threadOrigin,
       onToolActivity,
+      onRunStart,
     ],
   );
 
@@ -635,6 +696,40 @@ export function ChatKitHarness({
   useEffect(() => {
     chatKitRef.current = chatKit;
   }, [chatKit]);
+
+  useEffect(() => {
+    if (!activeComposerToolId) {
+      return;
+    }
+    void chatKit.setComposerValue({
+      selectedToolId: activeComposerToolId,
+    });
+  }, [activeComposerToolId, chatKit]);
+
+  useEffect(() => {
+    if (
+      !queuedPrompts.length ||
+      running ||
+      activeClientToolName !== null ||
+      dispatchingQueuedPrompt
+    ) {
+      return;
+    }
+    const [nextPrompt, ...rest] = queuedPrompts;
+    setQueuedPrompts(rest);
+    setDispatchingQueuedPrompt(true);
+    clearFinishStatusTimeout();
+    setStatus("Continuing in the seeded workspace.");
+    void chatKit
+      .sendUserMessage({
+        text: nextPrompt.prompt,
+        model: nextPrompt.model ?? CHATKIT_DEFAULT_MODEL_ID,
+        newThread: !threadIdRef.current,
+      })
+      .finally(() => {
+        setDispatchingQueuedPrompt(false);
+      });
+  }, [activeClientToolName, chatKit, dispatchingQueuedPrompt, queuedPrompts, running]);
 
   useEffect(() => {
     resolveScrollTarget();
@@ -662,25 +757,7 @@ export function ChatKitHarness({
     });
   }
 
-  async function handleProvideFeedback() {
-    const busy = runningRef.current || Boolean(activeClientToolRef.current);
-    if (!threadIdRef.current || busy) {
-      return;
-    }
-    clearFinishStatusTimeout();
-    setStatus("Starting feedback flow.");
-    await chatKit.sendUserMessage({
-      text: buildProvideFeedbackPrompt(),
-      newThread: false,
-    });
-  }
-
-  const isBusy = running || activeClientToolName !== null;
-  const feedbackActionTitle = !threadId
-    ? "Feedback is available after the first assistant response."
-    : isBusy
-      ? "Wait for the current run to finish before opening feedback."
-      : "Open the feedback flow for the latest assistant response in this thread.";
+  const isBusy = running || activeClientToolName !== null || dispatchingQueuedPrompt;
 
   return (
     <ChatKitPaneHarness>
@@ -698,16 +775,6 @@ export function ChatKitHarness({
                 {action.label}
               </ChatKitPaneToolbarButton>
             ))}
-            <ChatKitPaneFeedbackButton
-              aria-label={FEEDBACK_ACTION_LABEL}
-              data-testid="chatkit-provide-feedback"
-              type="button"
-              onClick={() => void handleProvideFeedback()}
-              disabled={isBusy || !threadId}
-              title={feedbackActionTitle}
-            >
-              {FEEDBACK_ACTION_LABEL}
-            </ChatKitPaneFeedbackButton>
           </ChatKitPaneToolbar>
           <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
             {status}
@@ -727,14 +794,15 @@ export function ChatKitHarness({
 }
 
 export function ChatKitPane({
-  capabilityBundle,
+  agentBundle,
   enabled,
   files,
-  workspaceState,
+  shellState,
   investigationBrief,
   clientTools,
   onEffects,
-  onFilesAdded,
+  onSelectAgent,
+  onReplaceAgentResources,
   headerTitle,
   greeting,
   prompts,
@@ -751,16 +819,20 @@ export function ChatKitPane({
   showDefaultModelMeta = false,
   surfaceMinHeight,
   showChatKitHeader = true,
+  showComposerTools = true,
+  composerToolIds,
   onToolActivity,
+  onRunStart,
 }: {
-  capabilityBundle: ToolProviderBundle;
+  agentBundle: AgentBundle;
   enabled: boolean;
   files: LocalWorkspaceFile[];
-  workspaceState?: WorkspaceState;
+  shellState?: ShellStateMetadata;
   investigationBrief: string;
-  clientTools: ToolProviderClientTool[];
+  clientTools: AgentClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
-  onFilesAdded?: (files: LocalWorkspaceFile[]) => LocalWorkspaceFile[] | void;
+  onSelectAgent?: (agentId: string) => void;
+  onReplaceAgentResources?: (agentId: string, resources: AgentResourceRecord[]) => void;
   headerTitle?: string;
   greeting?: string;
   prompts?: readonly ChatKitStarterPrompt[];
@@ -777,7 +849,10 @@ export function ChatKitPane({
   showDefaultModelMeta?: boolean;
   surfaceMinHeight?: number;
   showChatKitHeader?: boolean;
+  showComposerTools?: boolean;
+  composerToolIds?: string[];
   onToolActivity?: (activity: ActiveToolInvocation | null) => void;
+  onRunStart?: () => void;
 }) {
   const canInvestigate = enabled && (files.length > 0 || clientTools.length > 0);
   const resolvedMeta =
@@ -790,14 +865,14 @@ export function ChatKitPane({
 
   useEffect(() => {
     devLogger.chatKitGate({
-      capabilityId: capabilityBundle.root_tool_provider_id,
+      agentId: agentBundle.root_agent_id,
       clientToolCount: clientTools.length,
       enabled,
       canInvestigate,
       fileCount: files.length,
       emptyMessage,
     });
-  }, [capabilityBundle.root_tool_provider_id, canInvestigate, clientTools.length, emptyMessage, enabled, files.length]);
+  }, [agentBundle.root_agent_id, canInvestigate, clientTools.length, emptyMessage, enabled, files.length]);
 
   return (
     <ChatKitPaneCard>
@@ -811,13 +886,14 @@ export function ChatKitPane({
       {showDefaultModelMeta ? <ChatKitPaneMeta>{paneMeta ?? resolvedMeta}</ChatKitPaneMeta> : null}
       {canInvestigate ? (
         <ChatKitHarness
-          capabilityBundle={capabilityBundle}
+          agentBundle={agentBundle}
           files={files}
-          workspaceState={workspaceState}
+          shellState={shellState}
           investigationBrief={investigationBrief}
           clientTools={clientTools}
           onEffects={onEffects}
-          onFilesAdded={onFilesAdded}
+          onSelectAgent={onSelectAgent}
+          onReplaceAgentResources={onReplaceAgentResources}
           headerTitle={headerTitle}
           greeting={greeting}
           prompts={prompts}
@@ -828,7 +904,10 @@ export function ChatKitPane({
           showDictation={showDictation}
           surfaceMinHeight={surfaceMinHeight}
           showChatKitHeader={showChatKitHeader}
+          showComposerTools={showComposerTools}
+          composerToolIds={composerToolIds}
           onToolActivity={onToolActivity}
+          onRunStart={onRunStart}
         />
       ) : (
         <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">

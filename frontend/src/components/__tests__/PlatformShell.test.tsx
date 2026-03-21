@@ -5,49 +5,40 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlatformShell } from "../PlatformShell";
-import type { CapabilityDefinition, ShellWorkspaceRegistration } from "../../capabilities/types";
+import type { AgentDefinition } from "../../agents/types";
+
+vi.mock("../AuthPanel", () => ({
+  AuthPanel: () => <div data-testid="auth-panel">Auth</div>,
+}));
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
 
-const capabilities: CapabilityDefinition[] = [
+const agents: AgentDefinition[] = [
   {
-    id: "workspace-agent",
+    id: "help-agent",
     path: "/workspace",
     navLabel: "Workspace",
     title: "Workspace",
     eyebrow: "Workspace",
-    description: "Shared chat-led workspace.",
-    chatkitLead: "Investigate local files.",
-    chatkitPlaceholder: "Ask the workspace to inspect local files",
+    description: "App orientation and demo launches.",
+    chatkitLead: "Explain the workspace and launch demos.",
+    chatkitPlaceholder: "Ask what this app can do",
+    tabs: [],
+  },
+  {
+    id: "admin-users",
+    path: "/admin/users",
+    navLabel: "Admin",
+    title: "Admin",
+    eyebrow: "Admin",
+    description: "Manage users.",
+    chatkitLead: "Review users.",
+    chatkitPlaceholder: "Ask about users",
     tabs: [],
   },
 ];
-
-const workspaceRegistration: ShellWorkspaceRegistration = {
-  capabilityId: "workspace-agent",
-  title: "Workspace artifacts",
-  description: "Artifacts for the active capability.",
-  artifacts: [],
-  workspaces: [
-    {
-      id: "default",
-      name: "Default workspace",
-      kind: "default",
-      created_at: "2026-03-19T00:00:00.000Z",
-    },
-  ],
-  activeWorkspaceId: "default",
-  activeWorkspaceName: "Default workspace",
-  activeWorkspaceKind: "default",
-  accept: ".csv",
-  onSelectFiles: vi.fn(async () => {}),
-  onSelectWorkspace: vi.fn(),
-  onCreateWorkspace: vi.fn(),
-  onClearWorkspace: vi.fn(),
-  clearActionLabel: "Clear workspace",
-};
 
 describe("PlatformShell", () => {
   let container: HTMLDivElement;
@@ -68,17 +59,13 @@ describe("PlatformShell", () => {
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  it("uses workspace-first shell copy and a files utility entry", async () => {
+  it("shows a generic workspace shell without the surface selector", async () => {
     await act(async () => {
       root.render(
         <PlatformShell
-          capabilities={capabilities}
-          activeCapabilityId="workspace-agent"
-          onSelectCapability={() => {}}
-          workspaceRegistration={workspaceRegistration}
-          workspaceModalOpen={false}
-          onOpenWorkspaceModal={() => {}}
-          onCloseWorkspaceModal={() => {}}
+          agents={agents}
+          activeAgentId="help-agent"
+          onSelectAgent={() => {}}
         >
           <div>child content</div>
         </PlatformShell>,
@@ -86,8 +73,11 @@ describe("PlatformShell", () => {
     });
 
     expect(container.textContent).not.toContain("Browse");
-    expect(container.textContent).not.toContain("Theme");
-    expect(container.textContent).toContain("Analysis Workspace");
-    expect(container.querySelector("[data-testid='workspace-nav-button']")?.textContent).toContain("files");
+    expect(container.textContent).toContain("Workspace");
+    expect(container.textContent).not.toContain("Select an agent inside the workspace shell");
+    expect(container.querySelector("[data-testid='workspace-feedback-button']")).toBeNull();
+    expect(container.textContent).not.toContain("Files");
+    expect(container.querySelector("[data-testid='workspace-surface-selector']")).toBeNull();
+    expect(container.querySelector("[data-testid='workspace-surface-selector-mobile']")).toBeNull();
   });
 });

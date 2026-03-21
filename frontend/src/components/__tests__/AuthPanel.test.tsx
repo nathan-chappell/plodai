@@ -81,6 +81,6 @@ describe("AuthPanel", () => {
     expect(container.textContent).toContain("Dark");
     expect(container.textContent).toContain("Balance $0.89");
     expect(container.textContent).toContain("Credits N/A");
-    expect(container.textContent).not.toContain("Admin capabilities");
+    expect(container.textContent).not.toContain("Admin agents");
   });
 });

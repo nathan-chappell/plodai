@@ -1,6 +1,6 @@
 # AI Portfolio
 
-AI Portfolio is a demo app for showcasing agentic capabilities with a FastAPI backend and a Vite TypeScript React frontend. The original Report Foundry CSV workflow now lives inside the app as a legacy capability. The Python app code lives under `backend/`, while the frontend source lives under `frontend/`.
+AI Portfolio is a demo app for showcasing reusable frontend agents with a FastAPI backend and a Vite TypeScript React frontend. The original Report Foundry CSV workflow now lives inside the app as the current dataset-first analysis flow. The Python app code lives under `backend/`, while the frontend source lives under `frontend/`.
 
 ## Why this shape
 
@@ -81,9 +81,9 @@ This scaffold provides:
 - a React UI with styled-components, ChatKit scaffolding, Chart.js, and client analysis tooling
 - Docker, VS Code tasks, and a release script scaffold
 
-The biggest missing pieces are fuller CSV tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
+The biggest missing pieces are fuller dataset-tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
 
 ## Demo runs
 
-The recommended demo workflow is now the in-app capability demos. Sign in normally, open any capability's `Demo` tab, and use the built-in `Run demo` action to exercise the curated scenario directly in ChatKit.
+The recommended demo workflow is now the in-app agent demos. Sign in normally, open any agent's `Demo` tab, and use the built-in `Run demo` action to exercise the curated scenario directly in ChatKit.
 

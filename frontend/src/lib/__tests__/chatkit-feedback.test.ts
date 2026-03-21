@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildFeedbackSubmissionPrompt,
-  buildProvideFeedbackPrompt,
+  buildNativeFeedbackPrompt,
 } from "../chatkit-feedback";
 
 describe("chatkit feedback helpers", () => {
-  it("builds the seeded feedback prompt", () => {
-    expect(buildProvideFeedbackPrompt()).toContain("feedback agent");
-    expect(buildProvideFeedbackPrompt()).toContain("latest assistant response");
-    expect(buildProvideFeedbackPrompt()).toContain("have not written the feedback yet");
-    expect(buildProvideFeedbackPrompt()).toContain("Call get_feedback first");
+  it("builds the seeded native feedback prompt", () => {
+    expect(buildNativeFeedbackPrompt("positive")).toContain("feedback agent");
+    expect(buildNativeFeedbackPrompt("positive")).toContain('sentiment: "thumbs up"');
+    expect(buildNativeFeedbackPrompt("positive")).toContain("latest assistant response");
+    expect(buildNativeFeedbackPrompt("positive")).toContain("Call get_feedback first");
   });
 
   it("builds a confirmation prompt from the submitted widget payload", () => {

@@ -3,6 +3,8 @@ import styled from "styled-components";
 import ReactMarkdown from "react-markdown";
 
 import { MetaText } from "../app/styles";
+import { resolveReportImageDataUrl } from "../lib/report-chart-preview";
+import type { LocalWorkspaceFile } from "../types/report";
 import type { WorkspaceReportV1 } from "../types/workspace-contract";
 
 function formatTimestamp(value: string | null | undefined): string | null {
@@ -22,9 +24,11 @@ function formatTimestamp(value: string | null | undefined): string | null {
 
 export function WorkspaceReportDrawer({
   currentReport,
+  files = [],
   dataTestId,
 }: {
   currentReport: WorkspaceReportV1 | null;
+  files?: LocalWorkspaceFile[];
   dataTestId?: string;
 }) {
   const slides = currentReport?.slides ?? [];
@@ -53,6 +57,8 @@ export function WorkspaceReportDrawer({
   const activeSlide = slides[activeSlideIndex] ?? null;
   const firstChartPanel =
     activeSlide?.panels.find((panel) => panel.type === "chart") ?? null;
+  const firstImagePanel =
+    activeSlide?.panels.find((panel) => panel.type === "image") ?? null;
   const firstNarrativePanel =
     activeSlide?.panels.find((panel) => panel.type === "narrative") ?? null;
   const updatedLabel = formatTimestamp(
@@ -115,7 +121,16 @@ export function WorkspaceReportDrawer({
                   </DrawerNavButton>
                 </DrawerSlideControls>
               </DrawerToolbar>
-              {firstChartPanel?.image_data_url ? (
+              {firstImagePanel ? (
+                resolveReportImageDataUrl(files, firstImagePanel) ? (
+                  <DrawerChartImage
+                    alt={firstImagePanel.alt_text ?? firstImagePanel.title}
+                    src={resolveReportImageDataUrl(files, firstImagePanel) ?? ""}
+                  />
+                ) : (
+                  <MetaText>This slide is saved, but its image preview is not available yet.</MetaText>
+                )
+              ) : firstChartPanel?.image_data_url ? (
                 <DrawerChartImage
                   alt={firstChartPanel.title}
                   src={firstChartPanel.image_data_url}

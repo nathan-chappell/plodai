@@ -193,8 +193,6 @@ def build_handoff_trace_widget(
     return _card_widget(
         size="sm",
         padding="8px",
-        status_text="Agent handoff",
-        status_icon="agent",
         children=[_col_widget(content_children, gap="4px")],
     )
 

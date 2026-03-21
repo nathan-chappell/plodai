@@ -59,8 +59,8 @@ def _collect_text_values(children: list[dict[str, object]]) -> list[str]:
 def test_client_tool_proxy_streams_widget_without_progress_event() -> None:
     tool = _build_client_tool_proxy(
         {
-            "name": "list_csv_files",
-            "description": "List CSV files.",
+            "name": "list_datasets",
+            "description": "List datasets.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -84,10 +84,10 @@ def test_client_tool_proxy_streams_widget_without_progress_event() -> None:
     assert widget["type"] == "Card"
     assert "status" not in widget
     text_values = _collect_text_values(widget["children"])
-    assert "List CSV Files(includeSamples=true)" in text_values
-    assert copy_text == "List CSV Files(includeSamples=true)"
+    assert "List Datasets(includeSamples=true)" in text_values
+    assert copy_text == "List Datasets(includeSamples=true)"
     assert result == {
-        "name": "list_csv_files",
+        "name": "list_datasets",
         "arguments": {"includeSamples": True},
     }
 
@@ -95,12 +95,13 @@ def test_client_tool_proxy_streams_widget_without_progress_event() -> None:
 def test_client_tool_proxy_titles_create_csv_with_output_filename() -> None:
     tool = _build_client_tool_proxy(
         {
-            "name": "create_csv_file",
-            "description": "Create a CSV file.",
+            "name": "create_dataset",
+            "description": "Create a dataset.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {"type": "string"},
+                    "format": {"type": "string"},
                     "query_plan": {
                         "type": "object",
                         "properties": {
@@ -110,15 +111,16 @@ def test_client_tool_proxy_titles_create_csv_with_output_filename() -> None:
                         "additionalProperties": False,
                     },
                 },
-                "required": ["filename", "query_plan"],
+                "required": ["filename", "format", "query_plan"],
                 "additionalProperties": False,
             },
             "strict": True,
             "display": {
-                "label": "Create CSV File",
-                "prominent_args": ["filename", "query_plan.dataset_id"],
+                "label": "Create Dataset",
+                "prominent_args": ["filename", "format", "query_plan.dataset_id"],
                 "arg_labels": {
                     "filename": "file",
+                    "format": "format",
                     "query_plan.dataset_id": "dataset",
                 },
             },
@@ -133,6 +135,7 @@ def test_client_tool_proxy_titles_create_csv_with_output_filename() -> None:
             json.dumps(
                 {
                     "filename": "aggregated_sales_by_month_category.csv",
+                    "format": "csv",
                     "query_plan": {
                         "dataset_id": "demo-sales-fixture",
                     },
@@ -144,11 +147,11 @@ def test_client_tool_proxy_titles_create_csv_with_output_filename() -> None:
     widget, copy_text = chatkit_context.widget_calls[0]
     text_values = _collect_text_values(widget["children"])
     assert (
-        "Create CSV File(file=aggregated_sales_by_month_category.csv, dataset=demo-sales-fixture)"
+        "Create Dataset(file=aggregated_sales_by_month_category.csv, format=csv, dataset=demo-sales-fixture)"
         in text_values
     )
     assert copy_text == (
-        "Create CSV File(file=aggregated_sales_by_month_category.csv, dataset=demo-sales-fixture)"
+        "Create Dataset(file=aggregated_sales_by_month_category.csv, format=csv, dataset=demo-sales-fixture)"
     )
 
 
@@ -163,7 +166,7 @@ def test_feedback_get_feedback_tool_streams_widget_and_wait_state() -> None:
         compiled_tool
         for compiled_tool in build_agent_tools(
             context,
-            capability_id="feedback-agent",
+            agent_id="feedback-agent",
             client_tools=[],
         )
         if compiled_tool.name == "get_feedback"

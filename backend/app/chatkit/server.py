@@ -10,24 +10,30 @@ import re
 from hashlib import sha256
 from typing import Any, AsyncIterator, Literal, cast
 
-from agents import Runner
+from agents import Agent, Runner
+from agents.model_settings import ModelSettings
 from chatkit.actions import Action
 from chatkit.agents import AgentContext as ChatKitAgentContext
-from chatkit.agents import ThreadItemConverter, stream_agent_response
+from chatkit.agents import ThreadItemConverter
 from chatkit.server import ChatKitServer
 from chatkit.types import (
     Attachment,
     AudioInput,
+    CustomSummary,
+    CustomTask,
     ChatKitReq,
     ClientToolCallItem,
+    HiddenContextItem,
     ProgressUpdateEvent,
     SyncCustomActionResponse,
+    ThreadItemDoneEvent,
     ThreadItem,
     ThreadItemRemovedEvent,
     ThreadMetadata,
     ThreadStreamEvent,
     TranscriptionResult,
     UserMessageItem,
+    WorkflowItem,
     WidgetItem,
 )
 from fastapi import Depends
@@ -43,7 +49,7 @@ from openai.types.responses.response_input_item_param import (
     FunctionCallOutput,
     ResponseInputItemParam,
 )
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.agent_builder import build_registered_agent
@@ -59,15 +65,20 @@ from backend.app.chatkit.feedback_types import (
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
+    AgentPlan,
+    AgentPlanExecutionHint,
     PendingFeedbackSession,
+    PlanExecution,
     ThreadMetadataPatch,
+    active_plan_execution,
     merge_thread_metadata,
     parse_thread_metadata,
 )
 from backend.app.chatkit.runtime_state import (
     resolve_thread_runtime_state,
-    workspace_files_from_workspace_state,
+    workspace_files_from_shell_state,
 )
+from backend.app.chatkit.streaming import stream_agent_response_with_plan_workflow
 from backend.app.chatkit.usage import (
     accumulate_transcription_usage,
     accumulate_usage,
@@ -81,6 +92,7 @@ from backend.app.core.logging import (
     log_event,
     summarize_mapping_keys_for_log,
     summarize_pairs_for_log,
+    summarize_for_log,
     summarize_sequence_for_log,
 )
 from backend.app.db.session import get_db
@@ -96,10 +108,187 @@ MODEL_ALIASES = {
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
 MAX_AGENT_TURNS = 30
+PLAN_STEP_MAX_ATTEMPTS = 2
 RATE_LIMIT_RETRY_PATTERN = re.compile(
     r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
     re.IGNORECASE,
 )
+
+
+class PlanStepJudgeResult(BaseModel):
+    complete: bool
+    explanation: str
+
+
+def _current_thread_metadata(thread: ThreadMetadata) -> dict[str, Any]:
+    return parse_thread_metadata(thread.metadata)
+
+
+def _plan_hint_for_step(
+    plan: AgentPlan,
+    step_index: int,
+) -> AgentPlanExecutionHint | None:
+    execution_hints = cast(
+        list[AgentPlanExecutionHint] | None,
+        plan.get("execution_hints"),
+    )
+    if not execution_hints:
+        return None
+    if step_index < 0 or step_index >= len(execution_hints):
+        return None
+    return execution_hints[step_index]
+
+
+def _plan_task_content(
+    execution_hint: AgentPlanExecutionHint | None,
+    note: str | None,
+) -> str | None:
+    lines: list[str] = []
+    if execution_hint:
+        done_when = execution_hint.get("done_when")
+        if isinstance(done_when, str) and done_when.strip():
+            lines.append(f"Done when: {done_when.strip()}")
+        preferred_tool_names = execution_hint.get("preferred_tool_names")
+        if preferred_tool_names:
+            lines.append(f"Preferred tools: {', '.join(preferred_tool_names)}")
+        preferred_handoff_tool_names = execution_hint.get(
+            "preferred_handoff_tool_names"
+        )
+        if preferred_handoff_tool_names:
+            lines.append(
+                f"Preferred handoffs: {', '.join(preferred_handoff_tool_names)}"
+            )
+    if isinstance(note, str) and note.strip():
+        lines.append(f"Note: {note.strip()}")
+    return "\n".join(lines) if lines else None
+
+
+def _workflow_task_for_step(
+    plan: AgentPlan,
+    execution: PlanExecution,
+    step_index: int,
+) -> CustomTask:
+    planned_steps = plan.get("planned_steps", [])
+    step_text = planned_steps[step_index] if step_index < len(planned_steps) else ""
+    current_step_index = execution["current_step_index"]
+    status = execution.get("status")
+    if step_index < current_step_index:
+        status_indicator: Literal["none", "loading", "complete"] = "complete"
+    elif step_index == current_step_index and status == "active":
+        status_indicator = "loading"
+    elif status == "completed" and step_index < current_step_index:
+        status_indicator = "complete"
+    else:
+        status_indicator = "none"
+    step_notes = execution.get("step_notes") or []
+    note = (
+        step_notes[step_index]
+        if step_index < len(step_notes) and isinstance(step_notes[step_index], str)
+        else None
+    )
+    return CustomTask(
+        title=f"{step_index + 1}. {step_text}",
+        content=_plan_task_content(_plan_hint_for_step(plan, step_index), note),
+        status_indicator=status_indicator,
+    )
+
+
+def _plan_step_prompt(
+    plan: AgentPlan,
+    step_index: int,
+    *,
+    retry_feedback: str | None = None,
+) -> str:
+    planned_steps = plan.get("planned_steps", [])
+    step_text = planned_steps[step_index]
+    lines = [
+        "Continue the active execution plan.",
+        f"Focus only on step {step_index + 1}/{len(planned_steps)}: {step_text}",
+    ]
+    hint = _plan_hint_for_step(plan, step_index)
+    if hint is not None:
+        done_when = hint.get("done_when")
+        if isinstance(done_when, str) and done_when.strip():
+            lines.append(f"Done when: {done_when.strip()}")
+        preferred_tool_names = hint.get("preferred_tool_names")
+        if preferred_tool_names:
+            lines.append(
+                f"Preferred tools: {', '.join(preferred_tool_names)}"
+            )
+        preferred_handoff_tool_names = hint.get("preferred_handoff_tool_names")
+        if preferred_handoff_tool_names:
+            lines.append(
+                f"Preferred handoffs: {', '.join(preferred_handoff_tool_names)}"
+            )
+    success_criteria = plan.get("success_criteria") or []
+    if success_criteria:
+        lines.append("Overall success criteria:")
+        lines.extend(f"- {criterion}" for criterion in success_criteria)
+    if retry_feedback:
+        lines.append(f"Judge feedback from the previous attempt: {retry_feedback}")
+    lines.append("Do not restate the full plan. Just execute the step.")
+    return "\n".join(lines)
+
+
+def _plan_completion_summary(plan: AgentPlan) -> str:
+    focus = plan.get("focus") or "Plan"
+    return f"{focus}: execution finished."
+
+
+def _summarize_assistant_item(item: ThreadItem) -> str | None:
+    if item.type != "assistant_message":
+        return None
+    text = " ".join(
+        content.text.strip()
+        for content in item.content
+        if getattr(content, "text", "").strip()
+    ).strip()
+    if not text:
+        return None
+    return f"Assistant: {summarize_for_log(text, limit=320)}"
+
+
+def _summarize_tool_item(item: ThreadItem) -> str | None:
+    if item.type != "client_tool_call":
+        return None
+    detail = f"Tool {item.name} [{item.status}]"
+    if item.status == "completed" and item.output is not None:
+        result_summary = _result_line(coerce_client_tool_result(item.output))
+        if result_summary:
+            detail += f": {result_summary}"
+    return detail
+
+
+def _summarize_hidden_item(item: ThreadItem) -> str | None:
+    if not isinstance(item, HiddenContextItem):
+        return None
+    if not isinstance(item.content, dict):
+        return None
+    if item.content.get("kind") != "plan_handoff":
+        return None
+    summary = item.content.get("summary")
+    handoff_tool_name = item.content.get("handoff_tool_name")
+    if isinstance(summary, str) and summary.strip():
+        if isinstance(handoff_tool_name, str) and handoff_tool_name.strip():
+            return f"Handoff: {summary.strip()} via {handoff_tool_name.strip()}"
+        return f"Handoff: {summary.strip()}"
+    return None
+
+
+def _summarize_step_delta(items: list[ThreadItem]) -> str:
+    lines: list[str] = []
+    for item in items:
+        for summarizer in (
+            _summarize_assistant_item,
+            _summarize_tool_item,
+            _summarize_hidden_item,
+        ):
+            if (line := summarizer(item)) is not None:
+                lines.append(line)
+                break
+    if not lines:
+        return "No assistant, tool, or handoff activity was recorded for this step yet."
+    return "\n".join(f"- {line}" for line in lines[:12])
 
 
 def _context_line(
@@ -195,7 +384,7 @@ def _summarize_client_tool_result_for_log(
     if isinstance(file_input, dict):
         summary["has_file_input"] = True
         summary["file_input_keys"] = summarize_mapping_keys_for_log(file_input)
-    for key in ("files", "csv_files", "pdf_files", "chartable_files", "reports"):
+    for key in ("files", "datasets", "pdf_files", "reports"):
         raw_value = result.get(key)
         if isinstance(raw_value, list):
             summary[key] = len(raw_value)
@@ -264,7 +453,7 @@ class ClientToolResultConverter(ThreadItemConverter):
         file_input = result.get("file_input")
         query_id = result.get("query_id") or result.get("queryId")
         row_count = result.get("row_count")
-        csv_files = result.get("csv_files")
+        datasets = result.get("datasets")
         sanitized_result = dict(result)
         sanitized_result.pop("imageDataUrl", None)
         sanitized_result.pop("image_data_url", None)
@@ -299,8 +488,8 @@ class ClientToolResultConverter(ThreadItemConverter):
                 description += f" Query id: {query_id}."
             if isinstance(row_count, int):
                 description += f" Result row count: {row_count}."
-            if isinstance(csv_files, list):
-                description += f" CSV files available: {len(csv_files)}."
+            if isinstance(datasets, list):
+                description += f" Datasets available: {len(datasets)}."
             rich_output.append(
                 {
                     "type": "input_text",
@@ -402,10 +591,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             chart_cache=dict(metadata.get("chart_cache") or {}),
             request_metadata=metadata,
             thread_metadata=metadata,
-            available_files=workspace_files_from_workspace_state(
-                metadata.get("workspace_state")
+            available_files=workspace_files_from_shell_state(
+                metadata.get("shell_state")
             ),
-            tool_provider_bundle=metadata.get("tool_provider_bundle"),
+            agent_bundle=metadata.get("agent_bundle"),
         )
         context.query_plan_model, _ = build_query_plan_model(context.available_datasets)
 
@@ -425,6 +614,207 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
 
         return context
 
+    async def _load_thread_items_after(
+        self,
+        thread_id: str,
+        after: str | None,
+        context: ReportAgentContext,
+        *,
+        page_size: int = 50,
+        max_items: int = 200,
+    ) -> list[ThreadItem]:
+        items: list[ThreadItem] = []
+        cursor = after
+        while len(items) < max_items:
+            page = await self.store.load_thread_items(
+                thread_id,
+                after=cursor,
+                limit=min(page_size, max_items - len(items)),
+                order="asc",
+                context=context,
+            )
+            items.extend(page.data)
+            if not page.has_more or page.after is None:
+                break
+            cursor = page.after
+        return items
+
+    async def _latest_thread_item_id(
+        self,
+        thread_id: str,
+        context: ReportAgentContext,
+    ) -> str | None:
+        page = await self.store.load_thread_items(
+            thread_id,
+            after=None,
+            limit=1,
+            order="desc",
+            context=context,
+        )
+        if not page.data:
+            return None
+        return page.data[0].id
+
+    async def _load_workflow_item(
+        self,
+        thread_id: str,
+        workflow_item_id: str,
+        context: ReportAgentContext,
+    ) -> WorkflowItem | None:
+        try:
+            item = await self.store.load_item(thread_id, workflow_item_id, context=context)
+        except Exception:
+            return None
+        return item if isinstance(item, WorkflowItem) else None
+
+    def _apply_metadata_patch(
+        self,
+        thread: ThreadMetadata,
+        context: ReportAgentContext,
+        patch: ThreadMetadataPatch,
+    ) -> dict[str, Any]:
+        current_metadata = _current_thread_metadata(thread)
+        merged_metadata = merge_thread_metadata(current_metadata, patch)
+        thread.metadata = dict(merged_metadata)
+        context.thread_metadata = merged_metadata
+        return merged_metadata
+
+    async def _sync_plan_workflow_tasks(
+        self,
+        agent_context: ChatKitAgentContext[ReportAgentContext],
+        plan: AgentPlan,
+        execution: PlanExecution,
+    ) -> None:
+        workflow_item_id = execution["workflow_item_id"]
+        if (
+            agent_context.workflow_item is None
+            or agent_context.workflow_item.id != workflow_item_id
+        ):
+            workflow_item = await self._load_workflow_item(
+                agent_context.thread.id,
+                workflow_item_id,
+                agent_context.request_context,
+            )
+            if workflow_item is None:
+                return
+            agent_context.workflow_item = workflow_item
+
+        if agent_context.workflow_item is None:
+            return
+
+        for step_index, _step in enumerate(plan.get("planned_steps", [])):
+            await agent_context.update_workflow_task(
+                _workflow_task_for_step(plan, execution, step_index),
+                step_index,
+            )
+
+    async def _drain_agent_context_events(
+        self,
+        agent_context: ChatKitAgentContext[ReportAgentContext],
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        while True:
+            try:
+                queued_event = agent_context._events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if hasattr(queued_event, "type"):
+                yield cast(ThreadStreamEvent, queued_event)
+
+    async def _judge_plan_step(
+        self,
+        *,
+        context: ReportAgentContext,
+        model: str,
+        plan: AgentPlan,
+        execution: PlanExecution,
+        delta_items: list[ThreadItem],
+    ) -> PlanStepJudgeResult:
+        step_index = execution["current_step_index"]
+        hint = _plan_hint_for_step(plan, step_index)
+        success_criteria = plan.get("success_criteria") or []
+        judge_prompt_lines = [
+            "Evaluate whether the current plan step is complete.",
+            "Return complete=true only if the step has been materially finished in the observed thread activity.",
+            "If the model only planned, described intent, or partially executed the work, return complete=false.",
+            "",
+            f"Plan focus: {plan.get('focus') or 'Execution plan'}",
+            f"Current step ({step_index + 1}/{len(plan.get('planned_steps', []))}): {plan['planned_steps'][step_index]}",
+        ]
+        if hint is not None:
+            done_when = hint.get("done_when")
+            if isinstance(done_when, str) and done_when.strip():
+                judge_prompt_lines.append(f"Step done_when hint: {done_when.strip()}")
+            preferred_tool_names = hint.get("preferred_tool_names")
+            if preferred_tool_names:
+                judge_prompt_lines.append(
+                    f"Preferred tools: {', '.join(preferred_tool_names)}"
+                )
+            preferred_handoff_tool_names = hint.get("preferred_handoff_tool_names")
+            if preferred_handoff_tool_names:
+                judge_prompt_lines.append(
+                    f"Preferred handoffs: {', '.join(preferred_handoff_tool_names)}"
+                )
+        if success_criteria:
+            judge_prompt_lines.append("Plan success criteria:")
+            judge_prompt_lines.extend(f"- {criterion}" for criterion in success_criteria)
+        judge_prompt_lines.extend(
+            [
+                "",
+                "Observed thread activity since the current step started:",
+                _summarize_step_delta(delta_items),
+            ]
+        )
+
+        judge_agent = Agent[ReportAgentContext](
+            name="Plan Step Judge",
+            model=model,
+            instructions=(
+                "You are an internal execution judge. "
+                "Return only the structured output. Be strict about actual completion."
+            ),
+            output_type=PlanStepJudgeResult,
+            model_settings=ModelSettings(parallel_tool_calls=False),
+        )
+        result = await Runner.run(
+            judge_agent,
+            "\n".join(judge_prompt_lines),
+            context=context,
+            max_turns=3,
+        )
+        return result.final_output_as(
+            PlanStepJudgeResult,
+            raise_if_incorrect_type=True,
+        )
+
+    async def _cancel_plan_execution(
+        self,
+        thread: ThreadMetadata,
+        context: ReportAgentContext,
+    ) -> list[ThreadStreamEvent]:
+        metadata = _current_thread_metadata(thread)
+        execution = active_plan_execution(metadata)
+        if execution is None:
+            return []
+
+        workflow_item = await self._load_workflow_item(
+            thread.id,
+            execution["workflow_item_id"],
+            context,
+        )
+        self._apply_metadata_patch(
+            thread,
+            context,
+            cast(ThreadMetadataPatch, {"plan_execution": None}),
+        )
+        if workflow_item is None:
+            return []
+        workflow_item.workflow.summary = CustomSummary(
+            title="Plan execution cancelled",
+            icon="info",
+        )
+        workflow_item.workflow.expanded = False
+        return [ThreadItemDoneEvent(item=workflow_item)]
+
     async def respond(
         self,
         thread: ThreadMetadata,
@@ -433,6 +823,16 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
     ) -> AsyncIterator[ThreadStreamEvent]:
         runtime_state = resolve_thread_runtime_state(thread=thread, context=context)
         typed_metadata = runtime_state.metadata
+        if context.agent_bundle is None:
+            raise RuntimeError(
+                "No registered agent bundle is available for this thread or request surface."
+            )
+
+        if input_user_message is not None:
+            for event in await self._cancel_plan_execution(thread, context):
+                yield event
+            typed_metadata = _current_thread_metadata(thread)
+
         recent_items = await self.store.load_thread_items(
             thread.id,
             after=None,
@@ -441,11 +841,6 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             context=context,
         )
         recent_item_data = recent_items.data
-        if context.tool_provider_bundle is None:
-            raise RuntimeError(
-                "No registered tool provider bundle is available for this thread or request surface."
-            )
-
         pending_items = self._collect_pending_items(
             recent_item_data,
             has_openai_conversation=bool(typed_metadata.get("openai_conversation_id")),
@@ -454,7 +849,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             item.id == input_user_message.id for item in pending_items
         ):
             pending_items.append(input_user_message)
-        agent_input = await self.converter.to_agent_input(pending_items)
+        agent_input: str | list[ResponseInputItemParam] = cast(
+            list[ResponseInputItemParam],
+            await self.converter.to_agent_input(pending_items),
+        )
         requested_model = self._resolve_requested_model(
             input_user_message=input_user_message,
             recent_items=recent_item_data,
@@ -486,13 +884,14 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             thread=thread, store=self.store, request_context=context
         )
         max_retries = max(0, self.settings.openai_max_retries)
-        next_agent_input = agent_input
+        next_agent_input: str | list[ResponseInputItemParam] = agent_input
         final_response_id: str | None = None
         final_conversation_id = conversation_id
         updated_usage = typed_metadata.get("usage")
 
         while True:
             result = None
+            agent_context.client_tool_call = None
             for attempt in range(max_retries + 1):
                 run_started = False
                 try:
@@ -504,7 +903,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         conversation_id=conversation_id,
                     )
                     run_started = True
-                    async for event in stream_agent_response(agent_context, result):
+                    async for event in stream_agent_response_with_plan_workflow(
+                        agent_context, result
+                    ):
                         yield event
                     break
                 except Exception as exc:
@@ -567,7 +968,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                     yield ProgressUpdateEvent(text="Retrying the OpenAI run now.")
 
                     if run_started:
-                        next_agent_input = []
+                        next_agent_input = cast(list[ResponseInputItemParam], [])
 
             if result is None:
                 raise RuntimeError("ChatKit agent run completed without a run result.")
@@ -595,8 +996,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 response_id=result_response_id,
                 cost_usd=response_cost_usd,
             )
-            typed_metadata = merge_thread_metadata(
-                typed_metadata,
+            typed_metadata = self._apply_metadata_patch(
+                thread,
+                context,
                 cast(
                     ThreadMetadataPatch,
                     {
@@ -608,15 +1010,251 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                     },
                 ),
             )
-            thread.metadata = dict(typed_metadata)
-            context.thread_metadata = typed_metadata
             context.chart_cache = dict(typed_metadata.get("chart_cache") or {})
             conversation_id = result_conversation_id
             previous_response_id = result_response_id
             final_conversation_id = result_conversation_id
             final_response_id = result_response_id
 
-            break
+            current_plan = typed_metadata.get("plan")
+            current_execution = active_plan_execution(typed_metadata)
+            if not isinstance(current_plan, dict) or current_execution is None:
+                break
+
+            if agent_context.client_tool_call is not None:
+                break
+
+            planned_steps = cast(list[str], current_plan.get("planned_steps") or [])
+            if not planned_steps:
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": None}),
+                )
+                break
+
+            step_index = current_execution["current_step_index"]
+            if step_index < 0 or step_index >= len(planned_steps):
+                completed_execution = cast(PlanExecution, dict(current_execution))
+                completed_execution["status"] = "completed"
+                completed_execution["current_step_index"] = len(planned_steps)
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": completed_execution}),
+                )
+                await self._sync_plan_workflow_tasks(
+                    agent_context,
+                    cast(AgentPlan, current_plan),
+                    completed_execution,
+                )
+                async for event in self._drain_agent_context_events(agent_context):
+                    yield event
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": None}),
+                )
+                if (
+                    agent_context.workflow_item is not None
+                    and agent_context.workflow_item.id
+                    == completed_execution["workflow_item_id"]
+                    ):
+                        await agent_context.end_workflow(
+                            summary=CustomSummary(
+                                title=_plan_completion_summary(cast(AgentPlan, current_plan)),
+                                icon="check-circle",
+                            )
+                        )
+                        async for event in self._drain_agent_context_events(agent_context):
+                            yield event
+                break
+
+            attempts_by_step = list(current_execution.get("attempts_by_step") or [])
+            if len(attempts_by_step) != len(planned_steps):
+                attempts_by_step = [0 for _ in planned_steps]
+            attempts_by_step[step_index] += 1
+            current_execution["attempts_by_step"] = attempts_by_step
+
+            delta_items = await self._load_thread_items_after(
+                thread.id,
+                current_execution.get("step_started_after_item_id"),
+                context,
+            )
+            judge_result = await self._judge_plan_step(
+                context=context,
+                model=requested_model,
+                plan=cast(AgentPlan, current_plan),
+                execution=current_execution,
+                delta_items=delta_items,
+            )
+
+            step_notes = list(current_execution.get("step_notes") or [])
+            if len(step_notes) != len(planned_steps):
+                step_notes = [None for _ in planned_steps]
+            step_notes[step_index] = judge_result.explanation.strip()
+            current_execution["step_notes"] = step_notes
+
+            if judge_result.complete:
+                current_execution["current_step_index"] = step_index + 1
+                if current_execution["current_step_index"] >= len(planned_steps):
+                    current_execution["status"] = "completed"
+                    typed_metadata = self._apply_metadata_patch(
+                        thread,
+                        context,
+                        cast(
+                            ThreadMetadataPatch,
+                            {"plan_execution": current_execution},
+                        ),
+                    )
+                    await self._sync_plan_workflow_tasks(
+                        agent_context,
+                        cast(AgentPlan, current_plan),
+                        current_execution,
+                    )
+                    async for event in self._drain_agent_context_events(agent_context):
+                        yield event
+                    typed_metadata = self._apply_metadata_patch(
+                        thread,
+                        context,
+                        cast(ThreadMetadataPatch, {"plan_execution": None}),
+                    )
+                    if (
+                        agent_context.workflow_item is not None
+                        and agent_context.workflow_item.id
+                        == current_execution["workflow_item_id"]
+                        ):
+                            await agent_context.end_workflow(
+                                summary=CustomSummary(
+                                    title=_plan_completion_summary(
+                                        cast(AgentPlan, current_plan)
+                                    ),
+                                    icon="check-circle",
+                                )
+                            )
+                            async for event in self._drain_agent_context_events(agent_context):
+                                yield event
+                    yield ProgressUpdateEvent(text="Plan execution finished.")
+                    break
+
+                latest_item_id = await self._latest_thread_item_id(thread.id, context)
+                if latest_item_id is not None:
+                    current_execution["step_started_after_item_id"] = latest_item_id
+                elif "step_started_after_item_id" in current_execution:
+                    current_execution.pop("step_started_after_item_id", None)
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                )
+                await self._sync_plan_workflow_tasks(
+                    agent_context,
+                    cast(AgentPlan, current_plan),
+                    current_execution,
+                )
+                async for event in self._drain_agent_context_events(agent_context):
+                    yield event
+                yield ProgressUpdateEvent(
+                    text=(
+                        f"Completed step {step_index + 1}/{len(planned_steps)}. "
+                        f"Continuing with step {current_execution['current_step_index'] + 1}."
+                    )
+                )
+                next_agent_input = _plan_step_prompt(
+                    cast(AgentPlan, current_plan),
+                    current_execution["current_step_index"],
+                )
+                continue
+
+            if attempts_by_step[step_index] < PLAN_STEP_MAX_ATTEMPTS:
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                )
+                await self._sync_plan_workflow_tasks(
+                    agent_context,
+                    cast(AgentPlan, current_plan),
+                    current_execution,
+                )
+                async for event in self._drain_agent_context_events(agent_context):
+                    yield event
+                yield ProgressUpdateEvent(
+                    text=f"Retrying step {step_index + 1}/{len(planned_steps)}."
+                )
+                next_agent_input = _plan_step_prompt(
+                    cast(AgentPlan, current_plan),
+                    step_index,
+                    retry_feedback=judge_result.explanation.strip(),
+                )
+                continue
+
+            current_execution["current_step_index"] = step_index + 1
+            if current_execution["current_step_index"] >= len(planned_steps):
+                current_execution["status"] = "completed"
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                )
+                await self._sync_plan_workflow_tasks(
+                    agent_context,
+                    cast(AgentPlan, current_plan),
+                    current_execution,
+                )
+                async for event in self._drain_agent_context_events(agent_context):
+                    yield event
+                typed_metadata = self._apply_metadata_patch(
+                    thread,
+                    context,
+                    cast(ThreadMetadataPatch, {"plan_execution": None}),
+                )
+                if (
+                    agent_context.workflow_item is not None
+                    and agent_context.workflow_item.id
+                    == current_execution["workflow_item_id"]
+                    ):
+                        await agent_context.end_workflow(
+                            summary=CustomSummary(
+                                title=_plan_completion_summary(cast(AgentPlan, current_plan)),
+                                icon="check-circle",
+                            )
+                        )
+                        async for event in self._drain_agent_context_events(agent_context):
+                            yield event
+                yield ProgressUpdateEvent(
+                    text="Plan execution finished after the final step advanced."
+                )
+                break
+
+            latest_item_id = await self._latest_thread_item_id(thread.id, context)
+            if latest_item_id is not None:
+                current_execution["step_started_after_item_id"] = latest_item_id
+            elif "step_started_after_item_id" in current_execution:
+                current_execution.pop("step_started_after_item_id", None)
+            typed_metadata = self._apply_metadata_patch(
+                thread,
+                context,
+                cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+            )
+            await self._sync_plan_workflow_tasks(
+                agent_context,
+                cast(AgentPlan, current_plan),
+                current_execution,
+            )
+            async for event in self._drain_agent_context_events(agent_context):
+                yield event
+            yield ProgressUpdateEvent(
+                text=(
+                    f"Advanced past step {step_index + 1}/{len(planned_steps)} after retry. "
+                    f"Continuing with step {current_execution['current_step_index'] + 1}."
+                )
+            )
+            next_agent_input = _plan_step_prompt(
+                cast(AgentPlan, current_plan),
+                current_execution["current_step_index"],
+            )
+            continue
 
         log_event(
             self.logger,

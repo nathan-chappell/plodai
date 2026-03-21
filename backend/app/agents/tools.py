@@ -6,10 +6,13 @@ from pathlib import PurePosixPath
 from typing import Any, Literal, Mapping, Sequence, cast
 from uuid import uuid4
 
-from agents import FunctionTool, function_tool
+from agents import FunctionTool, WebSearchTool, function_tool
+from agents.tool import Tool
 from agents.tool_context import ToolContext
 from chatkit.agents import AgentContext as ChatKitAgentContext, ClientToolCall
-from chatkit.types import ProgressUpdateEvent
+from chatkit.types import CustomTask, ProgressUpdateEvent, Workflow
+from openai.types.responses.web_search_tool import Filters as WebSearchToolFilters
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.widgets import (
@@ -17,14 +20,18 @@ from backend.app.agents.widgets import (
     build_feedback_saved_widget,
     build_feedback_session_copy_text,
     build_feedback_session_widget,
-    build_plan_copy_text,
-    build_plan_widget,
     build_tool_trace_copy_text,
     build_tool_trace_widget,
     format_tool_label,
 )
 from backend.app.chatkit.feedback_types import ChatItemFeedbackRecord, FeedbackOrigin
-from backend.app.chatkit.metadata import AgentPlan, PendingFeedbackSession
+from backend.app.chatkit.metadata import (
+    AgentPlan,
+    AgentPlanExecutionHint,
+    PendingFeedbackSession,
+    PlanExecution,
+    active_plan_execution,
+)
 from backend.app.core.logging import (
     get_logger,
     log_event,
@@ -38,6 +45,35 @@ from backend.app.models.chatkit import ChatItemFeedback
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
+AGRICULTURE_WEB_SEARCH_ALLOWED_DOMAINS = [
+    "extension.umn.edu",
+    "ipm.ucanr.edu",
+    "cropwatch.unl.edu",
+    "ohioline.osu.edu",
+    "apsnet.org",
+    "nifa.usda.gov",
+    "ars.usda.gov",
+]
+
+
+class PlanExecutionHintInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    done_when: str | None = None
+    preferred_tool_names: list[str] | None = None
+    preferred_handoff_tool_names: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> "PlanExecutionHintInput":
+        if (
+            self.done_when is None
+            and not self.preferred_tool_names
+            and not self.preferred_handoff_tool_names
+        ):
+            raise ValueError(
+                "Each execution hint must include done_when, preferred_tool_names, or preferred_handoff_tool_names."
+            )
+        return self
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -319,10 +355,10 @@ def _basename(path: str) -> str:
 
 
 def _tool_trace_target(tool_name: str, arguments: Mapping[str, object]) -> str | None:
-    if tool_name in {"create_csv_file", "create_json_file"}:
-        path = arguments.get("path")
-        if isinstance(path, str) and path.strip():
-            return _basename(path.strip())
+    if tool_name == "create_dataset":
+        filename = arguments.get("filename")
+        if isinstance(filename, str) and filename.strip():
+            return _basename(filename.strip())
 
     if tool_name == "create_report":
         title = arguments.get("title")
@@ -342,15 +378,15 @@ def _tool_trace_target(tool_name: str, arguments: Mapping[str, object]) -> str |
         if isinstance(report_id, str) and report_id.strip():
             return report_id.strip()
 
-    if tool_name == "render_chart_from_file":
+    if tool_name == "render_chart_from_dataset":
         chart_plan = arguments.get("chart_plan")
         if isinstance(chart_plan, Mapping):
             chart_title = chart_plan.get("title")
             if isinstance(chart_title, str) and chart_title.strip():
                 return summarize_for_log(chart_title.strip(), limit=56)
-        file_id = arguments.get("file_id")
-        if isinstance(file_id, str) and file_id.strip():
-            return file_id.strip()
+        dataset_id = arguments.get("dataset_id")
+        if isinstance(dataset_id, str) and dataset_id.strip():
+            return dataset_id.strip()
 
     if tool_name == "run_aggregate_query":
         query_plan = arguments.get("query_plan")
@@ -359,7 +395,7 @@ def _tool_trace_target(tool_name: str, arguments: Mapping[str, object]) -> str |
             if isinstance(dataset_id, str) and dataset_id.strip():
                 return dataset_id.strip()
 
-    for key in ("report_id", "slide_id", "file_id", "chart_plan_id"):
+    for key in ("report_id", "slide_id", "file_id", "dataset_id", "chart_plan_id"):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -496,22 +532,16 @@ def _summarize_client_tool_request(
     tool_name: str,
     arguments: Mapping[str, object],
 ) -> tuple[str, list[str]]:
-    if tool_name in {"list_csv_files", "list_chartable_files", "list_pdf_files"}:
-        details: list[str] = []
-        prefix = arguments.get("prefix")
-        if isinstance(prefix, str) and prefix.strip():
-            details.append(f"Prefix: {prefix.strip()}")
+    if tool_name in {"list_datasets", "list_pdf_files"}:
         include_samples = arguments.get("includeSamples")
-        label = (
-            "Local CSV workspace scan"
-            if tool_name == "list_csv_files"
-            else "Local PDF workspace scan"
-            if tool_name == "list_pdf_files"
-            else "Local chartable artifact scan"
-        )
-        if include_samples is True:
-            details.append("Samples: included")
-        return (label, details)
+        if tool_name == "list_datasets":
+            return (
+                "Queued a dataset workspace listing with samples."
+                if include_samples is True
+                else "Queued a dataset workspace listing.",
+                [],
+            )
+        return ("Queued a PDF workspace listing.", [])
 
     if tool_name == "list_reports":
         return ("Report index lookup", [])
@@ -555,10 +585,10 @@ def _summarize_client_tool_request(
             ],
         )
 
-    if tool_name == "inspect_chartable_file_schema":
+    if tool_name == "inspect_dataset_schema":
         return (
-            "Chartable schema inspection",
-            [f"File: {arguments.get('file_id') or 'unknown'}"],
+            "Dataset schema inspection",
+            [f"Dataset: {arguments.get('dataset_id') or 'unknown'}"],
         )
 
     if tool_name == "inspect_pdf_file":
@@ -592,23 +622,20 @@ def _summarize_client_tool_request(
                 _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)),
             )
 
-    if tool_name in {"create_csv_file", "create_json_file"}:
-        details = [f"Path: {arguments.get('path') or 'unknown'}"]
+    if tool_name == "create_dataset":
+        details = [f"File: {arguments.get('filename') or 'unknown'}"]
+        if isinstance(arguments.get("format"), str) and arguments["format"].strip():
+            details.append(f"Format: {arguments['format'].strip()}")
         query_plan = arguments.get("query_plan")
         if isinstance(query_plan, Mapping):
             details.extend(
                 _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan))
             )
-        return (
-            "Derived CSV artifact"
-            if tool_name == "create_csv_file"
-            else "Derived JSON artifact",
-            details,
-        )
+        return ("Derived dataset artifact", details)
 
-    if tool_name == "render_chart_from_file":
+    if tool_name == "render_chart_from_dataset":
         chart_plan = arguments.get("chart_plan")
-        details = [f"File: {arguments.get('file_id') or 'unknown'}"]
+        details = [f"Dataset: {arguments.get('dataset_id') or 'unknown'}"]
         if isinstance(chart_plan, Mapping):
             details.append(f"Chart: {chart_plan.get('type') or 'unknown'}")
         if isinstance(arguments.get("x_key"), str):
@@ -631,10 +658,86 @@ async def _stream_tool_trace_widget(
     tool_name: str,
     invocation: str,
 ) -> None:
+    if active_plan_execution(ctx.context.request_context.thread_metadata):
+        return
     await ctx.context.stream_widget(
         build_tool_trace_widget(tool_name, invocation),
         copy_text=build_tool_trace_copy_text(tool_name, invocation),
     )
+
+
+def _normalize_execution_hint(
+    hint: PlanExecutionHintInput,
+) -> AgentPlanExecutionHint:
+    normalized: AgentPlanExecutionHint = {}
+    if isinstance(hint.done_when, str) and hint.done_when.strip():
+        normalized["done_when"] = hint.done_when.strip()
+    if hint.preferred_tool_names:
+        normalized["preferred_tool_names"] = [
+            tool_name.strip()
+            for tool_name in hint.preferred_tool_names
+            if isinstance(tool_name, str) and tool_name.strip()
+        ]
+    if hint.preferred_handoff_tool_names:
+        normalized["preferred_handoff_tool_names"] = [
+            tool_name.strip()
+            for tool_name in hint.preferred_handoff_tool_names
+            if isinstance(tool_name, str) and tool_name.strip()
+        ]
+    return normalized
+
+
+def _plan_task_content(
+    execution_hint: AgentPlanExecutionHint | None,
+    note: str | None = None,
+) -> str | None:
+    lines: list[str] = []
+    if execution_hint:
+        done_when = execution_hint.get("done_when")
+        if isinstance(done_when, str) and done_when.strip():
+            lines.append(f"Done when: {done_when.strip()}")
+        tool_names = execution_hint.get("preferred_tool_names")
+        if tool_names:
+            lines.append(f"Preferred tools: {', '.join(tool_names)}")
+        handoff_names = execution_hint.get("preferred_handoff_tool_names")
+        if handoff_names:
+            lines.append(f"Preferred handoffs: {', '.join(handoff_names)}")
+    if isinstance(note, str) and note.strip():
+        lines.append(f"Note: {note.strip()}")
+    return "\n".join(lines) if lines else None
+
+
+def _build_plan_workflow(
+    plan: AgentPlan,
+) -> Workflow:
+    execution_hints = cast(
+        list[AgentPlanExecutionHint] | None,
+        plan.get("execution_hints"),
+    )
+    tasks = [
+        CustomTask(
+            title=f"{index}. {step}",
+            content=_plan_task_content(
+                execution_hints[index - 1] if execution_hints else None
+            ),
+            status_indicator="loading" if index == 1 else "none",
+        )
+        for index, step in enumerate(plan["planned_steps"], start=1)
+    ]
+    return Workflow(type="custom", tasks=tasks)
+
+
+async def _latest_thread_item_id(ctx: ChatKitToolContext) -> str | None:
+    page = await ctx.context.store.load_thread_items(
+        ctx.context.thread.id,
+        after=None,
+        limit=1,
+        order="desc",
+        context=ctx.context.request_context,
+    )
+    if not page.data:
+        return None
+    return page.data[0].id
 
 
 async def _latest_assistant_item_ids(ctx: ChatKitToolContext) -> list[str]:
@@ -751,13 +854,30 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
     )
 
 
+def _build_hosted_tools(
+    *,
+    agent_id: str,
+) -> list[Tool]:
+    if agent_id != "agriculture-agent":
+        return []
+
+    return [
+        WebSearchTool(
+            filters=WebSearchToolFilters(
+                allowed_domains=AGRICULTURE_WEB_SEARCH_ALLOWED_DOMAINS,
+            ),
+            search_context_size="medium",
+        )
+    ]
+
+
 def build_agent_tools(
     context: ReportAgentContext,
     *,
-    capability_id: str,
+    agent_id: str,
     client_tools: Sequence[Mapping[str, Any]],
-) -> list[FunctionTool]:
-    tools: list[FunctionTool] = []
+) -> list[Tool]:
+    tools: list[Tool] = []
     tool_names = get_client_tool_names(client_tools)
     registered_tool_map = {
         name.strip(): tool_definition
@@ -807,8 +927,9 @@ def build_agent_tools(
         planned_steps: list[str],
         success_criteria: list[str] | None = None,
         follow_on_tool_hints: list[str] | None = None,
+        execution_hints: list[PlanExecutionHintInput] | None = None,
     ) -> dict[str, object]:
-        """Write down a concise plan, then continue executing it immediately with more tool calls."""
+        """Write down a concise plan, optionally add per-step execution hints, and continue executing it immediately with more tool calls."""
         request_context = ctx.context.request_context
         cleaned_focus = focus.strip()
         cleaned_steps = [step.strip() for step in planned_steps if step.strip()]
@@ -818,6 +939,13 @@ def build_agent_tools(
         cleaned_follow_on_tool_hints = [
             item.strip() for item in follow_on_tool_hints or [] if item.strip()
         ]
+        cleaned_execution_hints = [
+            _normalize_execution_hint(hint) for hint in execution_hints or []
+        ]
+        if cleaned_execution_hints and len(cleaned_execution_hints) != len(cleaned_steps):
+            raise ValueError(
+                "execution_hints must align one-to-one with planned_steps."
+            )
         _log_tool_start(
             request_context,
             "make_plan",
@@ -827,9 +955,11 @@ def build_agent_tools(
                     ("steps", len(cleaned_steps)),
                     ("success", len(cleaned_success_criteria)),
                     ("next", summarize_sequence_for_log(cleaned_follow_on_tool_hints)),
+                    ("hints", len(cleaned_execution_hints)),
                 )
             ),
         )
+        latest_item_id = await _latest_thread_item_id(ctx)
         plan: AgentPlan = {
             "id": f"plan_{uuid4().hex}",
             "focus": cleaned_focus,
@@ -840,24 +970,43 @@ def build_agent_tools(
             plan["success_criteria"] = cleaned_success_criteria
         if cleaned_follow_on_tool_hints:
             plan["follow_on_tool_hints"] = cleaned_follow_on_tool_hints
+        if cleaned_execution_hints:
+            plan["execution_hints"] = cleaned_execution_hints
+        existing_execution = active_plan_execution(request_context.thread_metadata)
+        if (
+            existing_execution is not None
+            and ctx.context.workflow_item is not None
+            and ctx.context.workflow_item.id == existing_execution["workflow_item_id"]
+        ):
+            await ctx.context.end_workflow()
         request_context.thread_metadata["plan"] = plan
         if (
-            "render_chart_from_file" in cleaned_follow_on_tool_hints
-            or capability_id == "chart-agent"
+            "render_chart_from_dataset" in cleaned_follow_on_tool_hints
+            or agent_id == "chart-agent"
         ):
             request_context.thread_metadata["chart_plan"] = plan
+        await ctx.context.start_workflow(_build_plan_workflow(plan))
+        workflow_item = ctx.context.workflow_item
+        if workflow_item is None:
+            raise RuntimeError("Plan workflow failed to initialize.")
+        plan_execution: PlanExecution = {
+            "plan_id": plan["id"],
+            "status": "active",
+            "workflow_item_id": workflow_item.id,
+            "current_step_index": 0,
+            "attempts_by_step": [0 for _ in cleaned_steps],
+            "step_notes": [None for _ in cleaned_steps],
+        }
+        if latest_item_id is not None:
+            plan_execution["step_started_after_item_id"] = latest_item_id
+        request_context.thread_metadata["plan_execution"] = plan_execution
         ctx.context.thread.metadata = dict(request_context.thread_metadata)
         await ctx.context.stream(
             ProgressUpdateEvent(
                 text=(
-                    f"Plan saved with {len(cleaned_steps)} step(s). Continue executing it now "
-                    "with more tool calls instead of stopping."
+                    f"Plan saved with {len(cleaned_steps)} step(s). Execution workflow started; continue carrying out step 1 now."
                 )
             )
-        )
-        await ctx.context.stream_widget(
-            build_plan_widget(plan),
-            copy_text=build_plan_copy_text(plan),
         )
         _log_tool_end(
             request_context,
@@ -867,18 +1016,21 @@ def build_agent_tools(
                     ("id", plan["id"]),
                     ("steps", len(cleaned_steps)),
                     ("success", len(cleaned_success_criteria)),
+                    ("workflow", workflow_item.id),
                 )
             ),
         )
         return {
             "plan_id": plan["id"],
             "plan": plan,
+            "plan_execution": plan_execution,
             "report_id": request_context.report_id,
         }
 
     tools.extend([name_current_thread_tool, make_plan_tool])
+    tools.extend(_build_hosted_tools(agent_id=agent_id))
 
-    if capability_id == "feedback-agent":
+    if agent_id == "feedback-agent":
 
         @function_tool(name_override="get_feedback")
         async def get_feedback_tool(

@@ -21,7 +21,7 @@ class ClientToolWorkspaceFile(TypedDict, total=False):
     page_count: int
 
 
-class ClientToolCsvFile(TypedDict):
+class ClientToolDataset(TypedDict):
     id: str
     name: str
     row_count: int
@@ -40,9 +40,8 @@ class ClientToolResultPayload(TypedDict, total=False):
     rows: list[dict[str, object]]
     chart: dict[str, object]
     files: list[ClientToolWorkspaceFile]
-    csv_files: list[ClientToolCsvFile]
+    datasets: list[ClientToolDataset]
     pdf_files: list[ClientToolWorkspaceFile]
-    chartable_files: list[ClientToolWorkspaceFile]
     reports: list[dict[str, object]]
     report: dict[str, object]
     current_report_id: str

@@ -13,13 +13,13 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
         user_email=None,
         db=None,
         request_metadata={
-            "tool_provider_bundle": {
-                "root_tool_provider_id": "csv-agent",
-                "tool_providers": [
+            "agent_bundle": {
+                "root_agent_id": "analysis-agent",
+                "agents": [
                     {
-                        "tool_provider_id": "csv-agent",
-                        "agent_name": "CSV Agent",
-                        "instructions": "Inspect CSV files.",
+                        "agent_id": "analysis-agent",
+                        "agent_name": "Analysis Agent",
+                        "instructions": "Inspect datasets.",
                         "client_tools": [],
                         "delegation_targets": [],
                     }
@@ -36,8 +36,8 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
                         "id": "file_csv",
                         "name": "sales.csv",
                         "bucket": "uploaded",
-                        "producer_key": "csv-agent",
-                        "producer_label": "CSV Agent",
+                        "producer_key": "analysis-agent",
+                        "producer_label": "Analysis Agent",
                         "source": "uploaded",
                         "kind": "csv",
                         "extension": "csv",
@@ -45,7 +45,21 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
                         "columns": ["region", "revenue"],
                         "numeric_columns": ["revenue"],
                         "sample_rows": [{"region": "West", "revenue": 10}],
-                    }
+                    },
+                    {
+                        "id": "file_image",
+                        "name": "walnut.png",
+                        "bucket": "uploaded",
+                        "producer_key": "uploaded",
+                        "producer_label": "Uploaded",
+                        "source": "uploaded",
+                        "kind": "image",
+                        "extension": "png",
+                        "mime_type": "image/png",
+                        "byte_size": 1024,
+                        "width": 1200,
+                        "height": 800,
+                    },
                 ],
                 "reports": [],
             },
@@ -61,6 +75,9 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
 
     assert runtime_state.metadata["workspace_state"]["context"]["workspace_id"] == "workspace-demo"
     assert context.report_id == "thread_123"
-    assert context.tool_provider_id == "csv-agent"
+    assert context.agent_id == "analysis-agent"
     assert context.dataset_ids == ["file_csv"]
     assert context.available_files[0].csv is not None
+    assert context.available_files[1].image is not None
+    assert context.available_files[1].image.width == 1200
+    assert context.available_files[1].image.height == 800

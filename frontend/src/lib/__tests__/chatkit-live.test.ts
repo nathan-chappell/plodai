@@ -2,11 +2,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { getCapabilityModule } from "../../capabilities/registry";
-import { runCapabilityDemoScenario } from "../test-support/chatkit-live";
+import { getAgentModule } from "../../agents/registry";
+import { runAgentDemoScenario } from "../test-support/chatkit-live";
 
 function widgetContains(
-  result: Awaited<ReturnType<typeof runCapabilityDemoScenario>>,
+  result: Awaited<ReturnType<typeof runAgentDemoScenario>>,
   text: string,
 ): boolean {
   return result.widgets.some(
@@ -16,16 +16,16 @@ function widgetContains(
   );
 }
 
-describe.sequential("capability live integration", () => {
+describe.sequential("agent live integration", () => {
   it(
     "runs the report-agent demo against the real ChatKit server and validates the backend wiring",
     async () => {
-      const capabilityModule = getCapabilityModule("report-agent");
-      if (!capabilityModule) {
+      const agentModule = getAgentModule("report-agent");
+      if (!agentModule) {
         throw new Error("Report Agent module is not registered.");
       }
 
-      const result = await runCapabilityDemoScenario(capabilityModule);
+      const result = await runAgentDemoScenario(agentModule);
       const toolNames = new Set(result.toolCalls.map((toolCall) => toolCall.name));
 
       expect(
@@ -41,11 +41,11 @@ describe.sequential("capability live integration", () => {
       expect(toolNames.has("list_reports")).toBe(true);
       expect(toolNames.has("create_report")).toBe(true);
       expect(
-        ["run_aggregate_query", "create_csv_file", "create_json_file"].some((toolName) =>
+        ["run_aggregate_query", "create_dataset", "create_dataset"].some((toolName) =>
           toolNames.has(toolName),
         ),
       ).toBe(true);
-      expect(toolNames.has("render_chart_from_file")).toBe(true);
+      expect(toolNames.has("render_chart_from_dataset")).toBe(true);
       expect(toolNames.has("append_report_slide")).toBe(true);
       expect(
         result.effects.some((effect) => effect.type === "chart_rendered"),
@@ -64,12 +64,12 @@ describe.sequential("capability live integration", () => {
   it(
     "opens the feedback widget on first capture instead of asking for plain-text feedback",
     async () => {
-      const capabilityModule = getCapabilityModule("feedback-agent");
-      if (!capabilityModule) {
+      const agentModule = getAgentModule("feedback-agent");
+      if (!agentModule) {
         throw new Error("Feedback Agent module is not registered.");
       }
 
-      const result = await runCapabilityDemoScenario(capabilityModule);
+      const result = await runAgentDemoScenario(agentModule);
 
       expect(
         result.deterministicChecks.passed,
@@ -89,16 +89,16 @@ describe.sequential("capability live integration", () => {
   );
 
   it(
-    "does not stop after a chart handoff without a real render in the csv-agent demo",
+    "does not stop after analysis work without producing a real chart render when the run goes down the chart path",
     async () => {
-      const capabilityModule = getCapabilityModule("csv-agent");
-      if (!capabilityModule) {
-        throw new Error("CSV Agent module is not registered.");
+      const agentModule = getAgentModule("analysis-agent");
+      if (!agentModule) {
+        throw new Error("Analysis Agent module is not registered.");
       }
 
-      const result = await runCapabilityDemoScenario(capabilityModule);
+      const result = await runAgentDemoScenario(agentModule);
       const toolNames = new Set(result.toolCalls.map((toolCall) => toolCall.name));
-      const hasChartHandoff = widgetContains(result, "CSV Agent -> Chart Agent");
+      const hasChartHandoff = widgetContains(result, "Analysis Agent -> Chart Agent");
 
       expect(
         result.deterministicChecks.passed,
@@ -109,9 +109,9 @@ describe.sequential("capability live integration", () => {
         JSON.stringify(result.eventDiagnostics.error_events, null, 2),
       ).toHaveLength(0);
       expect(result.eventDiagnostics.final_pending_tool_names).toHaveLength(0);
-      expect(toolNames.has("list_csv_files")).toBe(true);
+      expect(toolNames.has("list_datasets")).toBe(true);
       expect(
-        toolNames.has("create_csv_file") || toolNames.has("create_json_file"),
+        toolNames.has("create_dataset") || toolNames.has("create_dataset"),
       ).toBe(true);
       expect(
         result.workspaceSummary.files.some(
@@ -119,8 +119,8 @@ describe.sequential("capability live integration", () => {
         ),
       ).toBe(true);
 
-      if (hasChartHandoff || toolNames.has("render_chart_from_file")) {
-        expect(toolNames.has("render_chart_from_file")).toBe(true);
+      if (hasChartHandoff || toolNames.has("render_chart_from_dataset")) {
+        expect(toolNames.has("render_chart_from_dataset")).toBe(true);
         expect(result.effects.some((effect) => effect.type === "chart_rendered")).toBe(true);
       }
       expect(result.requestMetadata.origin).toBe("ui_integration_test");

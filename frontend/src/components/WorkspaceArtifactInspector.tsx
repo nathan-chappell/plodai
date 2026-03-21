@@ -94,6 +94,7 @@ export function WorkspaceArtifactInspector({
                 {file.kind === "csv" || file.kind === "json" ? <MetaText as="span">{file.row_count} rows</MetaText> : null}
                 {file.kind === "csv" || file.kind === "json" ? <MetaText as="span">{file.columns.length} columns</MetaText> : null}
                 {file.kind === "pdf" ? <MetaText as="span">{file.page_count} pages</MetaText> : null}
+                {file.kind === "image" ? <MetaText as="span">{file.width}x{file.height}</MetaText> : null}
               </DatasetInventoryMetaRow>
             </DatasetInventoryToggle>
 
@@ -165,6 +166,15 @@ export function WorkspaceArtifactInspector({
                   </>
                 ) : null}
 
+                {file.kind === "image" ? (
+                  <>
+                    <MetaText>
+                      Image artifact sized {file.width} x {file.height}.
+                    </MetaText>
+                    <DatasetPreviewImage alt={file.name} src={`data:${file.mime_type || "image/png"};base64,${file.bytes_base64}`} />
+                  </>
+                ) : null}
+
                 {file.kind === "other" ? (
                   <>
                     {file.text_content ? (
@@ -176,7 +186,7 @@ export function WorkspaceArtifactInspector({
                 ) : null}
 
                 <DatasetInventoryToolbar>
-                  {file.kind === "pdf" || file.kind === "json" || (file.kind === "other" && file.text_content != null) ? (
+                  {file.kind === "pdf" || file.kind === "json" || file.kind === "image" || (file.kind === "other" && file.text_content != null) ? (
                     <DatasetInventoryButton onClick={() => openWorkspaceFileInNewTab(file)} type="button">
                       Open file
                     </DatasetInventoryButton>
@@ -239,4 +249,13 @@ const TextPreview = styled.pre<{ $compact: boolean }>`
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+`;
+
+const DatasetPreviewImage = styled.img`
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.72);
 `;

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useState, type ComponentType, type LazyExoticComponent } from "react";
+import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from "react";
 
 import { AppStateProvider } from "./app/context";
 import { WorkspaceProvider } from "./app/workspace";
@@ -14,35 +14,32 @@ import {
 } from "./app/styles";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
-import { allToolSurfaceDefinitions } from "./tools/definitions";
-import type { WorkspaceSurfaceRegistration } from "./tools/types";
+import { allAgentDefinitions } from "./agents/definitions";
 import { navigate, usePathname } from "./lib/router";
 import { isWritingPath } from "./lib/writing";
 
-type CapabilityPageProps = {
-  onRegisterWorkspace?: (registration: WorkspaceSurfaceRegistration | null) => void;
-};
+type AgentPageProps = Record<string, never>;
 
-type CapabilityPageComponent = ComponentType<CapabilityPageProps>;
+type AgentPageComponent = ComponentType<AgentPageProps>;
 
 const WritingPage = lazy(async () => {
   const module = await import("./components/WritingPage");
   return { default: module.WritingPage };
 });
 
-const WorkspaceAgentPage = lazy(async () => {
-  const module = await import("./tools/workspaceAgent");
-  return { default: module.WorkspaceAgentPage };
+const HelpAgentPage = lazy(async () => {
+  const module = await import("./agents/helpAgent");
+  return { default: module.HelpAgentPage };
 });
 
 const AdminUsersPage = lazy(async () => {
-  const module = await import("./tools/adminUsers");
-  const WrappedAdminUsersPage: CapabilityPageComponent = () => <module.AdminUsersPage />;
+  const module = await import("./agents/adminUsers");
+  const WrappedAdminUsersPage: AgentPageComponent = () => <module.AdminUsersPage />;
   return { default: WrappedAdminUsersPage };
 });
 
-const capabilityPages: Record<string, LazyExoticComponent<CapabilityPageComponent>> = {
-  "workspace-agent": WorkspaceAgentPage,
+const agentPages: Record<string, LazyExoticComponent<AgentPageComponent>> = {
+  "help-agent": HelpAgentPage,
   "admin-users": AdminUsersPage,
 };
 
@@ -55,17 +52,20 @@ function RouteLoadingState({ label }: { label: string }) {
   );
 }
 
-function filterCapabilities(role: "admin" | "user") {
-  return allToolSurfaceDefinitions.filter((capability) =>
-    capability.showInSidebar !== false &&
-    (capability.tabs.length === 0 ||
-      capability.tabs.some((tab) => (tab.visible ? tab.visible({ role }) : true))),
+function filterAgents(role: "admin" | "user") {
+  return allAgentDefinitions.filter((agent) =>
+    agent.showInSidebar !== false &&
+    (agent.tabs.length === 0 ||
+      agent.tabs.some((tab) => (tab.visible ? tab.visible({ role }) : true))),
   );
 }
 
-function resolveVisibleCapability(pathname: string, role: "admin" | "user") {
-  const capabilities = filterCapabilities(role);
-  return capabilities.find((capability) => capability.path === pathname) ?? null;
+function resolveVisibleAgent(pathname: string, role: "admin" | "user") {
+  const agents = filterAgents(role);
+  if (pathname === "/workspace" || pathname.startsWith("/workspace/")) {
+    return agents.find((agent) => agent.id === "help-agent") ?? null;
+  }
+  return agents.find((agent) => agent.path === pathname) ?? null;
 }
 
 export function App() {
@@ -73,21 +73,6 @@ export function App() {
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const { dismissToast, toasts } = useToastState();
   const viewingWriting = isWritingPath(pathname);
-  const [workspaceRegistration, setWorkspaceRegistration] = useState<WorkspaceSurfaceRegistration | null>(null);
-  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
-  const handleRegisterWorkspace = useCallback((registration: WorkspaceSurfaceRegistration | null) => {
-    setWorkspaceRegistration(registration);
-  }, []);
-  const handleSelectCapability = useCallback((path: string) => {
-    setWorkspaceModalOpen(false);
-    navigate(path);
-  }, []);
-  const handleOpenWorkspaceModal = useCallback(() => {
-    setWorkspaceModalOpen(true);
-  }, []);
-  const handleCloseWorkspaceModal = useCallback(() => {
-    setWorkspaceModalOpen(false);
-  }, []);
 
   useAppRouteGuards({
     authError,
@@ -132,32 +117,27 @@ export function App() {
     return <SignInPage authError={authError} hasClerkSession={isSignedIn} onRetryAuth={reloadSession} />;
   }
   const currentUser = user;
-  const capabilities = filterCapabilities(currentUser.role);
-  const activeCapability = resolveVisibleCapability(pathname, currentUser.role);
-  const ActiveCapabilityPage = activeCapability ? capabilityPages[activeCapability.id] : null;
+
+  const agents = filterAgents(currentUser.role);
+  const activeAgent = resolveVisibleAgent(pathname, currentUser.role);
+  const ActiveAgentPage = activeAgent ? agentPages[activeAgent.id] : null;
   return (
     <AppStateProvider value={{ authError, setAuthError, user: currentUser, setUser }}>
       <WorkspaceProvider>
         <PlatformShell
-          capabilities={capabilities}
-          activeCapabilityId={activeCapability?.id ?? null}
-          onSelectCapability={handleSelectCapability}
-          workspaceRegistration={workspaceRegistration}
-          workspaceModalOpen={workspaceModalOpen}
-          onOpenWorkspaceModal={handleOpenWorkspaceModal}
-          onCloseWorkspaceModal={handleCloseWorkspaceModal}
+          agents={agents}
+          activeAgentId={activeAgent?.id ?? null}
+          onSelectAgent={navigate}
         >
-          {!activeCapability ? (
+          {!activeAgent ? (
             <AppEmptyState>
               <strong>Unknown route</strong>
               <AppEmptyMetaText>Open the workspace or admin tools from the shell navigation.</AppEmptyMetaText>
             </AppEmptyState>
           ) : null}
-          {activeCapability && ActiveCapabilityPage ? (
-            <Suspense fallback={<RouteLoadingState label={activeCapability.title} />}>
-              <ActiveCapabilityPage
-                onRegisterWorkspace={handleRegisterWorkspace}
-              />
+          {activeAgent && ActiveAgentPage ? (
+            <Suspense fallback={<RouteLoadingState label={activeAgent.title} />}>
+              <ActiveAgentPage />
             </Suspense>
           ) : null}
         </PlatformShell>

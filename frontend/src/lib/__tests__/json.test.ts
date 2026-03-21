@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseJsonText } from "../json";
 
 describe("json parsing", () => {
-  it("parses array-of-object chartable artifacts", () => {
+  it("parses array-of-object derived datasets", () => {
     expect(parseJsonText('[{"region":"North","revenue":100},{"region":"South","revenue":50}]')).toEqual({
       rowCount: 2,
       columns: ["region", "revenue"],

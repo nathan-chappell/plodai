@@ -8,12 +8,12 @@ from backend.app.agents.agent_builder import (
 from backend.app.agents.context import ReportAgentContext
 
 
-def test_build_agent_graph_compiles_tools_per_capability() -> None:
-    tool_provider_bundle = {
-        "root_tool_provider_id": "report-agent",
-        "tool_providers": [
+def test_build_agent_graph_compiles_tools_per_agent() -> None:
+    agent_bundle = {
+        "root_agent_id": "report-agent",
+        "agents": [
             {
-                "tool_provider_id": "report-agent",
+                "agent_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [
@@ -34,25 +34,25 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
                 ],
                 "delegation_targets": [
                     {
-                        "tool_provider_id": "chart-agent",
+                        "agent_id": "chart-agent",
                         "tool_name": "delegate_to_chart_agent",
                         "description": "Delegate chart work.",
                     }
                 ],
             },
             {
-                "tool_provider_id": "chart-agent",
+                "agent_id": "chart-agent",
                 "agent_name": "Chart Agent",
                 "instructions": "Render charts.",
                 "client_tools": [
                     {
                         "type": "function",
-                        "name": "render_chart_from_file",
+                        "name": "render_chart_from_dataset",
                         "description": "Render a chart.",
                         "parameters": {
                             "type": "object",
                             "properties": {
-                                "file_id": {"type": "string"},
+                                "dataset_id": {"type": "string"},
                                 "chart_plan_id": {"type": "string"},
                                 "chart_plan": {
                                     "type": "object",
@@ -62,7 +62,7 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
                                 "x_key": {"type": "string"},
                             },
                             "required": [
-                                "file_id",
+                                "dataset_id",
                                 "chart_plan_id",
                                 "chart_plan",
                                 "x_key",
@@ -81,12 +81,12 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
     )
 
     agents = _build_agent_graph(
         context,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
         model=None,
     )
 
@@ -94,45 +94,45 @@ def test_build_agent_graph_compiles_tools_per_capability() -> None:
     chart_tool_names = [tool.name for tool in agents["chart-agent"].tools]
 
     assert "create_report" in report_tool_names
-    assert "render_chart_from_file" not in report_tool_names
-    assert "render_chart_from_file" in chart_tool_names
+    assert "render_chart_from_dataset" not in report_tool_names
+    assert "render_chart_from_dataset" in chart_tool_names
     assert "create_report" not in chart_tool_names
     assert [handoff.tool_name for handoff in agents["report-agent"].handoffs] == [
         "delegate_to_chart_agent"
     ]
     assert agents["report-agent"].model_settings.metadata == {
-        "root_tool_provider_id": "report-agent",
+        "root_agent_id": "report-agent",
         "root_agent_name": "Report Agent",
-        "tool_provider_id": "report-agent",
+        "agent_id": "report-agent",
         "agent_name": "Report Agent",
     }
     assert agents["chart-agent"].model_settings.metadata == {
-        "root_tool_provider_id": "report-agent",
+        "root_agent_id": "report-agent",
         "root_agent_name": "Report Agent",
-        "tool_provider_id": "chart-agent",
+        "agent_id": "chart-agent",
         "agent_name": "Chart Agent",
     }
 
 
 def test_handoff_streams_widget_with_distinct_status() -> None:
-    tool_provider_bundle = {
-        "root_tool_provider_id": "report-agent",
-        "tool_providers": [
+    agent_bundle = {
+        "root_agent_id": "report-agent",
+        "agents": [
             {
-                "tool_provider_id": "report-agent",
+                "agent_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [],
                 "delegation_targets": [
                     {
-                        "tool_provider_id": "chart-agent",
+                        "agent_id": "chart-agent",
                         "tool_name": "delegate_to_chart_agent",
                         "description": "Delegate chart work.",
                     }
                 ],
             },
             {
-                "tool_provider_id": "chart-agent",
+                "agent_id": "chart-agent",
                 "agent_name": "Chart Agent",
                 "instructions": "Render charts.",
                 "client_tools": [],
@@ -145,11 +145,11 @@ def test_handoff_streams_widget_with_distinct_status() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
     )
     agents = _build_agent_graph(
         context,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
         model=None,
     )
     widget_calls: list[tuple[object, str | None]] = []
@@ -168,23 +168,23 @@ def test_handoff_streams_widget_with_distinct_status() -> None:
     assert target_agent.name == "Chart Agent"
     assert len(widget_calls) == 1
     widget, copy_text = widget_calls[0]
-    assert widget["status"] == {"text": "Agent handoff", "icon": "agent"}
+    assert "status" not in widget
     assert copy_text == "Report Agent -> Chart Agent"
 
 
 def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
-    tool_provider_bundle = {
-        "root_tool_provider_id": "feedback-agent",
-        "tool_providers": [
+    agent_bundle = {
+        "root_agent_id": "feedback-agent",
+        "agents": [
             {
-                "tool_provider_id": "feedback-agent",
+                "agent_id": "feedback-agent",
                 "agent_name": "Feedback Agent",
                 "instructions": "Capture feedback.",
                 "client_tools": [],
                 "delegation_targets": [],
             },
             {
-                "tool_provider_id": "report-agent",
+                "agent_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports.",
                 "client_tools": [],
@@ -197,12 +197,12 @@ def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
     )
 
     agents = _build_agent_graph(
         context,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
         model=None,
     )
 
@@ -217,6 +217,38 @@ def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
     }
     assert "get_current_thread_cost" not in feedback_tool_names
     assert "get_current_thread_cost" not in report_tool_names
+
+
+def test_agriculture_agent_gets_hosted_web_search_tool() -> None:
+    agent_bundle = {
+        "root_agent_id": "agriculture-agent",
+        "agents": [
+            {
+                "agent_id": "agriculture-agent",
+                "agent_name": "Agriculture Agent",
+                "instructions": "Inspect plant images and use trusted web search when needed.",
+                "client_tools": [],
+                "delegation_targets": [],
+            }
+        ],
+    }
+    context = ReportAgentContext(
+        report_id="report_123",
+        user_id="user_123",
+        user_email=None,
+        db=None,
+        agent_bundle=agent_bundle,
+    )
+
+    agents = _build_agent_graph(
+        context,
+        agent_bundle=agent_bundle,
+        model=None,
+    )
+
+    agriculture_tool_names = [tool.name for tool in agents["agriculture-agent"].tools]
+
+    assert "web_search" in agriculture_tool_names
 
 
 async def _capture_widget(
@@ -254,7 +286,7 @@ def test_build_agent_instructions_injects_workspace_agents_overlay() -> None:
 
     rendered = _build_agent_instructions(
         context,
-        instructions="Inspect the available CSV files.",
+        instructions="Inspect the available datasets.",
     )
 
     assert "Workspace instruction overlay from AGENTS.md:" in rendered
@@ -265,11 +297,11 @@ def test_build_agent_instructions_injects_workspace_agents_overlay() -> None:
 
 
 def test_build_agent_graph_attaches_surface_key_to_response_metadata() -> None:
-    tool_provider_bundle = {
-        "root_tool_provider_id": "report-agent",
-        "tool_providers": [
+    agent_bundle = {
+        "root_agent_id": "report-agent",
+        "agents": [
             {
-                "tool_provider_id": "report-agent",
+                "agent_id": "report-agent",
                 "agent_name": "Report Agent",
                 "instructions": "Manage reports.",
                 "client_tools": [],
@@ -282,20 +314,20 @@ def test_build_agent_graph_attaches_surface_key_to_response_metadata() -> None:
         user_id="user_123",
         user_email=None,
         db=None,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
         thread_metadata={"surface_key": "report-agent-demo"},
     )
 
     agents = _build_agent_graph(
         context,
-        tool_provider_bundle=tool_provider_bundle,
+        agent_bundle=agent_bundle,
         model=None,
     )
 
     assert agents["report-agent"].model_settings.metadata == {
-        "root_tool_provider_id": "report-agent",
+        "root_agent_id": "report-agent",
         "root_agent_name": "Report Agent",
-        "tool_provider_id": "report-agent",
+        "agent_id": "report-agent",
         "agent_name": "Report Agent",
         "surface_key": "report-agent-demo",
     }

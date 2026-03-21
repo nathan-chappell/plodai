@@ -158,6 +158,11 @@ export const AccountCard = styled(CardSection)<{ $blend?: boolean }>`
 
   @media (max-width: 980px) {
     grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  @media (max-width: 680px) {
+    gap: 0.55rem;
   }
 `;
 
@@ -196,6 +201,14 @@ export const AccountSubline = styled(MetaText)`
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 28ch;
+
+  @media (max-width: 680px) {
+    white-space: normal;
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.35;
+  }
 `;
 
 export const AccountActions = styled(WrapRow)`
@@ -203,6 +216,12 @@ export const AccountActions = styled(WrapRow)`
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 0.45rem;
+
+  @media (max-width: 680px) {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    width: 100%;
+  }
 `;
 
 export const AccountThemeWrap = styled.div`
@@ -320,6 +339,10 @@ export const AccountButton = styled.button`
   ${primaryButtonCss};
   padding: 0.5rem 0.82rem;
   background: var(--ink);
+
+  @media (max-width: 680px) {
+    min-height: 2.65rem;
+  }
 `;
 
 export const AccountMetaGroup = styled.div`
@@ -329,6 +352,10 @@ export const AccountMetaGroup = styled.div`
   justify-content: flex-end;
   gap: 0.35rem;
   min-width: 0;
+
+  @media (max-width: 680px) {
+    justify-content: flex-start;
+  }
 `;
 
 export const AccountBadge = styled.span<{ $tone?: "default" | "accent" }>`
@@ -346,6 +373,11 @@ export const AccountBadge = styled.span<{ $tone?: "default" | "accent" }>`
 `;
 
 export const AdminPanelCard = styled(CardSection)`
+  align-self: stretch;
+  align-content: start;
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  padding: 0.95rem 1rem;
   gap: 0.45rem;
 `;
 
@@ -392,7 +424,8 @@ export const AdminPanelSubmitButton = styled.button`
 
 export const AdminPanelSecondaryButton = styled.button`
   ${secondaryButtonCss};
-  padding: 0.72rem 0.95rem;
+  padding: 0.62rem 0.9rem;
+  line-height: 1;
 `;
 
 export const AdminPanelMessage = styled(MetaText)`
@@ -411,7 +444,8 @@ export const AdminPanelToolbar = styled.div`
 `;
 
 export const AdminPanelTableWrap = styled.div`
-  overflow-x: auto;
+  min-height: 0;
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.58);
@@ -424,8 +458,8 @@ export const AdminPanelTable = styled.table`
 
 export const AdminPanelHeaderCell = styled.th`
   ${tableHeaderCellCss};
-  padding: 0.7rem 0.8rem;
-  font-size: 0.75rem;
+  padding: 0.58rem 0.8rem;
+  font-size: 0.73rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
@@ -434,13 +468,17 @@ export const AdminPanelHeaderCell = styled.th`
 
 export const AdminPanelCell = styled.td`
   ${tableBodyCellCss};
-  padding: 0.75rem 0.8rem;
+  padding: 0.56rem 0.8rem;
   vertical-align: top;
 `;
 
 export const AdminPanelActionCell = styled(AdminPanelCell)`
   white-space: nowrap;
   width: 1%;
+
+  > button + button {
+    margin-left: 0.35rem;
+  }
 `;
 
 export const AdminPanelUserButton = styled.button<{ $active: boolean }>`
@@ -448,7 +486,7 @@ export const AdminPanelUserButton = styled.button<{ $active: boolean }>`
   border: 1px solid ${({ $active }) => ($active ? "var(--accent)" : "transparent")};
   background: ${({ $active }) => ($active ? "color-mix(in srgb, var(--accent) 10%, white 90%)" : "transparent")};
   border-radius: 12px;
-  padding: 0.4rem 0.5rem;
+  padding: 0.34rem 0.46rem;
   text-align: left;
   cursor: pointer;
   transition: background 180ms ease, border-color 180ms ease;
@@ -459,8 +497,8 @@ export const AdminPanelUserButton = styled.button<{ $active: boolean }>`
 `;
 
 export const AdminPanelInlineMeta = styled(MetaText)`
-  font-size: 0.76rem;
-  line-height: 1.3;
+  font-size: 0.74rem;
+  line-height: 1.2;
 `;
 
 export const AdminPanelBadgeRow = styled.div`
@@ -472,7 +510,7 @@ export const AdminPanelBadge = styled.span<{ $tone?: "default" | "accent" | "mut
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 0.2rem 0.52rem;
+  padding: 0.16rem 0.48rem;
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
@@ -493,8 +531,8 @@ export const AdminPanelBadge = styled.span<{ $tone?: "default" | "accent" | "mut
 export const AdminPanelPager = styled.div`
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  justify-content: flex-end;
+  gap: 0.5rem;
   flex-wrap: wrap;
 `;
 
@@ -529,6 +567,10 @@ export const WorkspaceModalBackdrop = styled.div`
   padding: 1rem;
   background: rgba(12, 18, 24, 0.5);
   backdrop-filter: blur(10px);
+
+  @media (max-width: 760px) {
+    padding: 0.55rem;
+  }
 `;
 
 export const WorkspaceModalCard = styled.section`
@@ -538,6 +580,12 @@ export const WorkspaceModalCard = styled.section`
   overflow: hidden;
   border-radius: var(--radius-xl);
   box-shadow: 0 28px 80px rgba(10, 10, 10, 0.24);
+
+  @media (max-width: 760px) {
+    width: 100%;
+    max-height: calc(100dvh - 1.1rem);
+    padding: 0.82rem;
+  }
 `;
 
 export const WorkspaceModalHeader = styled.div`
@@ -545,6 +593,11 @@ export const WorkspaceModalHeader = styled.div`
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: start;
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
 `;
 
 export const WorkspaceModalTitleBlock = styled.div`
@@ -562,7 +615,14 @@ export const WorkspaceModalMeta = styled(MetaText)`
 
 export const WorkspaceModalCloseButton = styled.button`
   ${secondaryButtonCss};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   align-self: start;
+
+  @media (max-width: 760px) {
+    width: 100%;
+  }
 `;
 
 export const PlatformPage = styled.main`
@@ -579,6 +639,10 @@ export const PlatformPage = styled.main`
     max-height: none;
     overflow: visible;
     padding: 0.75rem;
+  }
+
+  @media (max-width: 640px) {
+    padding: 0.55rem;
   }
 `;
 
@@ -803,8 +867,11 @@ export const PlatformNavButton = styled.button<{ $active: boolean; $collapsed: b
   padding: ${({ $collapsed }) => ($collapsed ? "0.5rem 0.42rem" : "0.54rem 0.62rem")};
   text-align: left;
   display: grid;
-  justify-items: ${({ $collapsed }) => ($collapsed ? "center" : "start")};
-  gap: ${({ $collapsed }) => ($collapsed ? "0" : "0.05rem")};
+  grid-template-columns: ${({ $collapsed }) => ($collapsed ? "1fr" : "1.15rem minmax(0, 1fr)")};
+  align-items: start;
+  justify-items: ${({ $collapsed }) => ($collapsed ? "center" : "stretch")};
+  column-gap: ${({ $collapsed }) => ($collapsed ? "0" : "0.72rem")};
+  row-gap: 0;
   cursor: pointer;
   transition:
     background 180ms ease,
@@ -816,14 +883,20 @@ export const PlatformNavButton = styled.button<{ $active: boolean; $collapsed: b
   &:hover {
     transform: ${({ $collapsed }) => ($collapsed ? "translateY(-1px)" : "translateX(2px)")};
   }
+
+  > div {
+    min-width: 0;
+  }
 `;
 
 export const PlatformNavLabel = styled.strong<{ $collapsed: boolean }>`
   font-size: 0.87rem;
+  line-height: 1.15;
   display: ${({ $collapsed }) => ($collapsed ? "none" : "block")};
 `;
 
 export const PlatformNavMeta = styled(MetaText)<{ $collapsed: boolean }>`
+  margin-top: 0.22rem;
   color: var(--sidebar-muted);
   font-size: 0.71rem;
   line-height: 1.16;
@@ -831,18 +904,18 @@ export const PlatformNavMeta = styled(MetaText)<{ $collapsed: boolean }>`
 `;
 
 export const PlatformNavGlyph = styled.span<{ $active: boolean }>`
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 999px;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: ${({ $active }) => ($active ? "var(--accent)" : "rgba(255,255,255,0.18)")};
-  transition: background 180ms ease, transform 180ms ease;
+  color: ${({ $active }) => ($active ? "var(--accent-warm)" : "rgba(255,255,255,0.72)")};
+  transition: color 180ms ease, transform 180ms ease;
 
   svg {
-    width: 0.72rem;
-    height: 0.72rem;
+    width: 1rem;
+    height: 1rem;
   }
 `;
 
@@ -1038,6 +1111,16 @@ export const ChartCardPreviewImage = styled.img`
   border-radius: calc(var(--radius-md) - 4px);
 `;
 
+function resolveTabletChatPaneMinHeight(minHeight?: number): string {
+  const clampedHeight = Math.min(minHeight ?? 430, 620);
+  return `min(${clampedHeight}px, 72dvh)`;
+}
+
+function resolvePhoneChatPaneMinHeight(minHeight?: number): string {
+  const clampedHeight = Math.min(minHeight ?? 430, 520);
+  return `min(${clampedHeight}px, 68dvh)`;
+}
+
 export const ChartCardCode = styled.pre`
   margin: 1rem 0 0;
   padding: 0.9rem;
@@ -1066,7 +1149,14 @@ export const ChatKitPaneCard = styled.section`
   gap: 0.35rem;
 
   @media (max-width: 1180px) {
+    position: static;
+    top: auto;
     height: auto;
+  }
+
+  @media (max-width: 760px) {
+    padding: 0.62rem;
+    border-radius: calc(var(--radius-xl) - 2px);
   }
 `;
 
@@ -1086,6 +1176,10 @@ export const ChatKitPaneStatusRow = styled.div`
   align-items: center;
   gap: 0.6rem;
   min-height: 2rem;
+
+  @media (max-width: 760px) {
+    align-items: flex-start;
+  }
 `;
 
 export const ChatKitPaneStatusActions = styled.div`
@@ -1184,7 +1278,12 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
   }
 
   @media (max-width: 1180px) {
-    min-height: ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
+    min-height: ${({ $minHeight }) => resolveTabletChatPaneMinHeight($minHeight)};
+  }
+
+  @media (max-width: 760px) {
+    flex-basis: auto;
+    min-height: ${({ $minHeight }) => resolvePhoneChatPaneMinHeight($minHeight)};
   }
 `;
 
@@ -1202,10 +1301,14 @@ export const ChatKitPaneToolbar = styled(WrapRow)`
 
   @media (max-width: 760px) {
     flex-wrap: wrap;
+    width: 100%;
   }
 `;
 
 export const ChatKitPaneToolbarButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(31, 41, 55, 0.14);
   background: rgba(255, 255, 255, 0.92);
   color: #1f2937;
@@ -1216,10 +1319,11 @@ export const ChatKitPaneToolbarButton = styled.button`
   font-size: 0.84rem;
   line-height: 1;
   cursor: pointer;
-`;
 
-export const ChatKitPaneFeedbackButton = styled(ChatKitPaneToolbarButton)`
-  flex: 0 0 auto;
+  @media (max-width: 760px) {
+    flex: 1 1 0;
+    min-height: 2.6rem;
+  }
 `;
 
 export const ChatKitPaneModeRow = styled.div<{ $light?: boolean }>`

@@ -234,8 +234,8 @@ export function AdminCreditsPanel() {
 
   return (
     <AdminPanelCard>
-      <AdminPanelTitle>User access</AdminPanelTitle>
-      <MetaText>Browse Clerk users, then grant credit or update activation inline.</MetaText>
+      <AdminPanelTitle>Users</AdminPanelTitle>
+      <MetaText>Manage Clerk users, balances, and activation inline.</MetaText>
 
       <AdminPanelToolbar>
         <AdminPanelInput
@@ -337,13 +337,6 @@ export function AdminCreditsPanel() {
       </AdminPanelTableWrap>
 
       <AdminPanelPager>
-        <MetaText>
-          {loadingUsers
-            ? "Loading users..."
-            : selectedUser
-              ? `Selected: ${selectedUser.full_name || selectedUser.email || selectedUser.id}`
-              : "Select a user to manage access and credits."}
-        </MetaText>
         <AdminPanelRow>
           <AdminPanelSecondaryButton disabled={offset === 0 || loadingUsers} onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))} type="button">
             Previous
@@ -354,13 +347,7 @@ export function AdminCreditsPanel() {
         </AdminPanelRow>
       </AdminPanelPager>
 
-      <MetaText>
-        Signed-in balance: ${currentUser.current_credit_usd.toFixed(2)}. Credits: {formatCreditsValue(
-          currentUser.role,
-          currentUser.current_credit_usd,
-          currentUser.credit_floor_usd,
-        )}.
-      </MetaText>
+      {loadingUsers ? <AdminPanelMessage>Loading users...</AdminPanelMessage> : null}
       {status ? <AdminPanelMessage>{status}</AdminPanelMessage> : null}
 
       {creditPromptOpen ? (

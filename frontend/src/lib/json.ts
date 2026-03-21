@@ -13,7 +13,7 @@ export type JsonPreview = {
 export function parseJsonText(text: string): JsonPreview {
   const raw = JSON.parse(text) as unknown;
   if (!Array.isArray(raw)) {
-    throw new Error("JSON chartable artifacts must use a top-level array of objects.");
+    throw new Error("JSON datasets must use a top-level array of objects.");
   }
 
   const rows = raw.map((entry, index) => {

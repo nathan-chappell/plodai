@@ -30,6 +30,15 @@ export function buildWorkspaceFilePayload(file: LocalWorkspaceFile): { filename:
     };
   }
 
+  if (file.kind === "image") {
+    return {
+      filename: file.name,
+      blob: new Blob([toArrayBuffer(decodeBase64ToBytes(file.bytes_base64))], {
+        type: file.mime_type || "image/png",
+      }),
+    };
+  }
+
   if (file.kind === "other") {
     if (file.text_content != null) {
       return {

@@ -1,15 +1,15 @@
 # report-foundry
 
 ## Current product
-This repo is primarily a demo of frontend capabilities being exposed to agents in a conventional, reusable way. The main idea is that a useful TypeScript or frontend capability can be packaged cleanly, made available to one agent quickly, and then reused by other agents with minimal ceremony.
+This repo is primarily a demo of frontend agents being exposed to the runtime in a conventional, reusable way. The main idea is that a useful TypeScript or frontend agent module can be packaged cleanly, made available to one agent quickly, and then reused by other agents with minimal ceremony.
 
 ## Current architecture
 - Keep the frontend and shared tooling at the repo root.
 - Keep Python application code under `backend/`.
 - Even with separate frontend and backend subdirectories, treat the repository root as the working root for both toolchains, e.g. run `npm install` and `python -m venv .venv` from the repo root.
-- Treat the frontend capability-module structure as a core architectural feature of the project.
-- Define frontend capabilities in a conventional shape so they are easy to wire into agent specs, demo scenarios, and frontend-to-agent exposure.
-- Keep the backend straightforward: expose the frontend-provided capabilities to the agent runtime, handle the necessary plumbing, and do a small amount of bookkeeping.
+- Treat the frontend agent-module structure as a core architectural feature of the project.
+- Define frontend agents in a conventional shape so they are easy to wire into agent specs, demo scenarios, and frontend-to-agent exposure.
+- Keep the backend straightforward: expose the frontend-provided agents to the runtime, handle the necessary plumbing, and do a small amount of bookkeeping.
 - Use FastAPI, ChatKit, the OpenAI Agents SDK, and the Conversations API for the interactive runtime.
 - Use Pydantic models and typed Python structures deliberately at the backend boundary.
 - Use async SQLAlchemy for persistence and keep ChatKit memory in the same database.
