@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  parseLiveDemoValidationReply,
+  parseLiveTourValidationReply,
   type LiveThreadCostSnapshot,
 } from "../test-support/chatkit-live";
 
@@ -14,12 +14,12 @@ const COST_SNAPSHOT: LiveThreadCostSnapshot = {
   cost_usd: 0.00123456,
 };
 
-describe("live demo validator reply parsing", () => {
+describe("live tour validator reply parsing", () => {
   it("parses a passing validator reply", () => {
-    const validation = parseLiveDemoValidationReply({
+    const validation = parseLiveTourValidationReply({
       text: [
         "VERDICT: PASS",
-        "SUMMARY: The report demo completed the expected workflow and final output looked reasonable.",
+        "SUMMARY: The report tour completed the expected workflow and final output looked reasonable.",
         "CHART_SEEN: YES - I observed chart evidence in the same thread context.",
         "FAILURES: none",
         "COST_USD: 0.00123456",
@@ -37,7 +37,7 @@ describe("live demo validator reply parsing", () => {
 
   it("rejects malformed validator replies", () => {
     expect(() =>
-      parseLiveDemoValidationReply({
+      parseLiveTourValidationReply({
         text: "VERDICT: PASS\nSUMMARY: Missing the rest",
         expectChart: false,
         costSnapshot: COST_SNAPSHOT,
@@ -46,10 +46,10 @@ describe("live demo validator reply parsing", () => {
   });
 
   it("surfaces explicit validator failures", () => {
-    const validation = parseLiveDemoValidationReply({
+    const validation = parseLiveTourValidationReply({
       text: [
         "VERDICT: FAIL",
-        "SUMMARY: The demo stopped too early and never landed the expected output.",
+        "SUMMARY: The tour stopped too early and never landed the expected output.",
         "CHART_SEEN: YES - I saw a chart in the thread, but it was not tied to the final answer well enough.",
         "FAILURES: Final report item was too weak ; Expected outcome coverage was incomplete",
         "COST_USD: 0.00123456",
@@ -67,7 +67,7 @@ describe("live demo validator reply parsing", () => {
   });
 
   it("fails when a chart was expected but the validator could not confirm seeing one", () => {
-    const validation = parseLiveDemoValidationReply({
+    const validation = parseLiveTourValidationReply({
       text: [
         "VERDICT: PASS",
         "SUMMARY: Most of the workflow looked correct.",
@@ -86,7 +86,7 @@ describe("live demo validator reply parsing", () => {
   });
 
   it("uses the reported COST_USD when no explicit snapshot was exposed", () => {
-    const validation = parseLiveDemoValidationReply({
+    const validation = parseLiveTourValidationReply({
       text: [
         "VERDICT: PASS",
         "SUMMARY: The workflow completed successfully.",

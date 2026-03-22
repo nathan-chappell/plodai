@@ -262,13 +262,13 @@ export const includeSamplesSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-export const listDemoScenariosToolSchema: JsonSchema = {
+export const listTourScenariosToolSchema: JsonSchema = {
   type: "object",
   properties: {},
   additionalProperties: false,
 };
 
-export const launchDemoScenarioToolSchema: JsonSchema = {
+export const launchTourScenarioToolSchema: JsonSchema = {
   type: "object",
   properties: {
     scenario_id: { type: "string" },

@@ -20,6 +20,8 @@ from backend.app.agents.widgets import (
     build_feedback_saved_widget,
     build_feedback_session_copy_text,
     build_feedback_session_widget,
+    build_tour_picker_copy_text,
+    build_tour_picker_widget,
     build_tool_trace_copy_text,
     build_tool_trace_widget,
     format_tool_label,
@@ -30,6 +32,7 @@ from backend.app.chatkit.metadata import (
     AgentPlanExecutionHint,
     PendingFeedbackSession,
     PlanExecution,
+    TourPickerDisplaySpec,
     active_plan_execution,
 )
 from backend.app.core.logging import (
@@ -414,6 +417,68 @@ def _tool_display_spec(
 ) -> Mapping[str, object] | None:
     raw_display = tool_definition.get("display")
     return raw_display if isinstance(raw_display, Mapping) else None
+
+
+def _tour_picker_display_spec(
+    tool_definition: Mapping[str, Any],
+) -> TourPickerDisplaySpec | None:
+    display = _tool_display_spec(tool_definition)
+    if display is None:
+        return None
+    raw_picker = display.get("tour_picker")
+    return (
+        cast(TourPickerDisplaySpec, raw_picker)
+        if isinstance(raw_picker, Mapping)
+        else None
+    )
+
+
+def _build_hosted_client_tool(
+    tool_definition: Mapping[str, Any],
+) -> Tool | None:
+    tool_name = tool_definition.get("name")
+    if tool_name != "list_tour_scenarios":
+        return None
+
+    tour_picker = _tour_picker_display_spec(tool_definition)
+    if tour_picker is None or not tour_picker.get("scenarios"):
+        return None
+
+    @function_tool(name_override="list_tour_scenarios")
+    async def list_tour_scenarios_tool(
+        ctx: ChatKitToolContext,
+    ) -> dict[str, object]:
+        """Open the guided tour picker in chat and wait for the user to choose a tour."""
+        request_context = ctx.context.request_context
+        _log_tool_start(
+            request_context,
+            "list_tour_scenarios",
+            scenarios=len(tour_picker["scenarios"]),
+        )
+        await ctx.context.stream_widget(
+            build_tour_picker_widget(tour_picker),
+            copy_text=build_tour_picker_copy_text(tour_picker),
+        )
+        _log_tool_end(
+            request_context,
+            "list_tour_scenarios",
+            result=summarize_pairs_for_log(
+                (
+                    ("status", "waiting_for_user"),
+                    ("count", len(tour_picker["scenarios"])),
+                )
+            ),
+        )
+        return {
+            "status": "waiting_for_user",
+            "tour_scenarios": tour_picker["scenarios"],
+            "count": len(tour_picker["scenarios"]),
+            "next_action": (
+                "The guided tour picker is open in chat; wait for the user to choose a tour."
+            ),
+        }
+
+    return list_tour_scenarios_tool
 
 
 def _resolve_argument_path(
@@ -857,18 +922,26 @@ def _build_client_tool_proxy(tool_definition: Mapping[str, Any]) -> FunctionTool
 def _build_hosted_tools(
     *,
     agent_id: str,
+    client_tools: Sequence[Mapping[str, Any]],
 ) -> list[Tool]:
-    if agent_id != "agriculture-agent":
-        return []
+    tools: list[Tool] = []
 
-    return [
-        WebSearchTool(
-            filters=WebSearchToolFilters(
-                allowed_domains=AGRICULTURE_WEB_SEARCH_ALLOWED_DOMAINS,
-            ),
-            search_context_size="medium",
+    if agent_id == "agriculture-agent":
+        tools.append(
+            WebSearchTool(
+                filters=WebSearchToolFilters(
+                    allowed_domains=AGRICULTURE_WEB_SEARCH_ALLOWED_DOMAINS,
+                ),
+                search_context_size="medium",
+            )
         )
-    ]
+
+    for tool_definition in client_tools:
+        hosted_tool = _build_hosted_client_tool(tool_definition)
+        if hosted_tool is not None:
+            tools.append(hosted_tool)
+
+    return tools
 
 
 def build_agent_tools(
@@ -1028,7 +1101,8 @@ def build_agent_tools(
         }
 
     tools.extend([name_current_thread_tool, make_plan_tool])
-    tools.extend(_build_hosted_tools(agent_id=agent_id))
+    tools.extend(_build_hosted_tools(agent_id=agent_id, client_tools=client_tools))
+    hosted_tool_names = {tool.name for tool in tools}
 
     if agent_id == "feedback-agent":
 
@@ -1187,6 +1261,8 @@ def build_agent_tools(
         tools.extend([get_feedback_tool, send_feedback_tool])
 
     for tool_name in tool_names:
+        if tool_name in hosted_tool_names:
+            continue
         tool_definition = registered_tool_map.get(tool_name)
         if tool_definition is None:
             continue

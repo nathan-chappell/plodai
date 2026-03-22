@@ -11,7 +11,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./report_foundry.db"
+    database_url: str = "sqlite:///./ai_portfolio.db"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
     clerk_authorized_parties: list[str] = []

@@ -41,6 +41,7 @@ from openai import AsyncOpenAI
 from openai.types.conversations.conversation_item import ConversationItem
 from openai.types.responses import (
     ResponseFunctionCallOutputItemListParam,
+    ResponseFunctionToolCallParam,
 )
 from openai.types.responses.response_function_tool_call_item import (
     ResponseFunctionToolCallItem,
@@ -49,7 +50,7 @@ from openai.types.responses.response_input_item_param import (
     FunctionCallOutput,
     ResponseInputItemParam,
 )
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.agent_builder import build_registered_agent
@@ -120,8 +121,49 @@ class PlanStepJudgeResult(BaseModel):
     explanation: str
 
 
+class SubmitTourPickerPayload(BaseModel):
+    scenario_id: str
+
+    @field_validator("scenario_id", mode="before")
+    @classmethod
+    def _scenario_id(cls, value: object) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("scenario_id must be a non-empty string.")
+        return value.strip()
+
+
 def _current_thread_metadata(thread: ThreadMetadata) -> dict[str, Any]:
     return parse_thread_metadata(thread.metadata)
+
+
+def _tool_display_spec(
+    tool_definition: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw_display = tool_definition.get("display")
+    return raw_display if isinstance(raw_display, dict) else None
+
+
+def _tour_picker_scenario_ids(context: ReportAgentContext) -> set[str]:
+    scenario_ids: set[str] = set()
+    for tool_definition in context.client_tools:
+        if tool_definition.get("name") != "list_tour_scenarios":
+            continue
+        display = _tool_display_spec(tool_definition)
+        if display is None:
+            continue
+        raw_picker = display.get("tour_picker")
+        if not isinstance(raw_picker, dict):
+            continue
+        raw_scenarios = raw_picker.get("scenarios")
+        if not isinstance(raw_scenarios, list):
+            continue
+        for raw_scenario in raw_scenarios:
+            if not isinstance(raw_scenario, dict):
+                continue
+            scenario_id = raw_scenario.get("scenario_id")
+            if isinstance(scenario_id, str) and scenario_id.strip():
+                scenario_ids.add(scenario_id.strip())
+    return scenario_ids
 
 
 def _plan_hint_for_step(
@@ -437,6 +479,7 @@ class ClientToolResultConverter(ThreadItemConverter):
             result,
             call_id=item.call_id,
             tool_name=item.name,
+            tool_arguments=item.arguments,
         )
 
     async def client_tool_result_to_input(
@@ -445,6 +488,7 @@ class ClientToolResultConverter(ThreadItemConverter):
         *,
         call_id: str,
         tool_name: str | None = None,
+        tool_arguments: object | None = None,
     ):
         if result is None:
             return None
@@ -471,6 +515,15 @@ class ClientToolResultConverter(ThreadItemConverter):
             "type": "function_call_output",
             "call_id": call_id,
             "output": json.dumps(sanitized_result, ensure_ascii=True),
+        }
+        function_call: ResponseFunctionToolCallParam = {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": tool_name or "unknown_tool",
+            "arguments": json.dumps(
+                tool_arguments if isinstance(tool_arguments, dict) else {},
+                ensure_ascii=True,
+            ),
         }
 
         rich_output: ResponseFunctionCallOutputItemListParam = []
@@ -516,7 +569,7 @@ class ClientToolResultConverter(ThreadItemConverter):
         if rich_output:
             function_call_output["output"] = rich_output
 
-        return cast(list[ResponseInputItemParam], [function_call_output])
+        return cast(list[ResponseInputItemParam], [function_call, function_call_output])
 
     async def _upload_file_input(self, file_input: dict[str, object]) -> str | None:
         filename = file_input.get("filename")
@@ -911,6 +964,35 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 except Exception as exc:
                     attempt_number = attempt + 1
                     total_attempts = max_retries + 1
+                    should_retry = (
+                        attempt < max_retries
+                        and self._should_retry_exception(exc)
+                    )
+                    recovered_tool_calls = 0
+
+                    if conversation_id and run_started:
+                        recovered_tool_calls = await self._close_dangling_tool_calls(
+                            conversation_id,
+                            exc,
+                        )
+
+                    if not should_retry:
+                        if recovered_tool_calls:
+                            yield ProgressUpdateEvent(
+                                text=f"Recovered {recovered_tool_calls} unfinished tool call(s) before stopping."
+                            )
+                        log_event(
+                            self.logger,
+                            logging.ERROR,
+                            "respond.error",
+                            exc_info=exc,
+                            context=_context_line(
+                                user_id=context.user_id, thread_id=thread.id
+                            ),
+                            logs=_logs_link(previous_response_id, conversation_id),
+                        )
+                        raise
+
                     retry_delay_seconds = self._compute_retry_delay_seconds(exc)
 
                     log_event(
@@ -936,28 +1018,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         )
                     )
 
-                    if conversation_id and run_started:
-                        dangling_tool_calls = await self._close_dangling_tool_calls(
-                            conversation_id,
-                            exc,
+                    if recovered_tool_calls:
+                        yield ProgressUpdateEvent(
+                            text=f"Recovered {recovered_tool_calls} unfinished tool call(s) before retrying."
                         )
-                        if dangling_tool_calls:
-                            yield ProgressUpdateEvent(
-                                text=f"Recovered {dangling_tool_calls} unfinished tool call(s) before retrying."
-                            )
-
-                    if attempt >= max_retries:
-                        log_event(
-                            self.logger,
-                            logging.ERROR,
-                            "respond.error",
-                            exc_info=exc,
-                            context=_context_line(
-                                user_id=context.user_id, thread_id=thread.id
-                            ),
-                            logs=_logs_link(previous_response_id, conversation_id),
-                        )
-                        raise
 
                     if retry_delay_seconds >= 5:
                         yield ProgressUpdateEvent(
@@ -1329,6 +1393,14 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             return hinted_delay
         return max(0.0, 2.0 + random.uniform(-0.5, 0.5))
 
+    def _should_retry_exception(self, exc: Exception) -> bool:
+        status_code = getattr(exc, "status_code", None)
+        if not isinstance(status_code, int):
+            return True
+        if status_code in {408, 409, 429}:
+            return True
+        return status_code >= 500
+
     async def _list_conversation_items(
         self, conversation_id: str, *, limit: int = 100
     ) -> list[ConversationItem]:
@@ -1513,6 +1585,38 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 changes=summarize_mapping_keys_for_log(patch),
             )
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
+            return
+
+        if action.type == "submit_tour_picker" and sender is not None:
+            payload = SubmitTourPickerPayload.model_validate(action.payload or {})
+            available_scenario_ids = _tour_picker_scenario_ids(context)
+            if (
+                available_scenario_ids
+                and payload.scenario_id not in available_scenario_ids
+            ):
+                yield ProgressUpdateEvent(
+                    text="That guided tour option is no longer available."
+                )
+                return
+            log_event(
+                self.logger,
+                logging.INFO,
+                "tour_picker.selected",
+                context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                scenario_id=payload.scenario_id,
+            )
+            yield ThreadItemRemovedEvent(item_id=sender.id)
+            return
+
+        if action.type == "cancel_tour_picker" and sender is not None:
+            log_event(
+                self.logger,
+                logging.INFO,
+                "tour_picker.cancelled",
+                context=_context_line(user_id=context.user_id, thread_id=thread.id),
+                widget_id=sender.id,
+            )
+            yield ThreadItemRemovedEvent(item_id=sender.id)
             return
 
         if action.type == "submit_feedback_session" and sender is not None:

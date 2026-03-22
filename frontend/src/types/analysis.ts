@@ -165,6 +165,21 @@ export type AgentDelegationTargetMetadata = {
   description: string;
 };
 
+export type TourPickerDisplayScenarioMetadata = {
+  scenario_id: string;
+  title: string;
+  summary: string;
+  workspace_name: string;
+  target_agent_id: string;
+  default_asset_count: number;
+};
+
+export type TourPickerDisplayMetadata = {
+  title: string;
+  summary: string;
+  scenarios: TourPickerDisplayScenarioMetadata[];
+};
+
 export type AgentSpecMetadata = {
   agent_id: string;
   agent_name: string;
@@ -180,6 +195,7 @@ export type AgentSpecMetadata = {
       prominent_args?: string[];
       omit_args?: string[];
       arg_labels?: Record<string, string>;
+      tour_picker?: TourPickerDisplayMetadata;
     };
   }>;
   delegation_targets: AgentDelegationTargetMetadata[];
@@ -233,10 +249,16 @@ export type ListDatasetsToolArgs = {
   includeSamples?: boolean;
 };
 
-export type ListDemoScenariosToolArgs = Record<string, never>;
+export type ListTourScenariosToolArgs = Record<string, never>;
 
-export type LaunchDemoScenarioToolArgs = {
+export type LaunchTourScenarioToolArgs = {
   scenario_id: string;
+};
+
+export type TourUploadConfig = {
+  accept: Record<string, readonly string[]>;
+  max_count: number;
+  helper_text: string;
 };
 
 export type ListImageFilesToolArgs = Record<string, never>;
@@ -319,8 +341,8 @@ export type RemoveReportSlideToolArgs = {
 };
 
 export type ClientToolArgsMap = {
-  list_demo_scenarios: ListDemoScenariosToolArgs;
-  launch_demo_scenario: LaunchDemoScenarioToolArgs;
+  list_tour_scenarios: ListTourScenariosToolArgs;
+  launch_tour_scenario: LaunchTourScenarioToolArgs;
   list_datasets: ListDatasetsToolArgs;
   list_image_files: ListImageFilesToolArgs;
   run_aggregate_query: RunAggregateQueryToolArgs;
@@ -382,7 +404,19 @@ export type PdfSmartSplitEffect = {
   markdown: string;
 };
 
+export type TourRequestedEffect = {
+  type: "tour_requested";
+  scenarioId: string;
+  title: string;
+  summary: string;
+  workspaceName: string;
+  targetAgentId: string;
+  uploadConfig: TourUploadConfig;
+  defaultAssetCount: number;
+};
+
 export type ClientEffect =
   | ChartRenderedEffect
   | ReportSectionEffect
-  | PdfSmartSplitEffect;
+  | PdfSmartSplitEffect
+  | TourRequestedEffect;

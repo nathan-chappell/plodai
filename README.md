@@ -67,7 +67,7 @@ python release.py release
 - Railway can deploy a prebuilt Docker Hub image directly.
 - Railway provides the public HTTPS endpoint, so the container should serve plain HTTP only.
 - This app is currently hardcoded to listen on `0.0.0.0:8000` to match the current Railway setup.
-- Railway volumes are a good match for this demo if you want SQLite plus editable seed files.
+- Railway volumes are a good match for this demo if you want SQLite plus editable local assets.
 - Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
 
 ## Current status
@@ -83,7 +83,7 @@ This scaffold provides:
 
 The biggest missing pieces are fuller dataset-tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
 
-## Demo runs
+## Guided tours
 
-The recommended demo workflow is now the in-app agent demos. Sign in normally, open any agent's `Demo` tab, and use the built-in `Run demo` action to exercise the curated scenario directly in ChatKit.
+The recommended walkthrough is now the Help-agent guided tour flow. Sign in normally, open the shared workspace, ask the Help agent for a tour, and then either upload your own file or use one of the built-in default assets before the target agent continues in ChatKit.
 

@@ -72,7 +72,7 @@ const artifacts: ShellWorkspaceArtifact[] = [
     bucket: "chart",
     source: "derived",
     producerKey: "chart-agent",
-    producerLabel: "Chart Agent",
+    producerLabel: "Charts",
     file: chartArtifactFile,
   },
 ];
@@ -121,7 +121,7 @@ const smartSplitBundles: PdfSmartSplitBundleView[] = [
     id: "bundle-1",
     createdAt: "2026-03-20T12:00:00.000Z",
     sourceFileId: "source-pdf",
-    sourceFileName: "quarterly_packet_demo.pdf",
+    sourceFileName: "quarterly_packet_tour.pdf",
     entries: [
       {
         fileId: "data-csv",
@@ -208,7 +208,7 @@ describe("WorkspaceInventoryPane", () => {
     expect(container.textContent).toContain("Revenue summary");
     expect(container.textContent).toContain("Weekly summary");
     expect(container.textContent).toContain("Smart split bundles");
-    expect(container.textContent).toContain("quarterly_packet_demo.pdf");
+    expect(container.textContent).toContain("quarterly_packet_tour.pdf");
     expect(container.textContent).toContain("Workspace browser");
     expect(container.querySelector("[data-testid='workspace-recents-section']")).not.toBeNull();
     expect(container.querySelector("[data-testid='workspace-tree-pane']")).not.toBeNull();

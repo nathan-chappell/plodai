@@ -1,0 +1,11 @@
+month,region,segment,revenue,units,gross_margin,renewal_risk
+Jan,North,Enterprise,184000,42,0.41,low
+Jan,West,Enterprise,216500,47,0.44,low
+Jan,South,SMB,96300,58,0.29,medium
+Feb,North,Enterprise,201800,45,0.4,low
+Feb,West,Enterprise,239200,51,0.46,low
+Feb,South,SMB,101900,61,0.3,medium
+Mar,North,Enterprise,214600,48,0.42,low
+Mar,West,Enterprise,268900,57,0.49,low
+Mar,South,SMB,88400,54,0.25,high
+Mar,East,Mid-Market,143700,39,0.34,medium

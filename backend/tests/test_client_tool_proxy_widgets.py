@@ -137,7 +137,7 @@ def test_client_tool_proxy_titles_create_csv_with_output_filename() -> None:
                     "filename": "aggregated_sales_by_month_category.csv",
                     "format": "csv",
                     "query_plan": {
-                        "dataset_id": "demo-sales-fixture",
+                        "dataset_id": "tour-sales-fixture",
                     },
                 }
             ),
@@ -147,11 +147,11 @@ def test_client_tool_proxy_titles_create_csv_with_output_filename() -> None:
     widget, copy_text = chatkit_context.widget_calls[0]
     text_values = _collect_text_values(widget["children"])
     assert (
-        "Create Dataset(file=aggregated_sales_by_month_category.csv, format=csv, dataset=demo-sales-fixture)"
+        "Create Dataset(file=aggregated_sales_by_month_category.csv, format=csv, dataset=tour-sales-fixture)"
         in text_values
     )
     assert copy_text == (
-        "Create Dataset(file=aggregated_sales_by_month_category.csv, format=csv, dataset=demo-sales-fixture)"
+        "Create Dataset(file=aggregated_sales_by_month_category.csv, format=csv, dataset=tour-sales-fixture)"
     )
 
 
@@ -215,3 +215,99 @@ def test_feedback_get_feedback_tool_streams_widget_and_wait_state() -> None:
     assert widget["confirm"]["action"]["type"] == "submit_feedback_session"
     assert widget["cancel"]["action"]["type"] == "cancel_feedback_session"
     assert copy_text == "Feedback form for msg_123."
+
+
+def test_list_tour_scenarios_streams_a_chatkit_widget_and_wait_state() -> None:
+    context = ReportAgentContext(
+        report_id="report_123",
+        user_id="user_123",
+        user_email=None,
+        db=None,
+    )
+    tool = next(
+        compiled_tool
+        for compiled_tool in build_agent_tools(
+            context,
+            agent_id="default-agent",
+            client_tools=[
+                {
+                    "type": "function",
+                    "name": "list_tour_scenarios",
+                    "description": "Open the guided tour picker.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                    "display": {
+                        "label": "Open tour picker",
+                        "tour_picker": {
+                            "title": "Choose a guided tour",
+                            "summary": "Pick the best guided sample.",
+                            "scenarios": [
+                                {
+                                    "scenario_id": "report-tour",
+                                    "title": "Report tour",
+                                    "summary": "Create one chart-backed report slide.",
+                                    "workspace_name": "Report tour",
+                                    "target_agent_id": "report-agent",
+                                    "default_asset_count": 2,
+                                },
+                                {
+                                    "scenario_id": "document-tour",
+                                    "title": "Document tour",
+                                    "summary": "Inspect a PDF and produce a smart split.",
+                                    "workspace_name": "Document tour",
+                                    "target_agent_id": "document-agent",
+                                    "default_asset_count": 1,
+                                },
+                            ],
+                        },
+                    },
+                }
+            ],
+        )
+        if compiled_tool.name == "list_tour_scenarios"
+    )
+    chatkit_context = _StubChatKitContext()
+    chatkit_context.request_context = context
+    ctx = ToolContext(
+        context=chatkit_context,
+        tool_name="list_tour_scenarios",
+        tool_call_id="call_456",
+        tool_arguments="{}",
+    )
+
+    result = asyncio.run(tool.on_invoke_tool(ctx, "{}"))
+
+    assert result == {
+        "status": "waiting_for_user",
+        "tour_scenarios": [
+            {
+                "scenario_id": "report-tour",
+                "title": "Report tour",
+                "summary": "Create one chart-backed report slide.",
+                "workspace_name": "Report tour",
+                "target_agent_id": "report-agent",
+                "default_asset_count": 2,
+            },
+            {
+                "scenario_id": "document-tour",
+                "title": "Document tour",
+                "summary": "Inspect a PDF and produce a smart split.",
+                "workspace_name": "Document tour",
+                "target_agent_id": "document-agent",
+                "default_asset_count": 1,
+            },
+        ],
+        "count": 2,
+        "next_action": "The guided tour picker is open in chat; wait for the user to choose a tour.",
+    }
+    assert chatkit_context.stream_events == []
+    assert len(chatkit_context.widget_calls) == 1
+    widget, copy_text = chatkit_context.widget_calls[0]
+    assert widget["type"] == "Card"
+    assert widget["confirm"]["action"]["type"] == "submit_tour_picker"
+    assert widget["cancel"]["action"]["type"] == "cancel_tour_picker"
+    assert copy_text == "Choose a guided tour: Report tour, Document tour"

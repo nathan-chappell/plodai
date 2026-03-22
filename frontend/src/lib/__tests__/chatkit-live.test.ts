@@ -3,10 +3,10 @@
 import { describe, expect, it } from "vitest";
 
 import { getAgentModule } from "../../agents/registry";
-import { runAgentDemoScenario } from "../test-support/chatkit-live";
+import { runAgentTourScenario } from "../test-support/chatkit-live";
 
 function widgetContains(
-  result: Awaited<ReturnType<typeof runAgentDemoScenario>>,
+  result: Awaited<ReturnType<typeof runAgentTourScenario>>,
   text: string,
 ): boolean {
   return result.widgets.some(
@@ -18,14 +18,14 @@ function widgetContains(
 
 describe.sequential("agent live integration", () => {
   it(
-    "runs the report-agent demo against the real ChatKit server and validates the backend wiring",
+    "runs the report-agent tour against the real ChatKit server and validates the backend wiring",
     async () => {
       const agentModule = getAgentModule("report-agent");
       if (!agentModule) {
-        throw new Error("Report Agent module is not registered.");
+        throw new Error("Report module is not registered.");
       }
 
-      const result = await runAgentDemoScenario(agentModule);
+      const result = await runAgentTourScenario(agentModule);
       const toolNames = new Set(result.toolCalls.map((toolCall) => toolCall.name));
 
       expect(
@@ -66,10 +66,10 @@ describe.sequential("agent live integration", () => {
     async () => {
       const agentModule = getAgentModule("feedback-agent");
       if (!agentModule) {
-        throw new Error("Feedback Agent module is not registered.");
+        throw new Error("Feedback module is not registered.");
       }
 
-      const result = await runAgentDemoScenario(agentModule);
+      const result = await runAgentTourScenario(agentModule);
 
       expect(
         result.deterministicChecks.passed,
@@ -93,12 +93,12 @@ describe.sequential("agent live integration", () => {
     async () => {
       const agentModule = getAgentModule("analysis-agent");
       if (!agentModule) {
-        throw new Error("Analysis Agent module is not registered.");
+        throw new Error("Analysis module is not registered.");
       }
 
-      const result = await runAgentDemoScenario(agentModule);
+      const result = await runAgentTourScenario(agentModule);
       const toolNames = new Set(result.toolCalls.map((toolCall) => toolCall.name));
-      const hasChartHandoff = widgetContains(result, "Analysis Agent -> Chart Agent");
+      const hasChartHandoff = widgetContains(result, "Analysis -> Charts");
 
       expect(
         result.deterministicChecks.passed,
@@ -115,7 +115,7 @@ describe.sequential("agent live integration", () => {
       ).toBe(true);
       expect(
         result.workspaceSummary.files.some(
-          (file) => file.name !== "sales_demo.csv" && file.name !== "support_demo.csv",
+          (file) => file.name !== "sales_tour.csv" && file.name !== "support_tour.csv",
         ),
       ).toBe(true);
 

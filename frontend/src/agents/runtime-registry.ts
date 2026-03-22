@@ -10,11 +10,11 @@ import { analysisAgentRuntimeModule } from "./analysis-agent/runtime";
 import { chartAgentRuntimeModule } from "./chart-agent/runtime";
 import { documentAgentRuntimeModule } from "./document-agent/runtime";
 import { feedbackAgentRuntimeModule } from "./feedback-agent/runtime";
-import { helpAgentRuntimeModule } from "./help-agent/runtime";
+import { defaultAgentRuntimeModule } from "./default-agent/runtime";
 import { reportAgentRuntimeModule } from "./report-agent/runtime";
 
 const runtimeAgentModules: AgentRuntimeModule[] = [
-  helpAgentRuntimeModule,
+  defaultAgentRuntimeModule,
   reportAgentRuntimeModule,
   analysisAgentRuntimeModule,
   chartAgentRuntimeModule,

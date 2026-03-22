@@ -10,7 +10,7 @@ import { createEmptyAgentShellState } from "../../lib/shell-resources";
 function createWorkspace(): AgentRuntimeContext {
   const state = createEmptyAgentShellState();
   return {
-    activeAgentId: "help-agent",
+    activeAgentId: "default-agent",
     getAgentState: () => state,
     updateAgentState: () => undefined,
     replaceAgentResources: () => undefined,
@@ -35,5 +35,14 @@ describe("specialist agent modules", () => {
       expect(instructions).toContain("ask one concise clarifying question early");
       expect(instructions).toContain("asking repeated follow-ups");
     }
+  });
+
+  it("keeps the agriculture agent photo-first while reusing the same report by default", () => {
+    const instructions = agricultureAgentModule.buildAgentSpec(createWorkspace()).instructions;
+
+    expect(instructions).toContain("image evidence alone");
+    expect(instructions).toContain("list_reports");
+    expect(instructions).toContain("create_report");
+    expect(instructions).toContain("same report");
   });
 });

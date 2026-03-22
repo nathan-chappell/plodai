@@ -20,7 +20,7 @@ function createWorkspaceContext(
   const state = createEmptyAgentShellState();
 
   return {
-    activeAgentId: "help-agent",
+    activeAgentId: "default-agent",
     getAgentState: () => state,
     updateAgentState: () => undefined,
     replaceAgentResources: () => undefined,
@@ -33,8 +33,8 @@ function createWorkspaceContext(
 
 describe("agent registry", () => {
   it("returns the expected dependency graph for the help agent", () => {
-    expect(agentIdsFor("help-agent")).toEqual([
-      "help-agent",
+    expect(agentIdsFor("default-agent")).toEqual([
+      "default-agent",
       "report-agent",
       "analysis-agent",
       "chart-agent",
@@ -68,7 +68,7 @@ describe("agent registry", () => {
   });
 
   it("exposes agent modules by id", () => {
-    expect(getAgentModule("help-agent")?.definition.path).toBe("/workspace");
+    expect(getAgentModule("default-agent")?.definition.path).toBe("/workspace");
     expect(getAgentModule("agriculture-agent")?.definition.path).toBe("/workspace/agriculture");
     expect(getAgentModule("missing-agent")).toBeNull();
   });
@@ -89,16 +89,44 @@ describe("agent registry", () => {
     ]);
   });
 
+  it("serializes the bundled tour-picker metadata on the default-agent chooser tool", () => {
+    const workspace = createWorkspaceContext();
+    const bundle = buildAgentBundleForRoot("default-agent", workspace);
+    const rootSpec = bundle.agents.find(
+      (agent) => agent.agent_id === "default-agent",
+    );
+    const chooserTool = rootSpec?.client_tools.find(
+      (tool) => tool.name === "list_tour_scenarios",
+    );
+
+    expect(chooserTool?.display).toMatchObject({
+      label: "Open tour picker",
+      tour_picker: {
+        title: "Choose a guided tour",
+        scenarios: [
+          {
+            scenario_id: "report-tour",
+            title: "Report tour",
+          },
+          {
+            scenario_id: "document-tour",
+            title: "Document tour",
+          },
+        ],
+      },
+    });
+  });
+
   it("binds unique tools across delegated agent bundles", () => {
     const workspace = createWorkspaceContext();
     const toolNames = bindClientToolsForAgentBundle(
-      buildAgentBundleForRoot("help-agent", workspace),
+      buildAgentBundleForRoot("default-agent", workspace),
       workspace,
     ).map((tool) => tool.name);
 
     expect(toolNames).toEqual(expect.arrayContaining([
-      "list_demo_scenarios",
-      "launch_demo_scenario",
+      "list_tour_scenarios",
+      "launch_tour_scenario",
       "list_reports",
       "append_report_slide",
       "list_datasets",
@@ -120,6 +148,8 @@ describe("agent registry", () => {
     expect(toolNames).toEqual(expect.arrayContaining([
       "list_image_files",
       "inspect_image_file",
+      "list_reports",
+      "create_report",
       "append_report_slide",
     ]));
     expect(toolNames).toHaveLength(new Set(toolNames).size);

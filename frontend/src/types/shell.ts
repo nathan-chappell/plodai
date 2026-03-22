@@ -10,6 +10,7 @@ export type SharedExportKind =
   | "text"
   | "blob";
 
+export type AgentResourceOrigin = "uploaded" | "generated";
 export type SharedExportVisibility = "shared";
 
 export type DatasetResourcePayload = {
@@ -59,6 +60,7 @@ export type AgentResourcePayload =
 export type AgentResourceRecord = {
   id: string;
   owner_agent_id: string;
+  origin: AgentResourceOrigin;
   kind: SharedExportKind;
   title: string;
   created_at: string;
@@ -75,6 +77,15 @@ export type AgentShellState = {
   resources: AgentResourceRecord[];
 };
 
+export type WorkspaceContextRecord = {
+  id: string;
+  name: string;
+  selected_agent_id: string;
+  states_by_agent_id: Record<string, AgentShellState>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AgentShellSummary = {
   agent_id: string;
   goal: string | null;
@@ -85,6 +96,7 @@ export type AgentShellSummary = {
 export type SharedExportSummary = {
   id: string;
   owner_agent_id: string;
+  origin: AgentResourceOrigin;
   kind: SharedExportKind;
   title: string;
   created_at: string;
@@ -105,6 +117,8 @@ export type SharedExportSummary = {
 
 export type ShellStateMetadata = {
   version: "v1";
+  context_id: string;
+  context_name: string;
   active_agent_id: string;
   agents: AgentShellSummary[];
   resources: SharedExportSummary[];

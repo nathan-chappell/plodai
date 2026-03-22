@@ -75,7 +75,7 @@ describe("AgentPreviewPane", () => {
         <AgentPreviewPane
           previewModel={buildAgentPreviewModel({
             agentId: "report-agent",
-            title: "Report Agent",
+            title: "Report",
             resources: [resource],
           })}
           resources={[resource]}
@@ -112,7 +112,7 @@ describe("AgentPreviewPane", () => {
         <AgentPreviewPane
           previewModel={buildAgentPreviewModel({
             agentId: "report-agent",
-            title: "Report Agent",
+            title: "Report",
             resources: [resource],
           })}
           resources={[resource]}
@@ -135,7 +135,7 @@ describe("AgentPreviewPane", () => {
         <AgentPreviewPane
           previewModel={buildAgentPreviewModel({
             agentId: "report-agent",
-            title: "Report Agent",
+            title: "Report",
             resources: [resource],
           })}
           resources={[resource]}

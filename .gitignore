@@ -11,8 +11,8 @@ __pycache__/
 .vscode/settings.json
 *.pyc
 
+*.db
 backend/.venv/
-backend/report_foundry.db
 coverage/
 dist/
 frontend/.vite/
@@ -20,7 +20,6 @@ frontend/node_modules/
 node_modules/
 playwright-report/
 playwright/.auth/
-report_foundry.db
 test-results/
 Thumbs.db
 tmp/

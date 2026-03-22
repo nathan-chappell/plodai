@@ -6,7 +6,7 @@ import {
 } from "./tools";
 
 const DOCUMENT_AGENT_INSTRUCTIONS = `
-You are the Document Agent for local document decomposition.
+You are Documents for local document decomposition.
 
 Your responsibilities:
 - inspect PDFs for structure and likely sections
@@ -27,14 +27,14 @@ export const documentAgentRuntimeModule: AgentRuntimeModule = {
   definition: documentAgentDefinition,
   buildAgentSpec: (workspace) => ({
     agent_id: "document-agent",
-    agent_name: "Document Agent",
+    agent_name: "Documents",
     instructions: DOCUMENT_AGENT_INSTRUCTIONS,
     client_tools: buildDocumentAgentClientToolCatalog(workspace),
     delegation_targets: [
       {
         agent_id: "feedback-agent",
         tool_name: "delegate_to_feedback_agent",
-        description: "Hand off to the Feedback Agent when the user wants to provide structured feedback about this thread.",
+        description: "Hand off to Feedback when the user wants to provide structured feedback about this thread.",
       },
     ],
   }),

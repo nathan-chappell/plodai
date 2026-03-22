@@ -303,25 +303,25 @@ export function AgentPreviewPane({
     selectedResourceId !== undefined
       ? selectedResourceId === null
         ? null
-        : previewModel.items.some((item) => item.resource_id === selectedResourceId)
+        : resources.some((resource) => resource.id === selectedResourceId)
           ? selectedResourceId
-          : previewModel.items[0]?.resource_id ?? null
+          : previewModel.items[0]?.resource_id ?? resources[0]?.id ?? null
       : uncontrolledSelectedResourceId;
 
   useEffect(() => {
     if (selectedResourceId !== undefined) {
       return;
     }
-    if (!previewModel.items.length) {
+    if (!previewModel.items.length && !resources.length) {
       setUncontrolledSelectedResourceId(null);
       return;
     }
     setUncontrolledSelectedResourceId((current) =>
-      current && previewModel.items.some((item) => item.resource_id === current)
+      current && resources.some((resource) => resource.id === current)
         ? current
-        : previewModel.items[0]?.resource_id ?? null,
+        : previewModel.items[0]?.resource_id ?? resources[0]?.id ?? null,
     );
-  }, [previewModel, selectedResourceId]);
+  }, [previewModel, resources, selectedResourceId]);
 
   const selectedResource = useMemo(
     () =>
@@ -446,9 +446,9 @@ export function AgentPreviewPane({
           </>
         ) : (
           <PreviewEmptyState>
-            {previewModel.items.length
-              ? "Select an artifact from the workspace browser to inspect it here."
-              : "No exports yet for this workspace."}
+            {resources.length
+              ? "Select a workspace file or output to inspect it here."
+              : "No files yet for this workspace."}
           </PreviewEmptyState>
         )}
       </PreviewBody>

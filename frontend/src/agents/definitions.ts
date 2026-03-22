@@ -1,35 +1,63 @@
 import type { AgentDefinition } from "./types";
 
-export const helpAgentDefinition: AgentDefinition = {
-  id: "help-agent",
+const COMMON_WORKSPACE_ATTACHMENTS = {
+  "text/csv": [".csv"],
+  "application/json": [".json"],
+  "text/plain": [".txt", ".md"],
+  "application/pdf": [".pdf"],
+  "application/zip": [".zip"],
+  "image/*": [".png", ".jpg", ".jpeg", ".webp"],
+} as const;
+
+const TABULAR_ATTACHMENTS = {
+  "text/csv": [".csv"],
+  "application/json": [".json"],
+} as const;
+
+const PDF_ATTACHMENTS = {
+  "application/pdf": [".pdf"],
+} as const;
+
+const IMAGE_ATTACHMENTS = {
+  "image/*": [".png", ".jpg", ".jpeg", ".webp"],
+} as const;
+
+export const defaultAgentDefinition: AgentDefinition = {
+  id: "default-agent",
   path: "/workspace",
   navLabel: "Workspace",
-  title: "Workspace",
+  title: "Default",
   eyebrow: "Workspace",
   description:
-    "Shared workspace shell for browsing artifacts, choosing the right agent flow, and launching guided demos.",
+    "Shared workspace shell for browsing artifacts, choosing the right workflow, and launching guided tours.",
   chatkitLead:
-    "Explain the workspace shell, recommend the right agent flow, and launch the most useful demo when the user wants a guided start.",
-  chatkitPlaceholder: "Ask what this app can do, which agent to use, or start the report or document demo",
+    "You are in the shared workspace. I can help you choose the right workflow or start a guided tour.",
+  chatkitPlaceholder: "Ask what this app can do, which workflow to use, or start the report or document tour",
   tabs: [],
   showInSidebar: true,
   showInComposer: false,
   composerOrder: 0,
-  composerLabel: "Workspace",
-  composerShortLabel: "Workspace",
+  composerLabel: "Default",
+  composerShortLabel: "Default",
   composerIcon: "cube",
-  composerPlaceholder: "Explain the app, route to the right agent, or launch a demo workspace.",
+  composerPlaceholder: "Explain the app, route to the right workflow, or launch a guided tour workspace.",
   previewPriority: 0,
+  attachmentConfig: {
+    enabled: true,
+    accept: COMMON_WORKSPACE_ATTACHMENTS,
+    maxCount: 10,
+    maxSize: 100 * 1024 * 1024,
+  },
 };
 
 export const reportAgentDefinition: AgentDefinition = {
   id: "report-agent",
   path: "/workspace/report",
   navLabel: "Report",
-  title: "Report Agent",
+  title: "Report",
   eyebrow: "Mode",
   description: "Narrative report assembly with saved slides and delegated analysis.",
-  chatkitLead: "Investigate shared exports, coordinate specialists, and shape a compact report that stays useful.",
+  chatkitLead: "Use Report when you want a concise write-up, saved slides, or a stakeholder-ready summary.",
   chatkitPlaceholder: "Ask for a stakeholder-ready report, a short board update, or a saved slide backed by the exported evidence",
   tabs: [],
   showInSidebar: false,
@@ -40,16 +68,22 @@ export const reportAgentDefinition: AgentDefinition = {
   composerIcon: "cube",
   composerPlaceholder: "Build a report, review saved slides, or turn the current exports into a concise narrative.",
   previewPriority: 10,
+  attachmentConfig: {
+    enabled: true,
+    accept: COMMON_WORKSPACE_ATTACHMENTS,
+    maxCount: 10,
+    maxSize: 100 * 1024 * 1024,
+  },
 };
 
 export const analysisAgentDefinition: AgentDefinition = {
   id: "analysis-agent",
   path: "/workspace/analysis",
   navLabel: "Analysis",
-  title: "Analysis Agent",
+  title: "Analysis",
   eyebrow: "Hidden",
   description: "Tabular inspection, grouped analysis, and derived dataset exports.",
-  chatkitLead: "Inspect datasets, create reusable exports, and keep analysis grounded in the available data.",
+  chatkitLead: "Use Analysis to inspect datasets, compare segments, and create reusable derived tables.",
   chatkitPlaceholder: "Ask for a grouped query, a derived dataset artifact, or a compact data summary",
   tabs: [],
   showInSidebar: false,
@@ -60,16 +94,22 @@ export const analysisAgentDefinition: AgentDefinition = {
   composerIcon: "analytics",
   composerPlaceholder: "Inspect datasets, run grouped analysis, or create a derived dataset export.",
   previewPriority: 20,
+  attachmentConfig: {
+    enabled: true,
+    accept: TABULAR_ATTACHMENTS,
+    maxCount: 10,
+    maxSize: 100 * 1024 * 1024,
+  },
 };
 
 export const chartAgentDefinition: AgentDefinition = {
   id: "chart-agent",
   path: "/workspace/charts",
   navLabel: "Charts",
-  title: "Chart Agent",
+  title: "Charts",
   eyebrow: "Hidden",
   description: "Client-rendered chart planning and rendering over explicit datasets.",
-  chatkitLead: "Turn explicit datasets into clear, polished charts.",
+  chatkitLead: "Use Charts when you already have a dataset and want a clear, polished visual.",
   chatkitPlaceholder: "Ask for a chart once the underlying dataset exists",
   tabs: [],
   showInSidebar: false,
@@ -80,16 +120,22 @@ export const chartAgentDefinition: AgentDefinition = {
   composerIcon: "chart",
   composerPlaceholder: "Turn the current dataset into a clear, polished chart.",
   previewPriority: 30,
+  attachmentConfig: {
+    enabled: true,
+    accept: TABULAR_ATTACHMENTS,
+    maxCount: 10,
+    maxSize: 100 * 1024 * 1024,
+  },
 };
 
 export const documentAgentDefinition: AgentDefinition = {
   id: "document-agent",
   path: "/workspace/documents",
   navLabel: "Documents",
-  title: "Document Agent",
+  title: "Documents",
   eyebrow: "Mode",
   description: "PDF inspection, extraction, and smart document splits.",
-  chatkitLead: "Inspect PDFs, split documents cleanly, and package useful shared outputs.",
+  chatkitLead: "Use Documents to inspect PDFs, extract pages, or split a packet into useful sections.",
   chatkitPlaceholder: "Ask to inspect a PDF, extract a page range, or perform a smart split",
   tabs: [],
   showInSidebar: false,
@@ -100,16 +146,22 @@ export const documentAgentDefinition: AgentDefinition = {
   composerIcon: "document",
   composerPlaceholder: "Inspect a PDF, extract pages, or create a smart document split.",
   previewPriority: 40,
+  attachmentConfig: {
+    enabled: true,
+    accept: PDF_ATTACHMENTS,
+    maxCount: 10,
+    maxSize: 100 * 1024 * 1024,
+  },
 };
 
 export const agricultureAgentDefinition: AgentDefinition = {
   id: "agriculture-agent",
   path: "/workspace/agriculture",
   navLabel: "Agriculture",
-  title: "Agriculture Agent",
+  title: "Agriculture",
   eyebrow: "Mode",
   description: "Inspect plant photos, check trusted extension sources, and draft practical next steps.",
-  chatkitLead: "Inspect plant images first, state uncertainty clearly, and turn observations into practical agriculture guidance.",
+  chatkitLead: "Use Agriculture to inspect plant photos and turn visible evidence into practical next steps.",
   chatkitPlaceholder: "Ask the agriculture agent to inspect plant photos, summarize visible evidence, and create a concise report update",
   tabs: [],
   showInSidebar: false,
@@ -120,21 +172,30 @@ export const agricultureAgentDefinition: AgentDefinition = {
   composerIcon: "cube",
   composerPlaceholder: "Inspect plant photos, summarize visible evidence, and suggest practical next steps.",
   previewPriority: 50,
+  attachmentConfig: {
+    enabled: true,
+    accept: IMAGE_ATTACHMENTS,
+    maxCount: 10,
+    maxSize: 100 * 1024 * 1024,
+  },
 };
 
 export const feedbackAgentDefinition: AgentDefinition = {
   id: "feedback-agent",
   path: "/workspace/feedback",
   navLabel: "Feedback",
-  title: "Feedback Agent",
+  title: "Feedback",
   eyebrow: "Backend",
   description: "Structured feedback capture for the active thread.",
-  chatkitLead: "Capture structured feedback about the active thread.",
+  chatkitLead: "Use Feedback to leave a clear reaction or suggestion about this thread.",
   chatkitPlaceholder: "Ask the feedback flow to capture a precise reaction or suggestion",
   tabs: [],
   showInSidebar: false,
   showInComposer: false,
   previewPriority: 90,
+  attachmentConfig: {
+    enabled: false,
+  },
 };
 
 export const adminDefinition: AgentDefinition = {
@@ -144,16 +205,19 @@ export const adminDefinition: AgentDefinition = {
   title: "User Management",
   eyebrow: "Admin",
   description: "Manage activation and credits.",
-  chatkitLead: "Manage access, activation, and credits.",
+  chatkitLead: "Use Admin to review access, activation, and credit status.",
   chatkitPlaceholder: "Ask the admin workspace to review a user, credits, or activation state",
   tabs: [{ id: "users", label: "Users", visible: ({ role }) => role === "admin" }],
   showInSidebar: true,
   showInComposer: false,
   previewPriority: 999,
+  attachmentConfig: {
+    enabled: false,
+  },
 };
 
 export const runtimeAgentDefinitions: AgentDefinition[] = [
-  helpAgentDefinition,
+  defaultAgentDefinition,
   reportAgentDefinition,
   analysisAgentDefinition,
   chartAgentDefinition,
@@ -162,7 +226,7 @@ export const runtimeAgentDefinitions: AgentDefinition[] = [
   feedbackAgentDefinition,
 ];
 
-export const surfaceDefinitions: AgentDefinition[] = [helpAgentDefinition];
+export const surfaceDefinitions: AgentDefinition[] = [defaultAgentDefinition];
 
 export const allAgentDefinitions: AgentDefinition[] = [
   ...surfaceDefinitions,

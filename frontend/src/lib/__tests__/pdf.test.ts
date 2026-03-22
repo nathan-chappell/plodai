@@ -35,9 +35,9 @@ describe("pdf helpers", () => {
     const encode = vi.fn((bytes: Uint8Array) => `encoded:${bytes.length}`);
     setBase64CodecForTests({ decode, encode });
 
-    expect(base64ToUint8Array("demo")).toEqual(new Uint8Array([4, 7]));
+    expect(base64ToUint8Array("tour")).toEqual(new Uint8Array([4, 7]));
     expect(uint8ArrayToBase64(new Uint8Array([1, 2, 3]))).toBe("encoded:3");
-    expect(decode).toHaveBeenCalledWith("demo");
+    expect(decode).toHaveBeenCalledWith("tour");
     expect(encode).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
   });
 

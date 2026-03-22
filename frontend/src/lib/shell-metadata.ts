@@ -19,6 +19,8 @@ export function buildSharedExportsIndex(
 }
 
 export function buildShellStateMetadata(args: {
+  contextId: string;
+  contextName: string;
   activeAgentId: string;
   statesByAgentId: Record<string, AgentShellState>;
 }): ShellStateMetadata {
@@ -28,6 +30,8 @@ export function buildShellStateMetadata(args: {
 
   return {
     version: "v1",
+    context_id: args.contextId,
+    context_name: args.contextName,
     active_agent_id: args.activeAgentId,
     agents,
     resources: buildSharedExportsIndex(args.statesByAgentId),

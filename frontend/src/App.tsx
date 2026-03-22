@@ -1,7 +1,7 @@
 import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from "react";
 
 import { AppStateProvider } from "./app/context";
-import { WorkspaceProvider } from "./app/workspace";
+import { WorkspaceProvider, useAgentShell } from "./app/workspace";
 import { useAppRouteGuards, useAppSessionState, useToastState } from "./app/hooks";
 import {
   AppEmptyMetaText,
@@ -27,9 +27,9 @@ const WritingPage = lazy(async () => {
   return { default: module.WritingPage };
 });
 
-const HelpAgentPage = lazy(async () => {
-  const module = await import("./agents/helpAgent");
-  return { default: module.HelpAgentPage };
+const DefaultAgentPage = lazy(async () => {
+  const module = await import("./agents/defaultAgent");
+  return { default: module.DefaultAgentPage };
 });
 
 const AdminUsersPage = lazy(async () => {
@@ -39,7 +39,7 @@ const AdminUsersPage = lazy(async () => {
 });
 
 const agentPages: Record<string, LazyExoticComponent<AgentPageComponent>> = {
-  "help-agent": HelpAgentPage,
+  "default-agent": DefaultAgentPage,
   "admin-users": AdminUsersPage,
 };
 
@@ -63,9 +63,46 @@ function filterAgents(role: "admin" | "user") {
 function resolveVisibleAgent(pathname: string, role: "admin" | "user") {
   const agents = filterAgents(role);
   if (pathname === "/workspace" || pathname.startsWith("/workspace/")) {
-    return agents.find((agent) => agent.id === "help-agent") ?? null;
+    return agents.find((agent) => agent.id === "default-agent") ?? null;
   }
   return agents.find((agent) => agent.path === pathname) ?? null;
+}
+
+function WorkspaceShellFrame({
+  agents,
+  activeAgent,
+  ActiveAgentPage,
+}: {
+  agents: ReturnType<typeof filterAgents>;
+  activeAgent: ReturnType<typeof resolveVisibleAgent>;
+  ActiveAgentPage: LazyExoticComponent<AgentPageComponent> | null;
+}) {
+  const { selectedAgentId } = useAgentShell();
+  const themeAgentId =
+    activeAgent?.id === "default-agent"
+      ? selectedAgentId
+      : activeAgent?.id ?? null;
+
+  return (
+    <PlatformShell
+      agents={agents}
+      activeAgentId={activeAgent?.id ?? null}
+      themeAgentId={themeAgentId}
+      onSelectAgent={navigate}
+    >
+      {!activeAgent ? (
+        <AppEmptyState>
+          <strong>Unknown route</strong>
+          <AppEmptyMetaText>Open the workspace or admin tools from the shell navigation.</AppEmptyMetaText>
+        </AppEmptyState>
+      ) : null}
+      {activeAgent && ActiveAgentPage ? (
+        <Suspense fallback={<RouteLoadingState label={activeAgent.title} />}>
+          <ActiveAgentPage />
+        </Suspense>
+      ) : null}
+    </PlatformShell>
+  );
 }
 
 export function App() {
@@ -124,23 +161,11 @@ export function App() {
   return (
     <AppStateProvider value={{ authError, setAuthError, user: currentUser, setUser }}>
       <WorkspaceProvider>
-        <PlatformShell
+        <WorkspaceShellFrame
           agents={agents}
-          activeAgentId={activeAgent?.id ?? null}
-          onSelectAgent={navigate}
-        >
-          {!activeAgent ? (
-            <AppEmptyState>
-              <strong>Unknown route</strong>
-              <AppEmptyMetaText>Open the workspace or admin tools from the shell navigation.</AppEmptyMetaText>
-            </AppEmptyState>
-          ) : null}
-          {activeAgent && ActiveAgentPage ? (
-            <Suspense fallback={<RouteLoadingState label={activeAgent.title} />}>
-              <ActiveAgentPage />
-            </Suspense>
-          ) : null}
-        </PlatformShell>
+          activeAgent={activeAgent}
+          ActiveAgentPage={ActiveAgentPage}
+        />
       </WorkspaceProvider>
       <ToastViewport>
         {toasts.map((toast) => (

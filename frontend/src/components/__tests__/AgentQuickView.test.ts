@@ -54,7 +54,7 @@ describe("buildAgentQuickViewFacts", () => {
       producerLabel: "Uploaded",
       file: {
         id: "uploaded-csv-file",
-        name: "sales_demo.csv",
+        name: "sales_tour.csv",
         kind: "csv",
         extension: "csv",
         mime_type: "text/csv",
@@ -121,10 +121,10 @@ describe("buildAgentQuickViewFacts", () => {
       bucket: "pdf",
       source: "derived",
       producerKey: "document-agent",
-      producerLabel: "PDF Agent",
+      producerLabel: "Documents",
       file: {
         id: "pdf-file-id",
-        name: "board_pack_demo.pdf",
+        name: "board_pack_tour.pdf",
         kind: "pdf",
         extension: "pdf",
         mime_type: "application/pdf",

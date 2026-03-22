@@ -15,6 +15,18 @@ from backend.app.chatkit.usage import ThreadUsageTotals
 
 JsonSchemaPrimitive: TypeAlias = str | int | float | bool | None
 
+ALLOWED_AGENT_IDS = frozenset(
+    {
+        "default-agent",
+        "report-agent",
+        "analysis-agent",
+        "chart-agent",
+        "document-agent",
+        "agriculture-agent",
+        "feedback-agent",
+    }
+)
+
 
 class JsonSchema(TypedDict, total=False):
     type: str
@@ -68,11 +80,27 @@ class ClientToolDefinition(TypedDict, total=False):
     display: "ToolDisplaySpec"
 
 
+class TourPickerDisplayScenario(TypedDict):
+    scenario_id: str
+    title: str
+    summary: str
+    workspace_name: str
+    target_agent_id: str
+    default_asset_count: int
+
+
+class TourPickerDisplaySpec(TypedDict):
+    title: str
+    summary: str
+    scenarios: list[TourPickerDisplayScenario]
+
+
 class ToolDisplaySpec(TypedDict, total=False):
     label: str
     prominent_args: list[str]
     omit_args: list[str]
     arg_labels: dict[str, str]
+    tour_picker: TourPickerDisplaySpec
 
 
 class AgentDelegationTarget(TypedDict):
@@ -104,6 +132,7 @@ class ShellStateAgentSummary(TypedDict, total=False):
 class ShellStateResourceSummary(TypedDict, total=False):
     id: str
     owner_agent_id: str
+    origin: Literal["uploaded", "generated"]
     kind: Literal["dataset", "chart", "document", "image", "report", "text", "blob"]
     title: str
     created_at: str
@@ -124,6 +153,8 @@ class ShellStateResourceSummary(TypedDict, total=False):
 
 class ShellState(TypedDict):
     version: Literal["v1"]
+    context_id: str
+    context_name: str
     active_agent_id: str
     agents: list[ShellStateAgentSummary]
     resources: list[ShellStateResourceSummary]
@@ -212,6 +243,13 @@ def _validated_model_list(
         except ValidationError:
             continue
     return validated
+
+
+def _required_agent_id(value: object) -> str:
+    text = _strip_string(value)
+    if text is None or text not in ALLOWED_AGENT_IDS:
+        raise ValueError("expected a supported agent id")
+    return text
 
 
 def _is_strict_json_schema(raw_schema: object) -> TypeGuard[JsonSchema]:
@@ -502,6 +540,7 @@ class ToolDisplaySpecModel(_MetadataModel):
     prominent_args: list[str] | None = None
     omit_args: list[str] | None = None
     arg_labels: dict[str, str] | None = None
+    tour_picker: "TourPickerDisplaySpecModel | None" = None
 
     @field_validator("label", mode="before")
     @classmethod
@@ -532,13 +571,93 @@ class ToolDisplaySpecModel(_MetadataModel):
         }
         return labels or None
 
+    @field_validator("tour_picker", mode="before")
+    @classmethod
+    def _tour_picker(
+        cls,
+        value: object,
+    ) -> "TourPickerDisplaySpecModel | None":
+        validated = _validated_model_or_none(TourPickerDisplaySpecModel, value)
+        return cast(TourPickerDisplaySpecModel | None, validated)
+
+
+class TourPickerDisplayScenarioModel(_MetadataModel):
+    scenario_id: str
+    title: str
+    summary: str
+    workspace_name: str
+    target_agent_id: str
+    default_asset_count: int
+
+    @field_validator(
+        "scenario_id",
+        "title",
+        "summary",
+        "workspace_name",
+        mode="before",
+    )
+    @classmethod
+    def _required_text(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("target_agent_id", mode="before")
+    @classmethod
+    def _target_agent_id(cls, value: object) -> str:
+        return _required_agent_id(value)
+
+    @field_validator("default_asset_count", mode="before")
+    @classmethod
+    def _default_asset_count(cls, value: object) -> int:
+        if not isinstance(value, int):
+            raise ValueError("expected an integer")
+        if value < 0:
+            raise ValueError("expected default_asset_count >= 0")
+        return value
+
+
+class TourPickerDisplaySpecModel(_MetadataModel):
+    title: str
+    summary: str
+    scenarios: list[TourPickerDisplayScenarioModel] = Field(default_factory=list)
+
+    @field_validator("title", "summary", mode="before")
+    @classmethod
+    def _required_text(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("scenarios", mode="before")
+    @classmethod
+    def _scenarios(
+        cls,
+        value: object,
+    ) -> list[TourPickerDisplayScenarioModel]:
+        validated = _validated_model_list(TourPickerDisplayScenarioModel, value)
+        return cast(list[TourPickerDisplayScenarioModel], validated)
+
+    @model_validator(mode="after")
+    def _require_scenarios(self) -> "TourPickerDisplaySpecModel":
+        if not self.scenarios:
+            raise ValueError("expected at least one tour picker scenario")
+        return self
+
 
 class AgentDelegationTargetModel(_MetadataModel):
     agent_id: str
     tool_name: str
     description: str
 
-    @field_validator("agent_id", "tool_name", "description", mode="before")
+    @field_validator("agent_id", mode="before")
+    @classmethod
+    def _agent_id(cls, value: object) -> str:
+        return _required_agent_id(value)
+
+    @field_validator("tool_name", "description", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -556,7 +675,12 @@ class AgentSpecModel(_MetadataModel):
         default_factory=list
     )
 
-    @field_validator("agent_id", "agent_name", "instructions", mode="before")
+    @field_validator("agent_id", mode="before")
+    @classmethod
+    def _agent_id(cls, value: object) -> str:
+        return _required_agent_id(value)
+
+    @field_validator("agent_name", "instructions", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -594,10 +718,7 @@ class AgentBundleModel(_MetadataModel):
     @field_validator("root_agent_id", mode="before")
     @classmethod
     def _root_agent_id(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty root_agent_id")
-        return text
+        return _required_agent_id(value)
 
     @field_validator("agents", mode="before")
     @classmethod
@@ -633,10 +754,7 @@ class ShellStateAgentSummaryModel(_MetadataModel):
     @field_validator("agent_id", mode="before")
     @classmethod
     def _required_string(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty string")
-        return text
+        return _required_agent_id(value)
 
     @field_validator("goal", "current_report_id", mode="before")
     @classmethod
@@ -652,6 +770,7 @@ class ShellStateAgentSummaryModel(_MetadataModel):
 class ShellStateResourceSummaryModel(_MetadataModel):
     id: str
     owner_agent_id: str
+    origin: Literal["uploaded", "generated"] | None = None
     kind: Literal["dataset", "chart", "document", "image", "report", "text", "blob"]
     title: str
     created_at: str
@@ -669,9 +788,13 @@ class ShellStateResourceSummaryModel(_MetadataModel):
     height: int | None = None
     slide_count: int | None = None
 
+    @field_validator("owner_agent_id", mode="before")
+    @classmethod
+    def _owner_agent_id(cls, value: object) -> str:
+        return _required_agent_id(value)
+
     @field_validator(
         "id",
-        "owner_agent_id",
         "title",
         "created_at",
         "payload_ref",
@@ -688,6 +811,17 @@ class ShellStateResourceSummaryModel(_MetadataModel):
     @classmethod
     def _optional_string(cls, value: object) -> str | None:
         return _strip_string(value)
+
+    @field_validator("origin", mode="before")
+    @classmethod
+    def _origin(
+        cls, value: object
+    ) -> Literal["uploaded", "generated"] | None:
+        return (
+            value
+            if value in {"uploaded", "generated"}
+            else None
+        )
 
     @field_validator(
         "byte_size",
@@ -727,6 +861,8 @@ class ShellStateResourceSummaryModel(_MetadataModel):
 
 class ShellStateModel(_MetadataModel):
     version: Literal["v1"]
+    context_id: str
+    context_name: str
     active_agent_id: str
     agents: list[ShellStateAgentSummaryModel] = Field(default_factory=list)
     resources: list[ShellStateResourceSummaryModel] = Field(default_factory=list)
@@ -734,6 +870,11 @@ class ShellStateModel(_MetadataModel):
     @field_validator("active_agent_id", mode="before")
     @classmethod
     def _active_agent_id(cls, value: object) -> str:
+        return _required_agent_id(value)
+
+    @field_validator("context_id", "context_name", mode="before")
+    @classmethod
+    def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
         if text is None:
             raise ValueError("expected a non-empty string")

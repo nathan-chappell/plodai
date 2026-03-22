@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
+import styled from "styled-components";
 
 import {
   authenticatedFetch,
   getChatKitConfig,
+  registerChatKitLocalFiles,
+  setChatKitAttachmentHandler,
   setChatKitMetadataGetter,
   setChatKitNativeFeedbackHandler,
 } from "../lib/api";
 import { getAgentDefinition } from "../agents/definitions";
+import type { AgentAttachmentConfig, AgentBundle, AgentClientTool } from "../agents/types";
 import {
   buildFeedbackSubmissionPrompt,
   buildNativeFeedbackPrompt,
@@ -16,7 +20,6 @@ import {
 } from "../lib/chatkit-feedback";
 import { devLogger } from "../lib/dev-logging";
 import { findChatKitScrollTarget, isNearScrollBottom } from "../lib/chatkit-autoscroll";
-import type { AgentBundle, AgentClientTool } from "../agents/types";
 import {
   ChatKitPaneCard,
   ChatKitPaneEmpty,
@@ -35,6 +38,7 @@ import type {
   ClientEffect,
   ClientToolCall,
   ClientToolName,
+  TourRequestedEffect,
 } from "../types/analysis";
 import type { LocalWorkspaceFile } from "../types/report";
 import type { AgentResourceRecord, ShellStateMetadata } from "../types/shell";
@@ -50,9 +54,23 @@ export type ActiveToolInvocation = {
   params: Record<string, unknown>;
 };
 
-type QueuedPrompt = {
+type TourSelection = {
+  scenarioId: string;
+  source: "default" | "upload";
+  files?: File[];
+};
+
+type TourPickerActionPayload = {
+  scenario_id?: string;
+};
+
+type TourScenarioSelectionHandler = (scenarioId: string) => Promise<void> | void;
+
+type ScheduledChatPrompt = {
+  id: string;
   prompt: string;
   model?: string;
+  agentId: string;
 };
 
 const CHATKIT_DEFAULT_MODEL_ID = import.meta.env.VITE_CHATKIT_DEFAULT_MODEL ?? "lightweight";
@@ -150,10 +168,113 @@ function scrollElementToBottom(element: HTMLElement): void {
   element.scrollTop = element.scrollHeight;
 }
 
+function bindChatKitComposerFileInputs(
+  host: HTMLElement | null,
+  onFiles: (files: File[]) => void,
+): () => void {
+  if (!host || typeof MutationObserver === "undefined") {
+    return () => undefined;
+  }
+
+  const cleanupByInput = new Map<HTMLInputElement, () => void>();
+  let observer: MutationObserver | null = null;
+  let frameId: number | null = null;
+  let attempts = 0;
+
+  const bindInput = (input: HTMLInputElement) => {
+    if (cleanupByInput.has(input)) {
+      return;
+    }
+    const handleChange = (event: Event) => {
+      const files = (event.target as HTMLInputElement | null)?.files;
+      if (!files?.length) {
+        return;
+      }
+      onFiles(Array.from(files));
+    };
+    input.addEventListener("change", handleChange, true);
+    cleanupByInput.set(input, () => {
+      input.removeEventListener("change", handleChange, true);
+    });
+  };
+
+  const scanInputs = (): boolean => {
+    const shadowRoot = host.shadowRoot;
+    if (!shadowRoot) {
+      return false;
+    }
+    shadowRoot.querySelectorAll("input[type='file']").forEach((node) => {
+      if (node instanceof HTMLInputElement) {
+        bindInput(node);
+      }
+    });
+    return true;
+  };
+
+  const startObserving = () => {
+    const shadowRoot = host.shadowRoot;
+    if (!shadowRoot) {
+      return false;
+    }
+    observer = new MutationObserver(() => {
+      scanInputs();
+    });
+    observer.observe(shadowRoot, {
+      childList: true,
+      subtree: true,
+    });
+    return true;
+  };
+
+  const connect = () => {
+    attempts += 1;
+    if (scanInputs()) {
+      startObserving();
+      return;
+    }
+    if (typeof window === "undefined" || attempts >= 24) {
+      return;
+    }
+    frameId = window.requestAnimationFrame(connect);
+  };
+
+  connect();
+
+  return () => {
+    if (frameId !== null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(frameId);
+    }
+    observer?.disconnect();
+    for (const cleanup of cleanupByInput.values()) {
+      cleanup();
+    }
+  };
+}
+
+function acceptMapToInputValue(
+  accept: Record<string, readonly string[]> | undefined,
+): string | undefined {
+  if (!accept) {
+    return undefined;
+  }
+  const values = new Set<string>();
+  for (const [mimeType, extensions] of Object.entries(accept)) {
+    if (mimeType.trim()) {
+      values.add(mimeType.trim());
+    }
+    for (const extension of extensions) {
+      if (extension.trim()) {
+        values.add(extension.trim());
+      }
+    }
+  }
+  return values.size ? Array.from(values).join(",") : undefined;
+}
+
 function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
   switch (tool) {
-    case "list_demo_scenarios":
-    case "launch_demo_scenario":
+    case "list_tour_scenarios":
+    case "launch_tour_scenario":
     case "list_datasets":
     case "inspect_dataset_schema":
     case "list_reports":
@@ -182,17 +303,17 @@ function buildStarterPrompts(): readonly ChatKitStarterPrompt[] {
   return [
     {
       label: "Summarize files",
-      prompt: "Give me a concise summary of all attached files, including likely business meaning, key columns, and the most important first questions to investigate.",
+      prompt: "Give me a concise summary of all workspace files, including likely business meaning, key columns, and the most important first questions to investigate.",
       icon: "document",
     },
     {
       label: "Find anomalies",
-      prompt: "Investigate the attached files for anomalies, outliers, or suspicious shifts. Validate the strongest ones with follow-up queries and charts before concluding.",
+      prompt: "Investigate the workspace files for anomalies, outliers, or suspicious shifts. Validate the strongest ones with follow-up queries and charts before concluding.",
       icon: "analytics",
     },
     {
       label: "Suggest charts",
-      prompt: "Review the attached files and suggest the most informative charts to build first. Then create the strongest ones and explain what each chart reveals.",
+      prompt: "Review the workspace files and suggest the most informative charts to build first. Then create the strongest ones and explain what each chart reveals.",
       icon: "chart",
     },
   ] as const;
@@ -230,6 +351,7 @@ export function ChatKitHarness({
   investigationBrief,
   onEffects,
   onSelectAgent,
+  defaultAgentId,
   onReplaceAgentResources,
   clientTools,
   headerTitle = "AI Portfolio",
@@ -246,6 +368,15 @@ export function ChatKitHarness({
   composerToolIds,
   onToolActivity,
   onRunStart,
+  attachmentConfig,
+  onAddAttachments,
+  onRemoveAgentResource,
+  onSelectTourScenario,
+  tourLauncher,
+  onDismissTourLauncher,
+  onSubmitTourSelection,
+  scheduledPrompt,
+  onScheduledPromptDispatched,
 }: {
   agentBundle: AgentBundle;
   files: LocalWorkspaceFile[];
@@ -253,6 +384,7 @@ export function ChatKitHarness({
   investigationBrief: string;
   onEffects: (effects: ClientEffect[]) => void;
   onSelectAgent?: (agentId: string) => void;
+  defaultAgentId?: string;
   onReplaceAgentResources?: (agentId: string, resources: AgentResourceRecord[]) => void;
   clientTools: AgentClientTool[];
   headerTitle?: string;
@@ -269,13 +401,24 @@ export function ChatKitHarness({
   composerToolIds?: string[];
   onToolActivity?: (activity: ActiveToolInvocation | null) => void;
   onRunStart?: () => void;
+  attachmentConfig?: AgentAttachmentConfig;
+  onAddAttachments?: (
+    agentId: string,
+    files: FileList | Iterable<File> | null | undefined,
+  ) => Promise<LocalWorkspaceFile[]>;
+  onRemoveAgentResource?: (agentId: string, resourceId: string) => void;
+  onSelectTourScenario?: TourScenarioSelectionHandler;
+  tourLauncher?: TourRequestedEffect | null;
+  onDismissTourLauncher?: () => void;
+  onSubmitTourSelection?: (selection: TourSelection) => Promise<void>;
+  scheduledPrompt?: ScheduledChatPrompt | null;
+  onScheduledPromptDispatched?: (promptId: string) => void;
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [activeClientToolName, setActiveClientToolName] = useState<string | null>(null);
-  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
-  const [dispatchingQueuedPrompt, setDispatchingQueuedPrompt] = useState(false);
+  const [submittingTour, setSubmittingTour] = useState(false);
   const onEffectsRef = useRef(onEffects);
   const onSelectAgentRef = useRef(onSelectAgent);
   const onReplaceAgentResourcesRef = useRef(onReplaceAgentResources);
@@ -294,6 +437,11 @@ export function ChatKitHarness({
   const shellStateRef = useRef(shellState);
   const investigationBriefRef = useRef(investigationBrief);
   const threadOriginRef = useRef(threadOrigin);
+  const onAddAttachmentsRef = useRef(onAddAttachments);
+  const onRemoveAgentResourceRef = useRef(onRemoveAgentResource);
+  const tourLauncherInputRef = useRef<HTMLInputElement | null>(null);
+  const dispatchingScheduledPromptIdRef = useRef<string | null>(null);
+  const pendingDefaultAgentResetRef = useRef(false);
 
   useEffect(() => {
     onEffectsRef.current = onEffects;
@@ -335,6 +483,14 @@ export function ChatKitHarness({
     threadOriginRef.current = threadOrigin;
   }, [threadOrigin]);
 
+  useEffect(() => {
+    onAddAttachmentsRef.current = onAddAttachments;
+  }, [onAddAttachments]);
+
+  useEffect(() => {
+    onRemoveAgentResourceRef.current = onRemoveAgentResource;
+  }, [onRemoveAgentResource]);
+
   function clearFinishStatusTimeout() {
     if (finishStatusTimeoutRef.current !== null && typeof window !== "undefined") {
       window.clearTimeout(finishStatusTimeoutRef.current);
@@ -342,7 +498,7 @@ export function ChatKitHarness({
     }
   }
 
-  function scheduleIdleStatus(nextStatus: string) {
+  function scheduleIdleStatus(nextStatus: string | null) {
     if (typeof window === "undefined") {
       setStatus(nextStatus);
       return;
@@ -383,6 +539,33 @@ export function ChatKitHarness({
       setChatKitNativeFeedbackHandler(null);
     };
   }, []);
+
+  useEffect(() => {
+    if (!attachmentConfig?.enabled) {
+      setChatKitAttachmentHandler(null);
+      return;
+    }
+
+    setChatKitAttachmentHandler(
+      async ({ attachmentId, file }) => {
+        const agentId = agentBundleRef.current.root_agent_id;
+        const builtFiles = (await onAddAttachmentsRef.current?.(agentId, [file])) ?? [];
+        return {
+          agentId,
+          resourceIds: builtFiles.map((builtFile) => builtFile.id),
+        };
+      },
+      (record) => {
+        for (const resourceId of record.resourceIds) {
+          onRemoveAgentResourceRef.current?.(record.agentId, resourceId);
+        }
+      },
+    );
+
+    return () => {
+      setChatKitAttachmentHandler(null);
+    };
+  }, [attachmentConfig?.enabled]);
 
   function resolveScrollTarget(): HTMLElement | null {
     const chatKitElement = chatKitRef.current?.ref.current;
@@ -433,6 +616,27 @@ export function ChatKitHarness({
   }
 
   const starterPrompts = useMemo(() => prompts ?? buildStarterPrompts(), [prompts]);
+  const composerAttachments = useMemo(
+    () =>
+      attachmentConfig?.enabled
+        ? {
+            enabled: true,
+            accept: attachmentConfig.accept
+              ? Object.fromEntries(
+                  Object.entries(attachmentConfig.accept).map(([mimeType, extensions]) => [
+                    mimeType,
+                    [...extensions],
+                  ]),
+                )
+              : undefined,
+            maxCount: attachmentConfig.maxCount,
+            maxSize: attachmentConfig.maxSize,
+          }
+        : {
+            enabled: false,
+          },
+    [attachmentConfig],
+  );
   const composerTools = useMemo(
     () =>
       !showComposerTools
@@ -442,14 +646,17 @@ export function ChatKitHarness({
           : listBundleComposerTools(agentBundle),
     [agentBundle, composerToolIds, showComposerTools],
   );
-  const activeComposerToolId =
-    composerTools.find((tool) => tool.id === agentBundle.root_agent_id)?.id ?? null;
   const options = useMemo<UseChatKitOptions>(
     () => ({
       api: {
         url: getChatKitConfig().url,
         domainKey: getChatKitConfig().domainKey,
         fetch: authenticatedFetch,
+        uploadStrategy: attachmentConfig?.enabled
+          ? {
+              type: "two_phase",
+            }
+          : undefined,
       },
       theme: {
         colorScheme,
@@ -488,8 +695,27 @@ export function ChatKitHarness({
       },
       widgets: {
         onAction: async (action, widgetItem) => {
+          if (action.type === "submit_tour_picker") {
+            const scenarioId =
+              typeof (action.payload as TourPickerActionPayload | undefined)?.scenario_id ===
+              "string"
+                ? (action.payload as TourPickerActionPayload).scenario_id?.trim()
+                : "";
+            if (scenarioId) {
+              await handleTourScenarioSelection(scenarioId);
+            }
+            await chatKitRef.current?.sendCustomAction(action, widgetItem.id);
+            return;
+          }
+
           await chatKitRef.current?.sendCustomAction(action, widgetItem.id);
-          if (action.type !== "submit_feedback_session") {
+          if (
+            action.type !== "submit_feedback_session" &&
+            action.type !== "cancel_tour_picker"
+          ) {
+            return;
+          }
+          if (action.type === "cancel_tour_picker") {
             return;
           }
           await chatKitRef.current?.sendUserMessage({
@@ -504,9 +730,7 @@ export function ChatKitHarness({
         placeholder:
           composerPlaceholder ??
           "Ask the agent to inspect, transform, or investigate your local files",
-        attachments: {
-          enabled: false,
-        },
+        attachments: composerAttachments,
         dictation: { enabled: showDictation },
         models: CHATKIT_MODEL_CHOICES.map((choice) => ({
           ...choice,
@@ -518,19 +742,14 @@ export function ChatKitHarness({
           icon: tool.icon,
           shortLabel: tool.shortLabel,
           placeholderOverride: tool.placeholderOverride,
-          persistent: true,
+          persistent: false,
         })),
       },
       onReady: () => {
         clearFinishStatusTimeout();
-        setStatus("Chat ready.");
+        setStatus(null);
         resolveScrollTarget();
         scheduleScrollToBottom(true);
-        if (activeComposerToolId) {
-          void chatKitRef.current?.setComposerValue({
-            selectedToolId: activeComposerToolId,
-          });
-        }
       },
       onResponseStart: () => {
         clearFinishStatusTimeout();
@@ -552,7 +771,15 @@ export function ChatKitHarness({
         if (activeClientToolRef.current) {
           setStatus(`Running ${formatToolLabel(activeClientToolRef.current)} locally.`);
         } else {
-          scheduleIdleStatus("Agent run finished.");
+          scheduleIdleStatus(null);
+        }
+        if (
+          pendingDefaultAgentResetRef.current &&
+          defaultAgentId &&
+          agentBundleRef.current.root_agent_id !== defaultAgentId
+        ) {
+          pendingDefaultAgentResetRef.current = false;
+          onSelectAgentRef.current?.(defaultAgentId);
         }
         devLogger.responseEnd({
           agentId: agentBundle.root_agent_id,
@@ -573,7 +800,12 @@ export function ChatKitHarness({
         scheduleScrollToBottom(true);
       },
       onToolChange: ({ toolId }) => {
-        if (!toolId || !composerTools.some((tool) => tool.id === toolId)) {
+        if (!toolId) {
+          pendingDefaultAgentResetRef.current = Boolean(defaultAgentId);
+          return;
+        }
+        pendingDefaultAgentResetRef.current = false;
+        if (!composerTools.some((tool) => tool.id === toolId)) {
           return;
         }
         onSelectAgentRef.current?.(toolId);
@@ -618,14 +850,6 @@ export function ChatKitHarness({
             replaceAgentResources: (agentId, resources) => {
               onReplaceAgentResourcesRef.current?.(agentId, resources);
             },
-            schedulePrompt: (prompt, model) => {
-              const trimmedPrompt = prompt.trim();
-              if (!trimmedPrompt) {
-                return;
-              }
-              setQueuedPrompts((current) => [...current, { prompt: trimmedPrompt, model }]);
-              setStatus("Demo workspace is ready. Continuing automatically.");
-            },
           });
           devLogger.clientToolSuccess({
             agentId: agentBundle.root_agent_id,
@@ -638,7 +862,7 @@ export function ChatKitHarness({
           });
           setStatus(`Sent ${formatToolLabel(name)} back to the agent.`);
           if (!runningRef.current) {
-            scheduleIdleStatus("Agent run finished.");
+            scheduleIdleStatus(null);
           }
           return result;
         } catch (error) {
@@ -675,10 +899,12 @@ export function ChatKitHarness({
     }),
     [
       composerTools,
+      composerAttachments,
       colorScheme,
       composerPlaceholder,
+      attachmentConfig?.enabled,
       agentBundle.root_agent_id,
-      activeComposerToolId,
+      defaultAgentId,
       files.length,
       greeting,
       headerTitle,
@@ -698,38 +924,46 @@ export function ChatKitHarness({
   }, [chatKit]);
 
   useEffect(() => {
-    if (!activeComposerToolId) {
+    if (!attachmentConfig?.enabled) {
       return;
     }
-    void chatKit.setComposerValue({
-      selectedToolId: activeComposerToolId,
-    });
-  }, [activeComposerToolId, chatKit]);
+    return bindChatKitComposerFileInputs(
+      chatKit.ref.current,
+      registerChatKitLocalFiles,
+    );
+  }, [attachmentConfig?.enabled, chatKit]);
 
   useEffect(() => {
     if (
-      !queuedPrompts.length ||
+      !scheduledPrompt ||
+      scheduledPrompt.agentId !== agentBundle.root_agent_id ||
       running ||
       activeClientToolName !== null ||
-      dispatchingQueuedPrompt
+      dispatchingScheduledPromptIdRef.current === scheduledPrompt.id
     ) {
       return;
     }
-    const [nextPrompt, ...rest] = queuedPrompts;
-    setQueuedPrompts(rest);
-    setDispatchingQueuedPrompt(true);
+    dispatchingScheduledPromptIdRef.current = scheduledPrompt.id;
     clearFinishStatusTimeout();
-    setStatus("Continuing in the seeded workspace.");
+    setStatus("Continuing in the guided tour.");
     void chatKit
       .sendUserMessage({
-        text: nextPrompt.prompt,
-        model: nextPrompt.model ?? CHATKIT_DEFAULT_MODEL_ID,
-        newThread: !threadIdRef.current,
+        text: scheduledPrompt.prompt,
+        model: scheduledPrompt.model ?? CHATKIT_DEFAULT_MODEL_ID,
+        newThread: true,
       })
       .finally(() => {
-        setDispatchingQueuedPrompt(false);
+        dispatchingScheduledPromptIdRef.current = null;
+        onScheduledPromptDispatched?.(scheduledPrompt.id);
       });
-  }, [activeClientToolName, chatKit, dispatchingQueuedPrompt, queuedPrompts, running]);
+  }, [
+    activeClientToolName,
+    agentBundle.root_agent_id,
+    chatKit,
+    onScheduledPromptDispatched,
+    running,
+    scheduledPrompt,
+  ]);
 
   useEffect(() => {
     resolveScrollTarget();
@@ -746,6 +980,71 @@ export function ChatKitHarness({
     };
   }, [chatKit]);
 
+  async function submitTourSelection(selection: TourSelection) {
+    if (!onSubmitTourSelection) {
+      return;
+    }
+    clearFinishStatusTimeout();
+    setSubmittingTour(true);
+    setStatus(
+      selection.source === "default"
+        ? "Loading the built-in tour files."
+        : "Preparing the uploaded tour files.",
+    );
+    try {
+      await onSubmitTourSelection(selection);
+      setStatus("Tour workspace is ready. Continuing automatically.");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Unable to start the guided tour.";
+      setStatus(message);
+      throw error;
+    } finally {
+      setSubmittingTour(false);
+    }
+  }
+
+  async function handleTourFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextFiles = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = "";
+    if (!tourLauncher || !nextFiles.length) {
+      return;
+    }
+    try {
+      await submitTourSelection({
+        scenarioId: tourLauncher.scenarioId,
+        source: "upload",
+        files: nextFiles,
+      });
+    } catch {
+      // Status is already updated in submitTourSelection.
+    }
+  }
+
+  async function handleTourScenarioSelection(scenarioId: string) {
+    if (!onSelectTourScenario) {
+      return;
+    }
+    clearFinishStatusTimeout();
+    setSubmittingTour(true);
+    setStatus("Opening the guided tour launcher.");
+    try {
+      await onSelectTourScenario(scenarioId);
+      setStatus("Guided tour launcher is ready.");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Unable to open the guided tour launcher.";
+      setStatus(message);
+      throw error;
+    } finally {
+      setSubmittingTour(false);
+    }
+  }
+
   async function handleQuickAction(action: ChatKitQuickAction) {
     const needsNewThread = !threadIdRef.current;
     setStatus(`Starting ${action.label.toLowerCase()}.`);
@@ -757,30 +1056,96 @@ export function ChatKitHarness({
     });
   }
 
-  const isBusy = running || activeClientToolName !== null || dispatchingQueuedPrompt;
+  const isBusy =
+    running ||
+    activeClientToolName !== null ||
+    submittingTour ||
+    dispatchingScheduledPromptIdRef.current !== null;
+  const quickActionList = quickActions ?? [];
+  const hasStatusChrome = quickActionList.length > 0 || Boolean(status);
+  const tourAccept = tourLauncher
+    ? acceptMapToInputValue(tourLauncher.uploadConfig.accept)
+    : undefined;
 
   return (
     <ChatKitPaneHarness>
-      <ChatKitPaneStatusRow data-testid="chatkit-top-row">
-        <ChatKitPaneStatusActions data-testid="chatkit-header-controls">
-          <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
-            {(quickActions ?? []).map((action) => (
-              <ChatKitPaneToolbarButton
-                key={action.label}
-                data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
-                type="button"
-                onClick={() => void handleQuickAction(action)}
-                disabled={isBusy}
-              >
-                {action.label}
-              </ChatKitPaneToolbarButton>
-            ))}
-          </ChatKitPaneToolbar>
-          <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
-            {status}
-          </ChatKitPaneStatusText>
-        </ChatKitPaneStatusActions>
-      </ChatKitPaneStatusRow>
+      {tourLauncher ? (
+        <input
+          ref={tourLauncherInputRef}
+          accept={tourAccept}
+          data-testid="chatkit-tour-file-input"
+          multiple={tourLauncher.uploadConfig.max_count > 1}
+          onChange={(event) => void handleTourFileChange(event)}
+          type="file"
+          hidden
+        />
+      ) : null}
+      {hasStatusChrome ? (
+        <ChatKitPaneStatusRow data-testid="chatkit-top-row">
+          <ChatKitPaneStatusActions data-testid="chatkit-header-controls">
+            <ChatKitPaneToolbar data-testid="chatkit-quick-actions">
+              {quickActionList.map((action) => (
+                <ChatKitPaneToolbarButton
+                  key={action.label}
+                  data-testid={`chatkit-quick-action-${slugifyLabel(action.label)}`}
+                  type="button"
+                  onClick={() => void handleQuickAction(action)}
+                  disabled={isBusy}
+                >
+                  {action.label}
+                </ChatKitPaneToolbarButton>
+              ))}
+            </ChatKitPaneToolbar>
+            <ChatKitPaneStatusText $light={colorScheme === "light"} data-testid="chatkit-status">
+              {status}
+            </ChatKitPaneStatusText>
+          </ChatKitPaneStatusActions>
+        </ChatKitPaneStatusRow>
+      ) : null}
+      {tourLauncher ? (
+        <TourLauncherCard data-testid="chatkit-tour-launcher">
+          <TourLauncherEyebrow>Guided Tour</TourLauncherEyebrow>
+          <TourLauncherTitle>{tourLauncher.title}</TourLauncherTitle>
+          <TourLauncherSummary>{tourLauncher.summary}</TourLauncherSummary>
+          <TourLauncherMeta>
+            {tourLauncher.uploadConfig.helper_text}
+          </TourLauncherMeta>
+          <TourLauncherMeta>
+            Built-in default: {tourLauncher.defaultAssetCount} file
+            {tourLauncher.defaultAssetCount === 1 ? "" : "s"}.
+          </TourLauncherMeta>
+          <TourLauncherActions>
+            <TourLauncherButton
+              disabled={isBusy}
+              onClick={() => {
+                tourLauncherInputRef.current?.click();
+              }}
+              type="button"
+            >
+              Upload your own file(s)
+            </TourLauncherButton>
+            <TourLauncherButton
+              disabled={isBusy}
+              onClick={() => {
+                void submitTourSelection({
+                  scenarioId: tourLauncher.scenarioId,
+                  source: "default",
+                }).catch(() => undefined);
+              }}
+              type="button"
+            >
+              Use built-in default
+            </TourLauncherButton>
+            <TourLauncherButton
+              disabled={isBusy}
+              onClick={onDismissTourLauncher}
+              type="button"
+            >
+              Cancel
+            </TourLauncherButton>
+          </TourLauncherActions>
+        </TourLauncherCard>
+      ) : null}
       <ChatKitPaneSurface
         ref={surfaceRef}
         $light={colorScheme === "light"}
@@ -802,6 +1167,7 @@ export function ChatKitPane({
   clientTools,
   onEffects,
   onSelectAgent,
+  defaultAgentId,
   onReplaceAgentResources,
   headerTitle,
   greeting,
@@ -823,6 +1189,15 @@ export function ChatKitPane({
   composerToolIds,
   onToolActivity,
   onRunStart,
+  attachmentConfig,
+  onAddAttachments,
+  onRemoveAgentResource,
+  onSelectTourScenario,
+  tourLauncher,
+  onDismissTourLauncher,
+  onSubmitTourSelection,
+  scheduledPrompt,
+  onScheduledPromptDispatched,
 }: {
   agentBundle: AgentBundle;
   enabled: boolean;
@@ -832,6 +1207,7 @@ export function ChatKitPane({
   clientTools: AgentClientTool[];
   onEffects: (effects: ClientEffect[]) => void;
   onSelectAgent?: (agentId: string) => void;
+  defaultAgentId?: string;
   onReplaceAgentResources?: (agentId: string, resources: AgentResourceRecord[]) => void;
   headerTitle?: string;
   greeting?: string;
@@ -853,14 +1229,39 @@ export function ChatKitPane({
   composerToolIds?: string[];
   onToolActivity?: (activity: ActiveToolInvocation | null) => void;
   onRunStart?: () => void;
+  attachmentConfig?: AgentAttachmentConfig;
+  onAddAttachments?: (
+    agentId: string,
+    files: FileList | Iterable<File> | null | undefined,
+  ) => Promise<LocalWorkspaceFile[]>;
+  onRemoveAgentResource?: (agentId: string, resourceId: string) => void;
+  onSelectTourScenario?: TourScenarioSelectionHandler;
+  tourLauncher?: TourRequestedEffect | null;
+  onDismissTourLauncher?: () => void;
+  onSubmitTourSelection?: (selection: TourSelection) => Promise<void>;
+  scheduledPrompt?: ScheduledChatPrompt | null;
+  onScheduledPromptDispatched?: (promptId: string) => void;
 }) {
-  const canInvestigate = enabled && (files.length > 0 || clientTools.length > 0);
+  const canInvestigate =
+    enabled &&
+    (
+      files.length > 0 ||
+      clientTools.length > 0 ||
+      attachmentConfig?.enabled === true ||
+      tourLauncher != null
+    );
   const resolvedMeta =
     paneMeta ??
     (canInvestigate
-      ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. Start with a summary, extraction, or investigation pass.`
+      ? files.length > 0
+        ? `${files.length} file${files.length === 1 ? " is" : "s are"} ready. Start with a summary, extraction, or investigation pass.`
+        : attachmentConfig?.enabled
+          ? "Attach one or more files to prepare this workspace."
+          : "Start with a summary, extraction, or investigation pass."
       : enabled
-        ? "Add one or more local files to start the investigation."
+        ? attachmentConfig?.enabled
+          ? "Attach one or more files to start the investigation."
+          : "Add one or more local files to start the investigation."
         : "Sign in to start analyzing local files.");
 
   useEffect(() => {
@@ -893,6 +1294,7 @@ export function ChatKitPane({
           clientTools={clientTools}
           onEffects={onEffects}
           onSelectAgent={onSelectAgent}
+          defaultAgentId={defaultAgentId}
           onReplaceAgentResources={onReplaceAgentResources}
           headerTitle={headerTitle}
           greeting={greeting}
@@ -908,6 +1310,15 @@ export function ChatKitPane({
           composerToolIds={composerToolIds}
           onToolActivity={onToolActivity}
           onRunStart={onRunStart}
+          attachmentConfig={attachmentConfig}
+          onAddAttachments={onAddAttachments}
+          onRemoveAgentResource={onRemoveAgentResource}
+          onSelectTourScenario={onSelectTourScenario}
+          tourLauncher={tourLauncher}
+          onDismissTourLauncher={onDismissTourLauncher}
+          onSubmitTourSelection={onSubmitTourSelection}
+          scheduledPrompt={scheduledPrompt}
+          onScheduledPromptDispatched={onScheduledPromptDispatched}
         />
       ) : (
         <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">
@@ -919,3 +1330,74 @@ export function ChatKitPane({
     </ChatKitPaneCard>
   );
 }
+
+const TourLauncherCard = styled.section`
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 242, 235, 0.88)),
+    rgba(255, 255, 255, 0.84);
+  box-shadow: 0 14px 32px rgba(32, 26, 20, 0.08);
+`;
+
+const TourLauncherEyebrow = styled.div`
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+`;
+
+const TourLauncherTitle = styled.h3`
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.1;
+  color: var(--ink);
+`;
+
+const TourLauncherSummary = styled.p`
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.45;
+`;
+
+const TourLauncherMeta = styled.p`
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+`;
+
+const TourLauncherActions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.12rem;
+`;
+
+const TourLauncherButton = styled.button`
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+
+  &:hover:enabled {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.98);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+`;

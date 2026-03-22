@@ -121,7 +121,7 @@ vi.mock("../../lib/dev-logging", () => ({
     clientToolError: vi.fn(),
     clientToolStart: vi.fn(),
     clientToolSuccess: vi.fn(),
-    demoState: vi.fn(),
+    tourState: vi.fn(),
     responseEnd: vi.fn(),
     responseStart: vi.fn(),
     workspaceEvent: vi.fn(),
@@ -134,7 +134,7 @@ import {
   agricultureAgentDefinition,
   analysisAgentDefinition,
   documentAgentDefinition,
-  helpAgentDefinition,
+  defaultAgentDefinition,
   reportAgentDefinition,
 } from "../../agents/definitions";
 import type { LocalWorkspaceFile } from "../../types/report";
@@ -167,7 +167,7 @@ const agentBundle: AgentBundle = {
   agents: [
     {
       agent_id: "report-agent",
-      agent_name: "Report Agent",
+      agent_name: "Report",
       instructions: "Inspect files.",
       client_tools: [],
       delegation_targets: [],
@@ -192,6 +192,8 @@ const files: LocalWorkspaceFile[] = [
 
 const shellState: ShellStateMetadata = {
   version: "v1" as const,
+  context_id: "workspace-default",
+  context_name: "Workspace",
   active_agent_id: "report-agent",
   agents: [
     {
@@ -205,6 +207,7 @@ const shellState: ShellStateMetadata = {
     {
       id: "file_csv",
       owner_agent_id: "report-agent",
+      origin: "uploaded",
       kind: "dataset",
       title: "sales.csv",
       created_at: "2026-03-21T12:00:00.000Z",
@@ -402,9 +405,22 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(composer?.placeholder).toBe(analysisAgentDefinition.chatkitPlaceholder);
   });
 
+  it("keeps the top row hidden until there is useful status or an action to show", async () => {
+    await renderPane("");
+
+    expect(container.querySelector("[data-testid='chatkit-top-row']")).toBeNull();
+
+    await act(async () => {
+      latestHandlers?.onResponseStart?.();
+    });
+
+    expect(container.querySelector("[data-testid='chatkit-top-row']")).not.toBeNull();
+    expect(container.textContent).toContain("Agent run in progress.");
+  });
+
   it("can receive compact ChatKit copy for all core agent surfaces", async () => {
     const agents = [
-      helpAgentDefinition,
+      defaultAgentDefinition,
       reportAgentDefinition,
       analysisAgentDefinition,
       documentAgentDefinition,
@@ -427,18 +443,18 @@ describe("ChatKitHarness auto-scroll", () => {
 
   it("hides agent composer tools when the shared workspace drives mode selection", async () => {
     const bundleWithSpecialists: AgentBundle = {
-      root_agent_id: "help-agent",
+      root_agent_id: "default-agent",
       agents: [
         {
-          agent_id: "help-agent",
-          agent_name: "Help Agent",
+          agent_id: "default-agent",
+          agent_name: "Default",
           instructions: "Route work.",
           client_tools: [],
           delegation_targets: [],
         },
         {
           agent_id: "report-agent",
-          agent_name: "Report Agent",
+          agent_name: "Report",
           instructions: "Build reports.",
           client_tools: [
             {
@@ -456,7 +472,7 @@ describe("ChatKitHarness auto-scroll", () => {
         },
         {
           agent_id: "analysis-agent",
-          agent_name: "Analysis Agent",
+          agent_name: "Analysis",
           instructions: "Analyze data and coordinate charts.",
           client_tools: [
             {
@@ -477,7 +493,7 @@ describe("ChatKitHarness auto-scroll", () => {
         },
         {
           agent_id: "chart-agent",
-          agent_name: "Chart Agent",
+          agent_name: "Charts",
           instructions: "Render charts.",
           client_tools: [
             {
@@ -495,7 +511,7 @@ describe("ChatKitHarness auto-scroll", () => {
         },
         {
           agent_id: "document-agent",
-          agent_name: "Document Agent",
+          agent_name: "Documents",
           instructions: "Inspect PDFs.",
           client_tools: [
             {
@@ -513,7 +529,7 @@ describe("ChatKitHarness auto-scroll", () => {
         },
         {
           agent_id: "agriculture-agent",
-          agent_name: "Agriculture Agent",
+          agent_name: "Agriculture",
           instructions: "Inspect plant photos.",
           client_tools: [
             {
@@ -551,24 +567,24 @@ describe("ChatKitHarness auto-scroll", () => {
     expect(composer?.tools).toEqual([]);
   });
 
-  it("uses composer tool overrides to expose workspace agent switching and routes onToolChange", async () => {
+  it("uses composer tool overrides to expose workspace agent switching and resets to default after the specialist run settles", async () => {
     const onSelectAgent = vi.fn();
 
     await renderPane("", {
       agentBundle: {
-        root_agent_id: "help-agent",
+        root_agent_id: "default-agent",
         agents: [
           {
-            agent_id: "help-agent",
-            agent_name: "Help Agent",
+            agent_id: "default-agent",
+            agent_name: "Default",
             instructions: "Route work.",
             client_tools: [],
             delegation_targets: [],
           },
         ],
       },
+      defaultAgentId: "default-agent",
       composerToolIds: [
-        "help-agent",
         "report-agent",
         "analysis-agent",
         "chart-agent",
@@ -593,12 +609,11 @@ describe("ChatKitHarness auto-scroll", () => {
       label: tool.label,
       persistent: tool.persistent,
     }))).toEqual([
-      { id: "help-agent", label: "Help", persistent: true },
-      { id: "report-agent", label: "Report", persistent: true },
-      { id: "analysis-agent", label: "Analysis", persistent: true },
-      { id: "chart-agent", label: "Charts", persistent: true },
-      { id: "document-agent", label: "Documents", persistent: true },
-      { id: "agriculture-agent", label: "Agriculture", persistent: true },
+      { id: "report-agent", label: "Report", persistent: false },
+      { id: "analysis-agent", label: "Analysis", persistent: false },
+      { id: "chart-agent", label: "Charts", persistent: false },
+      { id: "document-agent", label: "Documents", persistent: false },
+      { id: "agriculture-agent", label: "Agriculture", persistent: false },
     ]);
 
     await act(async () => {
@@ -606,18 +621,54 @@ describe("ChatKitHarness auto-scroll", () => {
     });
 
     expect(onSelectAgent).toHaveBeenCalledWith("report-agent");
+
+    await renderPane("", {
+      agentBundle: {
+        root_agent_id: "report-agent",
+        agents: [
+          {
+            agent_id: "report-agent",
+            agent_name: "Report",
+            instructions: "Build reports.",
+            client_tools: [],
+            delegation_targets: [],
+          },
+        ],
+      },
+      defaultAgentId: "default-agent",
+      composerToolIds: [
+        "report-agent",
+        "analysis-agent",
+        "chart-agent",
+        "document-agent",
+        "agriculture-agent",
+      ],
+      onSelectAgent,
+    });
+
+    await act(async () => {
+      latestHandlers?.onToolChange?.({ toolId: null });
+    });
+
+    expect(onSelectAgent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestHandlers?.onResponseEnd?.();
+    });
+
+    expect(onSelectAgent).toHaveBeenLastCalledWith("default-agent");
   });
 
   it("renders quick actions in the header row when the custom feedback button is removed", async () => {
     await renderPane("", {
-      quickActions: [{ label: "Run demo", prompt: "Run the scripted walkthrough." }],
+      quickActions: [{ label: "Run tour", prompt: "Run the scripted walkthrough." }],
       showChatKitHeader: false,
     });
 
     const controls = container.querySelector("[data-testid='chatkit-header-controls']");
     const buttonLabels = Array.from(controls?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim());
 
-    expect(buttonLabels).toEqual(["Run demo"]);
+    expect(buttonLabels).toEqual(["Run tour"]);
     expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
   });
 
@@ -625,7 +676,7 @@ describe("ChatKitHarness auto-scroll", () => {
     await renderPane("", {
       quickActions: [
         {
-          label: "Run demo",
+          label: "Run tour",
           prompt: "Run the scripted walkthrough.",
         },
       ],
@@ -633,12 +684,12 @@ describe("ChatKitHarness auto-scroll", () => {
     });
 
     const sendUserMessage = latestChatKitApi?.sendUserMessage as ReturnType<typeof vi.fn> | undefined;
-    const runDemoButton = container.querySelector(
-      "[data-testid='chatkit-quick-action-run-demo']",
+    const runTourButton = container.querySelector(
+      "[data-testid='chatkit-quick-action-run-tour']",
     ) as HTMLButtonElement | null;
 
     await act(async () => {
-      runDemoButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      runTourButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(sendUserMessage).toHaveBeenNthCalledWith(1, {
@@ -648,12 +699,275 @@ describe("ChatKitHarness auto-scroll", () => {
     });
 
     await act(async () => {
-      latestHandlers?.onThreadChange?.({ threadId: "thread_demo" });
+      latestHandlers?.onThreadChange?.({ threadId: "thread_tour" });
       latestHandlers?.onResponseStart?.();
       latestHandlers?.onResponseEnd?.();
     });
 
     expect(sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the inline guided tour launcher and lets the user cancel it", async () => {
+    const onDismissTourLauncher = vi.fn();
+
+    await renderPane("", {
+      files: [],
+      tourLauncher: {
+        type: "tour_requested",
+        scenarioId: "report-tour",
+        title: "Report tour",
+        summary: "Create one chart-backed report slide.",
+        workspaceName: "Report tour",
+        targetAgentId: "report-agent",
+        uploadConfig: {
+          accept: {
+            "text/csv": [".csv"],
+            "application/pdf": [".pdf"],
+          },
+          max_count: 4,
+          helper_text: "Upload one or more reporting inputs.",
+        },
+        defaultAssetCount: 2,
+      },
+      onDismissTourLauncher,
+    });
+
+    expect(container.textContent).toContain("Guided Tour");
+    expect(container.textContent).toContain("Report tour");
+    expect(container.textContent).toContain("Upload one or more reporting inputs.");
+    expect(container.textContent).toContain("Built-in default: 2 files.");
+
+    const cancelButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Cancel",
+    );
+
+    await act(async () => {
+      cancelButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onDismissTourLauncher).toHaveBeenCalledOnce();
+  });
+
+  it("opens the selected tour scenario from a ChatKit tour-picker widget action", async () => {
+    const onSelectTourScenario = vi.fn(async () => undefined);
+
+    await renderPane("", {
+      onSelectTourScenario,
+    });
+
+    const onAction = (
+      latestChatKitOptions?.widgets as
+        | {
+            onAction?: (
+              action: { type: string; payload?: Record<string, unknown> },
+              widgetItem: { id: string },
+            ) => Promise<void>;
+          }
+        | undefined
+    )?.onAction;
+
+    await act(async () => {
+      await onAction?.(
+        {
+          type: "submit_tour_picker",
+          payload: {
+            scenario_id: "report-tour",
+          },
+        },
+        {
+          id: "widget_tour_picker",
+        },
+      );
+    });
+
+    expect(onSelectTourScenario).toHaveBeenCalledWith("report-tour");
+    expect(latestChatKitApi?.sendCustomAction).toHaveBeenCalledWith(
+      {
+        type: "submit_tour_picker",
+        payload: {
+          scenario_id: "report-tour",
+        },
+      },
+      "widget_tour_picker",
+    );
+  });
+
+  it("forwards tour-picker cancel actions without opening a launcher", async () => {
+    const onSelectTourScenario = vi.fn(async () => undefined);
+
+    await renderPane("", {
+      onSelectTourScenario,
+    });
+
+    const onAction = (
+      latestChatKitOptions?.widgets as
+        | {
+            onAction?: (
+              action: { type: string; payload?: Record<string, unknown> },
+              widgetItem: { id: string },
+            ) => Promise<void>;
+          }
+        | undefined
+    )?.onAction;
+
+    await act(async () => {
+      await onAction?.(
+        {
+          type: "cancel_tour_picker",
+          payload: {},
+        },
+        {
+          id: "widget_tour_picker",
+        },
+      );
+    });
+
+    expect(onSelectTourScenario).not.toHaveBeenCalled();
+    expect(latestChatKitApi?.sendCustomAction).toHaveBeenCalledWith(
+      {
+        type: "cancel_tour_picker",
+        payload: {},
+      },
+      "widget_tour_picker",
+    );
+  });
+
+  it("opens the hidden file picker and submits uploaded guided-tour files", async () => {
+    const onSubmitTourSelection = vi.fn(async () => undefined);
+    const inputClickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+
+    await renderPane("", {
+      files: [],
+      tourLauncher: {
+        type: "tour_requested",
+        scenarioId: "report-tour",
+        title: "Report tour",
+        summary: "Create one chart-backed report slide.",
+        workspaceName: "Report tour",
+        targetAgentId: "report-agent",
+        uploadConfig: {
+          accept: {
+            "text/csv": [".csv"],
+            "application/pdf": [".pdf"],
+          },
+          max_count: 4,
+          helper_text: "Upload one or more reporting inputs.",
+        },
+        defaultAssetCount: 2,
+      },
+      onSubmitTourSelection,
+    });
+
+    const uploadButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Upload your own file(s)",
+    );
+    const fileInput = container.querySelector(
+      "[data-testid='chatkit-tour-file-input']",
+    ) as HTMLInputElement | null;
+
+    expect(fileInput?.getAttribute("accept")).toBe("text/csv,.csv,application/pdf,.pdf");
+    expect(fileInput?.multiple).toBe(true);
+
+    await act(async () => {
+      uploadButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(inputClickSpy).toHaveBeenCalled();
+
+    const upload = new File(["region,revenue\nWest,120\n"], "sales.csv", {
+      type: "text/csv",
+    });
+    Object.defineProperty(fileInput, "files", {
+      configurable: true,
+      value: [upload],
+    });
+
+    await act(async () => {
+      fileInput?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(onSubmitTourSelection).toHaveBeenCalledWith({
+      scenarioId: "report-tour",
+      source: "upload",
+      files: [upload],
+    });
+  });
+
+  it("submits the built-in default guided-tour option", async () => {
+    const onSubmitTourSelection = vi.fn(async () => undefined);
+
+    await renderPane("", {
+      files: [],
+      tourLauncher: {
+        type: "tour_requested",
+        scenarioId: "document-tour",
+        title: "Document tour",
+        summary: "Inspect a PDF and produce a useful smart split.",
+        workspaceName: "Document tour",
+        targetAgentId: "document-agent",
+        uploadConfig: {
+          accept: {
+            "application/pdf": [".pdf"],
+          },
+          max_count: 1,
+          helper_text: "Upload a single PDF to inspect and split.",
+        },
+        defaultAssetCount: 1,
+      },
+      onSubmitTourSelection,
+    });
+
+    const defaultButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Use built-in default",
+    );
+    const fileInput = container.querySelector(
+      "[data-testid='chatkit-tour-file-input']",
+    ) as HTMLInputElement | null;
+
+    expect(fileInput?.getAttribute("accept")).toBe("application/pdf,.pdf");
+    expect(fileInput?.multiple).toBe(false);
+
+    await act(async () => {
+      defaultButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onSubmitTourSelection).toHaveBeenCalledWith({
+      scenarioId: "document-tour",
+      source: "default",
+    });
+  });
+
+  it("auto-dispatches a scheduled guided-tour prompt into a fresh thread", async () => {
+    const onScheduledPromptDispatched = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <ChatKitHarness
+          agentBundle={agentBundle}
+          files={files}
+          shellState={shellState}
+          investigationBrief=""
+          clientTools={[]}
+          onEffects={() => {}}
+          scheduledPrompt={{
+            id: "tour:report-tour:1",
+            prompt: "Start the report tour in the current workspace.",
+            model: "balanced",
+            agentId: "report-agent",
+          }}
+          onScheduledPromptDispatched={onScheduledPromptDispatched}
+        />,
+      );
+    });
+
+    const sendUserMessage = latestChatKitApi?.sendUserMessage as ReturnType<typeof vi.fn> | undefined;
+
+    expect(sendUserMessage).toHaveBeenCalledWith({
+      text: "Start the report tour in the current workspace.",
+      model: "balanced",
+      newThread: true,
+    });
+    expect(onScheduledPromptDispatched).toHaveBeenCalledWith("tour:report-tour:1");
   });
 
   it("does not render a custom feedback control in the top row", async () => {

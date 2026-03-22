@@ -1,13 +1,15 @@
 import { encodeBytesToBase64 } from "../../lib/base64";
 import { parseCsvText } from "../../lib/csv";
+import { getFileExtension, buildWorkspaceFile } from "../../lib/workspace-files";
 import { parseJsonText } from "../../lib/json";
+import { normalizeImageMimeType } from "../../lib/image";
 import type {
   LocalDataset,
   LocalImageFile,
   LocalPdfFile,
 } from "../../types/report";
 
-export function buildCsvDemoFile(id: string, name: string, csvText: string): LocalDataset {
+export function buildCsvTourFile(id: string, name: string, csvText: string): LocalDataset {
   const preview = parseCsvText(csvText);
   return {
     id,
@@ -25,7 +27,7 @@ export function buildCsvDemoFile(id: string, name: string, csvText: string): Loc
   };
 }
 
-export function buildJsonDemoFile(id: string, name: string, jsonText: string): LocalDataset {
+export function buildJsonTourFile(id: string, name: string, jsonText: string): LocalDataset {
   const preview = parseJsonText(jsonText);
   return {
     id,
@@ -44,7 +46,7 @@ export function buildJsonDemoFile(id: string, name: string, jsonText: string): L
   };
 }
 
-export function buildImageDemoFile(options: {
+export function buildImageTourFile(options: {
   id: string;
   name: string;
   mime_type: string;
@@ -65,7 +67,46 @@ export function buildImageDemoFile(options: {
   };
 }
 
-export async function buildPdfDemoFile(options: {
+export async function buildPublicImageTourFile(options: {
+  id: string;
+  public_path: string;
+  name?: string;
+  mime_type?: string;
+}): Promise<LocalImageFile> {
+  const publicPath = options.public_path.startsWith("/")
+    ? options.public_path
+    : `/${options.public_path}`;
+  const publicUrl = encodeURI(publicPath);
+  const response = await fetch(publicUrl);
+  if (!response.ok) {
+    throw new Error(`Unable to load tour image: ${publicPath}`);
+  }
+
+  const filename =
+    options.name?.trim() ||
+    decodeURIComponent(publicPath.split("/").at(-1) ?? options.id);
+  const extension = getFileExtension(filename);
+  const blob = await response.blob();
+  const file = new File([blob], filename, {
+    type:
+      options.mime_type?.trim() ||
+      blob.type ||
+      normalizeImageMimeType(undefined, extension),
+  });
+  const workspaceFile = await buildWorkspaceFile(file);
+
+  if (workspaceFile.kind !== "image") {
+    throw new Error(`Expected tour asset ${publicPath} to resolve to an image file.`);
+  }
+
+  return {
+    ...workspaceFile,
+    id: options.id,
+    name: filename,
+  };
+}
+
+export async function buildPdfTourFile(options: {
   id: string;
   name: string;
   pages: Array<{ title: string; body: string[] }>;

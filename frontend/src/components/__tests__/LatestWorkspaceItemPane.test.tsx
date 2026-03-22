@@ -22,7 +22,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 const sourceCsv: LocalWorkspaceFile = {
   id: "sales-file",
-  name: "sales_demo.csv",
+  name: "sales_tour.csv",
   kind: "csv",
   extension: "csv",
   mime_type: "text/csv",
@@ -151,7 +151,7 @@ describe("LatestWorkspaceItemPane", () => {
             bucket: "chart",
             source: "derived",
             producerKey: "chart-agent",
-            producerLabel: "Chart Agent",
+            producerLabel: "Charts",
           },
         ],
         currentReport: null,
@@ -189,7 +189,7 @@ describe("LatestWorkspaceItemPane", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("Preview: sales_demo.csv");
+    expect(container.textContent).toContain("Preview: sales_tour.csv");
 
     await act(async () => {
       root.render(
@@ -205,7 +205,7 @@ describe("LatestWorkspaceItemPane", () => {
               bucket: "chart",
               source: "derived",
               producerKey: "chart-agent",
-              producerLabel: "Chart Agent",
+              producerLabel: "Charts",
             },
           ]}
           files={[sourceCsv, chartFile]}
@@ -288,7 +288,7 @@ describe("LatestWorkspaceItemPane", () => {
     const chartImage = container.querySelector("img[alt='Revenue by region']");
     expect(chartImage).not.toBeNull();
     expect(chartImage?.getAttribute("src")).toContain("chart-preview-from-artifact");
-    expect(container.textContent).toContain("Source file: sales_demo.csv.");
+    expect(container.textContent).toContain("Source file: sales_tour.csv.");
   });
 
   it("shows a pending source preview while the tool is still working from the current latest item", async () => {
@@ -316,6 +316,6 @@ describe("LatestWorkspaceItemPane", () => {
     });
 
     expect(container.textContent).toContain("Render Chart From Dataset in progress.");
-    expect(container.textContent).toContain("Preview: sales_demo.csv");
+    expect(container.textContent).toContain("Preview: sales_tour.csv");
   });
 });

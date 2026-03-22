@@ -107,7 +107,7 @@ def _agent_bundle() -> dict[str, object]:
         "agents": [
             {
                 "agent_id": "report-agent",
-                "agent_name": "Report Agent",
+                "agent_name": "Report",
                 "instructions": "Execute the plan.",
                 "client_tools": [],
                 "delegation_targets": [],
@@ -407,3 +407,54 @@ def test_plan_execution_waits_for_client_tool_output_before_judging(
     assert judge_call_count["value"] == 0
     assert active_plan_execution(thread.metadata) is not None
     assert events == []
+
+
+class _StatusCodeError(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"status={status_code}")
+        self.status_code = status_code
+
+
+def test_should_retry_exception_skips_non_retryable_4xx() -> None:
+    server = object.__new__(ClientWorkspaceChatKitServer)
+
+    assert (
+        ClientWorkspaceChatKitServer._should_retry_exception(
+            server,
+            _StatusCodeError(400),
+        )
+        is False
+    )
+    assert (
+        ClientWorkspaceChatKitServer._should_retry_exception(
+            server,
+            _StatusCodeError(422),
+        )
+        is False
+    )
+
+
+def test_should_retry_exception_keeps_retryable_status_codes() -> None:
+    server = object.__new__(ClientWorkspaceChatKitServer)
+
+    assert (
+        ClientWorkspaceChatKitServer._should_retry_exception(
+            server,
+            _StatusCodeError(429),
+        )
+        is True
+    )
+    assert (
+        ClientWorkspaceChatKitServer._should_retry_exception(
+            server,
+            _StatusCodeError(500),
+        )
+        is True
+    )
+    assert (
+        ClientWorkspaceChatKitServer._should_retry_exception(
+            server,
+            RuntimeError("network jitter"),
+        )
+        is True
+    )

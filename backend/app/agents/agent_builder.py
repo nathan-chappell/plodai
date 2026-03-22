@@ -175,8 +175,11 @@ def _build_agent_graph(
         client_tools = agent_spec.get("client_tools", [])
         tool_names = get_client_tool_names(client_tools)
         stop_at_tool_names = [
-            *tool_names,
-            *tool_stop_overrides.get(agent_id, []),
+            tool_name
+            for tool_name in [
+                *tool_names,
+                *tool_stop_overrides.get(agent_id, []),
+            ]
         ]
         compiled_tools = list(
             build_agent_tools(

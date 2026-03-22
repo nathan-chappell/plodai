@@ -1264,6 +1264,8 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
   max-width: 100%;
   flex: 1 1 ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   border-radius: var(--radius-lg);
   overflow: auto;
   overscroll-behavior: contain;
@@ -1272,9 +1274,11 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
 
   openai-chatkit {
     display: block;
+    flex: 1 1 auto;
     width: 100%;
     max-width: 100%;
     min-width: 0;
+    min-height: 100%;
   }
 
   @media (max-width: 1180px) {
@@ -1289,6 +1293,7 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
 
 export const ChatKitPaneEmpty = styled.div`
   ${emptyStateCss};
+  flex: 1 1 auto;
   min-height: inherit;
   color: rgba(248, 246, 242, 0.74);
   padding: 1rem;

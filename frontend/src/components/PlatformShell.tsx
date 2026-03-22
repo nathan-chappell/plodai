@@ -3,56 +3,36 @@ import styled from "styled-components";
 
 import { AuthPanel } from "./AuthPanel";
 import type { AgentDefinition } from "../agents/types";
-import { PlatformThemeProvider } from "./platformTheme";
-import {
-  PlatformEyebrow,
-  PlatformMain,
-  PlatformPage,
-} from "./styles";
-
-function BrandMark() {
-  return (
-    <svg aria-hidden="true" fill="none" viewBox="0 0 20 20">
-      <rect x="3.5" y="4.25" width="13" height="11.5" rx="3" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M6.25 8.25h7.5M6.25 11h5.25"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
+import { getAgentDefinition } from "../agents/definitions";
+import { hasAgentTheme, PlatformThemeProvider } from "./platformTheme";
+import { PlatformMain, PlatformPage } from "./styles";
 
 export function PlatformShell({
-  agents,
-  activeAgentId,
+  agents: _agents,
+  activeAgentId: _activeAgentId,
+  themeAgentId,
   onSelectAgent: _onSelectAgent,
   children,
 }: {
   agents: AgentDefinition[];
   activeAgentId: string | null;
+  themeAgentId?: string | null;
   onSelectAgent: (path: string) => void;
   children: ReactNode;
 }) {
-  const activeAgent = agents.find((agent) => agent.id === activeAgentId) ?? null;
-  const shellTitle = activeAgent?.id === "help-agent" ? "Workspace" : activeAgent?.title ?? "Workspace";
+  const themedAgent = themeAgentId ? getAgentDefinition(themeAgentId) : null;
+  const modeLabel = themedAgent && hasAgentTheme(themedAgent.id) ? themedAgent.title : null;
 
   return (
-    <PlatformThemeProvider>
+    <PlatformThemeProvider agentId={themeAgentId}>
       <PlatformPage>
         <ShellFrame>
           <TopChrome>
             <TopChromeRow>
               <BrandCluster>
                 <BrandBlock>
-                  <BrandGlyph>
-                    <BrandMark />
-                  </BrandGlyph>
-                  <BrandTextBlock>
-                    <PlatformEyebrow>AI Portfolio</PlatformEyebrow>
-                    <BrandTitle>{shellTitle}</BrandTitle>
-                  </BrandTextBlock>
+                  <BrandTitle>AI Portfolio</BrandTitle>
+                  {modeLabel ? <BrandModePill>{modeLabel}</BrandModePill> : null}
                 </BrandBlock>
               </BrandCluster>
 
@@ -62,14 +42,6 @@ export function PlatformShell({
                 </AccountShell>
               </TopActions>
             </TopChromeRow>
-
-            <MobileUtilityWrap>
-              <MobileUtilityPanel>
-                <MobileAccountShell>
-                  <AuthPanel mode="account" blendWithShell compact />
-                </MobileAccountShell>
-              </MobileUtilityPanel>
-            </MobileUtilityWrap>
           </TopChrome>
 
           <PlatformMain>{children}</PlatformMain>
@@ -142,56 +114,42 @@ const BrandCluster = styled.div`
 `;
 
 const BrandBlock = styled.div`
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.62rem;
+  display: flex;
   align-items: center;
+  gap: 0.62rem;
+  min-width: 0;
 
   @media (max-width: 740px) {
     gap: 0.52rem;
   }
 `;
 
-const BrandGlyph = styled.div`
-  width: 1.7rem;
-  height: 1.7rem;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 12%, white 88%);
-  color: var(--accent-deep);
-
-  svg {
-    width: 0.92rem;
-    height: 0.92rem;
-  }
-
-  @media (max-width: 740px) {
-    width: 1.62rem;
-    height: 1.62rem;
-    border-radius: 11px;
-
-    svg {
-      width: 0.84rem;
-      height: 0.84rem;
-    }
-  }
-`;
-
-const BrandTextBlock = styled.div`
-  display: grid;
-  gap: 0.08rem;
-`;
-
 const BrandTitle = styled.h1`
   margin: 0;
-  font-size: clamp(0.98rem, 1.3vw, 1.18rem);
+  font-size: clamp(1.02rem, 1.35vw, 1.2rem);
   line-height: 1.02;
   color: var(--ink);
+  letter-spacing: -0.02em;
 
   @media (max-width: 740px) {
-    font-size: 0.92rem;
+    font-size: 0.94rem;
   }
+`;
+
+const BrandModePill = styled.div`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.85rem;
+  padding: 0.36rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, rgba(31, 41, 55, 0.08));
+  background: color-mix(in srgb, var(--accent) 10%, white 90%);
+  color: var(--accent-deep);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
 `;
 
 const TopActions = styled.div`
@@ -216,28 +174,5 @@ const AccountShell = styled.div`
 
   @media (max-width: 740px) {
     width: 100%;
-  }
-`;
-
-const MobileUtilityWrap = styled.div`
-  display: none;
-
-  @media (max-width: 740px) {
-    display: block;
-    margin-top: 0.42rem;
-  }
-`;
-
-const MobileUtilityPanel = styled.div`
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.12rem 0 0;
-`;
-
-const MobileAccountShell = styled.div`
-  width: 100%;
-
-  > div {
-    padding: 0;
   }
 `;

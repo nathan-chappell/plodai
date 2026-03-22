@@ -5,7 +5,12 @@ from typing import Any, Literal, Sequence, TypedDict
 from chatkit.actions import ActionConfig
 
 from backend.app.chatkit.feedback_types import ChatItemFeedbackRecord
-from backend.app.chatkit.metadata import AgentPlan, PendingFeedbackSession
+from backend.app.chatkit.metadata import (
+    AgentPlan,
+    PendingFeedbackSession,
+    TourPickerDisplayScenario,
+    TourPickerDisplaySpec,
+)
 
 
 class WidgetStatus(TypedDict):
@@ -440,6 +445,67 @@ def build_feedback_saved_copy_text(feedback: ChatItemFeedbackRecord) -> str:
     return f"Feedback saved. Sentiment: {sentiment}. Message: {message}"
 
 
+def build_tour_picker_widget(
+    picker: TourPickerDisplaySpec,
+) -> WidgetRoot:
+    children: list[WidgetComponent] = [
+        _badge_widget("Guided Tour", color="discovery"),
+        _title_widget(picker["title"], size="sm"),
+        _text_widget(picker["summary"], size="sm"),
+        _divider_widget(spacing=4),
+        _label_widget("Tour", field_name="scenario_id"),
+        _radio_group_widget(
+            "scenario_id",
+            options=[
+                {
+                    "label": _tour_picker_option_label(scenario),
+                    "value": scenario["scenario_id"],
+                }
+                for scenario in picker["scenarios"]
+            ],
+            default_value=picker["scenarios"][0]["scenario_id"],
+        ),
+    ]
+
+    for scenario in picker["scenarios"]:
+        children.extend(
+            [
+                _divider_widget(spacing=4),
+                _text_widget(scenario["title"], size="sm", weight="semibold"),
+                _caption_widget(scenario["summary"], size="sm"),
+                _caption_widget(
+                    _tour_picker_default_assets_copy(scenario["default_asset_count"]),
+                    size="sm",
+                ),
+            ]
+        )
+
+    return {
+        "type": "Card",
+        "size": "md",
+        "padding": "8px",
+        "asForm": True,
+        "status": {"text": "Guided tour", "icon": "compass"},
+        "children": [_col_widget(children, gap="4px")],
+        "confirm": {
+            "label": "Open launcher",
+            "action": _client_action("submit_tour_picker", {}),
+        },
+        "cancel": {
+            "label": "Cancel",
+            "action": _client_action("cancel_tour_picker", {}),
+        },
+    }
+
+
+def build_tour_picker_copy_text(picker: TourPickerDisplaySpec) -> str:
+    scenario_titles = ", ".join(
+        scenario["title"] for scenario in picker["scenarios"][:3]
+    )
+    suffix = "" if len(picker["scenarios"]) <= 3 else ", ..."
+    return f"{picker['title']}: {scenario_titles}{suffix}"
+
+
 def build_feedback_capture_copy_text(feedback: ChatItemFeedbackRecord) -> str:
     item_ids = ", ".join(feedback.item_ids) or "latest assistant response"
     return f"Feedback capture form for {item_ids}."
@@ -619,3 +685,18 @@ def _client_action(action_type: str, payload: dict[str, Any]) -> dict[str, objec
         loadingBehavior="container",
     )
     return config.model_dump(mode="json", exclude_none=True)
+
+
+def _tour_picker_option_label(
+    scenario: TourPickerDisplayScenario,
+) -> str:
+    default_assets = scenario["default_asset_count"]
+    return (
+        f"{scenario['title']} ({default_assets} built-in default file"
+        f"{'' if default_assets == 1 else 's'})"
+    )
+
+
+def _tour_picker_default_assets_copy(default_asset_count: int) -> str:
+    suffix = "" if default_asset_count == 1 else "s"
+    return f"Built-in default: {default_asset_count} file{suffix}."

@@ -8,6 +8,16 @@ let chatKitMetadataGetter: (() => Record<string, unknown> | null) | null = null;
 let chatKitNativeFeedbackHandler:
   | ((payload: ChatKitNativeFeedbackPayload) => Promise<void> | void)
   | null = null;
+let chatKitAttachmentHandler:
+  | ((payload: ChatKitAttachmentCreatePayload) => Promise<ChatKitAttachmentResult> | ChatKitAttachmentResult)
+  | null = null;
+let chatKitAttachmentDeleteHandler:
+  | ((payload: ChatKitLocalAttachmentRecord) => Promise<void> | void)
+  | null = null;
+
+type PendingChatKitLocalFile = {
+  file: File;
+};
 
 export type ChatKitNativeFeedbackKind = "positive" | "negative";
 
@@ -16,6 +26,29 @@ export type ChatKitNativeFeedbackPayload = {
   itemIds: string[];
   kind: ChatKitNativeFeedbackKind;
 };
+
+export type ChatKitAttachmentCreatePayload = {
+  attachmentId: string;
+  file: File;
+};
+
+export type ChatKitAttachmentResult = {
+  agentId: string;
+  resourceIds: string[];
+};
+
+export type ChatKitLocalAttachmentRecord = {
+  attachmentId: string;
+  agentId: string;
+  file: File;
+  mimeType: string;
+  name: string;
+  previewUrl: string | null;
+  resourceIds: string[];
+};
+
+const pendingChatKitFiles: PendingChatKitLocalFile[] = [];
+const localChatKitAttachments = new Map<string, ChatKitLocalAttachmentRecord>();
 
 export class ApiError extends Error {
   status: number;
@@ -41,6 +74,27 @@ export function setChatKitNativeFeedbackHandler(
   chatKitNativeFeedbackHandler = handler;
 }
 
+export function setChatKitAttachmentHandler(
+  handler:
+    | ((payload: ChatKitAttachmentCreatePayload) => Promise<ChatKitAttachmentResult> | ChatKitAttachmentResult)
+    | null,
+  deleteHandler:
+    | ((payload: ChatKitLocalAttachmentRecord) => Promise<void> | void)
+    | null = null,
+): void {
+  chatKitAttachmentHandler = handler;
+  chatKitAttachmentDeleteHandler = deleteHandler;
+  if (!handler) {
+    clearChatKitAttachmentState();
+  }
+}
+
+export function registerChatKitLocalFiles(files: Iterable<File>): void {
+  for (const file of files) {
+    pendingChatKitFiles.push({ file });
+  }
+}
+
 export function getChatKitConfig() {
   return {
     url: CHATKIT_URL,
@@ -56,13 +110,19 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
   }
 
   const nextInit = maybeAttachChatKitMetadata(input, init);
+  const interceptedAttachmentRequest = await maybeHandleChatKitAttachmentRequest(input, nextInit);
+  if (interceptedAttachmentRequest) {
+    return interceptedAttachmentRequest;
+  }
+
   const interceptedNativeFeedback = await maybeHandleChatKitNativeFeedback(input, nextInit);
   if (interceptedNativeFeedback) {
     return interceptedNativeFeedback;
   }
 
+  const forwardedInit = maybeStripChatKitLocalAttachments(input, nextInit);
   const response = await fetch(input, {
-    ...nextInit,
+    ...forwardedInit,
     headers,
   });
   if (response.status === 402) {
@@ -170,6 +230,65 @@ function maybeAttachChatKitMetadata(input: RequestInfo | URL, init?: RequestInit
   }
 }
 
+async function maybeHandleChatKitAttachmentRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response | null> {
+  if (!isChatKitRequest(input) || typeof init?.body !== "string") {
+    return null;
+  }
+
+  const createPayload = parseChatKitAttachmentCreateRequest(init.body);
+  if (createPayload) {
+    if (!chatKitAttachmentHandler) {
+      return buildJsonResponse(
+        { detail: "Local attachments are not available for this surface." },
+        400,
+      );
+    }
+
+    const file = consumePendingChatKitFile(createPayload);
+    if (!file) {
+      return buildJsonResponse(
+        { detail: "Unable to resolve the selected attachment locally." },
+        400,
+      );
+    }
+
+    const attachmentId = nextLocalAttachmentId();
+    const attachmentResult = await chatKitAttachmentHandler({
+      attachmentId,
+      file,
+    });
+    const previewUrl = buildAttachmentPreviewUrl(file);
+    const record: ChatKitLocalAttachmentRecord = {
+      attachmentId,
+      agentId: attachmentResult.agentId,
+      file,
+      mimeType: createPayload.mimeType,
+      name: createPayload.name,
+      previewUrl,
+      resourceIds: attachmentResult.resourceIds,
+    };
+    localChatKitAttachments.set(attachmentId, record);
+    return buildJsonResponse(serializeLocalAttachment(record));
+  }
+
+  const deletePayload = parseChatKitAttachmentDeleteRequest(init.body);
+  if (!deletePayload) {
+    return null;
+  }
+
+  const record = localChatKitAttachments.get(deletePayload.attachmentId);
+  if (!record) {
+    return buildJsonResponse({});
+  }
+
+  await chatKitAttachmentDeleteHandler?.(record);
+  releaseLocalAttachment(record);
+  return buildJsonResponse({});
+}
+
 async function maybeHandleChatKitNativeFeedback(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -184,12 +303,128 @@ async function maybeHandleChatKitNativeFeedback(
   }
 
   await chatKitNativeFeedbackHandler(payload);
-  return new Response("{}", {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
+  return buildJsonResponse({});
+}
+
+function maybeStripChatKitLocalAttachments(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): RequestInit | undefined {
+  if (!isChatKitRequest(input) || typeof init?.body !== "string") {
+    return init;
+  }
+
+  try {
+    const payload = JSON.parse(init.body) as {
+      type?: unknown;
+      params?: {
+        input?: {
+          attachments?: unknown;
+        };
+      };
+    };
+    if (
+      payload?.type !== "threads.create" &&
+      payload?.type !== "threads.add_user_message"
+    ) {
+      return init;
+    }
+
+    const attachments = Array.isArray(payload.params?.input?.attachments)
+      ? payload.params?.input?.attachments.filter((value): value is string => typeof value === "string")
+      : [];
+    if (!attachments.length) {
+      return init;
+    }
+
+    const localAttachmentIds = attachments.filter((attachmentId) =>
+      localChatKitAttachments.has(attachmentId),
+    );
+    if (!localAttachmentIds.length) {
+      return init;
+    }
+
+    const remainingAttachments = attachments.filter(
+      (attachmentId) => !localChatKitAttachments.has(attachmentId),
+    );
+    for (const attachmentId of localAttachmentIds) {
+      const record = localChatKitAttachments.get(attachmentId);
+      if (record) {
+        releaseLocalAttachment(record);
+      }
+    }
+
+    return {
+      ...init,
+      body: JSON.stringify({
+        ...payload,
+        params: {
+          ...payload.params,
+          input: {
+            ...payload.params?.input,
+            attachments: remainingAttachments,
+          },
+        },
+      }),
+    };
+  } catch {
+    return init;
+  }
+}
+
+function parseChatKitAttachmentCreateRequest(
+  body: string,
+): { name: string; size: number; mimeType: string } | null {
+  try {
+    const payload = JSON.parse(body) as {
+      type?: unknown;
+      params?: {
+        name?: unknown;
+        size?: unknown;
+        mime_type?: unknown;
+      };
+    };
+    if (payload?.type !== "attachments.create") {
+      return null;
+    }
+    const name = typeof payload.params?.name === "string" ? payload.params.name.trim() : "";
+    const size = typeof payload.params?.size === "number" ? payload.params.size : -1;
+    const mimeType =
+      typeof payload.params?.mime_type === "string" ? payload.params.mime_type.trim() : "";
+    if (!name || size < 0 || !mimeType) {
+      return null;
+    }
+    return {
+      name,
+      size,
+      mimeType,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseChatKitAttachmentDeleteRequest(
+  body: string,
+): { attachmentId: string } | null {
+  try {
+    const payload = JSON.parse(body) as {
+      type?: unknown;
+      params?: {
+        attachment_id?: unknown;
+      };
+    };
+    if (payload?.type !== "attachments.delete") {
+      return null;
+    }
+    const attachmentId =
+      typeof payload.params?.attachment_id === "string"
+        ? payload.params.attachment_id.trim()
+        : "";
+    return attachmentId ? { attachmentId } : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseChatKitNativeFeedbackPayload(body: string): ChatKitNativeFeedbackPayload | null {
@@ -245,4 +480,88 @@ function normalizeRequestPath(url: string): string {
   } catch {
     return url.replace(/\/$/, "");
   }
+}
+
+function matchesPendingFile(
+  file: File,
+  payload: { name: string; size: number; mimeType: string },
+): boolean {
+  if (file.name !== payload.name || file.size !== payload.size) {
+    return false;
+  }
+  if (!payload.mimeType) {
+    return true;
+  }
+  return !file.type || file.type === payload.mimeType;
+}
+
+function consumePendingChatKitFile(
+  payload: { name: string; size: number; mimeType: string },
+): File | null {
+  const matchingIndex = pendingChatKitFiles.findIndex(({ file }) => matchesPendingFile(file, payload));
+  if (matchingIndex < 0) {
+    return null;
+  }
+  const [record] = pendingChatKitFiles.splice(matchingIndex, 1);
+  return record?.file ?? null;
+}
+
+function nextLocalAttachmentId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `local_atc_${crypto.randomUUID()}`;
+  }
+  return `local_atc_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function buildAttachmentPreviewUrl(file: File): string | null {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+    return null;
+  }
+  return file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+}
+
+function serializeLocalAttachment(record: ChatKitLocalAttachmentRecord): Record<string, unknown> {
+  if (record.previewUrl) {
+    return {
+      type: "image",
+      id: record.attachmentId,
+      name: record.name,
+      mime_type: record.mimeType,
+      preview_url: record.previewUrl,
+      upload_descriptor: null,
+    };
+  }
+  return {
+    type: "file",
+    id: record.attachmentId,
+    name: record.name,
+    mime_type: record.mimeType,
+    upload_descriptor: null,
+  };
+}
+
+function releaseLocalAttachment(record: ChatKitLocalAttachmentRecord): void {
+  localChatKitAttachments.delete(record.attachmentId);
+  if (record.previewUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+    URL.revokeObjectURL(record.previewUrl);
+  }
+}
+
+function clearChatKitAttachmentState(): void {
+  pendingChatKitFiles.splice(0, pendingChatKitFiles.length);
+  for (const record of localChatKitAttachments.values()) {
+    if (record.previewUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+      URL.revokeObjectURL(record.previewUrl);
+    }
+  }
+  localChatKitAttachments.clear();
+}
+
+function buildJsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 }

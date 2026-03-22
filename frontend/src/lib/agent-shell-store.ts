@@ -1,74 +1,49 @@
 import { removeStoredValue, readStoredValue, writeStoredValue } from "./kv-store";
-import type { AgentShellState } from "../types/shell";
+import type { WorkspaceContextRecord } from "../types/shell";
 
-const SELECTED_AGENT_PREFIX = "shell:selected-agent:";
-const AGENT_STATE_PREFIX = "shell:agent-state:";
-const LEGACY_REPORT_FOUNDRY_PREFIX = "workspace:report-foundry:";
-const LEGACY_AGENT_PREFIX = "workspace:agent:";
-const LEGACY_WORKSPACE_DATABASE = "ai-portfolio-workspace";
+const ACTIVE_CONTEXT_PREFIX = "workspace-v1:active-context:";
+const WORKSPACE_CONTEXTS_PREFIX = "workspace-v1:contexts:";
 
-function selectedAgentKey(userId: string): string {
-  return `${SELECTED_AGENT_PREFIX}${userId}`;
+export const DEFAULT_WORKSPACE_CONTEXT_ID = "workspace-default";
+export const DEFAULT_WORKSPACE_CONTEXT_NAME = "Workspace";
+
+function activeContextKey(userId: string): string {
+  return `${ACTIVE_CONTEXT_PREFIX}${userId}`;
 }
 
-function agentStateKey(userId: string, agentId: string): string {
-  return `${AGENT_STATE_PREFIX}${agentId}:${userId}`;
+function workspaceContextsKey(userId: string): string {
+  return `${WORKSPACE_CONTEXTS_PREFIX}${userId}`;
 }
 
-export function loadSelectedAgentId(userId: string): Promise<string | null> {
-  return readStoredValue<string>(selectedAgentKey(userId));
-}
-
-export function saveSelectedAgentId(userId: string, agentId: string): Promise<void> {
-  return writeStoredValue(selectedAgentKey(userId), agentId);
-}
-
-export function loadAgentShellState(
+export function loadWorkspaceContexts(
   userId: string,
-  agentId: string,
-): Promise<AgentShellState | null> {
-  return readStoredValue<AgentShellState>(agentStateKey(userId, agentId));
+): Promise<WorkspaceContextRecord[] | null> {
+  return readStoredValue<WorkspaceContextRecord[]>(workspaceContextsKey(userId));
 }
 
-export function saveAgentShellState(
+export function saveWorkspaceContexts(
   userId: string,
-  agentId: string,
-  state: AgentShellState,
+  contexts: WorkspaceContextRecord[],
 ): Promise<void> {
-  return writeStoredValue(agentStateKey(userId, agentId), state);
+  return writeStoredValue(workspaceContextsKey(userId), contexts);
 }
 
-export function clearAgentShellState(
+export function loadActiveWorkspaceContextId(
   userId: string,
-  agentId: string,
-): Promise<void> {
-  return removeStoredValue(agentStateKey(userId, agentId));
+): Promise<string | null> {
+  return readStoredValue<string>(activeContextKey(userId));
 }
 
-export async function clearLegacyWorkspaceState(
+export function saveActiveWorkspaceContextId(
   userId: string,
-  agentIds: string[],
+  contextId: string,
 ): Promise<void> {
+  return writeStoredValue(activeContextKey(userId), contextId);
+}
+
+export async function clearWorkspaceStorage(userId: string): Promise<void> {
   await Promise.all([
-    removeStoredValue(`${LEGACY_REPORT_FOUNDRY_PREFIX}${userId}`),
-    ...agentIds.map((agentId) =>
-      removeStoredValue(`${LEGACY_AGENT_PREFIX}${agentId}:${userId}`),
-    ),
+    removeStoredValue(workspaceContextsKey(userId)),
+    removeStoredValue(activeContextKey(userId)),
   ]).catch(() => undefined);
-
-  await deleteIndexedDbDatabase(LEGACY_WORKSPACE_DATABASE).catch(() => undefined);
-}
-
-function deleteIndexedDbDatabase(name: string): Promise<void> {
-  if (typeof window === "undefined" || !("indexedDB" in window)) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve, reject) => {
-    const request = window.indexedDB.deleteDatabase(name);
-    request.onsuccess = () => resolve();
-    request.onblocked = () => resolve();
-    request.onerror = () =>
-      reject(request.error ?? new Error(`Failed to delete IndexedDB database ${name}.`));
-  });
 }

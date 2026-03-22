@@ -17,13 +17,13 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 const agents: AgentDefinition[] = [
   {
-    id: "help-agent",
+    id: "default-agent",
     path: "/workspace",
     navLabel: "Workspace",
-    title: "Workspace",
+    title: "Default",
     eyebrow: "Workspace",
-    description: "App orientation and demo launches.",
-    chatkitLead: "Explain the workspace and launch demos.",
+    description: "App orientation and guided tours.",
+    chatkitLead: "You are in the shared workspace. I can help you choose the right workflow or start a guided tour.",
     chatkitPlaceholder: "Ask what this app can do",
     tabs: [],
   },
@@ -64,7 +64,8 @@ describe("PlatformShell", () => {
       root.render(
         <PlatformShell
           agents={agents}
-          activeAgentId="help-agent"
+          activeAgentId="default-agent"
+          themeAgentId="document-agent"
           onSelectAgent={() => {}}
         >
           <div>child content</div>
@@ -73,7 +74,9 @@ describe("PlatformShell", () => {
     });
 
     expect(container.textContent).not.toContain("Browse");
-    expect(container.textContent).toContain("Workspace");
+    expect(container.textContent).toContain("AI Portfolio");
+    expect(container.textContent).toContain("Documents");
+    expect(container.textContent).not.toContain("Default");
     expect(container.textContent).not.toContain("Select an agent inside the workspace shell");
     expect(container.querySelector("[data-testid='workspace-feedback-button']")).toBeNull();
     expect(container.textContent).not.toContain("Files");

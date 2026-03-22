@@ -93,14 +93,14 @@ def test_build_tool_trace_widget_uses_explicit_title_when_provided() -> None:
 
 def test_build_handoff_trace_widget_and_copy_text_include_agents() -> None:
     widget = build_handoff_trace_widget(
-        source_agent_name="Report Agent",
-        target_agent_name="Chart Agent",
+        source_agent_name="Report",
+        target_agent_name="Charts",
         handoff_tool_name="delegate_to_chart_agent",
         summary="Delegate chart work.",
     )
     copy_text = build_handoff_trace_copy_text(
-        source_agent_name="Report Agent",
-        target_agent_name="Chart Agent",
+        source_agent_name="Report",
+        target_agent_name="Charts",
         handoff_tool_name="delegate_to_chart_agent",
         summary="Delegate chart work.",
     )
@@ -108,10 +108,10 @@ def test_build_handoff_trace_widget_and_copy_text_include_agents() -> None:
     assert widget["type"] == "Card"
     assert "status" not in widget
     text_values = collect_text_values(widget["children"])
-    assert "Report Agent -> Chart Agent" in text_values
+    assert "Report -> Charts" in text_values
     assert "Delegate chart work." not in text_values
     assert "Tool: delegate_to_chart_agent" not in text_values
-    assert copy_text == "Report Agent -> Chart Agent"
+    assert copy_text == "Report -> Charts"
 
 
 def test_build_workspace_context_widget_and_copy_text_include_paths() -> None:

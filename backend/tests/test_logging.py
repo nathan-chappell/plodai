@@ -63,7 +63,7 @@ def test_event_formatter_renders_multiline_fields() -> None:
         logging.INFO,
         "agent.agent_compiled",
         rendered=[
-            "Feedback Agent(Chart Agent):",
+            "Feedback(Charts):",
             "- create_report(title)",
         ],
         thread_id="thr_123",
@@ -72,7 +72,7 @@ def test_event_formatter_renders_multiline_fields() -> None:
 
     output = stream.getvalue()
     assert "agent.agent_compiled" in output
-    assert "\n > Feedback Agent(Chart Agent):" in output
+    assert "\n > Feedback(Charts):" in output
     assert "\n > - create_report(title)" in output
     assert "\n > thread_id=thr_123" in output
     assert "\n > status=ready" in output
@@ -171,6 +171,7 @@ def test_client_tool_output_received_log_uses_summaries() -> None:
     logger.propagate = False
     item = SimpleNamespace(
         status="completed",
+        arguments={"dataset_id": "sales_csv", "chart_type": "bar"},
         output={
             "row_count": 3,
             "rows": [{"region": "West"}],
@@ -190,7 +191,13 @@ def test_client_tool_output_received_log_uses_summaries() -> None:
         logger.removeHandler(handler)
     assert result is not None
     assert openai_client.files.calls
-    rich_output = result[0]["output"]
+    assert result[0] == {
+        "type": "function_call",
+        "call_id": "call_123",
+        "name": "render_chart_from_dataset",
+        "arguments": '{"dataset_id": "sales_csv", "chart_type": "bar"}',
+    }
+    rich_output = result[1]["output"]
     assert rich_output[1] == {
         "type": "input_image",
         "image_url": "data:image/png;base64,top-secret",
@@ -313,7 +320,13 @@ def test_client_tool_converter_uses_uploaded_file_ids() -> None:
     )
 
     assert result is not None
-    rich_output = result[0]["output"]
+    assert result[0] == {
+        "type": "function_call",
+        "call_id": "call_upload",
+        "name": "create_dataset",
+        "arguments": "{}",
+    }
+    rich_output = result[1]["output"]
     assert rich_output[1] == {
         "type": "input_file",
         "file_id": "file_uploaded_123",
@@ -429,7 +442,7 @@ def test_client_tool_schema_summary_surfaces_closed_required_optional_and_enum()
             "properties": {
                 "file_id": {
                     "type": "string",
-                    "enum": ["demo-board-pack"],
+                    "enum": ["tour-board-pack"],
                 },
                 "max_pages": {"type": "integer"},
             },
@@ -443,7 +456,7 @@ def test_client_tool_schema_summary_surfaces_closed_required_optional_and_enum()
     assert summary.schema_line == (
         "schema=closed strict=true required=file_id optional=max_pages?"
     )
-    assert summary.enum_line == 'enums=file_id="demo-board-pack"'
+    assert summary.enum_line == 'enums=file_id="tour-board-pack"'
     assert summary.schema_chars > 0
 
 
@@ -470,7 +483,7 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
         "agents": [
             {
                 "agent_id": "report-agent",
-                "agent_name": "Report Agent",
+                "agent_name": "Report",
                 "instructions": "Manage reports and delegate specialist work.",
                 "client_tools": [
                     {
@@ -498,7 +511,7 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
             },
             {
                 "agent_id": "chart-agent",
-                "agent_name": "Chart Agent",
+                "agent_name": "Charts",
                 "instructions": "Render charts.",
                 "client_tools": [],
                 "delegation_targets": [],
@@ -532,7 +545,7 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
 
     output = stream.getvalue()
     assert "agent.compiled" in output
-    assert "\n > Report Agent(Chart Agent):" in output
+    assert "\n > Report(Charts):" in output
     assert "\n > - name_current_thread(title)" in output
     assert "\n > - make_plan(" in output
     assert "\n > - create_report(title)" in output

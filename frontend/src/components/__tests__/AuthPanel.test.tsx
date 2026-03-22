@@ -14,7 +14,6 @@ vi.mock("@clerk/react", () => ({
 
 import { AppStateProvider } from "../../app/context";
 import { AuthPanel } from "../AuthPanel";
-import { PlatformThemeProvider } from "../platformTheme";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -40,7 +39,7 @@ describe("AuthPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows a compact theme trigger near account actions and opens the full popover", async () => {
+  it("shows account details without a theme settings control", async () => {
     await act(async () => {
       root.render(
         <AppStateProvider
@@ -59,28 +58,17 @@ describe("AuthPanel", () => {
             setUser: vi.fn(),
           }}
         >
-          <PlatformThemeProvider>
-            <AuthPanel mode="account" heading="Account" />
-          </PlatformThemeProvider>
+          <AuthPanel mode="account" heading="Account" />
         </AppStateProvider>,
       );
     });
 
-    const trigger = container.querySelector("[data-testid='account-theme-trigger']") as HTMLButtonElement | null;
-    expect(trigger).not.toBeNull();
-
-    await act(async () => {
-      trigger?.click();
-    });
-
-    expect(container.querySelector("[data-testid='account-theme-popover']")).not.toBeNull();
-    expect(container.textContent).toContain("Editorial");
-    expect(container.textContent).toContain("Coast");
-    expect(container.textContent).toContain("Ember");
-    expect(container.textContent).toContain("Light");
-    expect(container.textContent).toContain("Dark");
+    expect(container.querySelector("[data-testid='account-theme-trigger']")).toBeNull();
+    expect(container.querySelector("[data-testid='account-theme-popover']")).toBeNull();
+    expect(container.textContent).toContain("Nathan Chappell");
     expect(container.textContent).toContain("Balance $0.89");
     expect(container.textContent).toContain("Credits N/A");
-    expect(container.textContent).not.toContain("Admin agents");
+    expect(container.querySelector("[data-testid='mock-user-button']")).not.toBeNull();
+    expect(container.textContent).toContain("Sign out");
   });
 });

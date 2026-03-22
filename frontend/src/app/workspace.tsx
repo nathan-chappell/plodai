@@ -4,27 +4,25 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 
 import { useAppState } from "./context";
 import {
-  clearAgentShellState,
-  clearLegacyWorkspaceState,
-  loadAgentShellState,
-  loadSelectedAgentId,
-  saveAgentShellState,
-  saveSelectedAgentId,
+  loadActiveWorkspaceContextId,
+  loadWorkspaceContexts,
+  saveActiveWorkspaceContextId,
+  saveWorkspaceContexts,
 } from "../lib/agent-shell-store";
 import { buildShellStateMetadata } from "../lib/shell-metadata";
 import {
-  buildResourceFromFile,
   buildAgentPreviewModel,
+  buildResourceFromFile,
   createEmptyAgentShellState,
   listFileResources,
   normalizeAgentShellState,
+  removeAgentResource,
   replaceAgentResources,
   sortResources,
 } from "../lib/shell-resources";
@@ -37,16 +35,30 @@ import type {
   AgentResourceRecord,
   AgentShellState,
   ShellStateMetadata,
+  WorkspaceContextRecord,
 } from "../types/shell";
 
-const DEFAULT_AGENT_ID = "help-agent";
+const DEFAULT_AGENT_ID = "default-agent";
+const DEFAULT_CONTEXT_NAME = "Workspace";
 const PERSISTED_AGENT_IDS = runtimeAgentDefinitions
   .filter((agent) => agent.id !== "feedback-agent")
   .map((agent) => agent.id);
 
+type CreateContextOptions = {
+  agentId?: string;
+  name?: string;
+};
+
+type HandleSelectFilesOptions = {
+  contextId?: string;
+};
+
 type AgentShellContextValue = {
   currentUserId: string | null;
   hydrated: boolean;
+  contexts: WorkspaceContextRecord[];
+  activeContextId: string;
+  activeContextName: string;
   selectedAgentId: string;
   selectedAgentDefinition: AgentDefinition;
   selectedAgentState: AgentShellState;
@@ -56,20 +68,38 @@ type AgentShellContextValue = {
   sharedResources: AgentResourceRecord[];
   shellStateMetadata: ShellStateMetadata;
   selectAgent: (agentId: string) => void;
+  selectContextAndAgent: (contextId: string, agentId: string) => void;
+  createContext: (options?: CreateContextOptions) => string;
   getAgentState: (agentId: string) => AgentShellState;
   updateAgentState: (
     agentId: string,
     updater: (state: AgentShellState) => AgentShellState,
   ) => void;
   replaceAgentResources: (agentId: string, resources: AgentResourceRecord[]) => void;
+  removeAgentResource: (agentId: string, resourceId: string) => void;
   clearAgentState: (agentId: string) => void;
   clearSelectedAgentState: () => void;
-  handleSelectFiles: (agentId: string, files: FileList | null) => Promise<void>;
+  handleSelectFiles: (
+    agentId: string,
+    files: FileList | Iterable<File> | null | undefined,
+    options?: HandleSelectFilesOptions,
+  ) => Promise<LocalWorkspaceFile[]>;
   resolveResource: (resourceId: string) => AgentResourceRecord | null;
   getPreviewResources: (agentId: string) => AgentResourceRecord[];
 };
 
 const AgentShellContext = createContext<AgentShellContextValue | null>(null);
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function nextContextId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `workspace-${crypto.randomUUID()}`;
+  }
+  return `workspace-${Math.random().toString(36).slice(2, 12)}`;
+}
 
 function buildInitialStates(): Record<string, AgentShellState> {
   return Object.fromEntries(
@@ -92,24 +122,112 @@ function normalizeStates(
   );
 }
 
+function sortContexts(contexts: WorkspaceContextRecord[]): WorkspaceContextRecord[] {
+  return [...contexts].sort(
+    (left, right) =>
+      right.updated_at.localeCompare(left.updated_at) ||
+      left.name.localeCompare(right.name) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+function normalizeContextRecord(context: WorkspaceContextRecord): WorkspaceContextRecord {
+  const normalizedStates = normalizeStates(context.states_by_agent_id ?? buildInitialStates());
+  return {
+    ...context,
+    name:
+      typeof context.name === "string" && context.name.trim()
+        ? context.name.trim()
+        : DEFAULT_CONTEXT_NAME,
+    selected_agent_id: normalizeSelectedAgentId(context.selected_agent_id),
+    states_by_agent_id: normalizedStates,
+    created_at:
+      typeof context.created_at === "string" && context.created_at.trim()
+        ? context.created_at
+        : nowIso(),
+    updated_at:
+      typeof context.updated_at === "string" && context.updated_at.trim()
+        ? context.updated_at
+        : nowIso(),
+  };
+}
+
+function normalizeContexts(
+  contexts: WorkspaceContextRecord[] | null | undefined,
+): WorkspaceContextRecord[] {
+  if (!contexts?.length) {
+    const timestamp = nowIso();
+    return [
+      {
+        id: "workspace-default",
+        name: DEFAULT_CONTEXT_NAME,
+        selected_agent_id: DEFAULT_AGENT_ID,
+        states_by_agent_id: buildInitialStates(),
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ];
+  }
+  return sortContexts(contexts.map((context) => normalizeContextRecord(context)));
+}
+
+function normalizeActiveContextId(
+  contexts: WorkspaceContextRecord[],
+  activeContextId: string | null | undefined,
+): string {
+  return contexts.some((context) => context.id === activeContextId)
+    ? (activeContextId as string)
+    : contexts[0]?.id ?? "workspace-default";
+}
+
+function buildNextContextName(contexts: WorkspaceContextRecord[]): string {
+  const usedNames = new Set(contexts.map((context) => context.name.trim().toLowerCase()));
+  if (!usedNames.has(DEFAULT_CONTEXT_NAME.toLowerCase())) {
+    return DEFAULT_CONTEXT_NAME;
+  }
+  let suffix = 2;
+  while (usedNames.has(`${DEFAULT_CONTEXT_NAME.toLowerCase()} ${suffix}`)) {
+    suffix += 1;
+  }
+  return `${DEFAULT_CONTEXT_NAME} ${suffix}`;
+}
+
+function createWorkspaceContext(selectedAgentId: string, name: string): WorkspaceContextRecord {
+  const timestamp = nowIso();
+  return {
+    id: nextContextId(),
+    name,
+    selected_agent_id: normalizeSelectedAgentId(selectedAgentId),
+    states_by_agent_id: buildInitialStates(),
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function toFileArray(
+  files: FileList | Iterable<File> | null | undefined,
+): File[] {
+  if (!files) {
+    return [];
+  }
+  if (typeof FileList !== "undefined" && files instanceof FileList) {
+    return Array.from(files);
+  }
+  return Array.from(files);
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user } = useAppState();
   const currentUserId = user?.id ?? null;
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(DEFAULT_AGENT_ID);
-  const [statesByAgentId, setStatesByAgentId] = useState<Record<string, AgentShellState>>(
-    buildInitialStates(),
-  );
+  const [contexts, setContexts] = useState<WorkspaceContextRecord[]>(normalizeContexts(null));
+  const [activeContextId, setActiveContextId] = useState<string>("workspace-default");
   const [hydrated, setHydrated] = useState(false);
-  const hydratedRef = useRef(false);
-
-  useEffect(() => {
-    hydratedRef.current = hydrated;
-  }, [hydrated]);
 
   useEffect(() => {
     if (!currentUserId) {
-      setSelectedAgentId(DEFAULT_AGENT_ID);
-      setStatesByAgentId(buildInitialStates());
+      const initialContexts = normalizeContexts(null);
+      setContexts(initialContexts);
+      setActiveContextId(initialContexts[0]?.id ?? "workspace-default");
       setHydrated(false);
       return;
     }
@@ -118,25 +236,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setHydrated(false);
 
     void (async () => {
-      await clearLegacyWorkspaceState(currentUserId, PERSISTED_AGENT_IDS);
-      const [storedSelectedAgentId, ...storedStates] = await Promise.all([
-        loadSelectedAgentId(currentUserId),
-        ...PERSISTED_AGENT_IDS.map((agentId) => loadAgentShellState(currentUserId, agentId)),
+      const [storedContexts, storedActiveContextId] = await Promise.all([
+        loadWorkspaceContexts(currentUserId),
+        loadActiveWorkspaceContextId(currentUserId),
       ]);
+
+      const nextContexts = normalizeContexts(storedContexts);
+      const nextActiveContextId = normalizeActiveContextId(nextContexts, storedActiveContextId);
+
       if (cancelled) {
         return;
       }
-      setSelectedAgentId(normalizeSelectedAgentId(storedSelectedAgentId));
-      setStatesByAgentId(
-        normalizeStates(
-          Object.fromEntries(
-            PERSISTED_AGENT_IDS.map((agentId, index) => [
-              agentId,
-              storedStates[index] ?? createEmptyAgentShellState(),
-            ]),
-          ),
-        ),
-      );
+
+      setContexts(nextContexts);
+      setActiveContextId(nextActiveContextId);
       setHydrated(true);
     })();
 
@@ -150,32 +263,96 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const normalizedStates = normalizeStates(statesByAgentId);
+    const normalizedWorkspaceContexts = normalizeContexts(contexts);
+    const resolvedActiveContextId = normalizeActiveContextId(
+      normalizedWorkspaceContexts,
+      activeContextId,
+    );
     const timeoutId = window.setTimeout(() => {
       void Promise.all([
-        saveSelectedAgentId(currentUserId, selectedAgentId),
-        ...PERSISTED_AGENT_IDS.map((agentId) =>
-          saveAgentShellState(currentUserId, agentId, normalizedStates[agentId]),
-        ),
+        saveWorkspaceContexts(currentUserId, normalizedWorkspaceContexts),
+        saveActiveWorkspaceContextId(currentUserId, resolvedActiveContextId),
       ]).catch(() => undefined);
     }, 180);
 
     return () => window.clearTimeout(timeoutId);
-  }, [currentUserId, hydrated, selectedAgentId, statesByAgentId]);
+  }, [activeContextId, contexts, currentUserId, hydrated]);
+
+  const updateContextById = useCallback(
+    (contextId: string, updater: (context: WorkspaceContextRecord) => WorkspaceContextRecord) => {
+      setContexts((current) =>
+        sortContexts(
+          current.map((context) =>
+            context.id === contextId ? normalizeContextRecord(updater(context)) : context,
+          ),
+        ),
+      );
+    },
+    [],
+  );
+
+  const updateActiveContext = useCallback(
+    (updater: (context: WorkspaceContextRecord) => WorkspaceContextRecord) => {
+      updateContextById(activeContextId, updater);
+    },
+    [activeContextId, updateContextById],
+  );
+
+  const selectAgent = useCallback(
+    (agentId: string) => {
+      const resolvedAgentId = normalizeSelectedAgentId(agentId);
+      updateActiveContext((context) =>
+        context.selected_agent_id === resolvedAgentId
+          ? context
+          : {
+              ...context,
+              selected_agent_id: resolvedAgentId,
+              updated_at: nowIso(),
+            },
+      );
+    },
+    [updateActiveContext],
+  );
+
+  const selectContextAndAgent = useCallback(
+    (contextId: string, agentId: string) => {
+      const resolvedAgentId = normalizeSelectedAgentId(agentId);
+      setContexts((current) =>
+        sortContexts(
+          current.map((context) =>
+            context.id === contextId
+              ? normalizeContextRecord({
+                  ...context,
+                  selected_agent_id: resolvedAgentId,
+                  updated_at: nowIso(),
+                })
+              : context,
+          ),
+        ),
+      );
+      setActiveContextId(contextId);
+    },
+    [],
+  );
 
   const updateAgentState = useCallback(
     (agentId: string, updater: (state: AgentShellState) => AgentShellState) => {
       const resolvedAgentId = normalizeSelectedAgentId(agentId);
-      setStatesByAgentId((current) => {
-        const currentState = normalizeAgentShellState(current[resolvedAgentId]);
+      updateActiveContext((context) => {
+        const currentStates = normalizeStates(context.states_by_agent_id);
+        const currentState = normalizeAgentShellState(currentStates[resolvedAgentId]);
         const nextState = normalizeAgentShellState(updater(currentState));
         return {
-          ...current,
-          [resolvedAgentId]: nextState,
+          ...context,
+          states_by_agent_id: {
+            ...currentStates,
+            [resolvedAgentId]: nextState,
+          },
+          updated_at: nowIso(),
         };
       });
     },
-    [],
+    [updateActiveContext],
   );
 
   const replaceResourcesForAgent = useCallback(
@@ -185,50 +362,105 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [updateAgentState],
   );
 
-  const clearAgentStateById = useCallback(
-    (agentId: string) => {
-      const resolvedAgentId = normalizeSelectedAgentId(agentId);
-      setStatesByAgentId((current) => ({
-        ...current,
-        [resolvedAgentId]: createEmptyAgentShellState(),
-      }));
-      if (currentUserId && hydratedRef.current) {
-        void clearAgentShellState(currentUserId, resolvedAgentId).catch(() => undefined);
-      }
-    },
-    [currentUserId],
-  );
-
-  const handleSelectFiles = useCallback(
-    async (agentId: string, nextFiles: FileList | null) => {
-      if (!nextFiles?.length) {
-        return;
-      }
-      const ownerAgentId = normalizeSelectedAgentId(agentId);
-      const builtFiles = await Promise.all(
-        Array.from(nextFiles).map((file) => buildWorkspaceFile(file)),
-      );
-      const builtResources = builtFiles.map((file) => buildResourceFromFile(ownerAgentId, file));
-      updateAgentState(ownerAgentId, (state) => ({
-        ...state,
-        resources: sortResources([...normalizeAgentShellState(state).resources, ...builtResources]),
-      }));
+  const removeResourceForAgent = useCallback(
+    (agentId: string, resourceId: string) => {
+      updateAgentState(agentId, (state) => removeAgentResource(state, resourceId));
     },
     [updateAgentState],
   );
 
-  const normalizedStates = useMemo(
-    () => normalizeStates(statesByAgentId),
-    [statesByAgentId],
+  const clearAgentStateById = useCallback(
+    (agentId: string) => {
+      const resolvedAgentId = normalizeSelectedAgentId(agentId);
+      updateActiveContext((context) => ({
+        ...context,
+        states_by_agent_id: {
+          ...normalizeStates(context.states_by_agent_id),
+          [resolvedAgentId]: createEmptyAgentShellState(),
+        },
+        updated_at: nowIso(),
+      }));
+    },
+    [updateActiveContext],
   );
+
+  const handleSelectFiles = useCallback(
+    async (
+      agentId: string,
+      files: FileList | Iterable<File> | null | undefined,
+      options?: HandleSelectFilesOptions,
+    ) => {
+      const nextFiles = toFileArray(files);
+      if (!nextFiles.length) {
+        return [];
+      }
+      const targetContextId = options?.contextId ?? activeContextId;
+      const ownerAgentId = normalizeSelectedAgentId(agentId);
+      const builtFiles = await Promise.all(nextFiles.map((file) => buildWorkspaceFile(file)));
+      const builtResources = builtFiles.map((file) =>
+        buildResourceFromFile(ownerAgentId, file, {
+          origin: "uploaded",
+        }),
+      );
+      updateContextById(targetContextId, (context) => {
+        const currentStates = normalizeStates(context.states_by_agent_id);
+        const currentState = normalizeAgentShellState(currentStates[ownerAgentId]);
+        return {
+          ...context,
+          states_by_agent_id: {
+            ...currentStates,
+            [ownerAgentId]: {
+              ...currentState,
+              resources: sortResources([...currentState.resources, ...builtResources]),
+            },
+          },
+          updated_at: nowIso(),
+        };
+      });
+      return builtFiles;
+    },
+    [activeContextId, updateContextById],
+  );
+
+  const normalizedContexts = useMemo(
+    () => normalizeContexts(contexts),
+    [contexts],
+  );
+  const resolvedActiveContextId = normalizeActiveContextId(normalizedContexts, activeContextId);
+  const activeContext =
+    normalizedContexts.find((context) => context.id === resolvedActiveContextId) ??
+    normalizedContexts[0];
+  const normalizedStates = useMemo(
+    () => normalizeStates(activeContext?.states_by_agent_id ?? buildInitialStates()),
+    [activeContext],
+  );
+  const selectedAgentId = normalizeSelectedAgentId(activeContext?.selected_agent_id);
   const selectedAgentDefinition =
     getAgentDefinition(selectedAgentId) ?? getAgentDefinition(DEFAULT_AGENT_ID)!;
+
+  const createContext = useCallback(
+    (options?: CreateContextOptions) => {
+      const nextContext = createWorkspaceContext(
+        options?.agentId ?? selectedAgentId,
+        options?.name?.trim() || buildNextContextName(contexts),
+      );
+      setContexts((current) => sortContexts([nextContext, ...current]));
+      setActiveContextId(nextContext.id);
+      return nextContext.id;
+    },
+    [contexts, selectedAgentId],
+  );
 
   const sharedResources = useMemo(
     () =>
       Object.values(normalizedStates)
         .flatMap((state) => state.resources)
-        .sort((left, right) => right.created_at.localeCompare(left.created_at) || left.title.localeCompare(right.title)),
+        .sort(
+          (left, right) =>
+            right.created_at.localeCompare(left.created_at) ||
+            left.title.localeCompare(right.title) ||
+            left.id.localeCompare(right.id),
+        ),
     [normalizedStates],
   );
 
@@ -264,16 +496,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const shellStateMetadata = useMemo(
     () =>
       buildShellStateMetadata({
+        contextId: activeContext?.id ?? "workspace-default",
+        contextName: activeContext?.name ?? DEFAULT_CONTEXT_NAME,
         activeAgentId: selectedAgentId,
         statesByAgentId: normalizedStates,
       }),
-    [normalizedStates, selectedAgentId],
+    [activeContext?.id, activeContext?.name, normalizedStates, selectedAgentId],
   );
 
   const value = useMemo<AgentShellContextValue>(
     () => ({
       currentUserId,
       hydrated,
+      contexts: normalizedContexts,
+      activeContextId: activeContext?.id ?? "workspace-default",
+      activeContextName: activeContext?.name ?? DEFAULT_CONTEXT_NAME,
       selectedAgentId,
       selectedAgentDefinition,
       selectedAgentState,
@@ -282,11 +519,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectedAgentPreview,
       sharedResources,
       shellStateMetadata,
-      selectAgent: (agentId: string) => setSelectedAgentId(normalizeSelectedAgentId(agentId)),
+      selectAgent,
+      selectContextAndAgent,
+      createContext,
       getAgentState: (agentId: string) =>
         normalizeAgentShellState(normalizedStates[normalizeSelectedAgentId(agentId)]),
       updateAgentState,
       replaceAgentResources: replaceResourcesForAgent,
+      removeAgentResource: removeResourceForAgent,
       clearAgentState: clearAgentStateById,
       clearSelectedAgentState: () => clearAgentStateById(selectedAgentId),
       handleSelectFiles,
@@ -294,14 +534,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       getPreviewResources,
     }),
     [
+      activeContext?.id,
+      activeContext?.name,
       clearAgentStateById,
+      createContext,
       currentUserId,
       getPreviewResources,
       handleSelectFiles,
       hydrated,
+      normalizedContexts,
       normalizedStates,
+      removeResourceForAgent,
       replaceResourcesForAgent,
       resolveResource,
+      selectAgent,
+      selectContextAndAgent,
       selectedAgentDefinition,
       selectedAgentFiles,
       selectedAgentId,

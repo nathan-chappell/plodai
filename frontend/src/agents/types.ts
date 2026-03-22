@@ -14,11 +14,27 @@ export type FunctionToolDefinition = {
   display?: ToolDisplaySpec;
 };
 
+export type TourPickerDisplayScenario = {
+  scenario_id: string;
+  title: string;
+  summary: string;
+  workspace_name: string;
+  target_agent_id: string;
+  default_asset_count: number;
+};
+
+export type TourPickerDisplaySpec = {
+  title: string;
+  summary: string;
+  scenarios: TourPickerDisplayScenario[];
+};
+
 export type ToolDisplaySpec = {
   label?: string;
   prominent_args?: string[];
   omit_args?: string[];
   arg_labels?: Record<string, string>;
+  tour_picker?: TourPickerDisplaySpec;
 };
 
 export type ComposerToolIcon =
@@ -26,6 +42,15 @@ export type ComposerToolIcon =
   | "analytics"
   | "chart"
   | "document";
+
+export type AgentAttachmentAcceptMap = Record<string, readonly string[]>;
+
+export type AgentAttachmentConfig = {
+  enabled: boolean;
+  accept?: AgentAttachmentAcceptMap;
+  maxCount?: number;
+  maxSize?: number;
+};
 
 export type ClientToolHandlerContext = {
   emitEffect: (effect: ClientEffect) => void;
@@ -35,7 +60,6 @@ export type ClientToolHandlerContext = {
     agentId: string,
     resources: AgentResourceRecord[],
   ) => void;
-  schedulePrompt: (prompt: string, model?: string) => void;
 };
 
 export type ClientToolHandler<
@@ -96,6 +120,7 @@ export type AgentDefinition = {
   composerIcon?: ComposerToolIcon;
   composerPlaceholder?: string;
   previewPriority?: number;
+  attachmentConfig: AgentAttachmentConfig;
 };
 
 export type AgentRuntimeContext = {

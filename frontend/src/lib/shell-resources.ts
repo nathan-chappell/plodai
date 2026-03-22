@@ -5,6 +5,7 @@ import type { LocalOtherFile, LocalWorkspaceFile } from "../types/report";
 import type {
   AgentResourcePayload,
   AgentResourceRecord,
+  AgentResourceOrigin,
   AgentShellState,
   AgentShellSummary,
   AgentPreviewItem,
@@ -172,12 +173,16 @@ export function resourceFile(
 export function buildResourceFromFile(
   ownerAgentId: string,
   file: LocalWorkspaceFile,
+  options: {
+    origin?: AgentResourceOrigin;
+  } = {},
 ): AgentResourceRecord {
   const kind = resourceKindForFile(file);
   const title = kind === "chart" ? savedChartArtifactLabel(file) ?? file.name : file.name;
   return {
     id: file.id,
     owner_agent_id: ownerAgentId,
+    origin: options.origin ?? "generated",
     kind,
     title,
     created_at: nowIso(),
@@ -216,6 +221,7 @@ export function buildReportResource(
   return {
     id: report.report_id,
     owner_agent_id: ownerAgentId,
+    origin: "generated",
     kind: "report",
     title: report.title,
     created_at: report.updated_at,
@@ -278,6 +284,7 @@ export function summarizeSharedExport(
   return {
     id: resource.id,
     owner_agent_id: resource.owner_agent_id,
+    origin: resource.origin,
     kind: resource.kind,
     title: resource.title,
     created_at: resource.created_at,
@@ -363,6 +370,14 @@ export function listFileResources(
   return sortResources(resources)
     .map((resource) => resourceFile(resource))
     .filter((file): file is LocalWorkspaceFile => file !== null);
+}
+
+export function isUploadedResource(resource: AgentResourceRecord): boolean {
+  return resource.origin === "uploaded";
+}
+
+export function isGeneratedResource(resource: AgentResourceRecord): boolean {
+  return resource.origin === "generated";
 }
 
 export function coerceResourceTitle(

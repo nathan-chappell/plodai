@@ -3,7 +3,7 @@ import type { AgentRuntimeModule } from "../types";
 import { buildChartAgentClientToolCatalog, createChartAgentClientTools } from "./tools";
 
 const CHART_AGENT_INSTRUCTIONS = `
-You are the Chart Agent.
+You are Charts.
 
 Your responsibilities:
 - inspect chart-ready datasets
@@ -24,14 +24,14 @@ export const chartAgentRuntimeModule: AgentRuntimeModule = {
   definition: chartAgentDefinition,
   buildAgentSpec: (workspace) => ({
     agent_id: "chart-agent",
-    agent_name: "Chart Agent",
+    agent_name: "Charts",
     instructions: CHART_AGENT_INSTRUCTIONS,
     client_tools: buildChartAgentClientToolCatalog(workspace),
     delegation_targets: [
       {
         agent_id: "feedback-agent",
         tool_name: "delegate_to_feedback_agent",
-        description: "Hand off to the Feedback Agent when the user wants to provide structured feedback about this thread.",
+        description: "Hand off to Feedback when the user wants to provide structured feedback about this thread.",
       },
     ],
   }),

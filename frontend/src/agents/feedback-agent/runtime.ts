@@ -6,7 +6,7 @@ import {
 } from "./tools";
 
 const FEEDBACK_AGENT_INSTRUCTIONS = `
-You are the Feedback Agent for the client workspace.
+You are Feedback for the client workspace.
 
 Your responsibilities:
 - gather concise, actionable feedback about the current thread
@@ -26,7 +26,7 @@ export const feedbackAgentRuntimeModule: AgentRuntimeModule = {
   definition: feedbackAgentDefinition,
   buildAgentSpec: () => ({
     agent_id: "feedback-agent",
-    agent_name: "Feedback Agent",
+    agent_name: "Feedback",
     instructions: FEEDBACK_AGENT_INSTRUCTIONS,
     client_tools: buildFeedbackAgentClientToolCatalog(),
     delegation_targets: [],

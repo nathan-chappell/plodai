@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const agentDirs = [
-  "help-agent",
+  "default-agent",
   "agriculture-agent",
   "analysis-agent",
   "chart-agent",

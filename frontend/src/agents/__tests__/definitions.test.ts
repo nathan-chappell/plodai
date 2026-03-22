@@ -5,14 +5,14 @@ import {
   analysisAgentDefinition,
   chartAgentDefinition,
   documentAgentDefinition,
-  helpAgentDefinition,
+  defaultAgentDefinition,
   reportAgentDefinition,
 } from "../definitions";
 
 describe("agent definitions", () => {
   it("provide compact ChatKit copy for each core agent", () => {
     for (const agent of [
-      helpAgentDefinition,
+      defaultAgentDefinition,
       reportAgentDefinition,
       analysisAgentDefinition,
       chartAgentDefinition,

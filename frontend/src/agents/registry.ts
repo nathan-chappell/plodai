@@ -3,7 +3,7 @@ import analysisAgentModule from "./analysis-agent";
 import chartAgentModule from "./chart-agent";
 import documentAgentModule from "./document-agent";
 import feedbackAgentModule from "./feedback-agent";
-import helpAgentModule from "./help-agent";
+import defaultAgentModule from "./default-agent";
 import reportAgentModule from "./report-agent";
 import { buildAgentBundle } from "./shared/registry";
 import type {
@@ -14,7 +14,7 @@ import type {
 } from "./types";
 
 export const agentModules: AgentModule[] = [
-  helpAgentModule,
+  defaultAgentModule,
   reportAgentModule,
   analysisAgentModule,
   chartAgentModule,
