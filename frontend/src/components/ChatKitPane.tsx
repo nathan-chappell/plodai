@@ -171,8 +171,6 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
     case "create_report":
     case "append_report_slide":
     case "remove_report_slide":
-    case "list_image_files":
-    case "inspect_image_file":
     case "get_farm_state":
     case "save_farm_state":
       return "cube";

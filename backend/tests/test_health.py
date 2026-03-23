@@ -17,6 +17,22 @@ def test_healthcheck():
     assert response.json() == {"status": "ok"}
 
 
+def test_stored_file_preview_preflight_allows_chatkit_cdn_private_network():
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/stored-files/file_test/preview?token=test-token-value",
+            headers={
+                "Origin": "https://cdn.platform.openai.com",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Private-Network": "true",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://cdn.platform.openai.com"
+    assert response.headers["access-control-allow-private-network"] == "true"
+
+
 def test_configure_frontend_assets_skips_missing_build(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     application = FastAPI()
     monkeypatch.setattr(main_module, "static_path", tmp_path / "missing-dist")

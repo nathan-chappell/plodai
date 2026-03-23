@@ -174,6 +174,19 @@ class WorkspaceState(TypedDict):
     items: list[WorkspaceItemSummary]
 
 
+class AgricultureThreadImageRef(TypedDict):
+    stored_file_id: str
+    attachment_id: str
+    name: str
+    mime_type: str
+    width: int | None
+    height: int | None
+
+
+class AgricultureState(TypedDict):
+    thread_image_refs: list[AgricultureThreadImageRef]
+
+
 class PendingFeedbackSession(TypedDict):
     session_id: str
     item_ids: list[str]
@@ -196,6 +209,7 @@ class ChatMetadataPatch(TypedDict, total=False):
     usage: ThreadUsageTotals
     agent_bundle: AgentBundle
     workspace_state: WorkspaceState
+    agriculture_state: AgricultureState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
@@ -213,6 +227,7 @@ class AppChatMetadata(TypedDict, total=False):
     usage: ThreadUsageTotals
     agent_bundle: AgentBundle
     workspace_state: WorkspaceState
+    agriculture_state: AgricultureState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
@@ -928,6 +943,59 @@ class WorkspaceStateModel(_MetadataModel):
         )
 
 
+class AgricultureThreadImageRefModel(_MetadataModel):
+    stored_file_id: str
+    attachment_id: str
+    name: str
+    mime_type: str
+    width: int | None = None
+    height: int | None = None
+
+    @field_validator(
+        "stored_file_id",
+        "attachment_id",
+        "name",
+        "mime_type",
+        mode="before",
+    )
+    @classmethod
+    def _required_string(cls, value: object) -> str:
+        text = _strip_string(value)
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("width", "height", mode="before")
+    @classmethod
+    def _optional_dimension(cls, value: object) -> int | None:
+        if value is None:
+            return None
+        if not isinstance(value, int):
+            raise ValueError("expected an integer")
+        if value < 0:
+            raise ValueError("expected a non-negative integer")
+        return value
+
+
+class AgricultureStateModel(_MetadataModel):
+    thread_image_refs: list[AgricultureThreadImageRefModel] = Field(default_factory=list)
+
+    @field_validator("thread_image_refs", mode="before")
+    @classmethod
+    def _thread_image_refs(
+        cls,
+        value: object,
+    ) -> list[AgricultureThreadImageRefModel]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("expected a list")
+        validated: list[AgricultureThreadImageRefModel] = []
+        for raw_item in value:
+            validated.append(AgricultureThreadImageRefModel.model_validate(raw_item))
+        return validated
+
+
 class PendingFeedbackSessionModel(_MetadataModel):
     session_id: str
     item_ids: list[str]
@@ -992,6 +1060,7 @@ class AppChatMetadataModel(_MetadataModel):
     usage: ThreadUsageTotalsModel | None = None
     agent_bundle: AgentBundleModel | None = None
     workspace_state: WorkspaceStateModel | None = None
+    agriculture_state: AgricultureStateModel | None = None
     origin: FeedbackOrigin | None = None
     feedback_session: PendingFeedbackSessionModel | None = None
 
@@ -1053,6 +1122,12 @@ class AppChatMetadataModel(_MetadataModel):
         validated = _validated_model_or_none(WorkspaceStateModel, value)
         return cast(WorkspaceStateModel | None, validated)
 
+    @field_validator("agriculture_state", mode="before")
+    @classmethod
+    def _agriculture_state(cls, value: object) -> AgricultureStateModel | None:
+        validated = _validated_model_or_none(AgricultureStateModel, value)
+        return cast(AgricultureStateModel | None, validated)
+
     @field_validator("feedback_session", mode="before")
     @classmethod
     def _feedback_session(
@@ -1085,6 +1160,86 @@ def merge_chat_metadata(
         else:
             merged[key] = value
     return merged
+
+
+def list_agriculture_thread_image_refs(
+    metadata: object | None,
+) -> list[AgricultureThreadImageRef]:
+    parsed = parse_chat_metadata(metadata)
+    agriculture_state = parsed.get("agriculture_state")
+    if agriculture_state is None:
+        return []
+    return list(agriculture_state.get("thread_image_refs", []))
+
+
+def resolve_agriculture_thread_image_ref(
+    metadata: object | None,
+    *,
+    stored_file_id: str | None = None,
+    attachment_id: str | None = None,
+) -> AgricultureThreadImageRef | None:
+    for ref in list_agriculture_thread_image_refs(metadata):
+        if stored_file_id and ref.get("stored_file_id") == stored_file_id:
+            return ref
+        if attachment_id and ref.get("attachment_id") == attachment_id:
+            return ref
+    return None
+
+
+def build_agriculture_image_ref_patch(
+    current_metadata: AppChatMetadata,
+    refs: list[AgricultureThreadImageRef],
+) -> ChatMetadataPatch | None:
+    if not refs:
+        return None
+
+    merged_by_file_id: dict[str, AgricultureThreadImageRef] = {
+        ref["stored_file_id"]: ref
+        for ref in list_agriculture_thread_image_refs(current_metadata)
+    }
+    changed = False
+    for ref in refs:
+        previous = merged_by_file_id.get(ref["stored_file_id"])
+        if previous != ref:
+            changed = True
+            merged_by_file_id.pop(ref["stored_file_id"], None)
+            merged_by_file_id[ref["stored_file_id"]] = ref
+    if not changed:
+        return None
+    return {
+        "agriculture_state": {
+            "thread_image_refs": list(merged_by_file_id.values()),
+        }
+    }
+
+
+def build_remove_agriculture_image_ref_patch(
+    current_metadata: AppChatMetadata,
+    *,
+    stored_file_id: str | None = None,
+    attachment_id: str | None = None,
+) -> ChatMetadataPatch | None:
+    if stored_file_id is None and attachment_id is None:
+        return None
+
+    existing_refs = list_agriculture_thread_image_refs(current_metadata)
+    remaining_refs = [
+        ref
+        for ref in existing_refs
+        if not (
+            (stored_file_id and ref["stored_file_id"] == stored_file_id)
+            or (attachment_id and ref["attachment_id"] == attachment_id)
+        )
+    ]
+    if len(remaining_refs) == len(existing_refs):
+        return None
+    if not remaining_refs:
+        return {"agriculture_state": None}
+    return {
+        "agriculture_state": {
+            "thread_image_refs": remaining_refs,
+        }
+    }
 
 
 def active_plan_execution(

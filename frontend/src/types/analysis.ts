@@ -233,8 +233,6 @@ export type ListDatasetsToolArgs = {
   includeSamples?: boolean;
 };
 
-export type ListImageFilesToolArgs = Record<string, never>;
-
 export type InspectDatasetSchemaToolArgs = {
   dataset_id: string;
 };
@@ -295,11 +293,6 @@ export type SmartSplitDocumentToolArgs = {
 
 export type DeleteDocumentFileToolArgs = {
   file_id: string;
-};
-
-export type InspectImageFileToolArgs = {
-  file_id: string;
-  max_dimension?: number;
 };
 
 export type ListReportsToolArgs = Record<string, never>;
@@ -387,14 +380,12 @@ export type SaveFarmStateToolArgs = {
 
 export type ClientToolArgsMap = {
   list_datasets: ListDatasetsToolArgs;
-  list_image_files: ListImageFilesToolArgs;
   run_aggregate_query: RunAggregateQueryToolArgs;
   create_dataset: CreateDatasetToolArgs;
   list_pdf_files: ListWorkspaceFilesToolArgs;
   inspect_dataset_schema: InspectDatasetSchemaToolArgs;
   render_chart_from_dataset: RenderChartFromDatasetToolArgs;
   inspect_pdf_file: InspectPdfFileToolArgs;
-  inspect_image_file: InspectImageFileToolArgs;
   get_pdf_page_range: GetPdfPageRangeToolArgs;
   smart_split_pdf: SmartSplitPdfToolArgs;
   list_document_files: ListDocumentFilesToolArgs;

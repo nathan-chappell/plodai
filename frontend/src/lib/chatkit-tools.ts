@@ -9,9 +9,7 @@ import type {
   GetFarmStateToolArgs,
   GetReportToolArgs,
   InspectDatasetSchemaToolArgs,
-  InspectImageFileToolArgs,
   ListDatasetsToolArgs,
-  ListImageFilesToolArgs,
   ListReportsToolArgs,
   ListWorkspaceFilesToolArgs,
   RemoveReportSlideToolArgs,
@@ -19,12 +17,11 @@ import type {
   RunAggregateQueryToolArgs,
   SaveFarmStateToolArgs,
 } from "../types/analysis";
-import type { LocalDataset, LocalAttachment } from "../types/report";
+import type { LocalDataset } from "../types/report";
 
 import { executeQueryPlan } from "./analysis";
 import { renderChartToDataUrl } from "./chart";
 import { parseCsvText } from "./csv";
-import { buildImageDataUrlFromBase64 } from "./image";
 import { parseJsonText } from "./json";
 import { rowsToCsv, rowsToJson } from "./workspace-files";
 
@@ -34,14 +31,6 @@ export type ClientToolExecutionResult = {
   payload: Record<string, unknown>;
   effects: ClientEffect[];
 };
-
-function findImageFile(files: LocalAttachment[], fileId: string) {
-  const file = files.find((candidate) => candidate.id === fileId);
-  if (!file || file.kind !== "image") {
-    throw new Error(`Unknown image file: ${fileId}`);
-  }
-  return file;
-}
 
 function buildWorkspaceContextPayload(
   datasets: LoadedDataset[],
@@ -107,23 +96,6 @@ export async function executeClientTool<Name extends ClientToolName>(
           workspace_context: buildWorkspaceContextPayload(datasets),
           pdf_files: [],
           files: [],
-        },
-        effects: [],
-      };
-    }
-    case "list_image_files": {
-      void (toolCall.arguments as ListImageFilesToolArgs);
-      const imageFiles = (datasets as unknown as LocalAttachment[]).filter(
-        (
-          file,
-        ): file is Extract<LocalAttachment, { kind: "image" }> => file.kind === "image",
-      );
-      return {
-        payload: {
-          workspace_id: "smoke",
-          workspace_context: buildWorkspaceContextPayload(datasets),
-          image_files: imageFiles,
-          files: imageFiles,
         },
         effects: [],
       };
@@ -219,23 +191,6 @@ export async function executeClientTool<Name extends ClientToolName>(
             rows: dataset.rows,
           },
         ],
-      };
-    }
-    case "inspect_image_file": {
-      const args = toolCall.arguments as InspectImageFileToolArgs;
-      const file = findImageFile(datasets as unknown as LocalAttachment[], args.file_id);
-      return {
-        payload: {
-          workspace_id: "smoke",
-          workspace_context: buildWorkspaceContextPayload(datasets),
-          file_id: file.id,
-          kind: file.kind,
-          width: file.width,
-          height: file.height,
-          mime_type: file.mime_type,
-          imageDataUrl: buildImageDataUrlFromBase64(file.bytes_base64, file.mime_type),
-        },
-        effects: [],
       };
     }
     case "list_reports": {

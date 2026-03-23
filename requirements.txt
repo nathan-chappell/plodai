@@ -6,6 +6,7 @@ fastapi
 openai
 openai-agents
 openai-chatkit
+pillow
 pydantic-settings
 python-multipart
 sqlalchemy

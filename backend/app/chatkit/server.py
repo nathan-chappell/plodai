@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from base64 import b64decode
 from binascii import Error as BinasciiError
+from datetime import UTC, datetime
 import json
 import logging
 import random
@@ -33,6 +34,8 @@ from chatkit.types import (
     ThreadStreamEvent,
     TranscriptionResult,
     UserMessageItem,
+    UserMessageTagContent,
+    UserMessageTextContent,
     WorkflowItem,
     WidgetItem,
 )
@@ -42,16 +45,21 @@ from openai.types.conversations.conversation_item import ConversationItem
 from openai.types.responses import (
     ResponseFunctionCallOutputItemListParam,
     ResponseFunctionToolCallParam,
+    ResponseInputContentParam,
+    ResponseInputMessageContentListParam,
+    ResponseInputTextParam,
 )
 from openai.types.responses.response_function_tool_call_item import (
     ResponseFunctionToolCallItem,
 )
 from openai.types.responses.response_input_item_param import (
     FunctionCallOutput,
+    Message,
     ResponseInputItemParam,
 )
 from pydantic import BaseModel, TypeAdapter, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import assert_never
 
 from backend.app.agents.agent_builder import build_registered_agent
 from backend.app.agents.context import ReportAgentContext
@@ -66,14 +74,17 @@ from backend.app.chatkit.feedback_types import (
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
+    AgricultureThreadImageRef,
     AgentPlan,
     AgentPlanExecutionHint,
     PendingFeedbackSession,
     PlanExecution,
     ChatMetadataPatch,
     active_plan_execution,
+    build_agriculture_image_ref_patch,
     merge_chat_metadata,
     parse_chat_metadata,
+    resolve_agriculture_thread_image_ref,
 )
 from backend.app.chatkit.runtime_state import (
     resolve_thread_runtime_state,
@@ -97,6 +108,7 @@ from backend.app.core.logging import (
     summarize_sequence_for_log,
 )
 from backend.app.db.session import get_db
+from backend.app.models.stored_file import StoredOpenAIFile
 from backend.app.services.credit_service import CreditService
 
 logger = get_logger("chatkit.server")
@@ -411,9 +423,28 @@ def _summarize_client_tool_result_for_log(
 
 
 class ClientToolResultConverter(ThreadItemConverter):
-    def __init__(self, openai_client: AsyncOpenAI, upload_cache: dict[str, str]):
+    def __init__(
+        self,
+        openai_client: AsyncOpenAI,
+        upload_cache: dict[str, str],
+        db: AsyncSession,
+    ):
         self.openai_client = openai_client
         self.upload_cache = upload_cache
+        self.db = db
+        self.current_thread: ThreadMetadata | None = None
+        self.current_context: ReportAgentContext | None = None
+        self.current_metadata: dict[str, Any] = {}
+
+    def bind_request(
+        self,
+        *,
+        thread: ThreadMetadata,
+        context: ReportAgentContext,
+    ) -> None:
+        self.current_thread = thread
+        self.current_context = context
+        self.current_metadata = parse_chat_metadata(thread.metadata)
 
     async def attachment_to_message_content(self, attachment: Attachment):
         metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
@@ -449,6 +480,321 @@ class ClientToolResultConverter(ThreadItemConverter):
         return {
             "type": "input_file",
             "file_id": openai_file_id.strip(),
+        }
+
+    async def user_message_to_input(
+        self, item: UserMessageItem, is_last_message: bool = True
+    ) -> ResponseInputItemParam | list[ResponseInputItemParam] | None:
+        message_text_parts: list[str] = []
+        raw_tags: list[UserMessageTagContent] = []
+        current_attachment_file_ids: set[str] = set()
+        attachment_content: list[ResponseInputContentParam] = []
+
+        for attachment in item.attachments:
+            attachment_content.append(await self.attachment_to_message_content(attachment))
+            metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
+            stored_file_id = metadata.get("stored_file_id")
+            if isinstance(stored_file_id, str) and stored_file_id.strip():
+                current_attachment_file_ids.add(stored_file_id.strip())
+
+        for part in item.content:
+            if isinstance(part, UserMessageTextContent):
+                message_text_parts.append(part.text)
+            elif isinstance(part, UserMessageTagContent):
+                message_text_parts.append(f"@{part.text}")
+                raw_tags.append(part)
+            else:
+                assert_never(part)
+
+        user_text_item = Message(
+            role="user",
+            type="message",
+            content=[
+                ResponseInputTextParam(
+                    type="input_text", text="".join(message_text_parts)
+                ),
+                *attachment_content,
+            ],
+        )
+
+        context_items: list[ResponseInputItemParam] = []
+        if item.quoted_text and is_last_message:
+            context_items.append(
+                Message(
+                    role="user",
+                    type="message",
+                    content=[
+                        ResponseInputTextParam(
+                            type="input_text",
+                            text=f"The user is referring to this in particular: \n{item.quoted_text}",
+                        )
+                    ],
+                )
+            )
+
+        if raw_tags:
+            seen: set[str] = set()
+            uniq_tags: list[UserMessageTagContent] = []
+            for tag in raw_tags:
+                tag_key = tag.id.strip() if tag.id.strip() else tag.text.strip()
+                if tag_key in seen:
+                    continue
+                seen.add(tag_key)
+                uniq_tags.append(tag)
+
+            tag_content: ResponseInputMessageContentListParam = []
+            for tag in uniq_tags:
+                tag_content.extend(
+                    await self._tag_to_message_contents(
+                        tag,
+                        current_attachment_file_ids=current_attachment_file_ids,
+                    )
+                )
+
+            if tag_content:
+                context_items.append(
+                    Message(
+                        role="user",
+                        type="message",
+                        content=[
+                            ResponseInputTextParam(
+                                type="input_text",
+                                text=(
+                                    "# User-provided context for @-mentions\n"
+                                    "- When referencing resolved entities, use their canonical names without '@'.\n"
+                                    "- The '@' form appears only in user text and should not be echoed."
+                                ),
+                            ),
+                            *tag_content,
+                        ],
+                    )
+                )
+
+        return [user_text_item, *context_items]
+
+    async def tag_to_message_content(
+        self,
+        tag: UserMessageTagContent,
+    ) -> ResponseInputContentParam:
+        tag_content = await self._tag_to_message_contents(
+            tag,
+            current_attachment_file_ids=set(),
+        )
+        if tag_content:
+            return tag_content[0]
+        return {
+            "type": "input_text",
+            "text": f"Tagged context: {tag.text}",
+        }
+
+    async def _tag_to_message_contents(
+        self,
+        tag: UserMessageTagContent,
+        *,
+        current_attachment_file_ids: set[str],
+    ) -> list[ResponseInputContentParam]:
+        if not self._is_agriculture_thread():
+            return [
+                {
+                    "type": "input_text",
+                    "text": f"Tagged context: {tag.text}",
+                }
+            ]
+
+        tag_data = tag.data if isinstance(tag.data, dict) else {}
+        entity_type = tag_data.get("entity_type")
+        if entity_type == "thread_image":
+            return await self._thread_image_tag_to_message_contents(
+                tag,
+                tag_data=tag_data,
+                current_attachment_file_ids=current_attachment_file_ids,
+            )
+        if entity_type in {
+            "farm_crop",
+            "farm_issue",
+            "farm_project",
+            "farm_current_work",
+        }:
+            return self._farm_tag_to_message_contents(
+                tag,
+                tag_data=tag_data,
+            )
+        return [
+            {
+                "type": "input_text",
+                "text": f"Tagged context: {tag.text}",
+            }
+        ]
+
+    def _is_agriculture_thread(self) -> bool:
+        workspace_state = self.current_metadata.get("workspace_state")
+        return (
+            isinstance(workspace_state, dict)
+            and workspace_state.get("app_id") == "agriculture"
+            and self.current_context is not None
+            and self.current_thread is not None
+        )
+
+    async def _thread_image_tag_to_message_contents(
+        self,
+        tag: UserMessageTagContent,
+        *,
+        tag_data: dict[str, Any],
+        current_attachment_file_ids: set[str],
+    ) -> list[ResponseInputContentParam]:
+        stored_file_id = tag_data.get("stored_file_id") or tag_data.get("file_id")
+        attachment_id = tag_data.get("attachment_id")
+        if not isinstance(stored_file_id, str) or not stored_file_id.strip():
+            return [self._missing_thread_image_text(tag.text)]
+        stored_file_id = stored_file_id.strip()
+        if stored_file_id in current_attachment_file_ids:
+            return [
+                {
+                    "type": "input_text",
+                    "text": (
+                        f"The user explicitly referenced the currently attached image '{tag.text.strip() or stored_file_id}'."
+                    ),
+                }
+            ]
+
+        ref = resolve_agriculture_thread_image_ref(
+            self.current_metadata,
+            stored_file_id=stored_file_id,
+            attachment_id=attachment_id.strip()
+            if isinstance(attachment_id, str) and attachment_id.strip()
+            else None,
+        )
+        if ref is None:
+            return [self._missing_thread_image_text(tag.text)]
+
+        record = await self._load_thread_image_record(ref)
+        if record is None:
+            return [
+                {
+                    "type": "input_text",
+                    "text": (
+                        f"Tagged thread image '{ref['name']}' is unavailable because it expired or was removed. "
+                        "Ask the user to reattach it if visual inspection is still needed."
+                    ),
+                }
+            ]
+
+        return [
+            {
+                "type": "input_text",
+                "text": (
+                    f"Tagged thread image '{ref['name']}' was explicitly referenced from earlier in this thread. "
+                    "Inspect it as part of the current request."
+                ),
+            },
+            {
+                "type": "input_image",
+                "file_id": record.openai_file_id,
+                "detail": "high",
+            },
+        ]
+
+    async def _load_thread_image_record(
+        self,
+        ref: AgricultureThreadImageRef,
+    ) -> StoredOpenAIFile | None:
+        context = self.current_context
+        thread = self.current_thread
+        if context is None or thread is None:
+            return None
+
+        record = await self.db.get(StoredOpenAIFile, ref["stored_file_id"])
+        if record is None:
+            return None
+        if record.user_id != context.user_id:
+            return None
+        if record.workspace_id != context.workspace_id or record.thread_id != thread.id:
+            return None
+        if record.status == "deleted" or record.kind != "image":
+            return None
+        if record.attachment_id != ref["attachment_id"]:
+            return None
+        expires_at = record.expires_at
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= datetime.now(UTC):
+                return None
+        if not isinstance(record.openai_file_id, str) or not record.openai_file_id.strip():
+            return None
+        return record
+
+    def _farm_tag_to_message_contents(
+        self,
+        tag: UserMessageTagContent,
+        *,
+        tag_data: dict[str, Any],
+    ) -> list[ResponseInputContentParam]:
+        artifact_id = tag_data.get("artifact_id")
+        workspace_state = self.current_metadata.get("workspace_state")
+        workspace_items = (
+            workspace_state.get("items", [])
+            if isinstance(workspace_state, dict)
+            else []
+        )
+        has_farm_artifact = isinstance(artifact_id, str) and any(
+            item.get("id") == artifact_id and item.get("kind") == "farm.v1"
+            for item in workspace_items
+            if isinstance(item, dict)
+        )
+        if not has_farm_artifact:
+            return [
+                {
+                    "type": "input_text",
+                    "text": f"Tagged farm context '{tag.text}' is unavailable.",
+                }
+            ]
+
+        entity_type = tag_data.get("entity_type")
+        farm_name = tag_data.get("farm_name")
+        farm_label = (
+            farm_name.strip()
+            if isinstance(farm_name, str) and farm_name.strip()
+            else "the farm"
+        )
+        parts: list[str] = [f"Tagged farm context from {farm_label}: {tag.text.strip()}."]
+        if entity_type == "farm_crop":
+            area = tag_data.get("area")
+            expected_yield = tag_data.get("expected_yield")
+            notes = tag_data.get("notes")
+            if isinstance(area, str) and area.strip():
+                parts.append(f"Area: {area.strip()}.")
+            if isinstance(expected_yield, str) and expected_yield.strip():
+                parts.append(f"Expected yield: {expected_yield.strip()}.")
+            if isinstance(notes, str) and notes.strip():
+                parts.append(f"Notes: {notes.strip()}.")
+        elif entity_type in {"farm_issue", "farm_project"}:
+            status = tag_data.get("status")
+            notes = tag_data.get("notes")
+            if isinstance(status, str) and status.strip():
+                parts.append(f"Status: {status.strip()}.")
+            if isinstance(notes, str) and notes.strip():
+                parts.append(f"Notes: {notes.strip()}.")
+        elif entity_type == "farm_current_work":
+            notes = tag_data.get("notes")
+            if isinstance(notes, str) and notes.strip():
+                parts.append(f"Farm notes: {notes.strip()}.")
+
+        return [
+            {
+                "type": "input_text",
+                "text": " ".join(parts),
+            }
+        ]
+
+    def _missing_thread_image_text(self, label: str) -> ResponseInputContentParam:
+        resolved_label = label.strip() or "thread image"
+        return {
+            "type": "input_text",
+            "text": (
+                f"Tagged thread image '{resolved_label}' could not be resolved from saved thread attachments. "
+                "Ask the user to reattach it if visual inspection is needed."
+            ),
         }
 
     async def client_tool_call_to_input(self, item: ClientToolCallItem):
@@ -619,6 +965,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         self.converter = ClientToolResultConverter(
             self.openai_client,
             self._uploaded_file_ids,
+            db,
         )
         self.logger = logger
 
@@ -677,6 +1024,97 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         )
 
         return context
+
+    async def _process_new_thread_item_respond(
+        self,
+        thread: ThreadMetadata,
+        item: UserMessageItem,
+        context: ReportAgentContext,
+    ) -> AsyncIterator[ThreadStreamEvent]:
+        for attachment in item.attachments:
+            await self.store.bind_attachment_to_thread(
+                attachment_id=attachment.id,
+                thread_id=thread.id,
+            )
+
+        await self._sync_agriculture_thread_image_refs(
+            thread=thread,
+            context=context,
+            attachments=item.attachments,
+        )
+
+        await self.store.add_thread_item(thread.id, item, context=context)
+        yield ThreadItemDoneEvent(item=item)
+
+        async for event in self._process_events(
+            thread,
+            context,
+            lambda: self.respond(thread, item, context),
+        ):
+            yield event
+
+    async def _sync_agriculture_thread_image_refs(
+        self,
+        *,
+        thread: ThreadMetadata,
+        context: ReportAgentContext,
+        attachments: list[Attachment],
+    ) -> None:
+        workspace_state = parse_chat_metadata(thread.metadata).get("workspace_state")
+        if not isinstance(workspace_state, dict) or workspace_state.get("app_id") != "agriculture":
+            return
+
+        refs = await self._build_agriculture_thread_image_refs_from_attachments(attachments)
+        patch = build_agriculture_image_ref_patch(
+            parse_chat_metadata(thread.metadata),
+            refs,
+        )
+        if patch is None:
+            return
+
+        self._apply_metadata_patch(thread, context, patch)
+        await self.store.save_thread(thread, context=context)
+
+    async def _build_agriculture_thread_image_refs_from_attachments(
+        self,
+        attachments: list[Attachment],
+    ) -> list[AgricultureThreadImageRef]:
+        refs: list[AgricultureThreadImageRef] = []
+        for attachment in attachments:
+            metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
+            stored_file_id = metadata.get("stored_file_id")
+            if (
+                metadata.get("input_kind") != "image"
+                or not isinstance(stored_file_id, str)
+                or not stored_file_id.strip()
+            ):
+                continue
+
+            record = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+            width: int | None = None
+            height: int | None = None
+            if record is not None and record.preview_json.get("kind") == "image":
+                raw_width = record.preview_json.get("width")
+                raw_height = record.preview_json.get("height")
+                width = raw_width if isinstance(raw_width, int) and raw_width >= 0 else None
+                height = raw_height if isinstance(raw_height, int) and raw_height >= 0 else None
+
+            refs.append(
+                {
+                    "stored_file_id": stored_file_id.strip(),
+                    "attachment_id": attachment.id,
+                    "name": attachment.name.strip() or "image",
+                    "mime_type": (
+                        attachment.mime_type.strip()
+                        if isinstance(attachment.mime_type, str)
+                        and attachment.mime_type.strip()
+                        else "application/octet-stream"
+                    ),
+                    "width": width,
+                    "height": height,
+                }
+            )
+        return refs
 
     async def _load_thread_items_after(
         self,
@@ -913,6 +1351,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             item.id == input_user_message.id for item in pending_items
         ):
             pending_items.append(input_user_message)
+        self.converter.bind_request(thread=thread, context=context)
         agent_input: str | list[ResponseInputItemParam] = cast(
             list[ResponseInputItemParam],
             await self.converter.to_agent_input(pending_items),

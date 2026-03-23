@@ -2,7 +2,6 @@ import { executeQueryPlan } from "./analysis";
 import { buildChartArtifactFilename } from "./chart-artifacts";
 import { renderChartToDataUrl } from "./chart";
 import { parseCsvText } from "./csv";
-import { buildModelSafeImageDataUrl } from "./image";
 import { parseJsonText } from "./json";
 import {
   base64ToUint8Array,
@@ -24,10 +23,8 @@ import type {
   GetPdfPageRangeToolArgs,
   GetReportToolArgs,
   InspectDatasetSchemaToolArgs,
-  InspectImageFileToolArgs,
   InspectPdfFileToolArgs,
   ListDatasetsToolArgs,
-  ListImageFilesToolArgs,
   ListReportsToolArgs,
   ListWorkspaceFilesToolArgs,
   RemoveReportSlideToolArgs,
@@ -40,7 +37,6 @@ import type {
 import type { AgentRuntimeContext } from "../agents/types";
 import type {
   LocalDataset,
-  LocalImageAttachment,
   LocalOtherAttachment,
   LocalPdfAttachment,
   LocalAttachment,
@@ -165,17 +161,6 @@ async function requireLocalPdf(
   const file = await requireLocalFile(workspace, fileId);
   if (file.kind !== "pdf") {
     throw new Error(`Workspace file ${fileId} is not a PDF.`);
-  }
-  return file;
-}
-
-async function requireLocalImage(
-  workspace: AgentRuntimeContext,
-  fileId: string,
-): Promise<LocalImageAttachment> {
-  const file = await requireLocalFile(workspace, fileId);
-  if (file.kind !== "image") {
-    throw new Error(`Workspace file ${fileId} is not an image.`);
   }
   return file;
 }
@@ -314,17 +299,6 @@ export async function executeLocalTool<Name extends ClientToolName>(
   args: ClientToolArgsMap[Name],
 ): Promise<ToolExecutionResult> {
   switch (toolName) {
-    case "list_image_files": {
-      void (args as ListImageFilesToolArgs);
-      const files = listFilesByKind(workspace, ["image"]);
-      return {
-        payload: {
-          image_files: files.map((file) => summarizeFileEntry(file)),
-          files: files.map((file) => summarizeFileEntry(file)),
-        },
-        effects: [],
-      };
-    }
     case "list_pdf_files": {
       const includeSamples = (args as ListWorkspaceFilesToolArgs).includeSamples ?? true;
       const files = listFilesByKind(workspace, ["pdf"]);
@@ -343,26 +317,6 @@ export async function executeLocalTool<Name extends ClientToolName>(
         payload: {
           datasets: files.map((file) => summarizeFileEntry(file, { includeSamples })),
           files: files.map((file) => summarizeFileEntry(file, { includeSamples })),
-        },
-        effects: [],
-      };
-    }
-    case "inspect_image_file": {
-      const toolArgs = args as InspectImageFileToolArgs;
-      const entry = findFileEntry(workspace, toolArgs.file_id);
-      const file = await requireLocalImage(workspace, toolArgs.file_id);
-      return {
-        payload: {
-          file_id: entry.id,
-          name: entry.name,
-          kind: entry.kind,
-          width: file.width,
-          height: file.height,
-          mime_type: file.mime_type,
-          byte_size: file.byte_size,
-          imageDataUrl: await buildModelSafeImageDataUrl(file, {
-            maxDimension: toolArgs.max_dimension ?? 1536,
-          }),
         },
         effects: [],
       };

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./ai_portfolio.db"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
-    stored_file_default_expiry_seconds: int = 72 * 60 * 60
+    stored_file_default_expiry_seconds: int = 24 * 60 * 60
     agriculture_chat_attachment_max_bytes: int = 10 * 1024 * 1024
     chat_attachment_max_model_bytes: int = 32 * 1024 * 1024
     document_thread_max_bytes: int = 100 * 1024 * 1024

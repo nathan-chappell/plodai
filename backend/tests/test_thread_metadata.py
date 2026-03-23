@@ -65,6 +65,20 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
                 ],
                 "ignored": True,
             },
+            "agriculture_state": {
+                "thread_image_refs": [
+                    {
+                        "stored_file_id": "file_image_1",
+                        "attachment_id": "attachment_1",
+                        "name": "orchard.png",
+                        "mime_type": "image/png",
+                        "width": 1200,
+                        "height": 900,
+                        "ignored": True,
+                    }
+                ],
+                "ignored": True,
+            },
             "openai_conversation_id": "conv_123",
             "openai_previous_response_id": "resp_456",
             "origin": "ui_integration_test",
@@ -105,6 +119,18 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
     }
     assert metadata["chart_cache"] == {"chart-1": "data:image/png;base64,abc"}
     assert metadata["surface_key"] == "/agriculture"
+    assert metadata["agriculture_state"] == {
+        "thread_image_refs": [
+            {
+                "stored_file_id": "file_image_1",
+                "attachment_id": "attachment_1",
+                "name": "orchard.png",
+                "mime_type": "image/png",
+                "width": 1200,
+                "height": 900,
+            }
+        ]
+    }
     assert metadata["openai_conversation_id"] == "conv_123"
     assert metadata["openai_previous_response_id"] == "resp_456"
     assert metadata["origin"] == "ui_integration_test"
@@ -197,6 +223,18 @@ def test_merge_chat_metadata_allows_patch_and_removal() -> None:
                     }
                 ],
             },
+            "agriculture_state": {
+                "thread_image_refs": [
+                    {
+                        "stored_file_id": "file_image_2",
+                        "attachment_id": "attachment_2",
+                        "name": "leaf-closeup.png",
+                        "mime_type": "image/png",
+                        "width": 640,
+                        "height": 480,
+                    }
+                ],
+            },
             "openai_previous_response_id": "resp_789",
             "origin": "ui_integration_test",
             "feedback_session": {
@@ -219,6 +257,18 @@ def test_merge_chat_metadata_allows_patch_and_removal() -> None:
     assert merged["surface_key"] == "/agriculture"
     assert merged["openai_conversation_id"] == "conv_123"
     assert merged["openai_previous_response_id"] == "resp_789"
+    assert merged["agriculture_state"] == {
+        "thread_image_refs": [
+            {
+                "stored_file_id": "file_image_2",
+                "attachment_id": "attachment_2",
+                "name": "leaf-closeup.png",
+                "mime_type": "image/png",
+                "width": 640,
+                "height": 480,
+            }
+        ]
+    }
     assert merged["origin"] == "ui_integration_test"
     assert merged["feedback_session"] == {
         "session_id": "fbs_789",

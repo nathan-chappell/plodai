@@ -1,8 +1,10 @@
+import logging
 import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.core.auth import (
@@ -10,6 +12,7 @@ from backend.app.core.auth import (
     require_admin_user,
     require_current_user,
 )
+from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.db.session import get_db
 from backend.app.schemas.auth import UserResponse
 from backend.app.schemas.credits import (
@@ -60,6 +63,28 @@ from backend.app.services.workspace_service import (
 
 
 router = APIRouter(prefix="/api")
+logger = get_logger("api.routes")
+
+
+async def _extract_chat_attachment_upload_bytes(request: Request) -> bytes:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" not in content_type:
+        return await request.body()
+
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, StarletteUploadFile):
+        upload = next(
+            (value for value in form.values() if isinstance(value, StarletteUploadFile)),
+            None,
+        )
+    if not isinstance(upload, StarletteUploadFile):
+        return b""
+
+    try:
+        return await upload.read()
+    finally:
+        await upload.close()
 
 
 @router.get("/auth/me", response_model=UserResponse)
@@ -364,39 +389,96 @@ async def complete_chatkit_attachment_upload(
     token: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
 ):
-    file_bytes = await request.body()
+    store = DatabaseMemoryStore(db)
+    try:
+        pending_upload = await store.resolve_pending_attachment_upload(
+            attachment_id=attachment_id,
+            token=token,
+        )
+    except HTTPException as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "chat_attachment.finalize_token_rejected",
+            summary=summarize_pairs_for_log(
+                (("attachment", attachment_id), ("status", exc.status_code))
+            ),
+            detail=str(exc.detail),
+        )
+        raise
+
+    file_bytes = await _extract_chat_attachment_upload_bytes(request)
     if not file_bytes:
+        log_event(
+            logger,
+            logging.WARNING,
+            "chat_attachment.finalize_missing_body",
+            summary=summarize_pairs_for_log((("attachment", attachment_id),)),
+        )
         raise HTTPException(status_code=400, detail="Attachment upload body is required.")
 
-    store = DatabaseMemoryStore(db)
-    pending_upload = await store.resolve_pending_attachment_upload(
-        attachment_id=attachment_id,
-        token=token,
-    )
     if pending_upload.is_completed:
+        display_attachment = await store.load_attachment(
+            attachment_id,
+            context=None,
+            hydrate_preview=True,
+        )
         return Response(
-            content=pending_upload.attachment.model_dump_json(exclude_none=True),
+            content=display_attachment.model_dump_json(exclude_none=True),
             media_type="application/json",
         )
     if len(file_bytes) != pending_upload.declared_size:
+        log_event(
+            logger,
+            logging.WARNING,
+            "chat_attachment.finalize_size_mismatch",
+            summary=summarize_pairs_for_log(
+                (
+                    ("attachment", attachment_id),
+                    ("declared", pending_upload.declared_size),
+                    ("received", len(file_bytes)),
+                )
+            ),
+        )
         raise HTTPException(
             status_code=400,
             detail="Attachment upload size did not match the initialized file metadata.",
         )
 
-    response = await StoredFileService(db).create_chat_attachment_upload(
-        user_id=pending_upload.user_id,
-        workspace_id=pending_upload.workspace_id,
-        app_id=pending_upload.app_id,  # type: ignore[arg-type]
-        file_name=pending_upload.attachment.name,
-        mime_type=pending_upload.attachment.mime_type,
-        file_bytes=file_bytes,
-        attachment_id=attachment_id,
-        scope="chat_attachment",
-        thread_id=pending_upload.attachment.thread_id,
-        create_attachment=True,
-        public_base_url=str(request.base_url).rstrip("/"),
-    )
+    try:
+        response = await StoredFileService(db).create_chat_attachment_upload(
+            user_id=pending_upload.user_id,
+            workspace_id=pending_upload.workspace_id,
+            app_id=pending_upload.app_id,  # type: ignore[arg-type]
+            file_name=pending_upload.attachment.name,
+            mime_type=pending_upload.attachment.mime_type,
+            file_bytes=file_bytes,
+            attachment_id=attachment_id,
+            scope="chat_attachment",
+            thread_id=pending_upload.attachment.thread_id,
+            create_attachment=True,
+            public_base_url=str(request.base_url).rstrip("/"),
+        )
+    except HTTPException as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "chat_attachment.finalize_store_rejected",
+            summary=summarize_pairs_for_log(
+                (("attachment", attachment_id), ("status", exc.status_code))
+            ),
+            detail=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "chat_attachment.finalize_store_failed",
+            summary=summarize_pairs_for_log((("attachment", attachment_id),)),
+            exc_info=exc,
+        )
+        raise
     if response.attachment is None:
         raise HTTPException(status_code=500, detail="Attachment upload did not finalize.")
 

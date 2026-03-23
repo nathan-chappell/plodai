@@ -277,12 +277,6 @@ export const launchTourScenarioToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
-export const listImageFilesToolSchema: JsonSchema = {
-  type: "object",
-  properties: {},
-  additionalProperties: false,
-};
-
 export const inspectDatasetSchemaToolSchema: JsonSchema = {
   type: "object",
   properties: {
@@ -351,16 +345,6 @@ export const inspectPdfFileToolSchema: JsonSchema = {
   properties: {
     file_id: { type: "string" },
     max_pages: { type: "integer", minimum: 1, maximum: 30 },
-  },
-  required: ["file_id"],
-  additionalProperties: false,
-};
-
-export const inspectImageFileToolSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    file_id: { type: "string" },
-    max_dimension: { type: "integer", minimum: 256, maximum: 2048 },
   },
   required: ["file_id"],
   additionalProperties: false,

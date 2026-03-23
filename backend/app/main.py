@@ -109,6 +109,10 @@ async def lifespan(_: FastAPI):
 configure_logging()
 settings = get_settings()
 logger = get_logger("main")
+EXTRA_CHATKIT_CORS_ORIGINS = (
+    "https://cdn.platform.openai.com",
+    "https://platform.openai.com",
+)
 log_event(
     logger,
     logging.INFO,
@@ -151,12 +155,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins = list(dict.fromkeys([*settings.CORS_ORIGINS, *EXTRA_CHATKIT_CORS_ORIGINS]))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 app.include_router(router)

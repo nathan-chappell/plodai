@@ -14,13 +14,23 @@ from pathlib import PurePosixPath
 from typing import Literal
 from uuid import uuid4
 
-from chatkit.types import FileAttachment, ImageAttachment
+from chatkit.types import Attachment, FileAttachment
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.chatkit.attachment_payloads import (
+    build_canonical_attachment,
+    build_display_attachment,
+    serialize_attachment,
+)
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
+from backend.app.chatkit.metadata import (
+    build_remove_agriculture_image_ref_patch,
+    merge_chat_metadata,
+    parse_chat_metadata,
+)
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.models.chatkit import WorkspaceChat, WorkspaceWorkspaceChatAttachment
@@ -130,22 +140,21 @@ class StoredFileService:
         )
         serialized_attachment: SerializedChatAttachment | None = None
         if create_attachment:
-            attachment = self._build_chat_attachment(
+            canonical_attachment = build_canonical_attachment(
                 stored_file=stored_file,
                 attachment_id=attachment_id,
                 scope=scope,
                 thread_id=ensured_thread_id,
-                public_base_url=public_base_url,
             )
             await DatabaseMemoryStore(self.db).save_attachment(
-                attachment,
+                canonical_attachment,
                 context=None,
             )
-            serialized_attachment = self._serialize_chat_attachment(
-                stored_file=stored_file,
-                attachment_id=attachment_id,
-                public_base_url=public_base_url,
+            display_attachment = build_display_attachment(
+                canonical_attachment=canonical_attachment,
+                file_bytes=file_bytes if stored_file.kind == "image" else None,
             )
+            serialized_attachment = serialize_attachment(display_attachment)
 
         return ChatAttachmentUploadResponse(
             attachment=serialized_attachment,
@@ -209,6 +218,17 @@ class StoredFileService:
         )
         record = result.scalar_one_or_none()
         attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
+        if record is not None and isinstance(record.thread_id, str) and record.thread_id.strip():
+            chat = await self.db.get(WorkspaceChat, record.thread_id.strip())
+            if chat is not None and chat.user_id == user_id and isinstance(chat.metadata_json, dict):
+                current_metadata = parse_chat_metadata(chat.metadata_json)
+                patch = build_remove_agriculture_image_ref_patch(
+                    current_metadata,
+                    stored_file_id=record.id,
+                    attachment_id=attachment_id,
+                )
+                if patch is not None:
+                    chat.metadata_json = merge_chat_metadata(current_metadata, patch)
         if attachment is not None:
             await self.db.delete(attachment)
         if record is not None:
@@ -610,64 +630,25 @@ class StoredFileService:
                 detail="Agriculture chat attachments must be 10 MB or smaller.",
             )
 
-    def _build_chat_attachment(
+    async def build_attachment_display_payload(
         self,
         *,
         stored_file: StoredOpenAIFile,
         attachment_id: str,
         scope: StoredFileScope,
         thread_id: str | None,
-        public_base_url: str | None,
-    ) -> FileAttachment | ImageAttachment:
-        metadata = {
-            "stored_file_id": stored_file.id,
-            "openai_file_id": stored_file.openai_file_id,
-            "attach_mode": (
-                "document_tool_only" if scope == "document_thread_file" else "model_input"
-            ),
-            "input_kind": "image" if stored_file.kind == "image" else "file",
-            "byte_size": stored_file.byte_size,
-            "scope": scope,
-        }
-        common_kwargs = {
-            "id": attachment_id,
-            "name": stored_file.name,
-            "mime_type": stored_file.mime_type or "application/octet-stream",
-            "upload_descriptor": None,
-            "thread_id": thread_id,
-            "metadata": metadata,
-        }
-        if stored_file.kind == "image":
-            return ImageAttachment(
-                **common_kwargs,
-                preview_url=self.build_public_preview_url(
-                    stored_file,
-                    public_base_url=public_base_url,
-                ),
-            )
-        return FileAttachment(**common_kwargs)
-
-    def _serialize_chat_attachment(
-        self,
-        *,
-        stored_file: StoredOpenAIFile,
-        attachment_id: str,
-        public_base_url: str | None,
-    ) -> SerializedChatAttachment:
-        base_fields = {
-            "id": attachment_id,
-            "name": stored_file.name,
-            "mime_type": stored_file.mime_type or "application/octet-stream",
-        }
-        if stored_file.kind == "image":
-            return SerializedImageChatAttachment(
-                **base_fields,
-                preview_url=self.build_public_preview_url(
-                    stored_file,
-                    public_base_url=public_base_url,
-                ),
-            )
-        return SerializedFileChatAttachment(**base_fields)
+    ) -> Attachment:
+        canonical_attachment = build_canonical_attachment(
+            stored_file=stored_file,
+            attachment_id=attachment_id,
+            scope=scope,
+            thread_id=thread_id,
+        )
+        file_bytes = await self.load_file_bytes(stored_file) if stored_file.kind == "image" else None
+        return build_display_attachment(
+            canonical_attachment=canonical_attachment,
+            file_bytes=file_bytes,
+        )
 
     def _build_preview_token(self, record: StoredOpenAIFile) -> str:
         expires_at = record.expires_at or (

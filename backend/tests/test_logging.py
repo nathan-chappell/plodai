@@ -36,10 +36,10 @@ from backend.app.core.logging import (
 
 class _StubFilesClient:
     def __init__(self) -> None:
-        self.calls: list[tuple[object, str]] = []
+        self.calls: list[dict[str, object]] = []
 
-    async def create(self, *, file: object, purpose: str):
-        self.calls.append((file, purpose))
+    async def create(self, **kwargs: object):
+        self.calls.append(kwargs)
         return SimpleNamespace(id="file_uploaded_123")
 
 
@@ -160,7 +160,7 @@ def test_tool_start_and_end_logs_are_structured() -> None:
 
 def test_client_tool_output_received_log_uses_summaries() -> None:
     openai_client = _StubOpenAIClient()
-    converter = ClientToolResultConverter(openai_client, {})
+    converter = ClientToolResultConverter(openai_client, {}, None)
     stream = StringIO()
     logger = logging.getLogger("report_foundry.chatkit.server")
     logger.handlers.clear()
@@ -206,6 +206,10 @@ def test_client_tool_output_received_log_uses_summaries() -> None:
     assert rich_output[2] == {
         "type": "input_file",
         "file_id": "file_uploaded_123",
+    }
+    assert openai_client.files.calls[0]["expires_after"] == {
+        "anchor": "created_at",
+        "seconds": 24 * 60 * 60,
     }
     captured = stream.getvalue()
     assert "tool.output.received" in captured
@@ -303,7 +307,7 @@ def test_respond_end_log_uses_logs_link_and_compact_usage() -> None:
 
 def test_client_tool_converter_uses_uploaded_file_ids() -> None:
     openai_client = _StubOpenAIClient()
-    converter = ClientToolResultConverter(openai_client, {})
+    converter = ClientToolResultConverter(openai_client, {}, None)
 
     result = asyncio.run(
         converter.client_tool_result_to_input(
@@ -332,10 +336,14 @@ def test_client_tool_converter_uses_uploaded_file_ids() -> None:
         "file_id": "file_uploaded_123",
     }
     assert openai_client.files.calls == [
-        (
-            ("derived.csv", b"column\nvalue\n", "text/csv"),
-            "user_data",
-        )
+        {
+            "file": ("derived.csv", b"column\nvalue\n", "text/csv"),
+            "purpose": "user_data",
+            "expires_after": {
+                "anchor": "created_at",
+                "seconds": 24 * 60 * 60,
+            },
+        }
     ]
 
 

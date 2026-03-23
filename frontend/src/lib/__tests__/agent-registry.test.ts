@@ -75,8 +75,6 @@ describe("agent registry", () => {
     ).map((tool) => tool.name);
 
     expect(toolNames).toEqual(expect.arrayContaining([
-      "list_image_files",
-      "inspect_image_file",
       "get_farm_state",
       "save_farm_state",
       "list_reports",
@@ -90,7 +88,21 @@ describe("agent registry", () => {
       "create_dataset",
       "render_chart_from_dataset",
     ]));
+    expect(toolNames).not.toContain("list_image_files");
+    expect(toolNames).not.toContain("inspect_image_file");
     expect(toolNames).toHaveLength(new Set(toolNames).size);
+  });
+
+  it("uses attachment-first agriculture instructions without the removed image tools", () => {
+    const workspace = createWorkspaceContext();
+    const instructions = getAgentModule("agriculture-agent")?.buildAgentSpec(workspace).instructions;
+
+    expect(instructions).toContain("Treat images attached to the user's message as primary evidence.");
+    expect(instructions).toContain("Tagged thread images can bring older photos from this thread back into scope.");
+    expect(instructions).toContain("prefer one compact narrative-first slide");
+    expect(instructions).not.toContain("list_image_files");
+    expect(instructions).not.toContain("inspect_image_file");
+    expect(instructions).not.toContain("image first and the narrative guidance second");
   });
 
   it("lists unique tool names declared across the document bundle", () => {

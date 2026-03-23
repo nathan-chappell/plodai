@@ -28,6 +28,15 @@ from chatkit.types import (
 )
 
 from backend.app.agents.context import ReportAgentContext
+from backend.app.chatkit.attachment_payloads import (
+    build_display_attachment,
+    normalize_attachment_for_storage,
+)
+from backend.app.chatkit.metadata import (
+    build_remove_agriculture_image_ref_patch,
+    merge_chat_metadata,
+    parse_chat_metadata,
+)
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.models.chatkit import (
@@ -192,8 +201,9 @@ class DatabaseMemoryStore(
         has_more = len(records) > limit
         page_records = records[:limit]
         next_after = page_records[-1].id if has_more and page_records else None
+        hydrated_items = [await self._to_thread_item(item) for item in page_records]
         return Page[ThreadItem](
-            data=[self._to_thread_item(item) for item in page_records],
+            data=hydrated_items,
             has_more=has_more,
             after=next_after,
         )
@@ -201,20 +211,25 @@ class DatabaseMemoryStore(
     async def save_attachment(
         self, attachment: Attachment, context: ReportAgentContext
     ) -> None:
-        payload = attachment.model_dump(mode="json")
+        canonical_attachment = normalize_attachment_for_storage(attachment)
+        payload = canonical_attachment.model_dump(mode="json")
         existing = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment.id)
         if existing is None:
             self.db.add(
                 WorkspaceWorkspaceChatAttachment(
                     id=attachment.id,
-                    kind=attachment.type,
+                    kind=canonical_attachment.type,
                     payload=payload,
                 )
             )
         else:
-            existing.kind = attachment.type
+            existing.kind = canonical_attachment.type
             existing.payload = payload
-        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else None
+        metadata = (
+            canonical_attachment.metadata
+            if isinstance(canonical_attachment.metadata, dict)
+            else None
+        )
         stored_file_id = (
             metadata.get("stored_file_id")
             if metadata is not None
@@ -223,18 +238,62 @@ class DatabaseMemoryStore(
         if isinstance(stored_file_id, str) and stored_file_id.strip():
             stored_file = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
             if stored_file is not None:
-                stored_file.attachment_id = attachment.id
-                if isinstance(attachment.thread_id, str) and attachment.thread_id.strip():
-                    stored_file.thread_id = attachment.thread_id.strip()
+                stored_file.attachment_id = canonical_attachment.id
+                if (
+                    isinstance(canonical_attachment.thread_id, str)
+                    and canonical_attachment.thread_id.strip()
+                ):
+                    stored_file.thread_id = canonical_attachment.thread_id.strip()
         await self.db.commit()
 
     async def load_attachment(
-        self, attachment_id: str, context: ReportAgentContext
+        self,
+        attachment_id: str,
+        context: ReportAgentContext,
+        *,
+        hydrate_preview: bool = False,
     ) -> Attachment:
         attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
         if attachment is None:
             raise NotFoundError(f"Attachment {attachment_id} was not found")
-        return ATTACHMENT_ADAPTER.validate_python(attachment.payload)
+        parsed_attachment = ATTACHMENT_ADAPTER.validate_python(attachment.payload)
+        if not hydrate_preview:
+            return parsed_attachment
+        return await self._hydrate_attachment_for_display(parsed_attachment)
+
+    async def bind_attachment_to_thread(
+        self,
+        *,
+        attachment_id: str,
+        thread_id: str,
+    ) -> None:
+        attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
+        if attachment is None:
+            raise NotFoundError(f"Attachment {attachment_id} was not found")
+
+        parsed_attachment = ATTACHMENT_ADAPTER.validate_python(attachment.payload)
+        canonical_attachment = normalize_attachment_for_storage(
+            parsed_attachment.model_copy(update={"thread_id": thread_id})
+        )
+        attachment.kind = canonical_attachment.type
+        attachment.payload = canonical_attachment.model_dump(mode="json")
+
+        metadata = (
+            canonical_attachment.metadata
+            if isinstance(canonical_attachment.metadata, dict)
+            else None
+        )
+        stored_file_id = (
+            metadata.get("stored_file_id")
+            if metadata is not None
+            else None
+        )
+        if isinstance(stored_file_id, str) and stored_file_id.strip():
+            stored_file = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+            if stored_file is not None:
+                stored_file.attachment_id = canonical_attachment.id
+                stored_file.thread_id = thread_id
+        await self.db.commit()
 
     async def delete_attachment(
         self, attachment_id: str, context: ReportAgentContext
@@ -247,6 +306,17 @@ class DatabaseMemoryStore(
         )
         stored_files = list(result.scalars().all())
         for stored_file in stored_files:
+            if isinstance(stored_file.thread_id, str) and stored_file.thread_id.strip():
+                chat = await self.db.get(WorkspaceChat, stored_file.thread_id.strip())
+                if chat is not None and isinstance(chat.metadata_json, dict):
+                    current_metadata = parse_chat_metadata(chat.metadata_json)
+                    patch = build_remove_agriculture_image_ref_patch(
+                        current_metadata,
+                        stored_file_id=stored_file.id,
+                        attachment_id=attachment_id,
+                    )
+                    if patch is not None:
+                        chat.metadata_json = merge_chat_metadata(current_metadata, patch)
             try:
                 await self.openai_client.files.delete(stored_file.openai_file_id)
             except Exception:
@@ -354,20 +424,32 @@ class DatabaseMemoryStore(
         self, thread_id: str, item: ThreadItem, context: ReportAgentContext
     ) -> None:
         existing = await self.db.get(WorkspaceChatEntry, item.id)
-        payload = item.model_dump(mode="json")
+        attachments = getattr(item, "attachments", None)
+        if isinstance(attachments, list) and attachments:
+            canonical_item = item.model_copy(
+                update={
+                    "attachments": [
+                        normalize_attachment_for_storage(attachment)
+                        for attachment in attachments
+                    ]
+                }
+            )
+        else:
+            canonical_item = item
+        payload = canonical_item.model_dump(mode="json")
         if existing is None:
             self.db.add(
                 WorkspaceChatEntry(
-                    id=item.id,
+                    id=canonical_item.id,
                     chat_id=thread_id,
-                    kind=item.type,
+                    kind=canonical_item.type,
                     payload=payload,
                     sequence=await self._next_sequence(WorkspaceChatEntry.sequence),
                 )
             )
         else:
             existing.chat_id = thread_id
-            existing.kind = item.type
+            existing.kind = canonical_item.type
             existing.payload = payload
         await self._touch_chat(thread_id)
         await self.db.commit()
@@ -383,7 +465,7 @@ class DatabaseMemoryStore(
         item = await self.db.get(WorkspaceChatEntry, item_id)
         if item is None or item.chat_id != thread_id:
             raise NotFoundError(f"Thread item {item_id} was not found")
-        return self._to_thread_item(item)
+        return await self._to_thread_item(item)
 
     async def delete_thread(self, thread_id: str, context: ReportAgentContext) -> None:
         chat = await self.db.get(WorkspaceChat, thread_id)
@@ -564,8 +646,65 @@ class DatabaseMemoryStore(
             metadata=cast(dict, chat.metadata_json),
         )
 
-    def _to_thread_item(self, item: WorkspaceChatEntry) -> ThreadItem:
-        return THREAD_ITEM_ADAPTER.validate_python(item.payload)
+    async def _to_thread_item(self, item: WorkspaceChatEntry) -> ThreadItem:
+        parsed_item = THREAD_ITEM_ADAPTER.validate_python(item.payload)
+        attachments = getattr(parsed_item, "attachments", None)
+        if not isinstance(attachments, list) or not attachments:
+            return parsed_item
+
+        hydrated_attachments: list[Attachment] = []
+        for attachment in attachments:
+            hydrated_attachments.append(
+                await self._hydrate_attachment_for_display(attachment)
+            )
+        return parsed_item.model_copy(update={"attachments": hydrated_attachments})
+
+    async def _hydrate_attachment_for_display(
+        self,
+        attachment: Attachment,
+    ) -> Attachment:
+        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
+        if metadata.get("input_kind") != "image" or attachment.upload_descriptor is not None:
+            return attachment
+
+        stored_file_id = metadata.get("stored_file_id")
+        if not isinstance(stored_file_id, str) or not stored_file_id.strip():
+            return attachment
+
+        record = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+        if (
+            record is None
+            or record.status == "deleted"
+            or record.kind != "image"
+            or not isinstance(record.openai_file_id, str)
+            or not record.openai_file_id.strip()
+        ):
+            return attachment
+
+        expires_at = record.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at is not None and expires_at <= datetime.now(UTC):
+            return attachment
+
+        try:
+            binary_response = await self.openai_client.files.content(record.openai_file_id)
+            file_bytes = await binary_response.aread()
+        except Exception:
+            log_event(
+                logger,
+                logging.WARNING,
+                "attachment.preview_hydrate_failed",
+                summary=summarize_pairs_for_log(
+                    (("attachment", attachment.id), ("stored_file", record.id))
+                ),
+            )
+            return attachment
+
+        return build_display_attachment(
+            canonical_attachment=attachment,
+            file_bytes=file_bytes,
+        )
 
 
 def _kind_for_attachment_input(
