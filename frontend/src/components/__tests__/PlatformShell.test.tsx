@@ -17,26 +17,32 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 const agents: AgentDefinition[] = [
   {
-    id: "default-agent",
-    path: "/workspace",
-    navLabel: "Workspace",
-    title: "Default",
-    eyebrow: "Workspace",
-    description: "App orientation and guided tours.",
-    chatkitLead: "You are in the shared workspace. I can help you choose the right workflow or start a guided tour.",
-    chatkitPlaceholder: "Ask what this app can do",
+    id: "agriculture-agent",
+    path: "/agriculture",
+    navLabel: "Agriculture",
+    title: "Agriculture",
+    eyebrow: "App",
+    description: "Inspect plant photos and draft practical next steps.",
+    chatkitLead: "Inspect plant photos and summarize visible evidence.",
+    chatkitPlaceholder: "Ask the agriculture app to inspect plant photos",
     tabs: [],
+    attachmentConfig: {
+      enabled: true,
+    },
   },
   {
     id: "admin-users",
-    path: "/admin/users",
+    path: "/admin",
     navLabel: "Admin",
     title: "Admin",
     eyebrow: "Admin",
-    description: "Manage users.",
+    description: "Manage users and test cases.",
     chatkitLead: "Review users.",
     chatkitPlaceholder: "Ask about users",
     tabs: [],
+    attachmentConfig: {
+      enabled: false,
+    },
   },
 ];
 
@@ -59,12 +65,12 @@ describe("PlatformShell", () => {
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  it("shows a generic workspace shell without the surface selector", async () => {
+  it("shows the branded chrome with the current themed app name", async () => {
     await act(async () => {
       root.render(
         <PlatformShell
           agents={agents}
-          activeAgentId="default-agent"
+          activeAgentId="agriculture-agent"
           themeAgentId="document-agent"
           onSelectAgent={() => {}}
         >
@@ -73,14 +79,9 @@ describe("PlatformShell", () => {
       );
     });
 
-    expect(container.textContent).not.toContain("Browse");
     expect(container.textContent).toContain("AI Portfolio");
     expect(container.textContent).toContain("Documents");
-    expect(container.textContent).not.toContain("Default");
-    expect(container.textContent).not.toContain("Select an agent inside the workspace shell");
-    expect(container.querySelector("[data-testid='workspace-feedback-button']")).toBeNull();
-    expect(container.textContent).not.toContain("Files");
-    expect(container.querySelector("[data-testid='workspace-surface-selector']")).toBeNull();
-    expect(container.querySelector("[data-testid='workspace-surface-selector-mobile']")).toBeNull();
+    expect(container.textContent).not.toContain("Workspace");
+    expect(container.querySelector("[data-testid='auth-panel']")).not.toBeNull();
   });
 });

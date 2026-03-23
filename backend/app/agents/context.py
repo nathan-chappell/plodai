@@ -8,8 +8,9 @@ from backend.app.agents.workspace_file import WorkspaceFileMetadata
 from backend.app.chatkit.metadata import (
     AgentBundle,
     AgentSpec,
-    AppThreadMetadata,
+    AppChatMetadata,
     ClientToolDefinition,
+    WorkspaceItemSummary,
 )
 
 
@@ -19,10 +20,13 @@ class ReportAgentContext:
     user_id: str
     user_email: str | None
     db: AsyncSession
+    workspace_id: str | None = None
+    workspace_name: str | None = None
     chart_cache: dict[str, str] = field(default_factory=dict)
-    request_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
-    thread_metadata: AppThreadMetadata = field(default_factory=AppThreadMetadata)
+    request_metadata: AppChatMetadata = field(default_factory=AppChatMetadata)
+    thread_metadata: AppChatMetadata = field(default_factory=AppChatMetadata)
     available_files: list[WorkspaceFileMetadata] = field(default_factory=list)
+    available_artifacts: list[WorkspaceItemSummary] = field(default_factory=list)
     query_plan_model: type[BaseModel] | None = None
     agent_bundle: AgentBundle | None = None
     uploaded_file_ids: dict[str, str] = field(default_factory=dict)

@@ -1,13 +1,13 @@
-import type { AppThreadMetadata, UpdateThreadMetadataPayload } from "../types/analysis";
+import type { AppChatMetadata, UpdateChatMetadataPayload } from "../types/analysis";
 
-export function buildThreadMetadataUpdateAction(payload: UpdateThreadMetadataPayload) {
+export function buildChatMetadataUpdateAction(payload: UpdateChatMetadataPayload) {
   return {
-    type: "update_thread_metadata",
+    type: "update_chat_metadata",
     payload,
   };
 }
 
-export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThreadMetadata {
+export function buildInitialChatMetadata(metadata: AppChatMetadata): AppChatMetadata {
   return {
     title: metadata.title,
     investigation_brief: metadata.investigation_brief,
@@ -17,7 +17,7 @@ export function buildInitialThreadMetadata(metadata: AppThreadMetadata): AppThre
     chart_cache: metadata.chart_cache,
     surface_key: metadata.surface_key,
     agent_bundle: metadata.agent_bundle,
-    shell_state: metadata.shell_state,
+    workspace_state: metadata.workspace_state,
     openai_conversation_id: metadata.openai_conversation_id,
     openai_previous_response_id: metadata.openai_previous_response_id,
     origin: metadata.origin,

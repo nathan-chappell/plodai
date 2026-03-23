@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import styled, { css } from "styled-components";
+import styled from "styled-components";
 
 import {
   resolveReportChartImageDataUrl,
@@ -8,7 +8,8 @@ import {
   resolveReportImageDataUrl,
   resolveReportImageSourceLabel,
 } from "../lib/report-chart-preview";
-import type { LocalWorkspaceFile } from "../types/report";
+import { getReportSlideGridTemplate } from "../lib/report-slide-layout";
+import type { LocalAttachment } from "../types/report";
 import type {
   ReportChartPanelV1,
   ReportImagePanelV1,
@@ -21,7 +22,7 @@ export const REPORT_PDF_PAGE_SELECTOR = "[data-report-pdf-page='true']";
 
 export function collectReportAssetUrls(
   report: WorkspaceReportV1,
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
 ): string[] {
   const urls = new Set<string>();
 
@@ -65,7 +66,7 @@ export async function preloadReportAssetUrls(urls: string[]): Promise<void> {
 }
 
 function renderPanel(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportSlidePanelV1,
 ) {
   if (panel.type === "narrative") {
@@ -92,7 +93,7 @@ function renderPanel(
 }
 
 function renderChartPanel(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportChartPanelV1,
 ) {
   const imageUrl = resolveReportChartImageDataUrl(files, panel);
@@ -120,7 +121,7 @@ function renderChartPanel(
 }
 
 function renderImagePanel(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportImagePanelV1,
 ) {
   const imageUrl = resolveReportImageDataUrl(files, panel);
@@ -152,7 +153,7 @@ export function ReportPdfDocument({
   report,
   pageTestId,
 }: {
-  files: LocalWorkspaceFile[];
+  files: LocalAttachment[];
   report: WorkspaceReportV1;
   pageTestId?: string;
 }) {
@@ -249,25 +250,15 @@ const SlideCounter = styled.div`
   white-space: nowrap;
 `;
 
-const layoutStyles = {
-  "1x1": css`
-    grid-template-columns: minmax(0, 1fr);
-  `,
-  "1x2": css`
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(2, minmax(0, 1fr));
-  `,
-  "2x2": css`
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
-  `,
-} satisfies Record<ReportSlideLayout, ReturnType<typeof css>>;
-
 const SlideGrid = styled.section<{ $layout: ReportSlideLayout }>`
   min-height: 0;
   display: grid;
   gap: 0.22in;
-  ${({ $layout }) => layoutStyles[$layout]}
+  grid-template-columns: ${({ $layout }) => getReportSlideGridTemplate($layout).columns};
+  ${({ $layout }) => {
+    const { rows } = getReportSlideGridTemplate($layout);
+    return rows ? `grid-template-rows: ${rows};` : "";
+  }}
 `;
 
 const PanelCard = styled.section`

@@ -35,6 +35,9 @@ class ClientToolResultPayload(TypedDict, total=False):
     query_id: str
     queryId: str
     row_count: int
+    artifact_id: str
+    artifact_kind: str
+    revision: int
     image_data_url: str
     imageDataUrl: str
     rows: list[dict[str, object]]

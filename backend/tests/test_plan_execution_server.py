@@ -14,7 +14,7 @@ from chatkit.types import (
 
 import backend.app.chatkit.server as server_module
 from backend.app.agents.context import ReportAgentContext
-from backend.app.chatkit.metadata import active_plan_execution, parse_thread_metadata
+from backend.app.chatkit.metadata import active_plan_execution, parse_chat_metadata
 from backend.app.chatkit.server import ClientWorkspaceChatKitServer, PlanStepJudgeResult
 
 
@@ -171,7 +171,7 @@ def _thread(metadata: dict[str, object]) -> ThreadMetadata:
 
 
 def _context(metadata: dict[str, object]) -> ReportAgentContext:
-    parsed_metadata = parse_thread_metadata(metadata)
+    parsed_metadata = parse_chat_metadata(metadata)
     return ReportAgentContext(
         report_id="thread_123",
         user_id="user_123",
@@ -205,7 +205,7 @@ def _patch_server_runtime(
         server_module,
         "resolve_thread_runtime_state",
         lambda thread, context: SimpleNamespace(
-            metadata=parse_thread_metadata(thread.metadata)
+            metadata=parse_chat_metadata(thread.metadata)
         ),
     )
     monkeypatch.setattr(

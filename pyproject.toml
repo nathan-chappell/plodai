@@ -11,9 +11,11 @@ dependencies = [
   "openai",
   "openai-agents",
   "openai-chatkit",
+  "pypdf",
   "colorlog",
   "pydantic-settings",
   "python-multipart",
+  "reportlab",
   "sqlalchemy",
   "typer",
   "uvicorn[standard]"

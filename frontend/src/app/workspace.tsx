@@ -4,209 +4,99 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
 import { useAppState } from "./context";
-import {
-  loadActiveWorkspaceContextId,
-  loadWorkspaceContexts,
-  saveActiveWorkspaceContextId,
-  saveWorkspaceContexts,
-} from "../lib/agent-shell-store";
-import { buildShellStateMetadata } from "../lib/shell-metadata";
-import {
-  buildAgentPreviewModel,
-  buildResourceFromFile,
-  createEmptyAgentShellState,
-  listFileResources,
-  normalizeAgentShellState,
-  removeAgentResource,
-  replaceAgentResources,
-  sortResources,
-} from "../lib/shell-resources";
+import { WorkspaceRepository } from "../lib/workspace-repository";
 import { buildWorkspaceFile } from "../lib/workspace-files";
-import { getAgentDefinition, runtimeAgentDefinitions } from "../agents/definitions";
-import type { AgentDefinition } from "../agents/types";
-import type { LocalWorkspaceFile } from "../types/report";
+import type { LocalAttachment } from "../types/report";
 import type {
-  AgentPreviewModel,
-  AgentResourceRecord,
-  AgentShellState,
-  ShellStateMetadata,
-  WorkspaceContextRecord,
-} from "../types/shell";
+  ApplyWorkspaceItemOperationPayload,
+  WorkspaceAppId,
+  WorkspaceItemCreatePayload,
+  WorkspaceCreatedItemDetail,
+  WorkspaceItemRevision,
+  WorkspaceCreatedItemSummary,
+  WorkspaceListItem,
+  WorkspaceState,
+  WorkspaceUpdatePayload,
+  WorkspaceUploadItemSummary,
+} from "../types/workspace";
 
-const DEFAULT_AGENT_ID = "default-agent";
-const DEFAULT_CONTEXT_NAME = "Workspace";
-const PERSISTED_AGENT_IDS = runtimeAgentDefinitions
-  .filter((agent) => agent.id !== "feedback-agent")
-  .map((agent) => agent.id);
+const DEFAULT_WORKSPACE_NAME_BY_APP: Record<WorkspaceAppId, string> = {
+  agriculture: "Agriculture workspace",
+  documents: "Documents workspace",
+};
 
-type CreateContextOptions = {
-  agentId?: string;
+type CreateWorkspaceOptions = {
+  appId?: WorkspaceAppId;
   name?: string;
 };
 
 type HandleSelectFilesOptions = {
-  contextId?: string;
+  workspaceId?: string;
+  appId?: WorkspaceAppId;
+};
+
+type PendingComposerLaunch = {
+  appId: WorkspaceAppId;
+  workspaceId: string;
+  prompt: string;
+  model?: string | null;
 };
 
 type AgentShellContextValue = {
   currentUserId: string | null;
+  currentAppId: WorkspaceAppId | null;
   hydrated: boolean;
-  contexts: WorkspaceContextRecord[];
-  activeContextId: string;
-  activeContextName: string;
-  selectedAgentId: string;
-  selectedAgentDefinition: AgentDefinition;
-  selectedAgentState: AgentShellState;
-  selectedAgentResources: AgentResourceRecord[];
-  selectedAgentFiles: LocalWorkspaceFile[];
-  selectedAgentPreview: AgentPreviewModel;
-  sharedResources: AgentResourceRecord[];
-  shellStateMetadata: ShellStateMetadata;
-  selectAgent: (agentId: string) => void;
-  selectContextAndAgent: (contextId: string, agentId: string) => void;
-  createContext: (options?: CreateContextOptions) => string;
-  getAgentState: (agentId: string) => AgentShellState;
-  updateAgentState: (
-    agentId: string,
-    updater: (state: AgentShellState) => AgentShellState,
-  ) => void;
-  replaceAgentResources: (agentId: string, resources: AgentResourceRecord[]) => void;
-  removeAgentResource: (agentId: string, resourceId: string) => void;
-  clearAgentState: (agentId: string) => void;
-  clearSelectedAgentState: () => void;
+  workspaces: WorkspaceListItem[];
+  activeWorkspace: WorkspaceState | null;
+  activeWorkspaceId: string | null;
+  activeWorkspaceName: string;
+  selectedFileId: string | null;
+  selectedArtifactId: string | null;
+  currentReportArtifactId: string | null;
+  listFiles: () => WorkspaceUploadItemSummary[];
+  getFile: (fileId: string) => WorkspaceUploadItemSummary | null;
+  resolveLocalFile: (fileId: string) => Promise<LocalAttachment | null>;
+  registerFile: (
+    file: LocalAttachment,
+    options?: {
+      sourceItemId?: string | null;
+    },
+  ) => Promise<WorkspaceUploadItemSummary>;
+  listArtifacts: () => WorkspaceCreatedItemSummary[];
+  getArtifact: (artifactId: string) => Promise<WorkspaceCreatedItemDetail | null>;
+  listArtifactRevisions: (artifactId: string) => Promise<WorkspaceItemRevision[]>;
+  createArtifact: (
+    payload: WorkspaceItemCreatePayload,
+  ) => Promise<WorkspaceCreatedItemDetail>;
+  applyArtifactOperation: (
+    artifactId: string,
+    payload: ApplyWorkspaceItemOperationPayload,
+  ) => Promise<WorkspaceCreatedItemDetail>;
+  updateWorkspace: (payload: WorkspaceUpdatePayload) => Promise<WorkspaceState | null>;
+  selectWorkspace: (workspaceId: string) => Promise<void>;
+  createWorkspace: (options?: CreateWorkspaceOptions) => Promise<string>;
   handleSelectFiles: (
-    agentId: string,
     files: FileList | Iterable<File> | null | undefined,
     options?: HandleSelectFilesOptions,
-  ) => Promise<LocalWorkspaceFile[]>;
-  resolveResource: (resourceId: string) => AgentResourceRecord | null;
-  getPreviewResources: (agentId: string) => AgentResourceRecord[];
+  ) => Promise<LocalAttachment[]>;
+  removeWorkspaceFile: (fileId: string) => Promise<void>;
+  refreshWorkspace: () => Promise<void>;
+  queuePendingComposerLaunch: (launch: PendingComposerLaunch | null) => void;
+  consumePendingComposerLaunch: (
+    appId: WorkspaceAppId,
+    workspaceId: string,
+  ) => PendingComposerLaunch | null;
 };
 
 const AgentShellContext = createContext<AgentShellContextValue | null>(null);
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function nextContextId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `workspace-${crypto.randomUUID()}`;
-  }
-  return `workspace-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function buildInitialStates(): Record<string, AgentShellState> {
-  return Object.fromEntries(
-    PERSISTED_AGENT_IDS.map((agentId) => [agentId, createEmptyAgentShellState()]),
-  );
-}
-
-function normalizeSelectedAgentId(value: string | null | undefined): string {
-  return value && PERSISTED_AGENT_IDS.includes(value) ? value : DEFAULT_AGENT_ID;
-}
-
-function normalizeStates(
-  statesByAgentId: Record<string, AgentShellState>,
-): Record<string, AgentShellState> {
-  return Object.fromEntries(
-    PERSISTED_AGENT_IDS.map((agentId) => [
-      agentId,
-      normalizeAgentShellState(statesByAgentId[agentId]),
-    ]),
-  );
-}
-
-function sortContexts(contexts: WorkspaceContextRecord[]): WorkspaceContextRecord[] {
-  return [...contexts].sort(
-    (left, right) =>
-      right.updated_at.localeCompare(left.updated_at) ||
-      left.name.localeCompare(right.name) ||
-      left.id.localeCompare(right.id),
-  );
-}
-
-function normalizeContextRecord(context: WorkspaceContextRecord): WorkspaceContextRecord {
-  const normalizedStates = normalizeStates(context.states_by_agent_id ?? buildInitialStates());
-  return {
-    ...context,
-    name:
-      typeof context.name === "string" && context.name.trim()
-        ? context.name.trim()
-        : DEFAULT_CONTEXT_NAME,
-    selected_agent_id: normalizeSelectedAgentId(context.selected_agent_id),
-    states_by_agent_id: normalizedStates,
-    created_at:
-      typeof context.created_at === "string" && context.created_at.trim()
-        ? context.created_at
-        : nowIso(),
-    updated_at:
-      typeof context.updated_at === "string" && context.updated_at.trim()
-        ? context.updated_at
-        : nowIso(),
-  };
-}
-
-function normalizeContexts(
-  contexts: WorkspaceContextRecord[] | null | undefined,
-): WorkspaceContextRecord[] {
-  if (!contexts?.length) {
-    const timestamp = nowIso();
-    return [
-      {
-        id: "workspace-default",
-        name: DEFAULT_CONTEXT_NAME,
-        selected_agent_id: DEFAULT_AGENT_ID,
-        states_by_agent_id: buildInitialStates(),
-        created_at: timestamp,
-        updated_at: timestamp,
-      },
-    ];
-  }
-  return sortContexts(contexts.map((context) => normalizeContextRecord(context)));
-}
-
-function normalizeActiveContextId(
-  contexts: WorkspaceContextRecord[],
-  activeContextId: string | null | undefined,
-): string {
-  return contexts.some((context) => context.id === activeContextId)
-    ? (activeContextId as string)
-    : contexts[0]?.id ?? "workspace-default";
-}
-
-function buildNextContextName(contexts: WorkspaceContextRecord[]): string {
-  const usedNames = new Set(contexts.map((context) => context.name.trim().toLowerCase()));
-  if (!usedNames.has(DEFAULT_CONTEXT_NAME.toLowerCase())) {
-    return DEFAULT_CONTEXT_NAME;
-  }
-  let suffix = 2;
-  while (usedNames.has(`${DEFAULT_CONTEXT_NAME.toLowerCase()} ${suffix}`)) {
-    suffix += 1;
-  }
-  return `${DEFAULT_CONTEXT_NAME} ${suffix}`;
-}
-
-function createWorkspaceContext(selectedAgentId: string, name: string): WorkspaceContextRecord {
-  const timestamp = nowIso();
-  return {
-    id: nextContextId(),
-    name,
-    selected_agent_id: normalizeSelectedAgentId(selectedAgentId),
-    states_by_agent_id: buildInitialStates(),
-    created_at: timestamp,
-    updated_at: timestamp,
-  };
-}
-
-function toFileArray(
-  files: FileList | Iterable<File> | null | undefined,
-): File[] {
+function toFileArray(files: FileList | Iterable<File> | null | undefined): File[] {
   if (!files) {
     return [];
   }
@@ -216,19 +106,77 @@ function toFileArray(
   return Array.from(files);
 }
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
+function baseWorkspaceName(appId: WorkspaceAppId): string {
+  return DEFAULT_WORKSPACE_NAME_BY_APP[appId];
+}
+
+function nextWorkspaceName(
+  appId: WorkspaceAppId,
+  workspaces: WorkspaceListItem[],
+): string {
+  const baseName = baseWorkspaceName(appId);
+  const used = new Set(workspaces.map((workspace) => workspace.name.trim().toLowerCase()));
+  if (!used.has(baseName.toLowerCase())) {
+    return baseName;
+  }
+  let suffix = 2;
+  while (used.has(`${baseName.toLowerCase()} ${suffix}`)) {
+    suffix += 1;
+  }
+  return `${baseName} ${suffix}`;
+}
+
+export function WorkspaceProvider({
+  appId,
+  children,
+}: {
+  appId: WorkspaceAppId | null;
+  children: ReactNode;
+}) {
   const { user } = useAppState();
   const currentUserId = user?.id ?? null;
-  const [contexts, setContexts] = useState<WorkspaceContextRecord[]>(normalizeContexts(null));
-  const [activeContextId, setActiveContextId] = useState<string>("workspace-default");
+  const repositoryRef = useRef<WorkspaceRepository | null>(null);
+  if (repositoryRef.current === null) {
+    repositoryRef.current = new WorkspaceRepository();
+  }
+  const repository = repositoryRef.current;
+
   const [hydrated, setHydrated] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceState | null>(null);
+  const [pendingComposerLaunch, setPendingComposerLaunch] =
+    useState<PendingComposerLaunch | null>(null);
+
+  const refreshWorkspaceList = useCallback(
+    async (targetAppId: WorkspaceAppId) => {
+      const nextWorkspaces = await repository.listWorkspaces(targetAppId);
+      setWorkspaces(nextWorkspaces);
+      return nextWorkspaces;
+    },
+    [repository],
+  );
+
+  const loadWorkspace = useCallback(
+    async (workspaceId: string, targetAppId: WorkspaceAppId) => {
+      const state = await repository.loadWorkspace(workspaceId, targetAppId);
+      setActiveWorkspace(state);
+      return state;
+    },
+    [repository],
+  );
 
   useEffect(() => {
     if (!currentUserId) {
-      const initialContexts = normalizeContexts(null);
-      setContexts(initialContexts);
-      setActiveContextId(initialContexts[0]?.id ?? "workspace-default");
       setHydrated(false);
+      setWorkspaces([]);
+      setActiveWorkspace(null);
+      return;
+    }
+
+    if (!appId) {
+      setWorkspaces([]);
+      setActiveWorkspace(null);
+      setHydrated(true);
       return;
     }
 
@@ -236,328 +184,312 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setHydrated(false);
 
     void (async () => {
-      const [storedContexts, storedActiveContextId] = await Promise.all([
-        loadWorkspaceContexts(currentUserId),
-        loadActiveWorkspaceContextId(currentUserId),
-      ]);
-
-      const nextContexts = normalizeContexts(storedContexts);
-      const nextActiveContextId = normalizeActiveContextId(nextContexts, storedActiveContextId);
-
+      const queuedLaunch =
+        pendingComposerLaunch?.appId === appId ? pendingComposerLaunch : null;
+      const state = queuedLaunch
+        ? await repository.loadWorkspace(queuedLaunch.workspaceId, appId)
+        : await repository.ensureWorkspace(appId);
+      const nextWorkspaces = await repository.listWorkspaces(appId);
       if (cancelled) {
         return;
       }
-
-      setContexts(nextContexts);
-      setActiveContextId(nextActiveContextId);
+      setActiveWorkspace(state);
+      setWorkspaces(nextWorkspaces);
       setHydrated(true);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [currentUserId]);
+  }, [appId, currentUserId, pendingComposerLaunch, repository]);
 
-  useEffect(() => {
-    if (!currentUserId || !hydrated) {
+  const refreshWorkspace = useCallback(async () => {
+    if (!activeWorkspace?.workspace_id || !appId) {
       return;
     }
+    const [state] = await Promise.all([
+      loadWorkspace(activeWorkspace.workspace_id, appId),
+      refreshWorkspaceList(appId),
+    ]);
+    setActiveWorkspace(state);
+  }, [activeWorkspace?.workspace_id, appId, loadWorkspace, refreshWorkspaceList]);
 
-    const normalizedWorkspaceContexts = normalizeContexts(contexts);
-    const resolvedActiveContextId = normalizeActiveContextId(
-      normalizedWorkspaceContexts,
-      activeContextId,
-    );
-    const timeoutId = window.setTimeout(() => {
-      void Promise.all([
-        saveWorkspaceContexts(currentUserId, normalizedWorkspaceContexts),
-        saveActiveWorkspaceContextId(currentUserId, resolvedActiveContextId),
-      ]).catch(() => undefined);
-    }, 180);
+  const updateWorkspace = useCallback(
+    async (payload: WorkspaceUpdatePayload) => {
+      if (!activeWorkspace?.workspace_id || !appId) {
+        return null;
+      }
+      const [state] = await Promise.all([
+        repository.updateWorkspace(activeWorkspace.workspace_id, appId, payload),
+        refreshWorkspaceList(appId),
+      ]);
+      setActiveWorkspace(state);
+      return state;
+    },
+    [activeWorkspace?.workspace_id, appId, refreshWorkspaceList, repository],
+  );
 
-    return () => window.clearTimeout(timeoutId);
-  }, [activeContextId, contexts, currentUserId, hydrated]);
+  const selectWorkspace = useCallback(
+    async (workspaceId: string) => {
+      if (!appId) {
+        return;
+      }
+      await loadWorkspace(workspaceId, appId);
+      setWorkspaces(await repository.listWorkspaces(appId));
+    },
+    [appId, loadWorkspace, repository],
+  );
 
-  const updateContextById = useCallback(
-    (contextId: string, updater: (context: WorkspaceContextRecord) => WorkspaceContextRecord) => {
-      setContexts((current) =>
-        sortContexts(
-          current.map((context) =>
-            context.id === contextId ? normalizeContextRecord(updater(context)) : context,
-          ),
-        ),
+  const createWorkspace = useCallback(
+    async (options?: CreateWorkspaceOptions) => {
+      const targetAppId = options?.appId ?? appId;
+      if (!targetAppId) {
+        throw new Error("No workspace app is available.");
+      }
+      const state = await repository.createWorkspace(
+        options?.name?.trim() || nextWorkspaceName(targetAppId, workspaces),
+        targetAppId,
       );
+      if (appId === targetAppId) {
+        setActiveWorkspace(state);
+        setWorkspaces(await repository.listWorkspaces(targetAppId));
+      }
+      return state.workspace_id;
     },
-    [],
-  );
-
-  const updateActiveContext = useCallback(
-    (updater: (context: WorkspaceContextRecord) => WorkspaceContextRecord) => {
-      updateContextById(activeContextId, updater);
-    },
-    [activeContextId, updateContextById],
-  );
-
-  const selectAgent = useCallback(
-    (agentId: string) => {
-      const resolvedAgentId = normalizeSelectedAgentId(agentId);
-      updateActiveContext((context) =>
-        context.selected_agent_id === resolvedAgentId
-          ? context
-          : {
-              ...context,
-              selected_agent_id: resolvedAgentId,
-              updated_at: nowIso(),
-            },
-      );
-    },
-    [updateActiveContext],
-  );
-
-  const selectContextAndAgent = useCallback(
-    (contextId: string, agentId: string) => {
-      const resolvedAgentId = normalizeSelectedAgentId(agentId);
-      setContexts((current) =>
-        sortContexts(
-          current.map((context) =>
-            context.id === contextId
-              ? normalizeContextRecord({
-                  ...context,
-                  selected_agent_id: resolvedAgentId,
-                  updated_at: nowIso(),
-                })
-              : context,
-          ),
-        ),
-      );
-      setActiveContextId(contextId);
-    },
-    [],
-  );
-
-  const updateAgentState = useCallback(
-    (agentId: string, updater: (state: AgentShellState) => AgentShellState) => {
-      const resolvedAgentId = normalizeSelectedAgentId(agentId);
-      updateActiveContext((context) => {
-        const currentStates = normalizeStates(context.states_by_agent_id);
-        const currentState = normalizeAgentShellState(currentStates[resolvedAgentId]);
-        const nextState = normalizeAgentShellState(updater(currentState));
-        return {
-          ...context,
-          states_by_agent_id: {
-            ...currentStates,
-            [resolvedAgentId]: nextState,
-          },
-          updated_at: nowIso(),
-        };
-      });
-    },
-    [updateActiveContext],
-  );
-
-  const replaceResourcesForAgent = useCallback(
-    (agentId: string, resources: AgentResourceRecord[]) => {
-      updateAgentState(agentId, (state) => replaceAgentResources(state, resources));
-    },
-    [updateAgentState],
-  );
-
-  const removeResourceForAgent = useCallback(
-    (agentId: string, resourceId: string) => {
-      updateAgentState(agentId, (state) => removeAgentResource(state, resourceId));
-    },
-    [updateAgentState],
-  );
-
-  const clearAgentStateById = useCallback(
-    (agentId: string) => {
-      const resolvedAgentId = normalizeSelectedAgentId(agentId);
-      updateActiveContext((context) => ({
-        ...context,
-        states_by_agent_id: {
-          ...normalizeStates(context.states_by_agent_id),
-          [resolvedAgentId]: createEmptyAgentShellState(),
-        },
-        updated_at: nowIso(),
-      }));
-    },
-    [updateActiveContext],
+    [appId, repository, workspaces],
   );
 
   const handleSelectFiles = useCallback(
     async (
-      agentId: string,
       files: FileList | Iterable<File> | null | undefined,
       options?: HandleSelectFilesOptions,
     ) => {
+      const targetWorkspaceId = options?.workspaceId ?? activeWorkspace?.workspace_id;
+      if (!targetWorkspaceId) {
+        return [];
+      }
+      const targetAppId = options?.appId ?? activeWorkspace?.app_id ?? appId;
+      if (!targetAppId) {
+        return [];
+      }
       const nextFiles = toFileArray(files);
       if (!nextFiles.length) {
         return [];
       }
-      const targetContextId = options?.contextId ?? activeContextId;
-      const ownerAgentId = normalizeSelectedAgentId(agentId);
       const builtFiles = await Promise.all(nextFiles.map((file) => buildWorkspaceFile(file)));
-      const builtResources = builtFiles.map((file) =>
-        buildResourceFromFile(ownerAgentId, file, {
-          origin: "uploaded",
-        }),
+      await Promise.all(
+        builtFiles.map((file) => repository.createUpload(targetWorkspaceId, file)),
       );
-      updateContextById(targetContextId, (context) => {
-        const currentStates = normalizeStates(context.states_by_agent_id);
-        const currentState = normalizeAgentShellState(currentStates[ownerAgentId]);
-        return {
-          ...context,
-          states_by_agent_id: {
-            ...currentStates,
-            [ownerAgentId]: {
-              ...currentState,
-              resources: sortResources([...currentState.resources, ...builtResources]),
-            },
-          },
-          updated_at: nowIso(),
-        };
-      });
+      if (targetWorkspaceId === activeWorkspace?.workspace_id) {
+        await refreshWorkspace();
+      } else if (appId === targetAppId) {
+        setWorkspaces(await repository.listWorkspaces(targetAppId));
+      }
       return builtFiles;
     },
-    [activeContextId, updateContextById],
+    [activeWorkspace?.app_id, activeWorkspace?.workspace_id, appId, refreshWorkspace, repository],
   );
 
-  const normalizedContexts = useMemo(
-    () => normalizeContexts(contexts),
-    [contexts],
-  );
-  const resolvedActiveContextId = normalizeActiveContextId(normalizedContexts, activeContextId);
-  const activeContext =
-    normalizedContexts.find((context) => context.id === resolvedActiveContextId) ??
-    normalizedContexts[0];
-  const normalizedStates = useMemo(
-    () => normalizeStates(activeContext?.states_by_agent_id ?? buildInitialStates()),
-    [activeContext],
-  );
-  const selectedAgentId = normalizeSelectedAgentId(activeContext?.selected_agent_id);
-  const selectedAgentDefinition =
-    getAgentDefinition(selectedAgentId) ?? getAgentDefinition(DEFAULT_AGENT_ID)!;
-
-  const createContext = useCallback(
-    (options?: CreateContextOptions) => {
-      const nextContext = createWorkspaceContext(
-        options?.agentId ?? selectedAgentId,
-        options?.name?.trim() || buildNextContextName(contexts),
-      );
-      setContexts((current) => sortContexts([nextContext, ...current]));
-      setActiveContextId(nextContext.id);
-      return nextContext.id;
+  const removeWorkspaceFile = useCallback(
+    async (fileId: string) => {
+      if (!activeWorkspace?.workspace_id) {
+        return;
+      }
+      await repository.deleteUpload(activeWorkspace.workspace_id, fileId);
+      await refreshWorkspace();
     },
-    [contexts, selectedAgentId],
+    [activeWorkspace?.workspace_id, refreshWorkspace, repository],
   );
 
-  const sharedResources = useMemo(
+  const listFiles = useCallback(
     () =>
-      Object.values(normalizedStates)
-        .flatMap((state) => state.resources)
-        .sort(
-          (left, right) =>
-            right.created_at.localeCompare(left.created_at) ||
-            left.title.localeCompare(right.title) ||
-            left.id.localeCompare(right.id),
-        ),
-    [normalizedStates],
+      activeWorkspace?.items.filter(
+        (item): item is WorkspaceUploadItemSummary => item.origin === "upload",
+      ) ?? [],
+    [activeWorkspace?.items],
   );
 
-  const resolveResource = useCallback(
-    (resourceId: string) =>
-      sharedResources.find((resource) => resource.id === resourceId) ?? null,
-    [sharedResources],
+  const getFile = useCallback(
+    (fileId: string) =>
+      activeWorkspace?.items.find(
+        (item): item is WorkspaceUploadItemSummary =>
+          item.origin === "upload" && item.id === fileId,
+      ) ?? null,
+    [activeWorkspace?.items],
   );
 
-  const getPreviewResources = useCallback(
-    (agentId: string) =>
-      agentId === DEFAULT_AGENT_ID
-        ? sharedResources
-        : normalizeAgentShellState(normalizedStates[normalizeSelectedAgentId(agentId)]).resources,
-    [normalizedStates, sharedResources],
+  const resolveLocalFile = useCallback(
+    async (fileId: string) => {
+      const file =
+        activeWorkspace?.items.find(
+          (entry): entry is WorkspaceUploadItemSummary =>
+            entry.origin === "upload" && entry.id === fileId,
+        ) ?? null;
+      if (!file) {
+        return null;
+      }
+      return repository.resolveLocalAttachment(file);
+    },
+    [activeWorkspace?.items, repository],
   );
 
-  const selectedAgentState = normalizeAgentShellState(normalizedStates[selectedAgentId]);
-  const selectedAgentResources = getPreviewResources(selectedAgentId);
-  const selectedAgentFiles = useMemo(
-    () => listFileResources(selectedAgentResources),
-    [selectedAgentResources],
+  const registerFile = useCallback(
+    async (
+      file: LocalAttachment,
+      options?: {
+        sourceItemId?: string | null;
+      },
+    ) => {
+      if (!activeWorkspace?.workspace_id) {
+        throw new Error("No active workspace is available.");
+      }
+      const entry = await repository.createUpload(activeWorkspace.workspace_id, file, {
+        sourceItemId: options?.sourceItemId ?? null,
+      });
+      await refreshWorkspace();
+      return entry;
+    },
+    [activeWorkspace?.workspace_id, refreshWorkspace, repository],
   );
-  const selectedAgentPreview = useMemo(
+
+  const listArtifacts = useCallback(
     () =>
-      buildAgentPreviewModel({
-        agentId: selectedAgentId,
-        title: selectedAgentDefinition.title,
-        resources: selectedAgentResources,
-      }),
-    [selectedAgentDefinition.title, selectedAgentId, selectedAgentResources],
+      activeWorkspace?.items.filter(
+        (item): item is WorkspaceCreatedItemSummary => item.origin === "created",
+      ) ?? [],
+    [activeWorkspace?.items],
   );
-  const shellStateMetadata = useMemo(
-    () =>
-      buildShellStateMetadata({
-        contextId: activeContext?.id ?? "workspace-default",
-        contextName: activeContext?.name ?? DEFAULT_CONTEXT_NAME,
-        activeAgentId: selectedAgentId,
-        statesByAgentId: normalizedStates,
-      }),
-    [activeContext?.id, activeContext?.name, normalizedStates, selectedAgentId],
+
+  const getArtifact = useCallback(
+    async (artifactId: string) => {
+      if (!activeWorkspace?.workspace_id) {
+        return null;
+      }
+      return repository.getItem(activeWorkspace.workspace_id, artifactId);
+    },
+    [activeWorkspace?.workspace_id, repository],
+  );
+
+  const listArtifactRevisions = useCallback(
+    async (artifactId: string) => {
+      if (!activeWorkspace?.workspace_id) {
+        return [];
+      }
+      return repository.listItemRevisions(activeWorkspace.workspace_id, artifactId);
+    },
+    [activeWorkspace?.workspace_id, repository],
+  );
+
+  const createArtifact = useCallback(
+    async (payload: WorkspaceItemCreatePayload) => {
+      if (!activeWorkspace?.workspace_id) {
+        throw new Error("No active workspace is available.");
+      }
+      const detail = await repository.createItem(activeWorkspace.workspace_id, payload);
+      await refreshWorkspace();
+      return detail;
+    },
+    [activeWorkspace?.workspace_id, refreshWorkspace, repository],
+  );
+
+  const applyArtifactOperation = useCallback(
+    async (artifactId: string, payload: ApplyWorkspaceItemOperationPayload) => {
+      if (!activeWorkspace?.workspace_id) {
+        throw new Error("No active workspace is available.");
+      }
+      const detail = await repository.applyItemOperation(
+        activeWorkspace.workspace_id,
+        artifactId,
+        payload,
+      );
+      await refreshWorkspace();
+      return detail;
+    },
+    [activeWorkspace?.workspace_id, refreshWorkspace, repository],
+  );
+
+  const queuePendingComposerLaunch = useCallback(
+    (launch: PendingComposerLaunch | null) => {
+      setPendingComposerLaunch(launch);
+    },
+    [],
+  );
+
+  const consumePendingComposerLaunch = useCallback(
+    (targetAppId: WorkspaceAppId, workspaceId: string) => {
+      let nextLaunch: PendingComposerLaunch | null = null;
+      setPendingComposerLaunch((current) => {
+        if (!current) {
+          return current;
+        }
+        if (current.appId !== targetAppId || current.workspaceId !== workspaceId) {
+          return current;
+        }
+        nextLaunch = current;
+        return null;
+      });
+      return nextLaunch;
+    },
+    [],
   );
 
   const value = useMemo<AgentShellContextValue>(
     () => ({
       currentUserId,
+      currentAppId: appId,
       hydrated,
-      contexts: normalizedContexts,
-      activeContextId: activeContext?.id ?? "workspace-default",
-      activeContextName: activeContext?.name ?? DEFAULT_CONTEXT_NAME,
-      selectedAgentId,
-      selectedAgentDefinition,
-      selectedAgentState,
-      selectedAgentResources,
-      selectedAgentFiles,
-      selectedAgentPreview,
-      sharedResources,
-      shellStateMetadata,
-      selectAgent,
-      selectContextAndAgent,
-      createContext,
-      getAgentState: (agentId: string) =>
-        normalizeAgentShellState(normalizedStates[normalizeSelectedAgentId(agentId)]),
-      updateAgentState,
-      replaceAgentResources: replaceResourcesForAgent,
-      removeAgentResource: removeResourceForAgent,
-      clearAgentState: clearAgentStateById,
-      clearSelectedAgentState: () => clearAgentStateById(selectedAgentId),
+      workspaces,
+      activeWorkspace,
+      activeWorkspaceId: activeWorkspace?.workspace_id ?? null,
+      activeWorkspaceName:
+        activeWorkspace?.workspace_name ??
+        (appId ? baseWorkspaceName(appId) : "Workspace"),
+      selectedFileId:
+        listFiles().find((item) => item.id === activeWorkspace?.selected_item_id)?.id ?? null,
+      selectedArtifactId:
+        listArtifacts().find((item) => item.id === activeWorkspace?.selected_item_id)?.id ?? null,
+      currentReportArtifactId: activeWorkspace?.current_report_item_id ?? null,
+      listFiles,
+      getFile,
+      resolveLocalFile,
+      registerFile,
+      listArtifacts,
+      getArtifact,
+      listArtifactRevisions,
+      createArtifact,
+      applyArtifactOperation,
+      updateWorkspace,
+      selectWorkspace,
+      createWorkspace,
       handleSelectFiles,
-      resolveResource,
-      getPreviewResources,
+      removeWorkspaceFile,
+      refreshWorkspace,
+      queuePendingComposerLaunch,
+      consumePendingComposerLaunch,
     }),
     [
-      activeContext?.id,
-      activeContext?.name,
-      clearAgentStateById,
-      createContext,
+      activeWorkspace,
+      appId,
+      applyArtifactOperation,
+      createArtifact,
+      createWorkspace,
       currentUserId,
-      getPreviewResources,
+      getArtifact,
+      getFile,
       handleSelectFiles,
       hydrated,
-      normalizedContexts,
-      normalizedStates,
-      removeResourceForAgent,
-      replaceResourcesForAgent,
-      resolveResource,
-      selectAgent,
-      selectContextAndAgent,
-      selectedAgentDefinition,
-      selectedAgentFiles,
-      selectedAgentId,
-      selectedAgentPreview,
-      selectedAgentResources,
-      selectedAgentState,
-      sharedResources,
-      shellStateMetadata,
-      updateAgentState,
+      listArtifactRevisions,
+      listArtifacts,
+      listFiles,
+      queuePendingComposerLaunch,
+      consumePendingComposerLaunch,
+      refreshWorkspace,
+      registerFile,
+      removeWorkspaceFile,
+      resolveLocalFile,
+      selectWorkspace,
+      updateWorkspace,
+      workspaces,
     ],
   );
 

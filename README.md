@@ -83,7 +83,9 @@ This scaffold provides:
 
 The biggest missing pieces are fuller dataset-tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
 
-## Guided tours
+## App routes
 
-The recommended walkthrough is now the Help-agent guided tour flow. Sign in normally, open the shared workspace, ask the Help agent for a tour, and then either upload your own file or use one of the built-in default assets before the target agent continues in ChatKit.
+- `/agriculture` is the Agriculture app.
+- `/documents` is the Documents app.
+- `/admin` includes the admin-only credit tools plus repo-backed test cases that create a normal workspace, load fixture files, and prefill the composer without auto-sending.
 

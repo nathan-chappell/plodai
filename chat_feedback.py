@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from backend.app.chatkit.feedback_types import FeedbackKind, FeedbackOrigin
 from backend.app.db.session import AsyncSessionLocal
-from backend.app.models.chatkit import ChatItemFeedback, ChatThread
+from backend.app.models.chatkit import WorkspaceChatFeedback, WorkspaceChat
 
 app = typer.Typer(help="Inspect structured ChatKit feedback captured in the client workspace.")
 
@@ -19,7 +19,7 @@ def list_feedback(
     email_contains: Annotated[str | None, typer.Option("--email-contains")] = None,
     kind: Annotated[FeedbackKind | None, typer.Option("--kind")] = None,
     origin: Annotated[FeedbackOrigin | None, typer.Option("--origin")] = None,
-    thread_id: Annotated[str | None, typer.Option("--thread-id")] = None,
+    chat_id: Annotated[str | None, typer.Option("--chat-id")] = None,
     has_message: Annotated[bool | None, typer.Option("--has-message/--no-has-message")] = None,
     limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 25,
 ) -> None:
@@ -28,16 +28,16 @@ def list_feedback(
             email_contains=email_contains,
             kind=kind,
             origin=origin,
-            thread_id=thread_id,
+            chat_id=chat_id,
             has_message=has_message,
             limit=limit,
         )
     )
 
 
-@app.command(name="thread")
-def show_thread(thread_id: str) -> None:
-    asyncio.run(_show_thread_feedback(thread_id))
+@app.command(name="chat")
+def show_chat(chat_id: str) -> None:
+    asyncio.run(_show_chat_feedback(chat_id))
 
 
 async def _list_feedback(
@@ -45,27 +45,27 @@ async def _list_feedback(
     email_contains: str | None,
     kind: FeedbackKind | None,
     origin: FeedbackOrigin | None,
-    thread_id: str | None,
+    chat_id: str | None,
     has_message: bool | None,
     limit: int,
 ) -> None:
     async with AsyncSessionLocal() as db:
-        query = select(ChatItemFeedback, ChatThread.title).join(
-            ChatThread, ChatThread.id == ChatItemFeedback.thread_id
+        query = select(WorkspaceChatFeedback, WorkspaceChat.title).join(
+            WorkspaceChat, WorkspaceChat.id == WorkspaceChatFeedback.chat_id
         )
         if email_contains:
-            query = query.where(ChatItemFeedback.user_email.ilike(f"%{email_contains.strip().lower()}%"))
+            query = query.where(WorkspaceChatFeedback.user_email.ilike(f"%{email_contains.strip().lower()}%"))
         if kind is not None:
-            query = query.where(ChatItemFeedback.kind == kind)
+            query = query.where(WorkspaceChatFeedback.kind == kind)
         if origin is not None:
-            query = query.where(ChatItemFeedback.origin == origin)
-        if thread_id:
-            query = query.where(ChatItemFeedback.thread_id == thread_id)
+            query = query.where(WorkspaceChatFeedback.origin == origin)
+        if chat_id:
+            query = query.where(WorkspaceChatFeedback.chat_id == chat_id)
         if has_message is True:
-            query = query.where(ChatItemFeedback.message.is_not(None))
+            query = query.where(WorkspaceChatFeedback.message.is_not(None))
         if has_message is False:
-            query = query.where(ChatItemFeedback.message.is_(None))
-        query = query.order_by(ChatItemFeedback.created_at.desc()).limit(limit)
+            query = query.where(WorkspaceChatFeedback.message.is_(None))
+        query = query.order_by(WorkspaceChatFeedback.created_at.desc()).limit(limit)
         result = await db.execute(query)
         rows = result.all()
 
@@ -78,8 +78,8 @@ async def _list_feedback(
             " | ".join(
                 [
                     _format_datetime(feedback.created_at),
-                    feedback.thread_id,
-                    title or "Untitled thread",
+                    feedback.chat_id,
+                    title or "Untitled chat",
                     feedback.kind or "draft",
                     feedback.origin,
                     feedback.user_email or "-",
@@ -90,21 +90,21 @@ async def _list_feedback(
         )
 
 
-async def _show_thread_feedback(thread_id: str) -> None:
+async def _show_chat_feedback(chat_id: str) -> None:
     async with AsyncSessionLocal() as db:
-        thread = await db.get(ChatThread, thread_id)
-        if thread is None:
-            typer.echo(f"Thread not found: {thread_id}")
+        chat = await db.get(WorkspaceChat, chat_id)
+        if chat is None:
+            typer.echo(f"Chat not found: {chat_id}")
             raise typer.Exit(1)
         result = await db.execute(
-            select(ChatItemFeedback)
-            .where(ChatItemFeedback.thread_id == thread_id)
-            .order_by(ChatItemFeedback.created_at.desc())
+            select(WorkspaceChatFeedback)
+            .where(WorkspaceChatFeedback.chat_id == chat_id)
+            .order_by(WorkspaceChatFeedback.created_at.desc())
         )
         rows = list(result.scalars().all())
 
-    typer.echo(f"Thread: {thread.title or 'Untitled thread'}")
-    typer.echo(f"Thread id: {thread.id}")
+    typer.echo(f"Chat: {chat.title or 'Untitled chat'}")
+    typer.echo(f"Chat id: {chat.id}")
     typer.echo(f"Feedback rows: {len(rows)}")
     for feedback in rows:
         typer.echo(f"- id: {feedback.id}")

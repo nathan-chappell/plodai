@@ -1,14 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 from backend.app.models.types import UserRole
-
-
-class CreditBalanceResponse(BaseModel):
-    user_id: str
-    current_credit_usd: float
-    updated_at: datetime
 
 
 class AdminGrantCreditRequest(BaseModel):

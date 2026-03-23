@@ -5,7 +5,6 @@ import {
   listReportsToolSchema,
   removeReportSlideToolSchema,
 } from "../../lib/tool-schemas";
-import { listReports } from "../../lib/agent-reports";
 import type { JsonSchema } from "../../types/json-schema";
 import {
   buildToolDefinition,
@@ -20,9 +19,10 @@ import type {
 } from "../types";
 
 function reportIdsForWorkspace(workspace: AgentRuntimeContext): string[] {
-  return listReports(workspace.getAgentState(workspace.agentId)).map(
-    (report) => report.report_id,
-  );
+  return workspace
+    .listArtifacts()
+    .filter((artifact) => artifact.kind === "report.v1")
+    .map((artifact) => artifact.id);
 }
 
 function withReportIdEnum(
@@ -50,7 +50,7 @@ export function buildReportAgentClientToolCatalog(
   return [
     buildToolDefinition(
       "list_reports",
-      "List structured reports stored in the current report agent state.",
+      "List structured report artifacts stored in the current workspace.",
       listReportsToolSchema,
       {
         label: "List Reports",
@@ -58,7 +58,7 @@ export function buildReportAgentClientToolCatalog(
     ),
     buildToolDefinition(
       "get_report",
-      "Read a structured report document from the current report agent state.",
+      "Read a structured report document from the current workspace.",
       withReportIdEnum(getReportToolSchema, workspace),
       {
         label: "Get Report",
@@ -68,7 +68,7 @@ export function buildReportAgentClientToolCatalog(
     ),
     buildToolDefinition(
       "create_report",
-      "Create a new structured report in the current report agent state only when no suitable active report exists or the user explicitly wants a separate one.",
+      "Create a new structured report artifact in the current workspace only when no suitable active report exists or the user explicitly wants a separate one.",
       createReportToolSchema,
       {
         label: "Create Report",
@@ -78,7 +78,7 @@ export function buildReportAgentClientToolCatalog(
     ),
     buildToolDefinition(
       "append_report_slide",
-      "Append a structured report slide to a report in the current report agent state.",
+      "Append a structured report slide to a report artifact in the current workspace.",
       withReportIdEnum(appendReportSlideToolSchema, workspace),
       {
         label: "Append Report Slide",
@@ -88,7 +88,7 @@ export function buildReportAgentClientToolCatalog(
     ),
     buildToolDefinition(
       "remove_report_slide",
-      "Remove a report slide from a structured report in the current report agent state.",
+      "Remove a report slide from a structured report artifact in the current workspace.",
       withReportIdEnum(removeReportSlideToolSchema, workspace),
       {
         label: "Remove Report Slide",

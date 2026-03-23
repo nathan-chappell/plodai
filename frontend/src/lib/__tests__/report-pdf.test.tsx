@@ -137,6 +137,14 @@ describe("report PDF export", () => {
     expect(file.blob.type).toBe("application/pdf");
     expect(pdfDocumentCreateMock).toHaveBeenCalledTimes(1);
     expect(toCanvasMock).toHaveBeenCalledTimes(2);
+    expect(toCanvasMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        preferredFontFormat: "woff2",
+        skipFonts: true,
+      }),
+    );
     expect(addPageMock).toHaveBeenCalledTimes(2);
     expect(drawImageMock).toHaveBeenCalledTimes(2);
     expect(onProgress).toHaveBeenNthCalledWith(1, {

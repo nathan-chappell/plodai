@@ -22,9 +22,9 @@ function buildQueryPlanSchemaForWorkspace(
 ): JsonSchema {
   const schema = cloneSchema(compactAggregateQueryPlanSchema);
   const datasetIds = workspace
-    .listSharedResources()
-    .filter((resource) => resource.kind === "dataset")
-    .map((resource) => resource.id);
+    .listFiles()
+    .filter((file) => file.kind === "csv" || file.kind === "json")
+    .map((file) => file.id);
   if (!datasetIds.length || !isObjectSchema(schema)) {
     return schema;
   }
@@ -59,7 +59,7 @@ export function buildAnalysisAgentClientToolCatalog(
   return [
     buildToolDefinition(
       "list_datasets",
-      "List tabular datasets from shared agent exports, including safe schema details, row counts, numeric columns, and tiny familiarization samples when requested.",
+      "List tabular datasets from the current workspace, including safe schema details, row counts, numeric columns, and tiny familiarization samples when requested.",
       includeSamplesSchema,
       {
         label: "List Datasets",

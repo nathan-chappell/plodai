@@ -1,4 +1,14 @@
 import { publishPaymentRequiredToast } from "../app/toasts";
+import type { AgricultureEntitySearchResponse } from "../types/chat-entities";
+import type {
+  ChatAttachmentDeleteResponse,
+  ChatAttachmentUploadResponse,
+  DeleteDocumentFileResponse,
+  DocumentFileListResponse,
+  DocumentImportHeader,
+  SerializedChatAttachment,
+} from "../types/stored-file";
+import type { WorkspaceAppId } from "../types/workspace";
 
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
@@ -33,18 +43,20 @@ export type ChatKitAttachmentCreatePayload = {
 };
 
 export type ChatKitAttachmentResult = {
-  agentId: string;
-  resourceIds: string[];
+  attachment?: SerializedChatAttachment;
+  fileIds?: string[];
+  threadId?: string | null;
+  stripBeforeForwarding?: boolean;
 };
 
 export type ChatKitLocalAttachmentRecord = {
   attachmentId: string;
-  agentId: string;
-  file: File;
+  file: File | null;
   mimeType: string;
   name: string;
   previewUrl: string | null;
-  resourceIds: string[];
+  fileIds: string[];
+  stripBeforeForwarding: boolean;
 };
 
 const pendingChatKitFiles: PendingChatKitLocalFile[] = [];
@@ -110,12 +122,18 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
   }
 
   const nextInit = maybeAttachChatKitMetadata(input, init);
-  const interceptedAttachmentRequest = await maybeHandleChatKitAttachmentRequest(input, nextInit);
+  const interceptedAttachmentRequest = await maybeHandleChatKitAttachmentRequest(
+    input,
+    nextInit,
+  );
   if (interceptedAttachmentRequest) {
     return interceptedAttachmentRequest;
   }
 
-  const interceptedNativeFeedback = await maybeHandleChatKitNativeFeedback(input, nextInit);
+  const interceptedNativeFeedback = await maybeHandleChatKitNativeFeedback(
+    input,
+    nextInit,
+  );
   if (interceptedNativeFeedback) {
     return interceptedNativeFeedback;
   }
@@ -148,6 +166,103 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   }
 
   return (await response.json()) as T;
+}
+
+export async function uploadStoredFile(params: {
+  file: File;
+  workspaceId: string;
+  appId: WorkspaceAppId;
+  scope: "chat_attachment" | "document_thread_file";
+  attachmentId?: string;
+  threadId?: string | null;
+  createAttachment?: boolean;
+}): Promise<ChatAttachmentUploadResponse> {
+  const formData = new FormData();
+  formData.set("workspace_id", params.workspaceId);
+  formData.set("app_id", params.appId);
+  formData.set("scope", params.scope);
+  formData.set("create_attachment", String(params.createAttachment ?? true));
+  if (params.attachmentId) {
+    formData.set("attachment_id", params.attachmentId);
+  }
+  if (params.threadId) {
+    formData.set("thread_id", params.threadId);
+  }
+  formData.set("file", params.file, params.file.name);
+  const response = await authenticatedFetch(`${API_BASE_URL}/chatkit/attachments/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw await buildApiError(response);
+  }
+  return (await response.json()) as ChatAttachmentUploadResponse;
+}
+
+export async function deleteStoredChatAttachment(
+  attachmentId: string,
+): Promise<ChatAttachmentDeleteResponse> {
+  return apiRequest<ChatAttachmentDeleteResponse>(`/chatkit/attachments/${attachmentId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function searchAgricultureEntities(params: {
+  appId: WorkspaceAppId;
+  workspaceId: string;
+  threadId: string;
+  query: string;
+}): Promise<AgricultureEntitySearchResponse> {
+  return apiRequest<AgricultureEntitySearchResponse>("/agriculture/entities/search", {
+    method: "POST",
+    body: JSON.stringify({
+      app_id: params.appId,
+      workspace_id: params.workspaceId,
+      thread_id: params.threadId,
+      query: params.query,
+    }),
+  });
+}
+
+export async function importDocumentFileFromUrl(params: {
+  workspaceId: string;
+  threadId?: string | null;
+  url: string;
+  headers: DocumentImportHeader[];
+}): Promise<ChatAttachmentUploadResponse> {
+  return apiRequest<ChatAttachmentUploadResponse>("/document-threads/import-url", {
+    method: "POST",
+    body: JSON.stringify({
+      workspace_id: params.workspaceId,
+      thread_id: params.threadId ?? null,
+      url: params.url,
+      headers: params.headers,
+    }),
+  });
+}
+
+export async function listDocumentFiles(threadId: string): Promise<DocumentFileListResponse> {
+  return apiRequest<DocumentFileListResponse>(`/document-threads/${threadId}/files`);
+}
+
+export async function deleteDocumentFile(
+  threadId: string,
+  fileId: string,
+): Promise<DeleteDocumentFileResponse> {
+  return apiRequest<DeleteDocumentFileResponse>(
+    `/document-threads/${threadId}/files/${fileId}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function fetchStoredFileBlob(fileId: string): Promise<Blob> {
+  const response = await authenticatedFetch(`${API_BASE_URL}/stored-files/${fileId}/content`);
+  if (!response.ok) {
+    throw await buildApiError(response);
+  }
+  return response.blob();
 }
 
 async function buildApiError(response: Response): Promise<ApiError> {
@@ -263,15 +378,25 @@ async function maybeHandleChatKitAttachmentRequest(
     const previewUrl = buildAttachmentPreviewUrl(file);
     const record: ChatKitLocalAttachmentRecord = {
       attachmentId,
-      agentId: attachmentResult.agentId,
-      file,
+      file: attachmentResult.stripBeforeForwarding === false ? null : file,
       mimeType: createPayload.mimeType,
       name: createPayload.name,
       previewUrl,
-      resourceIds: attachmentResult.resourceIds,
+      fileIds: attachmentResult.fileIds ?? [],
+      stripBeforeForwarding: attachmentResult.stripBeforeForwarding ?? true,
     };
+    const defaultAttachmentPayload = serializeLocalAttachment(record);
+    const attachmentPayload =
+      previewUrl &&
+      attachmentResult.attachment?.type === "image" &&
+      typeof attachmentResult.attachment.preview_url !== "string"
+        ? {
+            ...attachmentResult.attachment,
+            preview_url: previewUrl,
+          }
+        : attachmentResult.attachment ?? defaultAttachmentPayload;
     localChatKitAttachments.set(attachmentId, record);
-    return buildJsonResponse(serializeLocalAttachment(record));
+    return buildJsonResponse(attachmentPayload);
   }
 
   const deletePayload = parseChatKitAttachmentDeleteRequest(init.body);
@@ -337,21 +462,19 @@ function maybeStripChatKitLocalAttachments(
       return init;
     }
 
-    const localAttachmentIds = attachments.filter((attachmentId) =>
-      localChatKitAttachments.has(attachmentId),
-    );
-    if (!localAttachmentIds.length) {
+    const matchedRecords = attachments
+      .map((attachmentId) => localChatKitAttachments.get(attachmentId))
+      .filter((record): record is ChatKitLocalAttachmentRecord => Boolean(record));
+    if (!matchedRecords.length) {
       return init;
     }
 
     const remainingAttachments = attachments.filter(
-      (attachmentId) => !localChatKitAttachments.has(attachmentId),
+      (attachmentId) =>
+        !localChatKitAttachments.get(attachmentId)?.stripBeforeForwarding,
     );
-    for (const attachmentId of localAttachmentIds) {
-      const record = localChatKitAttachments.get(attachmentId);
-      if (record) {
-        releaseLocalAttachment(record);
-      }
+    for (const record of matchedRecords) {
+      releaseLocalAttachment(record);
     }
 
     return {
@@ -528,7 +651,6 @@ function serializeLocalAttachment(record: ChatKitLocalAttachmentRecord): Record<
       name: record.name,
       mime_type: record.mimeType,
       preview_url: record.previewUrl,
-      upload_descriptor: null,
     };
   }
   return {
@@ -536,7 +658,6 @@ function serializeLocalAttachment(record: ChatKitLocalAttachmentRecord): Record<
     id: record.attachmentId,
     name: record.name,
     mime_type: record.mimeType,
-    upload_descriptor: null,
   };
 }
 

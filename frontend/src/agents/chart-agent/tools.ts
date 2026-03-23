@@ -18,9 +18,9 @@ import type {
 
 function datasetIds(workspace: AgentRuntimeContext): string[] {
   return workspace
-    .listSharedResources()
-    .filter((resource) => resource.kind === "dataset")
-    .map((resource) => resource.id);
+    .listFiles()
+    .filter((file) => file.kind === "csv" || file.kind === "json")
+    .map((file) => file.id);
 }
 
 function withDatasetIdEnum(
@@ -48,7 +48,7 @@ export function buildChartAgentClientToolCatalog(
   return [
     buildToolDefinition(
       "list_datasets",
-      "List chart-ready datasets from shared agent exports, including schema hints and tiny samples when requested.",
+      "List chart-ready datasets from the current workspace, including schema hints and tiny samples when requested.",
       includeSamplesSchema,
       {
         label: "List Datasets",
@@ -67,7 +67,7 @@ export function buildChartAgentClientToolCatalog(
     ),
     buildToolDefinition(
       "render_chart_from_dataset",
-      "Render a chart from a tabular dataset after the chart has been planned.",
+      "Render a chart from a tabular dataset after the chart has been planned, then persist it as a typed chart artifact plus a local JSON projection file.",
       withDatasetIdEnum(renderChartFromDatasetToolSchema, workspace),
       {
         label: "Render Chart From Dataset",

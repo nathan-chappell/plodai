@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./ai_portfolio.db"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
+    stored_file_default_expiry_seconds: int = 72 * 60 * 60
+    agriculture_chat_attachment_max_bytes: int = 10 * 1024 * 1024
+    chat_attachment_max_model_bytes: int = 32 * 1024 * 1024
+    document_thread_max_bytes: int = 100 * 1024 * 1024
+    document_preview_max_pages: int = 12
     clerk_authorized_parties: list[str] = []
     clerk_clock_skew_ms: int = 5000
     USE_COLORLOG: bool = False

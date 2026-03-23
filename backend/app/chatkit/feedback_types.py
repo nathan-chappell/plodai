@@ -9,9 +9,9 @@ FeedbackKind = Literal["positive", "negative"]
 FeedbackOrigin = Literal["interactive", "ui_integration_test"]
 
 
-class ChatItemFeedbackRecord(BaseModel):
+class WorkspaceChatFeedbackRecord(BaseModel):
     id: str
-    thread_id: str
+    chat_id: str
     item_ids: list[str] = Field(default_factory=list)
     user_email: str | None = None
     kind: FeedbackKind | None = None

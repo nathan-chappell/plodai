@@ -70,14 +70,14 @@ from backend.app.chatkit.metadata import (
     AgentPlanExecutionHint,
     PendingFeedbackSession,
     PlanExecution,
-    ThreadMetadataPatch,
+    ChatMetadataPatch,
     active_plan_execution,
-    merge_thread_metadata,
-    parse_thread_metadata,
+    merge_chat_metadata,
+    parse_chat_metadata,
 )
 from backend.app.chatkit.runtime_state import (
     resolve_thread_runtime_state,
-    workspace_files_from_shell_state,
+    workspace_files_from_workspace_state,
 )
 from backend.app.chatkit.streaming import stream_agent_response_with_plan_workflow
 from backend.app.chatkit.usage import (
@@ -121,49 +121,8 @@ class PlanStepJudgeResult(BaseModel):
     explanation: str
 
 
-class SubmitTourPickerPayload(BaseModel):
-    scenario_id: str
-
-    @field_validator("scenario_id", mode="before")
-    @classmethod
-    def _scenario_id(cls, value: object) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("scenario_id must be a non-empty string.")
-        return value.strip()
-
-
 def _current_thread_metadata(thread: ThreadMetadata) -> dict[str, Any]:
-    return parse_thread_metadata(thread.metadata)
-
-
-def _tool_display_spec(
-    tool_definition: dict[str, Any],
-) -> dict[str, Any] | None:
-    raw_display = tool_definition.get("display")
-    return raw_display if isinstance(raw_display, dict) else None
-
-
-def _tour_picker_scenario_ids(context: ReportAgentContext) -> set[str]:
-    scenario_ids: set[str] = set()
-    for tool_definition in context.client_tools:
-        if tool_definition.get("name") != "list_tour_scenarios":
-            continue
-        display = _tool_display_spec(tool_definition)
-        if display is None:
-            continue
-        raw_picker = display.get("tour_picker")
-        if not isinstance(raw_picker, dict):
-            continue
-        raw_scenarios = raw_picker.get("scenarios")
-        if not isinstance(raw_scenarios, list):
-            continue
-        for raw_scenario in raw_scenarios:
-            if not isinstance(raw_scenario, dict):
-                continue
-            scenario_id = raw_scenario.get("scenario_id")
-            if isinstance(scenario_id, str) and scenario_id.strip():
-                scenario_ids.add(scenario_id.strip())
-    return scenario_ids
+    return parse_chat_metadata(thread.metadata)
 
 
 def _plan_hint_for_step(
@@ -457,9 +416,40 @@ class ClientToolResultConverter(ThreadItemConverter):
         self.upload_cache = upload_cache
 
     async def attachment_to_message_content(self, attachment: Attachment):
-        raise NotImplementedError(
-            "ChatKit attachments are disabled for this app. Files are selected and processed locally, then exposed to the agent through client tools."
-        )
+        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
+        attach_mode = metadata.get("attach_mode")
+        stored_file_id = metadata.get("stored_file_id")
+        openai_file_id = metadata.get("openai_file_id")
+        input_kind = metadata.get("input_kind")
+        if attach_mode == "document_tool_only":
+            file_label = attachment.name.strip() if attachment.name.strip() else "document"
+            file_id_suffix = (
+                f" Internal file id: {stored_file_id}."
+                if isinstance(stored_file_id, str) and stored_file_id.strip()
+                else ""
+            )
+            return {
+                "type": "input_text",
+                "text": (
+                    f"Document file '{file_label}' is available through the document tools."
+                    f"{file_id_suffix}"
+                ),
+            }
+        if not isinstance(openai_file_id, str) or not openai_file_id.strip():
+            return {
+                "type": "input_text",
+                "text": f"Attachment '{attachment.name}' is available but could not be attached as a model file.",
+            }
+        if input_kind == "image":
+            return {
+                "type": "input_image",
+                "file_id": openai_file_id.strip(),
+                "detail": "high",
+            }
+        return {
+            "type": "input_file",
+            "file_id": openai_file_id.strip(),
+        }
 
     async def client_tool_call_to_input(self, item: ClientToolCallItem):
         if item.status == "pending" or item.output is None:
@@ -602,15 +592,13 @@ class ClientToolResultConverter(ThreadItemConverter):
                 else "application/octet-stream",
             ),
             purpose="user_data",
+            expires_after={
+                "anchor": "created_at",
+                "seconds": get_settings().stored_file_default_expiry_seconds,
+            },
         )
         self.upload_cache[cache_key] = uploaded_file.id
         return uploaded_file.id
-
-
-class UpdateThreadMetadataAction(
-    Action[Literal["update_thread_metadata"], ThreadMetadataPatch]
-):
-    pass
 
 
 class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
@@ -634,18 +622,37 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         self, raw_request: bytes | str, user_id: str, user_email: str | None
     ) -> ReportAgentContext:
         parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
-        metadata = parse_thread_metadata(parsed_request.metadata)
+        metadata = parse_chat_metadata(parsed_request.metadata)
         thread_id = getattr(parsed_request.params, "thread_id", None)
         context = ReportAgentContext(
             report_id=thread_id or "pending_thread",
             user_id=user_id,
             user_email=user_email,
             db=self.db,
+            workspace_id=(
+                metadata.get("workspace_state", {}).get("workspace_id")
+                if metadata.get("workspace_state") is not None
+                else None
+            ),
+            workspace_name=(
+                metadata.get("workspace_state", {}).get("workspace_name")
+                if metadata.get("workspace_state") is not None
+                else None
+            ),
             chart_cache=dict(metadata.get("chart_cache") or {}),
             request_metadata=metadata,
             thread_metadata=metadata,
-            available_files=workspace_files_from_shell_state(
-                metadata.get("shell_state")
+            available_files=workspace_files_from_workspace_state(
+                metadata.get("workspace_state")
+            ),
+            available_artifacts=list(
+                [
+                    item
+                    for item in metadata.get("workspace_state", {}).get("items", [])
+                    if item.get("origin") == "created"
+                ]
+                if metadata.get("workspace_state") is not None
+                else []
             ),
             agent_bundle=metadata.get("agent_bundle"),
         )
@@ -724,10 +731,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         self,
         thread: ThreadMetadata,
         context: ReportAgentContext,
-        patch: ThreadMetadataPatch,
+        patch: ChatMetadataPatch,
     ) -> dict[str, Any]:
         current_metadata = _current_thread_metadata(thread)
-        merged_metadata = merge_thread_metadata(current_metadata, patch)
+        merged_metadata = merge_chat_metadata(current_metadata, patch)
         thread.metadata = dict(merged_metadata)
         context.thread_metadata = merged_metadata
         return merged_metadata
@@ -857,7 +864,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         self._apply_metadata_patch(
             thread,
             context,
-            cast(ThreadMetadataPatch, {"plan_execution": None}),
+            cast(ChatMetadataPatch, {"plan_execution": None}),
         )
         if workflow_item is None:
             return []
@@ -1064,7 +1071,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 thread,
                 context,
                 cast(
-                    ThreadMetadataPatch,
+                    ChatMetadataPatch,
                     {
                         "title": thread.title or typed_metadata.get("title"),
                         "openai_conversation_id": result_conversation_id,
@@ -1093,7 +1100,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": None}),
+                    cast(ChatMetadataPatch, {"plan_execution": None}),
                 )
                 break
 
@@ -1105,7 +1112,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": completed_execution}),
+                    cast(ChatMetadataPatch, {"plan_execution": completed_execution}),
                 )
                 await self._sync_plan_workflow_tasks(
                     agent_context,
@@ -1117,7 +1124,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": None}),
+                    cast(ChatMetadataPatch, {"plan_execution": None}),
                 )
                 if (
                     agent_context.workflow_item is not None
@@ -1167,7 +1174,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                         thread,
                         context,
                         cast(
-                            ThreadMetadataPatch,
+                            ChatMetadataPatch,
                             {"plan_execution": current_execution},
                         ),
                     )
@@ -1181,7 +1188,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                     typed_metadata = self._apply_metadata_patch(
                         thread,
                         context,
-                        cast(ThreadMetadataPatch, {"plan_execution": None}),
+                        cast(ChatMetadataPatch, {"plan_execution": None}),
                     )
                     if (
                         agent_context.workflow_item is not None
@@ -1209,7 +1216,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                    cast(ChatMetadataPatch, {"plan_execution": current_execution}),
                 )
                 await self._sync_plan_workflow_tasks(
                     agent_context,
@@ -1234,7 +1241,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                    cast(ChatMetadataPatch, {"plan_execution": current_execution}),
                 )
                 await self._sync_plan_workflow_tasks(
                     agent_context,
@@ -1259,7 +1266,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                    cast(ChatMetadataPatch, {"plan_execution": current_execution}),
                 )
                 await self._sync_plan_workflow_tasks(
                     agent_context,
@@ -1271,7 +1278,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 typed_metadata = self._apply_metadata_patch(
                     thread,
                     context,
-                    cast(ThreadMetadataPatch, {"plan_execution": None}),
+                    cast(ChatMetadataPatch, {"plan_execution": None}),
                 )
                 if (
                     agent_context.workflow_item is not None
@@ -1299,7 +1306,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             typed_metadata = self._apply_metadata_patch(
                 thread,
                 context,
-                cast(ThreadMetadataPatch, {"plan_execution": current_execution}),
+                cast(ChatMetadataPatch, {"plan_execution": current_execution}),
             )
             await self._sync_plan_workflow_tasks(
                 agent_context,
@@ -1571,59 +1578,27 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         sender: WidgetItem | None,
         context: ReportAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
-        if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
-            current_metadata = parse_thread_metadata(thread.metadata)
-            patch = cast(ThreadMetadataPatch, action.payload)
-            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
+        if action.type == "update_chat_metadata" and isinstance(action.payload, dict):
+            current_metadata = parse_chat_metadata(thread.metadata)
+            patch = cast(ChatMetadataPatch, action.payload)
+            thread.metadata = dict(merge_chat_metadata(current_metadata, patch))
             if title := patch.get("title"):
                 thread.title = title
             log_event(
                 self.logger,
                 logging.INFO,
-                "thread_metadata.updated",
+                "chat_metadata.updated",
                 context=_context_line(user_id=context.user_id, thread_id=thread.id),
                 changes=summarize_mapping_keys_for_log(patch),
             )
             yield ProgressUpdateEvent(text="Saved thread metadata update.")
             return
 
-        if action.type == "submit_tour_picker" and sender is not None:
-            payload = SubmitTourPickerPayload.model_validate(action.payload or {})
-            available_scenario_ids = _tour_picker_scenario_ids(context)
-            if (
-                available_scenario_ids
-                and payload.scenario_id not in available_scenario_ids
-            ):
-                yield ProgressUpdateEvent(
-                    text="That guided tour option is no longer available."
-                )
-                return
-            log_event(
-                self.logger,
-                logging.INFO,
-                "tour_picker.selected",
-                context=_context_line(user_id=context.user_id, thread_id=thread.id),
-                scenario_id=payload.scenario_id,
-            )
-            yield ThreadItemRemovedEvent(item_id=sender.id)
-            return
-
-        if action.type == "cancel_tour_picker" and sender is not None:
-            log_event(
-                self.logger,
-                logging.INFO,
-                "tour_picker.cancelled",
-                context=_context_line(user_id=context.user_id, thread_id=thread.id),
-                widget_id=sender.id,
-            )
-            yield ThreadItemRemovedEvent(item_id=sender.id)
-            return
-
         if action.type == "submit_feedback_session" and sender is not None:
             payload = TypeAdapter(SubmitFeedbackSessionPayload).validate_python(
                 action.payload or {}
             )
-            current_metadata = parse_thread_metadata(thread.metadata)
+            current_metadata = parse_chat_metadata(thread.metadata)
             session = self._feedback_session_from_metadata(current_metadata)
             if session is None or session.get("session_id") != payload.session_id:
                 yield ProgressUpdateEvent(text="Feedback session was not found.")
@@ -1651,9 +1626,9 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 "message_draft": final_message,
                 "inferred_sentiment": final_sentiment,
             }
-            merged_metadata = merge_thread_metadata(
+            merged_metadata = merge_chat_metadata(
                 current_metadata,
-                cast(ThreadMetadataPatch, {"feedback_session": updated_session}),
+                cast(ChatMetadataPatch, {"feedback_session": updated_session}),
             )
             thread.metadata = dict(merged_metadata)
             context.thread_metadata = merged_metadata
@@ -1678,12 +1653,12 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             payload = TypeAdapter(CancelFeedbackSessionPayload).validate_python(
                 action.payload or {}
             )
-            current_metadata = parse_thread_metadata(thread.metadata)
+            current_metadata = parse_chat_metadata(thread.metadata)
             session = self._feedback_session_from_metadata(current_metadata)
             if session is not None and session.get("session_id") == payload.session_id:
-                merged_metadata = merge_thread_metadata(
+                merged_metadata = merge_chat_metadata(
                     current_metadata,
-                    cast(ThreadMetadataPatch, {"feedback_session": None}),
+                    cast(ChatMetadataPatch, {"feedback_session": None}),
                 )
                 thread.metadata = dict(merged_metadata)
                 context.thread_metadata = merged_metadata
@@ -1707,17 +1682,17 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         sender: WidgetItem | None,
         context: ReportAgentContext,
     ) -> SyncCustomActionResponse:
-        if action.type == "update_thread_metadata" and isinstance(action.payload, dict):
-            current_metadata = parse_thread_metadata(thread.metadata)
-            patch = cast(ThreadMetadataPatch, action.payload)
-            thread.metadata = dict(merge_thread_metadata(current_metadata, patch))
+        if action.type == "update_chat_metadata" and isinstance(action.payload, dict):
+            current_metadata = parse_chat_metadata(thread.metadata)
+            patch = cast(ChatMetadataPatch, action.payload)
+            thread.metadata = dict(merge_chat_metadata(current_metadata, patch))
             if title := patch.get("title"):
                 thread.title = title
             await self.store.save_thread(thread, context=context)
             log_event(
                 self.logger,
                 logging.INFO,
-                "thread_metadata.sync_updated",
+                "chat_metadata.sync_updated",
                 context=_context_line(user_id=context.user_id, thread_id=thread.id),
                 changes=summarize_mapping_keys_for_log(patch),
             )

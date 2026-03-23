@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 
 import { MetaText } from "../app/styles";
 import { resolveReportImageDataUrl } from "../lib/report-chart-preview";
-import type { LocalWorkspaceFile } from "../types/report";
+import type { LocalAttachment } from "../types/report";
 import type { WorkspaceReportV1 } from "../types/workspace-contract";
 
 function formatTimestamp(value: string | null | undefined): string | null {
@@ -28,7 +28,7 @@ export function WorkspaceReportDrawer({
   dataTestId,
 }: {
   currentReport: WorkspaceReportV1 | null;
-  files?: LocalWorkspaceFile[];
+  files?: LocalAttachment[];
   dataTestId?: string;
 }) {
   const slides = currentReport?.slides ?? [];

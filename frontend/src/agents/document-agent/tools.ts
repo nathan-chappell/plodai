@@ -1,15 +1,6 @@
-import {
-  getPdfPageRangeToolSchema,
-  includeSamplesSchema,
-  inspectPdfFileToolSchema,
-  smartSplitPdfToolSchema,
-} from "../../lib/tool-schemas";
 import type { JsonSchema } from "../../types/json-schema";
 import {
   buildToolDefinition,
-  cloneSchema,
-  createBrokeredAgentTool,
-  isObjectSchema,
 } from "../shared/tool-helpers";
 import type {
   AgentClientTool,
@@ -17,95 +8,183 @@ import type {
   FunctionToolDefinition,
 } from "../types";
 
-function pdfFileIds(workspace: AgentRuntimeContext): string[] {
-  return workspace
-    .listSharedResources()
-    .filter(
-      (resource) =>
-        resource.kind === "document" &&
-        resource.payload.type === "document" &&
-        resource.payload.file.kind === "pdf",
-    )
-    .map((resource) => resource.id);
-}
+const emptyObjectSchema: JsonSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
 
-function withPdfFileIdEnum(
-  schema: JsonSchema,
-  workspace: AgentRuntimeContext,
-): JsonSchema {
-  const fileIds = pdfFileIds(workspace);
-  const cloned = cloneSchema(schema);
-  if (!fileIds.length || !isObjectSchema(cloned)) {
-    return cloned;
-  }
-  cloned.properties = {
-    ...cloned.properties,
-    file_id: {
-      ...(cloned.properties.file_id as JsonSchema),
-      enum: fileIds,
-    },
-  };
-  return cloned;
-}
+const documentFileIdSchema: JsonSchema = {
+  type: "string",
+};
+
+const locatorIdSchema: JsonSchema = {
+  type: "string",
+};
+
+const renderAsSchema: JsonSchema = {
+  enum: ["table", "chart"],
+};
+
+const documentFieldValueSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    locator_id: { type: "string" },
+    value: { type: "string" },
+  },
+  required: ["locator_id", "value"],
+  additionalProperties: false,
+};
 
 export function buildDocumentAgentClientToolCatalog(
-  workspace: AgentRuntimeContext,
+  _workspace: AgentRuntimeContext,
 ): FunctionToolDefinition[] {
   return [
     buildToolDefinition(
-      "list_pdf_files",
-      "List PDF files from shared agent exports, including lightweight metadata and tiny familiarization samples when requested.",
-      includeSamplesSchema,
-      {
-        label: "List PDF Files",
-        omit_args: ["includeSamples"],
-      },
+      "list_document_files",
+      "List thread-scoped document files available to the documents agent.",
+      emptyObjectSchema,
+      { label: "List Document Files" },
     ),
     buildToolDefinition(
-      "inspect_pdf_file",
-      "Inspect a PDF locally, returning page count, outline or bookmark hints, and page-level structure summaries.",
-      withPdfFileIdEnum(inspectPdfFileToolSchema, workspace),
+      "inspect_document_file",
+      "Inspect a stored PDF and return stable locator ids for text regions, form fields, and table/chart candidates.",
       {
-        label: "Inspect PDF File",
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+          max_pages: { type: "integer", minimum: 1, maximum: 30 },
+        },
+        required: ["file_id"],
+        additionalProperties: false,
+      },
+      {
+        label: "Inspect Document",
         prominent_args: ["file_id", "max_pages"],
         arg_labels: { file_id: "file", max_pages: "max" },
       },
     ),
     buildToolDefinition(
-      "get_pdf_page_range",
-      "Extract an inclusive page range from a PDF file, add the derived sub-PDF to the current agent exports, and return it as a file input payload.",
-      withPdfFileIdEnum(getPdfPageRangeToolSchema, workspace),
+      "replace_document_text",
+      "Replace a text region in a PDF by locator id, using strict safe fallbacks when in-place replacement is not reliable.",
       {
-        label: "Get PDF Page Range",
-        prominent_args: ["file_id", "start_page", "end_page"],
-        arg_labels: { file_id: "file", start_page: "from", end_page: "to" },
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+          locator_id: locatorIdSchema,
+          replacement_text: { type: "string" },
+        },
+        required: ["file_id", "locator_id", "replacement_text"],
+        additionalProperties: false,
+      },
+      {
+        label: "Replace Document Text",
+        prominent_args: ["file_id", "locator_id"],
+        arg_labels: { file_id: "file", locator_id: "locator" },
       },
     ),
     buildToolDefinition(
-      "smart_split_pdf",
-      "Inspect a PDF locally, propose a useful split, create titled sub-PDFs plus index.md, and add a ZIP archive to the current agent exports.",
-      withPdfFileIdEnum(smartSplitPdfToolSchema, workspace),
+      "fill_document_form",
+      "Fill PDF form fields by discovered locator id and report unresolved field locators explicitly.",
       {
-        label: "Smart Split PDF",
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+          field_values: {
+            type: "array",
+            items: documentFieldValueSchema,
+          },
+        },
+        required: ["file_id", "field_values"],
+        additionalProperties: false,
+      },
+      {
+        label: "Fill Document Form",
+        prominent_args: ["file_id"],
+        arg_labels: { file_id: "file" },
+      },
+    ),
+    buildToolDefinition(
+      "update_document_visual_from_dataset",
+      "Update a document chart or table candidate from a CSV/JSON dataset, replacing in place only when the visual anchor is reliable.",
+      {
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+          locator_id: locatorIdSchema,
+          dataset_file_id: documentFileIdSchema,
+          title: { type: "string" },
+          render_as: renderAsSchema,
+        },
+        required: ["file_id", "locator_id", "dataset_file_id"],
+        additionalProperties: false,
+      },
+      {
+        label: "Update Document Visual",
+        prominent_args: ["file_id", "locator_id", "dataset_file_id"],
+        arg_labels: { file_id: "file", locator_id: "locator", dataset_file_id: "dataset" },
+      },
+    ),
+    buildToolDefinition(
+      "append_document_appendix_from_dataset",
+      "Append a table or chart appendix generated from a thread-scoped dataset file.",
+      {
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+          dataset_file_id: documentFileIdSchema,
+          title: { type: "string" },
+          render_as: renderAsSchema,
+        },
+        required: ["file_id", "dataset_file_id", "title"],
+        additionalProperties: false,
+      },
+      {
+        label: "Append Dataset Appendix",
+        prominent_args: ["file_id", "dataset_file_id"],
+        arg_labels: { file_id: "file", dataset_file_id: "dataset" },
+      },
+    ),
+    buildToolDefinition(
+      "smart_split_document",
+      "Split a PDF into useful derived files, plus an index and ZIP bundle, all stored in the current document thread.",
+      {
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+          goal: { type: "string" },
+        },
+        required: ["file_id"],
+        additionalProperties: false,
+      },
+      {
+        label: "Smart Split Document",
         prominent_args: ["file_id", "goal"],
         arg_labels: { file_id: "file", goal: "goal" },
+      },
+    ),
+    buildToolDefinition(
+      "delete_document_file",
+      "Delete a thread-scoped document file from the current document thread.",
+      {
+        type: "object",
+        properties: {
+          file_id: documentFileIdSchema,
+        },
+        required: ["file_id"],
+        additionalProperties: false,
+      },
+      {
+        label: "Delete Document File",
+        prominent_args: ["file_id"],
+        arg_labels: { file_id: "file" },
       },
     ),
   ];
 }
 
 export function createDocumentAgentClientTools(
-  workspace: AgentRuntimeContext,
+  _workspace: AgentRuntimeContext,
 ): AgentClientTool[] {
-  return buildDocumentAgentClientToolCatalog(workspace).map((definition) =>
-    createBrokeredAgentTool(
-      workspace,
-      definition,
-      definition.name as
-        | "list_pdf_files"
-        | "inspect_pdf_file"
-        | "get_pdf_page_range"
-        | "smart_split_pdf",
-    ),
-  );
+  return [];
 }

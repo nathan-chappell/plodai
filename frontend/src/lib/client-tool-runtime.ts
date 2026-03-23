@@ -1,5 +1,4 @@
 import { executeQueryPlan } from "./analysis";
-import { appendReportSlides, createReport, getReport, listReports, removeReportSlide } from "./agent-reports";
 import { buildChartArtifactFilename } from "./chart-artifacts";
 import { renderChartToDataUrl } from "./chart";
 import { parseCsvText } from "./csv";
@@ -11,12 +10,6 @@ import {
   inspectPdfBytes,
   smartSplitPdfBytes,
 } from "./pdf";
-import {
-  buildResourceFromFile,
-  normalizeAgentShellState,
-  summarizeSharedExport,
-  upsertAgentResource,
-} from "./shell-resources";
 import { getFileExtension, rowsToCsv, rowsToJson } from "./workspace-files";
 
 import type {
@@ -27,6 +20,7 @@ import type {
   CreateDatasetToolArgs,
   CreateReportToolArgs,
   DataRow,
+  GetFarmStateToolArgs,
   GetPdfPageRangeToolArgs,
   GetReportToolArgs,
   InspectDatasetSchemaToolArgs,
@@ -39,13 +33,28 @@ import type {
   RemoveReportSlideToolArgs,
   RenderChartFromDatasetToolArgs,
   RunAggregateQueryToolArgs,
+  SaveFarmStateToolArgs,
   SmartSplitEntry,
   SmartSplitPdfToolArgs,
 } from "../types/analysis";
 import type { AgentRuntimeContext } from "../agents/types";
-import type { LocalDataset, LocalImageFile, LocalOtherFile, LocalPdfFile } from "../types/report";
-import type { AgentResourceRecord } from "../types/shell";
-import type { ReportSlideV1 } from "../types/workspace-contract";
+import type {
+  LocalDataset,
+  LocalImageAttachment,
+  LocalOtherAttachment,
+  LocalPdfAttachment,
+  LocalAttachment,
+} from "../types/report";
+import type {
+  ChartItemPayloadV1,
+  FarmItemPayloadV1,
+  PdfSplitItemPayloadV1,
+  WorkspaceCreatedItemDetail,
+  WorkspaceCreatedItemSummary,
+  WorkspaceUploadItemSummary,
+} from "../types/workspace";
+import type { ReportSlideV1, WorkspaceReportV1 } from "../types/workspace-contract";
+import { buildDefaultWorkspaceReport, normalizeReportId } from "../types/workspace-contract";
 
 type ToolExecutionResult = {
   payload: Record<string, unknown>;
@@ -60,97 +69,141 @@ function currentAgentId(workspace: AgentRuntimeContext): string {
   return workspace.agentId ?? workspace.activeAgentId;
 }
 
-function listSharedResourcesByKind(
+function summarizeFileEntry(
+  file: WorkspaceUploadItemSummary,
+  options: { includeSamples?: boolean } = {},
+): Record<string, unknown> {
+  const includeSamples = options.includeSamples ?? true;
+  return {
+    id: file.id,
+    name: file.name,
+    kind: file.kind,
+    extension: file.extension,
+    byte_size: file.byte_size,
+    mime_type: file.mime_type,
+    origin: file.origin,
+    local_status: file.local_status,
+    source_item_id: file.source_item_id,
+    ...(file.kind === "csv" || file.kind === "json"
+      ? {
+          row_count: "row_count" in file.preview ? file.preview.row_count : undefined,
+          columns: "columns" in file.preview ? file.preview.columns : [],
+          numeric_columns:
+            "numeric_columns" in file.preview ? file.preview.numeric_columns : [],
+          sample_rows:
+            includeSamples && "sample_rows" in file.preview ? file.preview.sample_rows : [],
+        }
+      : {}),
+    ...(file.kind === "pdf"
+      ? {
+          page_count: "page_count" in file.preview ? file.preview.page_count : undefined,
+        }
+      : {}),
+    ...(file.kind === "image"
+      ? {
+          width: "width" in file.preview ? file.preview.width : undefined,
+          height: "height" in file.preview ? file.preview.height : undefined,
+        }
+      : {}),
+  };
+}
+
+function summarizeReportArtifact(artifact: WorkspaceCreatedItemSummary): Record<string, unknown> {
+  const slideCount = "slide_count" in artifact.summary ? artifact.summary.slide_count : 0;
+  return {
+    report_id: artifact.id,
+    artifact_id: artifact.id,
+    artifact_kind: artifact.kind,
+    revision: artifact.current_revision,
+    title: artifact.title,
+    item_count: slideCount,
+    slide_count: slideCount,
+    updated_at: artifact.updated_at,
+  };
+}
+
+function findFileEntry(
   workspace: AgentRuntimeContext,
-  kinds: Array<AgentResourceRecord["kind"]>,
-): AgentResourceRecord[] {
+  fileId: string,
+): WorkspaceUploadItemSummary {
+  const entry = workspace.getFile(fileId);
+  if (!entry) {
+    throw new Error(`Unknown workspace file: ${fileId}`);
+  }
+  return entry;
+}
+
+async function requireLocalFile(
+  workspace: AgentRuntimeContext,
+  fileId: string,
+): Promise<LocalAttachment> {
+  const entry = findFileEntry(workspace, fileId);
+  const file = await workspace.resolveLocalFile(entry.id);
+  if (!file) {
+    throw new Error(
+      `Workspace file ${entry.name} is registered, but its local payload is unavailable in this browser.`,
+    );
+  }
+  return file;
+}
+
+async function requireLocalDataset(
+  workspace: AgentRuntimeContext,
+  fileId: string,
+): Promise<LocalDataset> {
+  const file = await requireLocalFile(workspace, fileId);
+  if (file.kind !== "csv" && file.kind !== "json") {
+    throw new Error(`Workspace file ${fileId} is not a dataset.`);
+  }
+  return file;
+}
+
+async function requireLocalPdf(
+  workspace: AgentRuntimeContext,
+  fileId: string,
+): Promise<LocalPdfAttachment> {
+  const file = await requireLocalFile(workspace, fileId);
+  if (file.kind !== "pdf") {
+    throw new Error(`Workspace file ${fileId} is not a PDF.`);
+  }
+  return file;
+}
+
+async function requireLocalImage(
+  workspace: AgentRuntimeContext,
+  fileId: string,
+): Promise<LocalImageAttachment> {
+  const file = await requireLocalFile(workspace, fileId);
+  if (file.kind !== "image") {
+    throw new Error(`Workspace file ${fileId} is not an image.`);
+  }
+  return file;
+}
+
+function listFilesByKind(
+  workspace: AgentRuntimeContext,
+  kinds: LocalAttachment["kind"][],
+): WorkspaceUploadItemSummary[] {
   const allowedKinds = new Set(kinds);
   return workspace
-    .listSharedResources()
-    .filter((resource) => allowedKinds.has(resource.kind))
-    .sort((left, right) => right.created_at.localeCompare(left.created_at));
+    .listFiles()
+    .filter((file) => allowedKinds.has(file.kind))
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
 }
 
-function findResource(
-  workspace: AgentRuntimeContext,
-  resourceId: string,
-): AgentResourceRecord {
-  const resource = workspace.resolveResource(resourceId);
-  if (!resource) {
-    throw new Error(`Unknown shared export: ${resourceId}`);
+function reportArtifacts(workspace: AgentRuntimeContext): WorkspaceCreatedItemSummary[] {
+  return workspace
+    .listArtifacts()
+    .filter((artifact) => artifact.kind === "report.v1")
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+}
+
+function currentReportId(workspace: AgentRuntimeContext): string | null {
+  const preferred = workspace.currentReportArtifactId ?? null;
+  if (preferred && reportArtifacts(workspace).some((artifact) => artifact.id === preferred)) {
+    return preferred;
   }
-  return resource;
-}
-
-function findDatasetResource(
-  workspace: AgentRuntimeContext,
-  datasetId: string,
-): AgentResourceRecord & { payload: { type: "dataset"; file: LocalDataset } } {
-  const resource = findResource(workspace, datasetId);
-  if (resource.payload.type !== "dataset") {
-    throw new Error(`Shared export ${datasetId} is not a dataset.`);
-  }
-  return resource as AgentResourceRecord & {
-    payload: { type: "dataset"; file: LocalDataset };
-  };
-}
-
-function findImageResource(
-  workspace: AgentRuntimeContext,
-  resourceId: string,
-): AgentResourceRecord & { payload: { type: "image"; file: LocalImageFile } } {
-  const resource = findResource(workspace, resourceId);
-  if (resource.payload.type !== "image") {
-    throw new Error(`Shared export ${resourceId} is not an image.`);
-  }
-  return resource as AgentResourceRecord & {
-    payload: { type: "image"; file: LocalImageFile };
-  };
-}
-
-function findPdfResource(
-  workspace: AgentRuntimeContext,
-  resourceId: string,
-): AgentResourceRecord & { payload: { type: "document"; file: LocalPdfFile } } {
-  const resource = findResource(workspace, resourceId);
-  if (resource.payload.type !== "document" || resource.payload.file.kind !== "pdf") {
-    throw new Error(`Shared export ${resourceId} is not a PDF document.`);
-  }
-  return resource as AgentResourceRecord & {
-    payload: { type: "document"; file: LocalPdfFile };
-  };
-}
-
-function listReportsForAgent(
-  workspace: AgentRuntimeContext,
-): ReturnType<typeof listReports> {
-  return listReports(workspace.getAgentState(currentAgentId(workspace)));
-}
-
-function summarizeResources(
-  resources: AgentResourceRecord[],
-): Array<Record<string, unknown>> {
-  return resources.map((resource) => summarizeSharedExport(resource));
-}
-
-function appendResourceToCurrentAgent(
-  workspace: AgentRuntimeContext,
-  resource: AgentResourceRecord,
-): AgentResourceRecord {
-  workspace.updateAgentState(currentAgentId(workspace), (state) =>
-    upsertAgentResource(state, resource),
-  );
-  return resource;
-}
-
-function ensureCsvFilename(filename: string): string {
-  const trimmed = filename.trim() || "derived.csv";
-  return trimmed.toLowerCase().endsWith(".csv") ? trimmed : `${trimmed}.csv`;
-}
-
-function ensureJsonFilename(filename: string): string {
-  const trimmed = filename.trim() || "derived.json";
-  return trimmed.toLowerCase().endsWith(".json") ? trimmed : `${trimmed}.json`;
+  return reportArtifacts(workspace)[0]?.id ?? null;
 }
 
 function buildReportSlideFromDraft(args: AppendReportSlideToolArgs): ReportSlideV1 {
@@ -190,6 +243,71 @@ function buildReportSlideFromDraft(args: AppendReportSlideToolArgs): ReportSlide
   };
 }
 
+function ensureCsvFilename(filename: string): string {
+  const trimmed = filename.trim() || "derived.csv";
+  return trimmed.toLowerCase().endsWith(".csv") ? trimmed : `${trimmed}.csv`;
+}
+
+function ensureJsonFilename(filename: string): string {
+  const trimmed = filename.trim() || "derived.json";
+  return trimmed.toLowerCase().endsWith(".json") ? trimmed : `${trimmed}.json`;
+}
+
+function ensureChartArtifactId(
+  workspace: AgentRuntimeContext,
+  chartPlanId: string,
+): string | null {
+  const existing = workspace
+    .listArtifacts()
+    .find(
+      (artifact) =>
+        artifact.kind === "chart.v1" &&
+        "chart_plan_id" in artifact.summary &&
+        artifact.summary.chart_plan_id === chartPlanId,
+    );
+  return existing?.id ?? null;
+}
+
+function ensurePdfSplitArtifactId(
+  workspace: AgentRuntimeContext,
+  sourceFileId: string,
+): string | null {
+  const existing = workspace
+    .listArtifacts()
+    .find(
+      (artifact) =>
+        artifact.kind === "pdf_split.v1" &&
+        "source_file_id" in artifact.summary &&
+        artifact.summary.source_file_id === sourceFileId,
+    );
+  return existing?.id ?? null;
+}
+
+function currentFarmArtifact(
+  workspace: AgentRuntimeContext,
+): WorkspaceCreatedItemSummary | null {
+  return (
+    workspace
+      .listArtifacts()
+      .find((artifact) => artifact.kind === "farm.v1") ?? null
+  );
+}
+
+async function getReportArtifactDetail(
+  workspace: AgentRuntimeContext,
+  reportId: string,
+): Promise<WorkspaceCreatedItemDetail> {
+  const detail = await workspace.getArtifact(normalizeReportId(reportId));
+  if (!detail || detail.kind !== "report.v1") {
+    throw new Error(`Unknown report: ${reportId}`);
+  }
+  return detail;
+}
+
+function asWorkspaceReport(payload: WorkspaceCreatedItemDetail["payload"]): WorkspaceReportV1 {
+  return payload as WorkspaceReportV1;
+}
+
 export async function executeLocalTool<Name extends ClientToolName>(
   workspace: AgentRuntimeContext,
   toolName: Name,
@@ -198,85 +316,78 @@ export async function executeLocalTool<Name extends ClientToolName>(
   switch (toolName) {
     case "list_image_files": {
       void (args as ListImageFilesToolArgs);
-      const imageResources = listSharedResourcesByKind(workspace, ["image"]);
+      const files = listFilesByKind(workspace, ["image"]);
       return {
         payload: {
-          image_files: summarizeResources(imageResources),
-          resources: summarizeResources(imageResources),
+          image_files: files.map((file) => summarizeFileEntry(file)),
+          files: files.map((file) => summarizeFileEntry(file)),
         },
         effects: [],
       };
     }
     case "list_pdf_files": {
       const includeSamples = (args as ListWorkspaceFilesToolArgs).includeSamples ?? true;
-      void includeSamples;
-      const documentResources = listSharedResourcesByKind(workspace, ["document"]).filter(
-        (resource) =>
-          resource.payload.type === "document" && resource.payload.file.kind === "pdf",
-      );
+      const files = listFilesByKind(workspace, ["pdf"]);
       return {
         payload: {
-          pdf_files: summarizeResources(documentResources),
-          resources: summarizeResources(documentResources),
+          pdf_files: files.map((file) => summarizeFileEntry(file, { includeSamples })),
+          files: files.map((file) => summarizeFileEntry(file, { includeSamples })),
         },
         effects: [],
       };
     }
     case "list_datasets": {
       const includeSamples = (args as ListDatasetsToolArgs).includeSamples ?? true;
-      const datasetResources = listSharedResourcesByKind(workspace, ["dataset"]).map((resource) => {
-        if (!includeSamples) {
-          return {
-            ...summarizeSharedExport(resource),
-            sample_rows: [],
-          };
-        }
-        return summarizeSharedExport(resource);
-      });
+      const files = listFilesByKind(workspace, ["csv", "json"]);
       return {
         payload: {
-          datasets: datasetResources,
-          resources: datasetResources,
+          datasets: files.map((file) => summarizeFileEntry(file, { includeSamples })),
+          files: files.map((file) => summarizeFileEntry(file, { includeSamples })),
         },
         effects: [],
       };
     }
     case "inspect_image_file": {
-      const resource = findImageResource(workspace, (args as InspectImageFileToolArgs).file_id);
+      const toolArgs = args as InspectImageFileToolArgs;
+      const entry = findFileEntry(workspace, toolArgs.file_id);
+      const file = await requireLocalImage(workspace, toolArgs.file_id);
       return {
         payload: {
-          file_id: resource.id,
-          name: resource.title,
-          kind: resource.kind,
-          width: resource.payload.file.width,
-          height: resource.payload.file.height,
-          mime_type: resource.payload.file.mime_type,
-          byte_size: resource.payload.file.byte_size,
-          imageDataUrl: await buildModelSafeImageDataUrl(resource.payload.file, {
-            maxDimension: (args as InspectImageFileToolArgs).max_dimension ?? 1536,
+          file_id: entry.id,
+          name: entry.name,
+          kind: entry.kind,
+          width: file.width,
+          height: file.height,
+          mime_type: file.mime_type,
+          byte_size: file.byte_size,
+          imageDataUrl: await buildModelSafeImageDataUrl(file, {
+            maxDimension: toolArgs.max_dimension ?? 1536,
           }),
         },
         effects: [],
       };
     }
     case "inspect_dataset_schema": {
-      const resource = findDatasetResource(workspace, (args as InspectDatasetSchemaToolArgs).dataset_id);
+      const toolArgs = args as InspectDatasetSchemaToolArgs;
+      const entry = findFileEntry(workspace, toolArgs.dataset_id);
       return {
         payload: {
-          dataset_id: resource.id,
-          kind: resource.payload.file.kind,
-          row_count: resource.payload.file.row_count,
-          columns: resource.payload.file.columns,
-          numeric_columns: resource.payload.file.numeric_columns,
-          sample_rows: resource.payload.file.sample_rows,
+          dataset_id: entry.id,
+          kind: entry.kind,
+          row_count: "row_count" in entry.preview ? entry.preview.row_count : 0,
+          columns: "columns" in entry.preview ? entry.preview.columns : [],
+          numeric_columns:
+            "numeric_columns" in entry.preview ? entry.preview.numeric_columns : [],
+          sample_rows: "sample_rows" in entry.preview ? entry.preview.sample_rows : [],
+          local_status: entry.local_status,
         },
         effects: [],
       };
     }
     case "run_aggregate_query": {
       const queryPlan = (args as RunAggregateQueryToolArgs).query_plan;
-      const resource = findDatasetResource(workspace, queryPlan.dataset_id);
-      const resultRows = executeQueryPlan(resource.payload.file.rows as DataRow[], queryPlan).rows;
+      const dataset = await requireLocalDataset(workspace, queryPlan.dataset_id);
+      const resultRows = executeQueryPlan(dataset.rows as DataRow[], queryPlan).rows;
       return {
         payload: {
           rows: resultRows,
@@ -287,8 +398,8 @@ export async function executeLocalTool<Name extends ClientToolName>(
     }
     case "create_dataset": {
       const toolArgs = args as CreateDatasetToolArgs;
-      const sourceResource = findDatasetResource(workspace, toolArgs.query_plan.dataset_id);
-      const resultRows = executeQueryPlan(sourceResource.payload.file.rows as DataRow[], toolArgs.query_plan).rows;
+      const dataset = await requireLocalDataset(workspace, toolArgs.query_plan.dataset_id);
+      const resultRows = executeQueryPlan(dataset.rows as DataRow[], toolArgs.query_plan).rows;
       const nextFile: LocalDataset =
         toolArgs.format === "json"
           ? (() => {
@@ -328,22 +439,19 @@ export async function executeLocalTool<Name extends ClientToolName>(
                 preview_rows: preview.previewRows,
               };
             })();
-      const resource = appendResourceToCurrentAgent(
-        workspace,
-        buildResourceFromFile(currentAgentId(workspace), nextFile),
-      );
+      const entry = await workspace.registerFile(nextFile);
       return {
         payload: {
-          created_file: summarizeSharedExport(resource),
+          created_file: summarizeFileEntry(entry),
           row_count: nextFile.row_count,
-          source_dataset_id: sourceResource.id,
+          source_dataset_id: toolArgs.query_plan.dataset_id,
         },
         effects: [],
       };
     }
     case "render_chart_from_dataset": {
       const toolArgs = args as RenderChartFromDatasetToolArgs;
-      const datasetResource = findDatasetResource(workspace, toolArgs.dataset_id);
+      const dataset = await requireLocalDataset(workspace, toolArgs.dataset_id);
       const chartPlan = {
         ...toolArgs.chart_plan,
         label_key: toolArgs.x_key,
@@ -354,12 +462,22 @@ export async function executeLocalTool<Name extends ClientToolName>(
               ? [{ label: toolArgs.y_key, data_key: toolArgs.y_key }]
               : toolArgs.chart_plan.series,
       };
-      const imageDataUrl = await renderChartToDataUrl(chartPlan as never, datasetResource.payload.file.rows);
-      const artifactFile: LocalOtherFile = {
-        id: crypto.randomUUID(),
+      const imageDataUrl = await renderChartToDataUrl(chartPlan as never, dataset.rows);
+      const artifactId = ensureChartArtifactId(workspace, toolArgs.chart_plan_id) ?? `chart-${crypto.randomUUID()}`;
+      const currentArtifact = artifactId ? await workspace.getArtifact(artifactId) : null;
+      const projectionFileId =
+        currentArtifact &&
+        currentArtifact.kind === "chart.v1" &&
+        "projection_file_id" in currentArtifact.payload &&
+        currentArtifact.payload.projection_file_id
+          ? currentArtifact.payload.projection_file_id
+          : crypto.randomUUID();
+
+      const artifactFile: LocalOtherAttachment = {
+        id: projectionFileId,
         name: buildChartArtifactFilename({
           title: chartPlan.title,
-          sourceFileName: datasetResource.payload.file.name,
+          sourceFileName: dataset.name,
         }),
         kind: "other",
         extension: "json",
@@ -379,16 +497,61 @@ export async function executeLocalTool<Name extends ClientToolName>(
         byte_size: 0,
       };
       artifactFile.byte_size = new TextEncoder().encode(artifactFile.text_content ?? "").length;
-      const resource = appendResourceToCurrentAgent(
-        workspace,
-        buildResourceFromFile(currentAgentId(workspace), artifactFile),
-      );
+      const projectionEntry = await workspace.registerFile(artifactFile, {
+        sourceItemId: artifactId,
+      });
+
+      let artifactDetail: WorkspaceCreatedItemDetail;
+      if (!currentArtifact) {
+        artifactDetail = await workspace.createArtifact({
+          id: artifactId,
+          kind: "chart.v1",
+          created_by_agent_id: currentAgentId(workspace),
+          payload: {
+            version: "v1",
+            source_file_id: toolArgs.dataset_id,
+            chart_plan_id: toolArgs.chart_plan_id,
+            title: chartPlan.title,
+            chart: chartPlan as Record<string, unknown>,
+            image_data_url: imageDataUrl,
+            linked_report_id: workspace.currentReportArtifactId ?? null,
+            projection_file_id: projectionEntry.id,
+          } satisfies ChartItemPayloadV1,
+        });
+      } else {
+        const afterSpec = await workspace.applyArtifactOperation(artifactId, {
+          base_revision: currentArtifact.current_revision,
+          created_by_agent_id: currentAgentId(workspace),
+          operation: {
+            op: "chart.set_spec",
+            source_file_id: toolArgs.dataset_id,
+            chart_plan_id: toolArgs.chart_plan_id,
+            title: chartPlan.title,
+            chart: chartPlan as Record<string, unknown>,
+            linked_report_id: workspace.currentReportArtifactId ?? null,
+            projection_file_id: projectionEntry.id,
+          },
+        });
+        artifactDetail = await workspace.applyArtifactOperation(artifactId, {
+          base_revision: afterSpec.current_revision,
+          created_by_agent_id: currentAgentId(workspace),
+          operation: {
+            op: "chart.set_preview",
+            image_data_url: imageDataUrl,
+            projection_file_id: projectionEntry.id,
+          },
+        });
+      }
+
       return {
         payload: {
           chart: chartPlan,
           dataset_id: toolArgs.dataset_id,
           chart_plan_id: toolArgs.chart_plan_id,
-          created_file: summarizeSharedExport(resource),
+          artifact_id: artifactDetail.id,
+          artifact_kind: artifactDetail.kind,
+          revision: artifactDetail.current_revision,
+          created_file: summarizeFileEntry(projectionEntry),
           imageDataUrl,
         },
         effects: [
@@ -398,22 +561,20 @@ export async function executeLocalTool<Name extends ClientToolName>(
             chartPlanId: toolArgs.chart_plan_id,
             chart: chartPlan as never,
             imageDataUrl: imageDataUrl ?? undefined,
-            rows: datasetResource.payload.file.rows,
+            rows: dataset.rows,
           },
         ],
       };
     }
     case "inspect_pdf_file": {
-      const resource = findPdfResource(workspace, (args as InspectPdfFileToolArgs).file_id);
-      const inspection = await inspectPdfBytes(
-        base64ToUint8Array(resource.payload.file.bytes_base64),
-        {
-          maxPages: (args as InspectPdfFileToolArgs).max_pages,
-        },
-      );
+      const toolArgs = args as InspectPdfFileToolArgs;
+      const file = await requireLocalPdf(workspace, toolArgs.file_id);
+      const inspection = await inspectPdfBytes(base64ToUint8Array(file.bytes_base64), {
+        maxPages: toolArgs.max_pages,
+      });
       return {
         payload: {
-          file_id: resource.id,
+          file_id: toolArgs.file_id,
           page_count: inspection.pageCount,
           outline: inspection.outline,
           page_hints: inspection.pageHints.map((page) => ({
@@ -427,16 +588,13 @@ export async function executeLocalTool<Name extends ClientToolName>(
     }
     case "get_pdf_page_range": {
       const toolArgs = args as GetPdfPageRangeToolArgs;
-      const resource = findPdfResource(workspace, toolArgs.file_id);
-      const extracted = await extractPdfPageRangeFromBytes(
-        base64ToUint8Array(resource.payload.file.bytes_base64),
-        {
-          filename: resource.payload.file.name,
-          startPage: toolArgs.start_page,
-          endPage: toolArgs.end_page,
-        },
-      );
-      const nextFile: LocalPdfFile = {
+      const file = await requireLocalPdf(workspace, toolArgs.file_id);
+      const extracted = await extractPdfPageRangeFromBytes(base64ToUint8Array(file.bytes_base64), {
+        filename: file.name,
+        startPage: toolArgs.start_page,
+        endPage: toolArgs.end_page,
+      });
+      const nextFile: LocalPdfAttachment = {
         id: crypto.randomUUID(),
         name: extracted.filename,
         kind: "pdf",
@@ -446,13 +604,10 @@ export async function executeLocalTool<Name extends ClientToolName>(
         page_count: extracted.pageRange.pageCount,
         bytes_base64: extracted.fileDataBase64,
       };
-      const nextResource = appendResourceToCurrentAgent(
-        workspace,
-        buildResourceFromFile(currentAgentId(workspace), nextFile),
-      );
+      const entry = await workspace.registerFile(nextFile);
       return {
         payload: {
-          created_file: summarizeSharedExport(nextResource),
+          created_file: summarizeFileEntry(entry),
           page_range: {
             start_page: extracted.pageRange.startPage,
             end_page: extracted.pageRange.endPage,
@@ -469,17 +624,19 @@ export async function executeLocalTool<Name extends ClientToolName>(
     }
     case "smart_split_pdf": {
       const toolArgs = args as SmartSplitPdfToolArgs;
-      const resource = findPdfResource(workspace, toolArgs.file_id);
-      const result = await smartSplitPdfBytes(base64ToUint8Array(resource.payload.file.bytes_base64), {
-        filename: resource.payload.file.name,
+      const file = await requireLocalPdf(workspace, toolArgs.file_id);
+      const result = await smartSplitPdfBytes(base64ToUint8Array(file.bytes_base64), {
+        filename: file.name,
         goal: toolArgs.goal,
       });
-      const ownerAgentId = currentAgentId(workspace);
+      const artifactId =
+        ensurePdfSplitArtifactId(workspace, toolArgs.file_id) ?? `pdf-split-${crypto.randomUUID()}`;
+      const currentArtifact = artifactId ? await workspace.getArtifact(artifactId) : null;
       const createdEntries: SmartSplitEntry[] = [];
-      const createdResources: AgentResourceRecord[] = [];
+      const createdFileEntries: WorkspaceUploadItemSummary[] = [];
 
       for (const extracted of result.extractedFiles) {
-        const file: LocalPdfFile = {
+        const nextFile: LocalPdfAttachment = {
           id: crypto.randomUUID(),
           name: extracted.filename,
           kind: "pdf",
@@ -489,11 +646,13 @@ export async function executeLocalTool<Name extends ClientToolName>(
           page_count: extracted.pageRange.pageCount,
           bytes_base64: extracted.fileDataBase64,
         };
-        const nextResource = buildResourceFromFile(ownerAgentId, file);
-        createdResources.push(nextResource);
+        const entry = await workspace.registerFile(nextFile, {
+          sourceItemId: artifactId,
+        });
+        createdFileEntries.push(entry);
         createdEntries.push({
-          fileId: nextResource.id,
-          name: file.name,
+          fileId: entry.id,
+          name: nextFile.name,
           title: extracted.title,
           startPage: extracted.pageRange.startPage,
           endPage: extracted.pageRange.endPage,
@@ -501,8 +660,21 @@ export async function executeLocalTool<Name extends ClientToolName>(
         });
       }
 
-      const indexFile: LocalOtherFile = {
-        id: crypto.randomUUID(),
+      const indexFileId =
+        currentArtifact &&
+        currentArtifact.kind === "pdf_split.v1" &&
+        "index_file_id" in currentArtifact.payload
+          ? currentArtifact.payload.index_file_id
+          : crypto.randomUUID();
+      const archiveFileId =
+        currentArtifact &&
+        currentArtifact.kind === "pdf_split.v1" &&
+        "archive_file_id" in currentArtifact.payload
+          ? currentArtifact.payload.archive_file_id
+          : crypto.randomUUID();
+
+      const indexFile: LocalOtherAttachment = {
+        id: indexFileId,
         name: result.archiveName.toLowerCase().endsWith(".zip")
           ? `${result.archiveName.slice(0, -4)}.md`
           : `${result.archiveName}.md`,
@@ -512,8 +684,8 @@ export async function executeLocalTool<Name extends ClientToolName>(
         text_content: result.indexMarkdown,
         byte_size: new TextEncoder().encode(result.indexMarkdown).length,
       };
-      const archiveFile: LocalOtherFile = {
-        id: crypto.randomUUID(),
+      const archiveFile: LocalOtherAttachment = {
+        id: archiveFileId,
         name: result.archiveName,
         kind: "other",
         extension: "zip",
@@ -521,21 +693,62 @@ export async function executeLocalTool<Name extends ClientToolName>(
         bytes_base64: result.archiveBase64,
         byte_size: Math.ceil((result.archiveBase64.length * 3) / 4),
       };
-      createdResources.push(buildResourceFromFile(ownerAgentId, indexFile));
-      createdResources.push(buildResourceFromFile(ownerAgentId, archiveFile));
+      const indexEntry = await workspace.registerFile(indexFile, {
+        sourceItemId: artifactId,
+      });
+      const archiveEntry = await workspace.registerFile(archiveFile, {
+        sourceItemId: artifactId,
+      });
 
-      workspace.updateAgentState(ownerAgentId, (state) => ({
-        ...normalizeAgentShellState(state),
-        resources: [
-          ...sortUniqueResources(normalizeAgentShellState(state).resources, createdResources),
-        ],
-      }));
+      let artifactDetail: WorkspaceCreatedItemDetail;
+      const payload: PdfSplitItemPayloadV1 = {
+        version: "v1",
+        title: `Split ${file.name}`,
+        source_file_id: toolArgs.file_id,
+        entries: createdEntries.map((entry) => ({
+          title: entry.title,
+          start_page: entry.startPage,
+          end_page: entry.endPage,
+          page_count: entry.pageCount,
+          file_id: entry.fileId,
+          file_name: entry.name,
+        })),
+        archive_file_id: archiveEntry.id,
+        index_file_id: indexEntry.id,
+        markdown: result.indexMarkdown,
+      };
 
-      const archiveResource = workspace.resolveResource(archiveFile.id);
-      const indexResource = workspace.resolveResource(indexFile.id);
+      if (!currentArtifact) {
+        artifactDetail = await workspace.createArtifact({
+          id: artifactId,
+          kind: "pdf_split.v1",
+          created_by_agent_id: currentAgentId(workspace),
+          payload,
+        });
+      } else {
+        artifactDetail = await workspace.applyArtifactOperation(artifactId, {
+          base_revision: currentArtifact.current_revision,
+          created_by_agent_id: currentAgentId(workspace),
+          operation: {
+            op: "pdf_split.set_result",
+            title: payload.title,
+            source_file_id: payload.source_file_id,
+            entries: payload.entries,
+            archive_file_id: payload.archive_file_id,
+            index_file_id: payload.index_file_id,
+            markdown: payload.markdown,
+          },
+        });
+      }
+
       return {
         payload: {
-          created_files: createdResources.map((created) => summarizeSharedExport(created)),
+          artifact_id: artifactDetail.id,
+          artifact_kind: artifactDetail.kind,
+          revision: artifactDetail.current_revision,
+          created_files: [...createdFileEntries, indexEntry, archiveEntry].map((entry) =>
+            summarizeFileEntry(entry),
+          ),
           smart_split: {
             entries: createdEntries.map((entry) => ({
               title: entry.title,
@@ -545,105 +758,211 @@ export async function executeLocalTool<Name extends ClientToolName>(
               file_id: entry.fileId,
               file_name: entry.name,
             })),
-            archive_file: archiveResource ? summarizeSharedExport(archiveResource) : summarizeSharedExport(createdResources[createdResources.length - 1]),
-            index_file: indexResource ? summarizeSharedExport(indexResource) : summarizeSharedExport(createdResources[createdResources.length - 2]),
+            archive_file: summarizeFileEntry(archiveEntry),
+            index_file: summarizeFileEntry(indexEntry),
           },
         },
         effects: [
           {
             type: "pdf_smart_split_completed",
-            sourceFileId: resource.id,
-            sourceFileName: resource.title,
-            archiveFileId: archiveFile.id,
-            archiveFileName: archiveFile.name,
-            indexFileId: indexFile.id,
-            indexFileName: indexFile.name,
+            sourceFileId: toolArgs.file_id,
+            sourceFileName: file.name,
+            archiveFileId: archiveEntry.id,
+            archiveFileName: archiveEntry.name,
+            indexFileId: indexEntry.id,
+            indexFileName: indexEntry.name,
             entries: createdEntries,
             markdown: result.indexMarkdown,
           },
         ],
       };
     }
-    case "list_reports": {
-      void (args as ListReportsToolArgs);
-      const reports = listReportsForAgent(workspace);
+    case "get_farm_state": {
+      void (args as GetFarmStateToolArgs);
+      const artifact = currentFarmArtifact(workspace);
+      if (!artifact) {
+        return {
+          payload: {
+            artifact_id: null,
+            farm: null,
+          },
+          effects: [],
+        };
+      }
+      const detail = await workspace.getArtifact(artifact.id);
+      if (!detail || detail.kind !== "farm.v1") {
+        return {
+          payload: {
+            artifact_id: null,
+            farm: null,
+          },
+          effects: [],
+        };
+      }
       return {
         payload: {
-          reports: reports.map((report) => ({
-            report_id: report.report_id,
-            title: report.title,
-            item_count: report.slides.length,
-            slide_count: report.slides.length,
-            updated_at: report.updated_at ?? null,
-          })),
-          current_report_id: workspace.getAgentState(currentAgentId(workspace)).current_report_id,
+          artifact_id: detail.id,
+          artifact_kind: detail.kind,
+          revision: detail.current_revision,
+          farm: detail.payload as FarmItemPayloadV1,
+        },
+        effects: [],
+      };
+    }
+    case "save_farm_state": {
+      const toolArgs = args as SaveFarmStateToolArgs;
+      const existing = currentFarmArtifact(workspace);
+      let detail: WorkspaceCreatedItemDetail;
+
+      if (!existing) {
+        detail = await workspace.createArtifact({
+          id: "farm-overview",
+          kind: "farm.v1",
+          created_by_agent_id: currentAgentId(workspace),
+          payload: {
+            version: "v1",
+            farm_name: toolArgs.farm_name,
+            location: toolArgs.location ?? null,
+            crops: toolArgs.crops,
+            issues: toolArgs.issues,
+            projects: toolArgs.projects,
+            current_work: toolArgs.current_work,
+            notes: toolArgs.notes ?? null,
+          } satisfies FarmItemPayloadV1,
+        });
+      } else {
+        detail = await workspace.applyArtifactOperation(existing.id, {
+          base_revision: existing.current_revision,
+          created_by_agent_id: currentAgentId(workspace),
+          operation: {
+            op: "farm.set_state",
+            farm_name: toolArgs.farm_name,
+            location: toolArgs.location ?? null,
+            crops: toolArgs.crops,
+            issues: toolArgs.issues,
+            projects: toolArgs.projects,
+            current_work: toolArgs.current_work,
+            notes: toolArgs.notes ?? null,
+          },
+        });
+      }
+
+      await workspace.updateWorkspace({
+        selected_item_id: detail.id,
+      });
+
+      return {
+        payload: {
+          artifact_id: detail.id,
+          artifact_kind: detail.kind,
+          revision: detail.current_revision,
+          farm: detail.payload as FarmItemPayloadV1,
+        },
+        effects: [],
+      };
+    }
+    case "list_reports": {
+      void (args as ListReportsToolArgs);
+      const reports = reportArtifacts(workspace);
+      return {
+        payload: {
+          reports: reports.map((artifact) => summarizeReportArtifact(artifact)),
+          current_report_id: currentReportId(workspace),
         },
         effects: [],
       };
     }
     case "get_report": {
-      const report = getReport(workspace.getAgentState(currentAgentId(workspace)), (args as GetReportToolArgs).report_id);
-      if (!report) {
-        throw new Error(`Unknown report: ${(args as GetReportToolArgs).report_id}`);
-      }
+      const toolArgs = args as GetReportToolArgs;
+      const detail = await getReportArtifactDetail(workspace, toolArgs.report_id);
       return {
-        payload: { report },
+        payload: {
+          artifact_id: detail.id,
+          artifact_kind: detail.kind,
+          revision: detail.current_revision,
+          report: asWorkspaceReport(detail.payload),
+        },
         effects: [],
       };
     }
     case "create_report": {
       const toolArgs = args as CreateReportToolArgs;
-      const created = createReport(workspace.getAgentState(currentAgentId(workspace)), currentAgentId(workspace), {
-        reportId: toolArgs.report_id,
+      const reportId = normalizeReportId(toolArgs.report_id ?? toolArgs.title);
+      const report = buildDefaultWorkspaceReport({
+        reportId,
         title: toolArgs.title,
       });
-      workspace.updateAgentState(currentAgentId(workspace), () => created.state);
+      const detail = await workspace.createArtifact({
+        id: report.report_id,
+        kind: "report.v1",
+        created_by_agent_id: currentAgentId(workspace),
+        payload: report,
+      });
+      await workspace.updateWorkspace({
+        current_report_item_id: detail.id,
+        selected_item_id: detail.id,
+      });
       return {
         payload: {
-          report: created.report,
-          reports: listReports(created.state).map((report) => ({
-            report_id: report.report_id,
-            title: report.title,
-            item_count: report.slides.length,
-            slide_count: report.slides.length,
-            updated_at: report.updated_at ?? null,
-          })),
-          current_report_id: created.state.current_report_id,
+          artifact_id: detail.id,
+          artifact_kind: detail.kind,
+          revision: detail.current_revision,
+          report: asWorkspaceReport(detail.payload),
+          reports: reportArtifacts(workspace).map((artifact) => summarizeReportArtifact(artifact)),
+          current_report_id: detail.id,
         },
         effects: [],
       };
     }
     case "append_report_slide": {
       const toolArgs = args as AppendReportSlideToolArgs;
+      const detail = await getReportArtifactDetail(workspace, toolArgs.report_id);
       const slide = buildReportSlideFromDraft(toolArgs);
-      const nextState = appendReportSlides(
-        workspace.getAgentState(currentAgentId(workspace)),
-        currentAgentId(workspace),
-        toolArgs.report_id,
-        [slide],
-      );
-      workspace.updateAgentState(currentAgentId(workspace), () => nextState);
+      const nextDetail = await workspace.applyArtifactOperation(detail.id, {
+        base_revision: detail.current_revision,
+        created_by_agent_id: currentAgentId(workspace),
+        operation: {
+          op: "report.append_slide",
+          slide,
+        },
+      });
+      await workspace.updateWorkspace({
+        current_report_item_id: nextDetail.id,
+        selected_item_id: nextDetail.id,
+      });
       return {
         payload: {
-          report: getReport(nextState, toolArgs.report_id),
-          current_report_id: nextState.current_report_id,
+          artifact_id: nextDetail.id,
+          artifact_kind: nextDetail.kind,
+          revision: nextDetail.current_revision,
+          report: asWorkspaceReport(nextDetail.payload),
+          current_report_id: nextDetail.id,
         },
         effects: [],
       };
     }
     case "remove_report_slide": {
       const toolArgs = args as RemoveReportSlideToolArgs;
-      const nextState = removeReportSlide(
-        workspace.getAgentState(currentAgentId(workspace)),
-        currentAgentId(workspace),
-        toolArgs.report_id,
-        toolArgs.slide_id,
-      );
-      workspace.updateAgentState(currentAgentId(workspace), () => nextState);
+      const detail = await getReportArtifactDetail(workspace, toolArgs.report_id);
+      const nextDetail = await workspace.applyArtifactOperation(detail.id, {
+        base_revision: detail.current_revision,
+        created_by_agent_id: currentAgentId(workspace),
+        operation: {
+          op: "report.remove_slide",
+          slide_id: toolArgs.slide_id,
+        },
+      });
+      await workspace.updateWorkspace({
+        current_report_item_id: nextDetail.id,
+        selected_item_id: nextDetail.id,
+      });
       return {
         payload: {
-          report: getReport(nextState, toolArgs.report_id),
-          current_report_id: nextState.current_report_id,
+          artifact_id: nextDetail.id,
+          artifact_kind: nextDetail.kind,
+          revision: nextDetail.current_revision,
+          report: asWorkspaceReport(nextDetail.payload),
+          current_report_id: nextDetail.id,
         },
         effects: [],
       };
@@ -651,19 +970,4 @@ export async function executeLocalTool<Name extends ClientToolName>(
   }
 
   throw new Error(`Unsupported client tool: ${toolName}`);
-}
-
-function sortUniqueResources(
-  current: AgentResourceRecord[],
-  additions: AgentResourceRecord[],
-): AgentResourceRecord[] {
-  const byId = new Map(current.map((resource) => [resource.id, resource]));
-  for (const resource of additions) {
-    byId.set(resource.id, resource);
-  }
-  return [...byId.values()].sort(
-    (left, right) =>
-      right.created_at.localeCompare(left.created_at) ||
-      left.title.localeCompare(right.title),
-  );
 }

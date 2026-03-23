@@ -138,6 +138,7 @@ def _build_model_settings(
     safety_identifier = context.user_id[:64]
     return ModelSettings(
         parallel_tool_calls=False,
+        response_include=["web_search_call.action.sources"],
         metadata=_build_response_api_metadata(
             context,
             agent_spec=agent_spec,
@@ -285,30 +286,3 @@ def build_registered_agent(
             f"'{root_agent_id}'."
         )
     return root_agent
-
-
-def get_agent_graph_agent_ids(
-    agent_bundle: AgentBundle,
-) -> list[str]:
-    return [
-        agent_spec["agent_id"]
-        for agent_spec in agent_bundle.get("agents", [])
-    ]
-
-
-def get_agent_spec(
-    agent_bundle: AgentBundle,
-    agent_id: str,
-) -> AgentSpec | None:
-    return next(
-        (
-            agent_spec
-            for agent_spec in agent_bundle.get("agents", [])
-            if agent_spec.get("agent_id") == agent_id
-        ),
-        None,
-    )
-
-
-get_agent_graph_agent_ids = get_agent_graph_agent_ids
-get_agent_spec = get_agent_spec

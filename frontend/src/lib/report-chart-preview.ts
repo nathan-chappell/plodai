@@ -1,26 +1,26 @@
 import { parseSavedChartArtifact } from "./chart-artifacts";
 import { buildImageDataUrlFromBase64 } from "./image";
-import type { LocalImageFile, LocalWorkspaceFile } from "../types/report";
+import type { LocalImageAttachment, LocalAttachment } from "../types/report";
 import type { ReportChartPanelV1, ReportImagePanelV1 } from "../types/workspace-contract";
 
 function findFileById(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   fileId: string | null | undefined,
-): LocalWorkspaceFile | null {
+): LocalAttachment | null {
   if (!fileId) {
     return null;
   }
   return files.find((file) => file.id === fileId) ?? null;
 }
 
-function resolveArtifactSourceFileId(file: LocalWorkspaceFile | null): string | null {
+function resolveArtifactSourceFileId(file: LocalAttachment | null): string | null {
   return file ? parseSavedChartArtifact(file)?.datasetId ?? null : null;
 }
 
 export function resolveReportChartArtifactFile(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportChartPanelV1,
-): LocalWorkspaceFile | null {
+): LocalAttachment | null {
   const directMatch = findFileById(files, panel.dataset_id);
   if (directMatch && parseSavedChartArtifact(directMatch)) {
     return directMatch;
@@ -35,9 +35,9 @@ export function resolveReportChartArtifactFile(
 }
 
 export function resolveReportChartSourceFile(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportChartPanelV1,
-): LocalWorkspaceFile | null {
+): LocalAttachment | null {
   const directMatch = findFileById(files, panel.dataset_id);
   if (directMatch && (directMatch.kind === "csv" || directMatch.kind === "json")) {
     return directMatch;
@@ -64,7 +64,7 @@ export function resolveReportChartSourceFile(
 }
 
 export function resolveReportChartRows(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportChartPanelV1,
 ) {
   const sourceFile = resolveReportChartSourceFile(files, panel);
@@ -74,7 +74,7 @@ export function resolveReportChartRows(
 }
 
 export function resolveReportChartImageDataUrl(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportChartPanelV1,
 ): string | null {
   if (typeof panel.image_data_url === "string" && panel.image_data_url) {
@@ -86,7 +86,7 @@ export function resolveReportChartImageDataUrl(
 }
 
 export function resolveReportChartSourceLabel(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportChartPanelV1,
 ): string {
   return (
@@ -98,15 +98,15 @@ export function resolveReportChartSourceLabel(
 }
 
 export function resolveReportImageFile(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportImagePanelV1,
-): LocalImageFile | null {
+): LocalImageAttachment | null {
   const file = findFileById(files, panel.file_id);
   return file?.kind === "image" ? file : null;
 }
 
 export function resolveReportImageDataUrl(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportImagePanelV1,
 ): string | null {
   if (typeof panel.image_data_url === "string" && panel.image_data_url) {
@@ -117,7 +117,7 @@ export function resolveReportImageDataUrl(
 }
 
 export function resolveReportImageSourceLabel(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   panel: ReportImagePanelV1,
 ): string {
   return resolveReportImageFile(files, panel)?.name ?? panel.file_id ?? "unknown";

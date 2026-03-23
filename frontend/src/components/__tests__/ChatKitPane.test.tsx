@@ -68,7 +68,7 @@ vi.mock("@openai/chatkit-react", async () => {
       }, [control]);
     },
     ChatKit: ReactModule.forwardRef(function MockChatKit(
-      { control }: { control: { setInstance: (instance: HTMLElement | null) => void; handlers: Record<string, any> } },
+      { control }: { control: { setInstance: (instance: HTMLElement | null) => void; handlers: Record<string, any>; options: Record<string, unknown> } },
       forwardedRef: React.ForwardedRef<HTMLElement>,
     ) {
       const localRef = ReactModule.useRef<HTMLElement | null>(null);
@@ -121,7 +121,6 @@ vi.mock("../../lib/dev-logging", () => ({
     clientToolError: vi.fn(),
     clientToolStart: vi.fn(),
     clientToolSuccess: vi.fn(),
-    tourState: vi.fn(),
     responseEnd: vi.fn(),
     responseStart: vi.fn(),
     workspaceEvent: vi.fn(),
@@ -134,11 +133,9 @@ import {
   agricultureAgentDefinition,
   analysisAgentDefinition,
   documentAgentDefinition,
-  defaultAgentDefinition,
-  reportAgentDefinition,
 } from "../../agents/definitions";
-import type { LocalWorkspaceFile } from "../../types/report";
-import type { ShellStateMetadata } from "../../types/shell";
+import type { LocalAttachment } from "../../types/report";
+import type { WorkspaceState } from "../../types/workspace";
 
 function setScrollMetrics(
   element: HTMLElement,
@@ -163,11 +160,11 @@ function setScrollMetrics(
 }
 
 const agentBundle: AgentBundle = {
-  root_agent_id: "report-agent",
+  root_agent_id: "agriculture-agent",
   agents: [
     {
-      agent_id: "report-agent",
-      agent_name: "Report",
+      agent_id: "agriculture-agent",
+      agent_name: "Agriculture",
       instructions: "Inspect files.",
       client_tools: [],
       delegation_targets: [],
@@ -175,54 +172,45 @@ const agentBundle: AgentBundle = {
   ],
 };
 
-const files: LocalWorkspaceFile[] = [
+const files: LocalAttachment[] = [
   {
-    id: "file_csv",
-    name: "sales.csv",
-    kind: "csv",
-    extension: "csv",
-    row_count: 1,
-    columns: ["region"],
-    numeric_columns: [],
-    sample_rows: [{ region: "West" }],
-    preview_rows: [{ region: "West" }],
-    rows: [{ region: "West" }],
+    id: "file_image",
+    name: "orchard.jpeg",
+    kind: "image",
+    extension: "jpeg",
+    mime_type: "image/jpeg",
+    width: 1200,
+    height: 800,
+    bytes_base64: "Zm9v",
   },
 ];
 
-const shellState: ShellStateMetadata = {
-  version: "v1" as const,
-  context_id: "workspace-default",
-  context_name: "Workspace",
-  active_agent_id: "report-agent",
-  agents: [
+const workspaceState: WorkspaceState = {
+  version: "v4",
+  workspace_id: "workspace-agriculture",
+  workspace_name: "Agriculture workspace",
+  app_id: "agriculture",
+  items: [
     {
-      agent_id: "report-agent",
-      goal: null,
-      resource_count: 1,
-      current_report_id: "report-1",
-    },
-  ],
-  resources: [
-    {
-      id: "file_csv",
-      owner_agent_id: "report-agent",
-      origin: "uploaded",
-      kind: "dataset",
-      title: "sales.csv",
+      origin: "upload",
+      id: "file_image",
+      workspace_id: "workspace-agriculture",
+      name: "orchard.jpeg",
+      kind: "image",
+      extension: "jpeg",
+      content_key: "sha256:file_image",
+      local_status: "available",
+      preview: {
+        width: 1200,
+        height: 800,
+      },
       created_at: "2026-03-21T12:00:00.000Z",
-      summary: "1 row · 1 column",
-      payload_ref: "file_csv",
-      extension: "csv",
-      row_count: 1,
-      columns: ["region"],
-      numeric_columns: [],
-      sample_rows: [{ region: "West" }],
+      updated_at: "2026-03-21T12:00:00.000Z",
     },
   ],
 };
 
-describe("ChatKitHarness auto-scroll", () => {
+describe("ChatKitPane", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -241,6 +229,7 @@ describe("ChatKitHarness auto-scroll", () => {
       return 1;
     });
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
@@ -251,19 +240,24 @@ describe("ChatKitHarness auto-scroll", () => {
     setChatKitMetadataGetter(null);
     setChatKitNativeFeedbackHandler(null);
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  async function renderHarness(clientTools: AgentClientTool[] = []) {
+  async function renderHarness(
+    overrides: Partial<React.ComponentProps<typeof ChatKitHarness>> = {},
+  ) {
     await act(async () => {
       root.render(
         <ChatKitHarness
           agentBundle={agentBundle}
           files={files}
-          shellState={shellState}
+          workspaceState={workspaceState}
           investigationBrief=""
-          clientTools={clientTools}
+          clientTools={[]}
           onEffects={() => {}}
+          {...overrides}
         />,
       );
     });
@@ -279,7 +273,7 @@ describe("ChatKitHarness auto-scroll", () => {
           agentBundle={agentBundle}
           enabled
           files={files}
-          shellState={shellState}
+          workspaceState={workspaceState}
           investigationBrief={investigationBrief}
           clientTools={[]}
           onEffects={() => {}}
@@ -312,122 +306,58 @@ describe("ChatKitHarness auto-scroll", () => {
       latestHandlers?.onResponseEnd?.();
     });
     expect(latestScrollTarget!.scrollTop).toBe(120);
-
-    latestScrollTarget!.scrollTop = 860;
-    latestScrollTarget!.dispatchEvent(new Event("scroll"));
-
-    await act(async () => {
-      latestHandlers?.onResponseEnd?.();
-    });
-    expect(latestScrollTarget!.scrollTop).toBe(900);
   });
 
-  it("forces scroll and re-enables auto-scroll on thread changes", async () => {
+  it("includes workspace metadata with the new app_id shape", async () => {
     await renderHarness();
-    expect(latestHandlers).not.toBeNull();
-    expect(latestScrollTarget).not.toBeNull();
 
-    setScrollMetrics(latestScrollTarget!, {
-      clientHeight: 220,
-      scrollHeight: 1000,
-      scrollTop: 150,
-    });
-    latestScrollTarget!.dispatchEvent(new Event("scroll"));
-
-    await act(async () => {
-      latestHandlers?.onThreadChange?.({ threadId: "thread_123" });
-    });
-    expect(latestScrollTarget!.scrollTop).toBe(1000);
-
-    latestScrollTarget!.scrollTop = 140;
-    latestScrollTarget!.dispatchEvent(new Event("scroll"));
-
-    await act(async () => {
-      latestHandlers?.onThreadLoadEnd?.({ threadId: "thread_123" });
-    });
-    expect(latestScrollTarget!.scrollTop).toBe(1000);
-  });
-
-  it("enables built-in feedback actions and includes the investigation brief in metadata", async () => {
-    await renderHarness([]);
-
-    expect(latestChatKitOptions?.threadItemActions).toEqual({ feedback: true });
     expect(
       buildChatKitRequestMetadata({
         agentBundle,
-        shellState,
-        investigationBrief: "Render the chart before stopping.",
+        workspaceState,
+        investigationBrief: "Inspect the orchard photos carefully.",
         threadOrigin: "interactive",
       }),
     ).toMatchObject({
-      investigation_brief: "Render the chart before stopping.",
+      investigation_brief: "Inspect the orchard photos carefully.",
       agent_bundle: agentBundle,
-      shell_state: shellState,
+      workspace_state: workspaceState,
       origin: "interactive",
     });
   });
 
-  it("does not echo the current goal into ChatKit chrome", async () => {
-    const goal = "Protect the margin story and focus on the west region.";
-
-    await renderPane(goal);
-
-    expect(container.textContent).not.toContain(goal);
-    expect(container.textContent).not.toContain("Current goal:");
-
-    const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
-    expect(composer?.placeholder).toBe("Ask the agent to inspect, transform, or investigate your local files");
-
-    const startScreen = latestChatKitOptions?.startScreen as
-      | { prompts?: Array<{ prompt: string }> }
-      | undefined;
-    const prompts = startScreen?.prompts?.map((prompt) => prompt.prompt) ?? [];
-    expect(prompts.length).toBeGreaterThan(0);
-    expect(prompts.some((prompt) => prompt.includes(goal))).toBe(false);
-    expect(prompts.some((prompt) => prompt.includes("Focus on this goal"))).toBe(false);
-  });
-
-  it("defaults to compact chrome and accepts agent-specific lead text", async () => {
+  it("does not auto-send a message just from mounting the pane", async () => {
     await renderPane("", {
-      greeting: analysisAgentDefinition.chatkitLead,
-      composerPlaceholder: analysisAgentDefinition.chatkitPlaceholder,
+      greeting: agricultureAgentDefinition.chatkitLead,
+      composerPlaceholder: agricultureAgentDefinition.chatkitPlaceholder,
     });
 
-    expect(container.textContent).not.toContain("Analyst workspace");
-    expect(container.textContent).not.toContain("Investigate your files");
-    expect(container.textContent).not.toContain("Default model agent");
-    expect(container.textContent).not.toContain("files are ready");
-
-    const startScreen = latestChatKitOptions?.startScreen as { greeting?: string } | undefined;
-    const composer = latestChatKitOptions?.composer as { placeholder?: string } | undefined;
-
-    expect(startScreen?.greeting).toBe(analysisAgentDefinition.chatkitLead);
-    expect(composer?.placeholder).toBe(analysisAgentDefinition.chatkitPlaceholder);
+    expect(latestChatKitApi?.sendUserMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps the top row hidden until there is useful status or an action to show", async () => {
-    await renderPane("");
+  it("prefills the composer from a queued draft without sending anything", async () => {
+    const onComposerDraftApplied = vi.fn();
 
-    expect(container.querySelector("[data-testid='chatkit-top-row']")).toBeNull();
-
-    await act(async () => {
-      latestHandlers?.onResponseStart?.();
+    await renderHarness({
+      composerDraft: {
+        id: "draft_1",
+        prompt: "Inspect the loaded orchard photos and summarize the visible evidence.",
+        model: "balanced",
+      },
+      onComposerDraftApplied,
     });
 
-    expect(container.querySelector("[data-testid='chatkit-top-row']")).not.toBeNull();
-    expect(container.textContent).toContain("Agent run in progress.");
+    expect(latestChatKitApi?.setComposerValue).toHaveBeenCalledWith({
+      text: "Inspect the loaded orchard photos and summarize the visible evidence.",
+      selectedModelId: "balanced",
+    });
+    expect(latestChatKitApi?.focusComposer).toHaveBeenCalled();
+    expect(latestChatKitApi?.sendUserMessage).not.toHaveBeenCalled();
+    expect(onComposerDraftApplied).toHaveBeenCalledWith("draft_1");
   });
 
-  it("can receive compact ChatKit copy for all core agent surfaces", async () => {
-    const agents = [
-      defaultAgentDefinition,
-      reportAgentDefinition,
-      analysisAgentDefinition,
-      documentAgentDefinition,
-      agricultureAgentDefinition,
-    ];
-
-    for (const agent of agents) {
+  it("accepts compact lead text for the visible app surfaces", async () => {
+    for (const agent of [agricultureAgentDefinition, documentAgentDefinition, analysisAgentDefinition]) {
       await renderPane("", {
         greeting: agent.chatkitLead,
         composerPlaceholder: agent.chatkitPlaceholder,
@@ -441,541 +371,74 @@ describe("ChatKitHarness auto-scroll", () => {
     }
   });
 
-  it("hides agent composer tools when the shared workspace drives mode selection", async () => {
-    const bundleWithSpecialists: AgentBundle = {
-      root_agent_id: "default-agent",
-      agents: [
-        {
-          agent_id: "default-agent",
-          agent_name: "Default",
-          instructions: "Route work.",
-          client_tools: [],
-          delegation_targets: [],
-        },
-        {
-          agent_id: "report-agent",
-          agent_name: "Report",
-          instructions: "Build reports.",
-          client_tools: [
-            {
-              type: "function",
-              name: "append_report_slide",
-              description: "Append a report slide.",
-              parameters: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-            },
-          ],
-          delegation_targets: [],
-        },
-        {
-          agent_id: "analysis-agent",
-          agent_name: "Analysis",
-          instructions: "Analyze data and coordinate charts.",
-          client_tools: [
-            {
-              type: "function",
-              name: "list_datasets",
-              description: "List datasets.",
-              parameters: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-              display: {
-                label: "List CSV Files",
-              },
-            },
-          ],
-          delegation_targets: [],
-        },
-        {
-          agent_id: "chart-agent",
-          agent_name: "Charts",
-          instructions: "Render charts.",
-          client_tools: [
-            {
-              type: "function",
-              name: "render_chart_from_dataset",
-              description: "Render a chart.",
-              parameters: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-            },
-          ],
-          delegation_targets: [],
-        },
-        {
-          agent_id: "document-agent",
-          agent_name: "Documents",
-          instructions: "Inspect PDFs.",
-          client_tools: [
-            {
-              type: "function",
-              name: "inspect_pdf_file",
-              description: "Inspect a PDF.",
-              parameters: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-            },
-          ],
-          delegation_targets: [],
-        },
-        {
-          agent_id: "agriculture-agent",
-          agent_name: "Agriculture",
-          instructions: "Inspect plant photos.",
-          client_tools: [
-            {
-              type: "function",
-              name: "inspect_image_file",
-              description: "Inspect an image.",
-              parameters: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-            },
-          ],
-          delegation_targets: [],
-        },
-      ],
-    };
-
+  it("configures agriculture composer attachments as image-only with a 10 MB cap", async () => {
     await renderPane("", {
-      agentBundle: bundleWithSpecialists,
+      attachmentConfig: agricultureAgentDefinition.attachmentConfig,
     });
 
     const composer = latestChatKitOptions?.composer as
       | {
-          tools?: Array<{
-            id: string;
-            label: string;
-            shortLabel?: string;
-            placeholderOverride?: string;
-            icon: string;
-          }>;
+          attachments?: {
+            enabled?: boolean;
+            accept?: Record<string, string[]>;
+            maxSize?: number;
+          };
         }
       | undefined;
 
-    expect(composer?.tools).toEqual([]);
-  });
-
-  it("uses composer tool overrides to expose workspace agent switching and resets to default after the specialist run settles", async () => {
-    const onSelectAgent = vi.fn();
-
-    await renderPane("", {
-      agentBundle: {
-        root_agent_id: "default-agent",
-        agents: [
-          {
-            agent_id: "default-agent",
-            agent_name: "Default",
-            instructions: "Route work.",
-            client_tools: [],
-            delegation_targets: [],
-          },
-        ],
+    expect(composer?.attachments).toEqual({
+      enabled: true,
+      accept: {
+        "image/*": [".png", ".jpg", ".jpeg", ".webp"],
       },
-      defaultAgentId: "default-agent",
-      composerToolIds: [
-        "report-agent",
-        "analysis-agent",
-        "chart-agent",
-        "document-agent",
-        "agriculture-agent",
-      ],
-      onSelectAgent,
+      maxCount: 10,
+      maxSize: 10 * 1024 * 1024,
     });
+  });
 
-    const composer = latestChatKitOptions?.composer as
-      | {
-          tools?: Array<{
-            id: string;
-            label: string;
-            persistent?: boolean;
-          }>;
-        }
-      | undefined;
-
-    expect(composer?.tools?.map((tool) => ({
-      id: tool.id,
-      label: tool.label,
-      persistent: tool.persistent,
-    }))).toEqual([
-      { id: "report-agent", label: "Report", persistent: false },
-      { id: "analysis-agent", label: "Analysis", persistent: false },
-      { id: "chart-agent", label: "Charts", persistent: false },
-      { id: "document-agent", label: "Documents", persistent: false },
-      { id: "agriculture-agent", label: "Agriculture", persistent: false },
-    ]);
-
-    await act(async () => {
-      latestHandlers?.onToolChange?.({ toolId: "report-agent" });
-    });
-
-    expect(onSelectAgent).toHaveBeenCalledWith("report-agent");
+  it("passes agriculture entity handlers through to ChatKit", async () => {
+    const onTagSearch = vi.fn(async () => []);
+    const onClick = vi.fn();
+    const onRequestPreview = vi.fn(async () => ({ preview: null }));
 
     await renderPane("", {
-      agentBundle: {
-        root_agent_id: "report-agent",
-        agents: [
-          {
-            agent_id: "report-agent",
-            agent_name: "Report",
-            instructions: "Build reports.",
-            client_tools: [],
-            delegation_targets: [],
-          },
-        ],
+      entitiesConfig: {
+        enabled: true,
+        showComposerMenu: true,
+        onTagSearch,
+        onClick,
+        onRequestPreview,
       },
-      defaultAgentId: "default-agent",
-      composerToolIds: [
-        "report-agent",
-        "analysis-agent",
-        "chart-agent",
-        "document-agent",
-        "agriculture-agent",
-      ],
-      onSelectAgent,
     });
 
-    await act(async () => {
-      latestHandlers?.onToolChange?.({ toolId: null });
+    expect(latestChatKitOptions?.entities).toMatchObject({
+      showComposerMenu: true,
+      onTagSearch,
+      onClick,
+      onRequestPreview,
     });
-
-    expect(onSelectAgent).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      latestHandlers?.onResponseEnd?.();
-    });
-
-    expect(onSelectAgent).toHaveBeenLastCalledWith("default-agent");
   });
 
-  it("renders quick actions in the header row when the custom feedback button is removed", async () => {
+  it("runs a quick action without scheduling follow-up turns", async () => {
     await renderPane("", {
-      quickActions: [{ label: "Run tour", prompt: "Run the scripted walkthrough." }],
-      showChatKitHeader: false,
-    });
-
-    const controls = container.querySelector("[data-testid='chatkit-header-controls']");
-    const buttonLabels = Array.from(controls?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim());
-
-    expect(buttonLabels).toEqual(["Run tour"]);
-    expect((latestChatKitOptions?.header as { enabled?: boolean } | undefined)?.enabled).toBe(false);
-  });
-
-  it("runs a quick action without scheduling a synthetic follow-up turn", async () => {
-    await renderPane("", {
-      quickActions: [
-        {
-          label: "Run tour",
-          prompt: "Run the scripted walkthrough.",
-        },
-      ],
+      quickActions: [{ label: "Inspect now", prompt: "Inspect the loaded files." }],
       showChatKitHeader: false,
     });
 
     const sendUserMessage = latestChatKitApi?.sendUserMessage as ReturnType<typeof vi.fn> | undefined;
-    const runTourButton = container.querySelector(
-      "[data-testid='chatkit-quick-action-run-tour']",
+    const quickActionButton = container.querySelector(
+      "[data-testid='chatkit-quick-action-inspect-now']",
     ) as HTMLButtonElement | null;
 
     await act(async () => {
-      runTourButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      quickActionButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(sendUserMessage).toHaveBeenNthCalledWith(1, {
-      text: "Run the scripted walkthrough.",
+    expect(sendUserMessage).toHaveBeenCalledWith({
+      text: "Inspect the loaded files.",
       model: "lightweight",
       newThread: true,
     });
-
-    await act(async () => {
-      latestHandlers?.onThreadChange?.({ threadId: "thread_tour" });
-      latestHandlers?.onResponseStart?.();
-      latestHandlers?.onResponseEnd?.();
-    });
-
-    expect(sendUserMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it("renders the inline guided tour launcher and lets the user cancel it", async () => {
-    const onDismissTourLauncher = vi.fn();
-
-    await renderPane("", {
-      files: [],
-      tourLauncher: {
-        type: "tour_requested",
-        scenarioId: "report-tour",
-        title: "Report tour",
-        summary: "Create one chart-backed report slide.",
-        workspaceName: "Report tour",
-        targetAgentId: "report-agent",
-        uploadConfig: {
-          accept: {
-            "text/csv": [".csv"],
-            "application/pdf": [".pdf"],
-          },
-          max_count: 4,
-          helper_text: "Upload one or more reporting inputs.",
-        },
-        defaultAssetCount: 2,
-      },
-      onDismissTourLauncher,
-    });
-
-    expect(container.textContent).toContain("Guided Tour");
-    expect(container.textContent).toContain("Report tour");
-    expect(container.textContent).toContain("Upload one or more reporting inputs.");
-    expect(container.textContent).toContain("Built-in default: 2 files.");
-
-    const cancelButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Cancel",
-    );
-
-    await act(async () => {
-      cancelButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    expect(onDismissTourLauncher).toHaveBeenCalledOnce();
-  });
-
-  it("opens the selected tour scenario from a ChatKit tour-picker widget action", async () => {
-    const onSelectTourScenario = vi.fn(async () => undefined);
-
-    await renderPane("", {
-      onSelectTourScenario,
-    });
-
-    const onAction = (
-      latestChatKitOptions?.widgets as
-        | {
-            onAction?: (
-              action: { type: string; payload?: Record<string, unknown> },
-              widgetItem: { id: string },
-            ) => Promise<void>;
-          }
-        | undefined
-    )?.onAction;
-
-    await act(async () => {
-      await onAction?.(
-        {
-          type: "submit_tour_picker",
-          payload: {
-            scenario_id: "report-tour",
-          },
-        },
-        {
-          id: "widget_tour_picker",
-        },
-      );
-    });
-
-    expect(onSelectTourScenario).toHaveBeenCalledWith("report-tour");
-    expect(latestChatKitApi?.sendCustomAction).toHaveBeenCalledWith(
-      {
-        type: "submit_tour_picker",
-        payload: {
-          scenario_id: "report-tour",
-        },
-      },
-      "widget_tour_picker",
-    );
-  });
-
-  it("forwards tour-picker cancel actions without opening a launcher", async () => {
-    const onSelectTourScenario = vi.fn(async () => undefined);
-
-    await renderPane("", {
-      onSelectTourScenario,
-    });
-
-    const onAction = (
-      latestChatKitOptions?.widgets as
-        | {
-            onAction?: (
-              action: { type: string; payload?: Record<string, unknown> },
-              widgetItem: { id: string },
-            ) => Promise<void>;
-          }
-        | undefined
-    )?.onAction;
-
-    await act(async () => {
-      await onAction?.(
-        {
-          type: "cancel_tour_picker",
-          payload: {},
-        },
-        {
-          id: "widget_tour_picker",
-        },
-      );
-    });
-
-    expect(onSelectTourScenario).not.toHaveBeenCalled();
-    expect(latestChatKitApi?.sendCustomAction).toHaveBeenCalledWith(
-      {
-        type: "cancel_tour_picker",
-        payload: {},
-      },
-      "widget_tour_picker",
-    );
-  });
-
-  it("opens the hidden file picker and submits uploaded guided-tour files", async () => {
-    const onSubmitTourSelection = vi.fn(async () => undefined);
-    const inputClickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
-
-    await renderPane("", {
-      files: [],
-      tourLauncher: {
-        type: "tour_requested",
-        scenarioId: "report-tour",
-        title: "Report tour",
-        summary: "Create one chart-backed report slide.",
-        workspaceName: "Report tour",
-        targetAgentId: "report-agent",
-        uploadConfig: {
-          accept: {
-            "text/csv": [".csv"],
-            "application/pdf": [".pdf"],
-          },
-          max_count: 4,
-          helper_text: "Upload one or more reporting inputs.",
-        },
-        defaultAssetCount: 2,
-      },
-      onSubmitTourSelection,
-    });
-
-    const uploadButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Upload your own file(s)",
-    );
-    const fileInput = container.querySelector(
-      "[data-testid='chatkit-tour-file-input']",
-    ) as HTMLInputElement | null;
-
-    expect(fileInput?.getAttribute("accept")).toBe("text/csv,.csv,application/pdf,.pdf");
-    expect(fileInput?.multiple).toBe(true);
-
-    await act(async () => {
-      uploadButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    expect(inputClickSpy).toHaveBeenCalled();
-
-    const upload = new File(["region,revenue\nWest,120\n"], "sales.csv", {
-      type: "text/csv",
-    });
-    Object.defineProperty(fileInput, "files", {
-      configurable: true,
-      value: [upload],
-    });
-
-    await act(async () => {
-      fileInput?.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-
-    expect(onSubmitTourSelection).toHaveBeenCalledWith({
-      scenarioId: "report-tour",
-      source: "upload",
-      files: [upload],
-    });
-  });
-
-  it("submits the built-in default guided-tour option", async () => {
-    const onSubmitTourSelection = vi.fn(async () => undefined);
-
-    await renderPane("", {
-      files: [],
-      tourLauncher: {
-        type: "tour_requested",
-        scenarioId: "document-tour",
-        title: "Document tour",
-        summary: "Inspect a PDF and produce a useful smart split.",
-        workspaceName: "Document tour",
-        targetAgentId: "document-agent",
-        uploadConfig: {
-          accept: {
-            "application/pdf": [".pdf"],
-          },
-          max_count: 1,
-          helper_text: "Upload a single PDF to inspect and split.",
-        },
-        defaultAssetCount: 1,
-      },
-      onSubmitTourSelection,
-    });
-
-    const defaultButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Use built-in default",
-    );
-    const fileInput = container.querySelector(
-      "[data-testid='chatkit-tour-file-input']",
-    ) as HTMLInputElement | null;
-
-    expect(fileInput?.getAttribute("accept")).toBe("application/pdf,.pdf");
-    expect(fileInput?.multiple).toBe(false);
-
-    await act(async () => {
-      defaultButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    expect(onSubmitTourSelection).toHaveBeenCalledWith({
-      scenarioId: "document-tour",
-      source: "default",
-    });
-  });
-
-  it("auto-dispatches a scheduled guided-tour prompt into a fresh thread", async () => {
-    const onScheduledPromptDispatched = vi.fn();
-
-    await act(async () => {
-      root.render(
-        <ChatKitHarness
-          agentBundle={agentBundle}
-          files={files}
-          shellState={shellState}
-          investigationBrief=""
-          clientTools={[]}
-          onEffects={() => {}}
-          scheduledPrompt={{
-            id: "tour:report-tour:1",
-            prompt: "Start the report tour in the current workspace.",
-            model: "balanced",
-            agentId: "report-agent",
-          }}
-          onScheduledPromptDispatched={onScheduledPromptDispatched}
-        />,
-      );
-    });
-
-    const sendUserMessage = latestChatKitApi?.sendUserMessage as ReturnType<typeof vi.fn> | undefined;
-
-    expect(sendUserMessage).toHaveBeenCalledWith({
-      text: "Start the report tour in the current workspace.",
-      model: "balanced",
-      newThread: true,
-    });
-    expect(onScheduledPromptDispatched).toHaveBeenCalledWith("tour:report-tour:1");
-  });
-
-  it("does not render a custom feedback control in the top row", async () => {
-    await renderPane("", {
-      showChatKitHeader: false,
-    });
-
-    expect(container.querySelector("[data-testid='chatkit-provide-feedback']")).toBeNull();
   });
 
   it("routes intercepted native feedback into the seeded feedback flow", async () => {
@@ -1016,58 +479,39 @@ describe("ChatKitHarness auto-scroll", () => {
       text: expect.stringContaining('sentiment: "thumbs up"'),
       newThread: false,
     });
-    expect(container.textContent).toContain("Starting feedback flow.");
   });
 
-  it("does not send custom metadata actions from client tools while ChatKit is responding", async () => {
-    const toolHandler = vi.fn(async () => ({
-      workspace_context: {
-        workspace_id: "workspace-default",
-        referenced_item_ids: ["file_csv"],
-      },
-    }));
-
-    await renderHarness([
+  it("clears the local tool completion status after a short delay", async () => {
+    const toolHandler = vi.fn(async () => ({ ok: true }));
+    const clientTools: AgentClientTool[] = [
       {
         type: "function",
-        name: "list_reports",
-        description: "List reports.",
-        strict: true,
+        name: "append_report_slide",
+        description: "Append a report slide.",
         parameters: {
           type: "object",
-          additionalProperties: false,
           properties: {},
+          additionalProperties: false,
         },
+        strict: true,
         handler: toolHandler,
       },
-    ]);
+    ];
+
+    await renderHarness({ clientTools });
 
     await act(async () => {
-      latestHandlers?.onReady?.();
-      latestHandlers?.onThreadChange?.({ threadId: "thread_tool" });
-      latestHandlers?.onResponseStart?.();
-    });
-
-    const onClientTool = latestChatKitOptions?.onClientTool as
-      | ((input: { name: string; params: Record<string, unknown> }) => Promise<unknown>)
-      | undefined;
-    const sendCustomAction = latestChatKitApi?.sendCustomAction as ReturnType<typeof vi.fn> | undefined;
-
-    let result: unknown;
-    await act(async () => {
-      result = await onClientTool?.({
-        name: "list_reports",
+      await (latestChatKitOptions as { onClientTool?: (event: { name: string; params: Record<string, unknown> }) => Promise<void> } | null)?.onClientTool?.({
+        name: "append_report_slide",
         params: {},
       });
     });
 
-    expect(toolHandler).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({
-      workspace_context: {
-        workspace_id: "workspace-default",
-        referenced_item_ids: ["file_csv"],
-      },
+    await act(async () => {
+      vi.advanceTimersByTime(200);
     });
-    expect(sendCustomAction).not.toHaveBeenCalled();
+
+    expect(toolHandler).toHaveBeenCalled();
+    expect(container.textContent).not.toContain("guided tour");
   });
 });

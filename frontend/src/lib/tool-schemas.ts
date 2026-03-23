@@ -510,6 +510,88 @@ export const removeReportSlideToolSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+const farmCropSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    area: { type: "string" },
+    expected_yield: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    notes: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["id", "name", "area"],
+  additionalProperties: false,
+};
+
+const farmIssueSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    status: { enum: ["open", "watching", "resolved"] },
+    notes: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["id", "title", "status"],
+  additionalProperties: false,
+};
+
+const farmProjectSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    status: { enum: ["planned", "active", "done"] },
+    notes: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["id", "title", "status"],
+  additionalProperties: false,
+};
+
+export const getFarmStateToolSchema: JsonSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+export const saveFarmStateToolSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    farm_name: { type: "string" },
+    location: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    crops: {
+      type: "array",
+      items: farmCropSchema,
+    },
+    issues: {
+      type: "array",
+      items: farmIssueSchema,
+    },
+    projects: {
+      type: "array",
+      items: farmProjectSchema,
+    },
+    current_work: {
+      type: "array",
+      items: { type: "string" },
+    },
+    notes: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["farm_name", "crops", "issues", "projects", "current_work"],
+  additionalProperties: false,
+};
+
 function buildRowExprSchema(depth: number): JsonSchema {
   if (depth <= 0) {
     return {

@@ -19,17 +19,17 @@ import {
   DatasetInventoryToolbar,
 } from "./styles";
 import { downloadWorkspaceFile, formatByteSize, openWorkspaceFileInNewTab } from "../lib/workspace-artifacts";
-import type { LocalWorkspaceFile } from "../types/report";
+import type { LocalAttachment } from "../types/report";
 
 const PAGE_SIZE = 10;
 const JSON_PREVIEW_LIMIT = 24;
 
 export function WorkspaceArtifactInspector({
   files,
-  emptyMessage = "No workspace artifacts yet.",
+  emptyMessage = "No workspace items yet.",
   compact = false,
 }: {
-  files: LocalWorkspaceFile[];
+  files: LocalAttachment[];
   emptyMessage?: string;
   compact?: boolean;
 }) {
@@ -152,7 +152,7 @@ export function WorkspaceArtifactInspector({
                     <MetaText>Columns: {file.columns.join(", ")}</MetaText>
                     <JsonPreview $compact={compact}>{jsonPreview}</JsonPreview>
                     {file.row_count > JSON_PREVIEW_LIMIT ? (
-                      <MetaText>Showing the first {JSON_PREVIEW_LIMIT} rows from the JSON artifact.</MetaText>
+                      <MetaText>Showing the first {JSON_PREVIEW_LIMIT} rows from this JSON item.</MetaText>
                     ) : null}
                   </>
                 ) : null}
@@ -160,7 +160,7 @@ export function WorkspaceArtifactInspector({
                 {file.kind === "pdf" ? (
                   <>
                     <MetaText>
-                      PDF artifact with {file.page_count} pages and a size of {formatByteSize(file.byte_size)}.
+                      PDF item with {file.page_count} pages and a size of {formatByteSize(file.byte_size)}.
                     </MetaText>
                     <MetaText>Open it in a new tab to inspect the document directly.</MetaText>
                   </>
@@ -169,7 +169,7 @@ export function WorkspaceArtifactInspector({
                 {file.kind === "image" ? (
                   <>
                     <MetaText>
-                      Image artifact sized {file.width} x {file.height}.
+                      Image item sized {file.width} x {file.height}.
                     </MetaText>
                     <DatasetPreviewImage alt={file.name} src={`data:${file.mime_type || "image/png"};base64,${file.bytes_base64}`} />
                   </>
@@ -180,7 +180,7 @@ export function WorkspaceArtifactInspector({
                     {file.text_content ? (
                       <TextPreview $compact={compact}>{file.text_content}</TextPreview>
                     ) : (
-                      <MetaText>This is a binary artifact. Download it to inspect it locally.</MetaText>
+                      <MetaText>This is a binary item. Download it to inspect it locally.</MetaText>
                     )}
                   </>
                 ) : null}

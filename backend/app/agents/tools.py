@@ -1,5 +1,7 @@
 import json
 import logging
+from io import BytesIO
+from zipfile import ZipFile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -11,7 +13,6 @@ from agents.tool import Tool
 from agents.tool_context import ToolContext
 from chatkit.agents import AgentContext as ChatKitAgentContext, ClientToolCall
 from chatkit.types import CustomTask, ProgressUpdateEvent, Workflow
-from openai.types.responses.web_search_tool import Filters as WebSearchToolFilters
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from backend.app.agents.context import ReportAgentContext
@@ -20,19 +21,16 @@ from backend.app.agents.widgets import (
     build_feedback_saved_widget,
     build_feedback_session_copy_text,
     build_feedback_session_widget,
-    build_tour_picker_copy_text,
-    build_tour_picker_widget,
     build_tool_trace_copy_text,
     build_tool_trace_widget,
     format_tool_label,
 )
-from backend.app.chatkit.feedback_types import ChatItemFeedbackRecord, FeedbackOrigin
+from backend.app.chatkit.feedback_types import WorkspaceChatFeedbackRecord, FeedbackOrigin
 from backend.app.chatkit.metadata import (
     AgentPlan,
     AgentPlanExecutionHint,
     PendingFeedbackSession,
     PlanExecution,
-    TourPickerDisplaySpec,
     active_plan_execution,
 )
 from backend.app.core.logging import (
@@ -43,22 +41,29 @@ from backend.app.core.logging import (
     summarize_for_log,
     summarize_sequence_for_log,
 )
-from backend.app.models.chatkit import ChatItemFeedback
+from backend.app.models.chatkit import WorkspaceChatFeedback
+from backend.app.schemas.stored_file import (
+    DocumentEditResult,
+    DocumentFieldValue,
+    DocumentInspectionResult,
+    DocumentSmartSplitResult,
+    DocumentSplitEntry,
+)
+from backend.app.services.document_pdf import (
+    append_pdf_bytes,
+    build_dataset_appendix_pdf,
+    extract_page_range_pdf,
+    fill_form_fields_in_pdf,
+    inspect_pdf_document,
+    plan_smart_split,
+    replace_text_in_pdf,
+    replace_visual_region,
+)
+from backend.app.services.stored_file_service import StoredFileService
 
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
-AGRICULTURE_WEB_SEARCH_ALLOWED_DOMAINS = [
-    "extension.umn.edu",
-    "ipm.ucanr.edu",
-    "cropwatch.unl.edu",
-    "ohioline.osu.edu",
-    "apsnet.org",
-    "nifa.usda.gov",
-    "ars.usda.gov",
-]
-
-
 class PlanExecutionHintInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -305,18 +310,11 @@ def get_client_tool_names(
     ]
 
 
-def _tool_summary_from_query_plan(query_plan: Mapping[str, object]) -> list[str]:
-    return [
-        f"Dataset: {query_plan.get('dataset_id') or 'unknown'}",
-        f"Filters: {len(cast(list[object], query_plan.get('filters') or []))}",
-        f"Group by: {len(cast(list[object], query_plan.get('group_by') or []))}",
-        f"Aggregates: {len(cast(list[object], query_plan.get('aggregates') or []))}",
-        *(
-            [f"Limit: {limit}"]
-            if isinstance((limit := query_plan.get("limit")), int)
-            else []
-        ),
-    ]
+def _tool_display_spec(
+    tool_definition: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    raw_display = tool_definition.get("display")
+    return raw_display if isinstance(raw_display, Mapping) else None
 
 
 def _summarize_tool_argument_value(value: object) -> str | None:
@@ -335,21 +333,6 @@ def _summarize_tool_argument_value(value: object) -> str | None:
     if isinstance(value, Sequence) and not isinstance(value, str):
         return f"{len(value)} item{'s' if len(value) != 1 else ''}"
     return summarize_for_log(value, limit=48)
-
-
-def _generic_tool_argument_lines(arguments: Mapping[str, object]) -> list[str]:
-    lines: list[str] = []
-    sorted_keys = sorted(arguments.keys())
-    for key in sorted_keys[:4]:
-        preview = _summarize_tool_argument_value(arguments.get(key))
-        if preview is None:
-            continue
-        lines.append(f"{key}: {preview}")
-    remaining_fields = max(0, len(sorted_keys) - 4)
-    if remaining_fields:
-        suffix = "" if remaining_fields == 1 else "s"
-        lines.append(f"+{remaining_fields} more field{suffix}")
-    return lines
 
 
 def _basename(path: str) -> str:
@@ -391,6 +374,11 @@ def _tool_trace_target(tool_name: str, arguments: Mapping[str, object]) -> str |
         if isinstance(dataset_id, str) and dataset_id.strip():
             return dataset_id.strip()
 
+    if tool_name == "save_farm_state":
+        farm_name = arguments.get("farm_name")
+        if isinstance(farm_name, str) and farm_name.strip():
+            return summarize_for_log(farm_name.strip(), limit=56)
+
     if tool_name == "run_aggregate_query":
         query_plan = arguments.get("query_plan")
         if isinstance(query_plan, Mapping):
@@ -404,81 +392,6 @@ def _tool_trace_target(tool_name: str, arguments: Mapping[str, object]) -> str |
             return value.strip()
 
     return None
-
-
-def _tool_trace_title(tool_name: str, arguments: Mapping[str, object]) -> str:
-    label = format_tool_label(tool_name)
-    target = _tool_trace_target(tool_name, arguments)
-    return f"{label}({target})" if target else label
-
-
-def _tool_display_spec(
-    tool_definition: Mapping[str, Any],
-) -> Mapping[str, object] | None:
-    raw_display = tool_definition.get("display")
-    return raw_display if isinstance(raw_display, Mapping) else None
-
-
-def _tour_picker_display_spec(
-    tool_definition: Mapping[str, Any],
-) -> TourPickerDisplaySpec | None:
-    display = _tool_display_spec(tool_definition)
-    if display is None:
-        return None
-    raw_picker = display.get("tour_picker")
-    return (
-        cast(TourPickerDisplaySpec, raw_picker)
-        if isinstance(raw_picker, Mapping)
-        else None
-    )
-
-
-def _build_hosted_client_tool(
-    tool_definition: Mapping[str, Any],
-) -> Tool | None:
-    tool_name = tool_definition.get("name")
-    if tool_name != "list_tour_scenarios":
-        return None
-
-    tour_picker = _tour_picker_display_spec(tool_definition)
-    if tour_picker is None or not tour_picker.get("scenarios"):
-        return None
-
-    @function_tool(name_override="list_tour_scenarios")
-    async def list_tour_scenarios_tool(
-        ctx: ChatKitToolContext,
-    ) -> dict[str, object]:
-        """Open the guided tour picker in chat and wait for the user to choose a tour."""
-        request_context = ctx.context.request_context
-        _log_tool_start(
-            request_context,
-            "list_tour_scenarios",
-            scenarios=len(tour_picker["scenarios"]),
-        )
-        await ctx.context.stream_widget(
-            build_tour_picker_widget(tour_picker),
-            copy_text=build_tour_picker_copy_text(tour_picker),
-        )
-        _log_tool_end(
-            request_context,
-            "list_tour_scenarios",
-            result=summarize_pairs_for_log(
-                (
-                    ("status", "waiting_for_user"),
-                    ("count", len(tour_picker["scenarios"])),
-                )
-            ),
-        )
-        return {
-            "status": "waiting_for_user",
-            "tour_scenarios": tour_picker["scenarios"],
-            "count": len(tour_picker["scenarios"]),
-            "next_action": (
-                "The guided tour picker is open in chat; wait for the user to choose a tour."
-            ),
-        }
-
-    return list_tour_scenarios_tool
 
 
 def _resolve_argument_path(
@@ -593,131 +506,6 @@ def _format_tool_invocation(
     return f"{label}()"
 
 
-def _summarize_client_tool_request(
-    tool_name: str,
-    arguments: Mapping[str, object],
-) -> tuple[str, list[str]]:
-    if tool_name in {"list_datasets", "list_pdf_files"}:
-        include_samples = arguments.get("includeSamples")
-        if tool_name == "list_datasets":
-            return (
-                "Queued a dataset workspace listing with samples."
-                if include_samples is True
-                else "Queued a dataset workspace listing.",
-                [],
-            )
-        return ("Queued a PDF workspace listing.", [])
-
-    if tool_name == "list_reports":
-        return ("Report index lookup", [])
-
-    if tool_name == "get_report":
-        return (
-            "Structured report read",
-            [f"Report: {arguments.get('report_id') or 'unknown'}"],
-        )
-
-    if tool_name == "create_report":
-        details = []
-        if isinstance(arguments.get("title"), str) and arguments["title"].strip():
-            details.append(
-                f"Title: {summarize_for_log(arguments['title'].strip(), limit=72)}"
-            )
-        if (
-            isinstance(arguments.get("report_id"), str)
-            and arguments["report_id"].strip()
-        ):
-            details.append(f"Requested id: {arguments['report_id'].strip()}")
-        return ("Structured report creation", details)
-
-    if tool_name == "append_report_slide":
-        details = [f"Report: {arguments.get('report_id') or 'unknown'}"]
-        raw_slide = arguments.get("slide")
-        if isinstance(raw_slide, Mapping):
-            details.append(f"Layout: {raw_slide.get('layout') or 'unknown'}")
-            if isinstance(raw_slide.get("title"), str) and raw_slide["title"].strip():
-                details.append(
-                    f"Title: {summarize_for_log(raw_slide['title'].strip(), limit=72)}"
-                )
-        return ("Report slide append", details)
-
-    if tool_name == "remove_report_slide":
-        return (
-            "Report slide removal",
-            [
-                f"Report: {arguments.get('report_id') or 'unknown'}",
-                f"Slide: {arguments.get('slide_id') or 'unknown'}",
-            ],
-        )
-
-    if tool_name == "inspect_dataset_schema":
-        return (
-            "Dataset schema inspection",
-            [f"Dataset: {arguments.get('dataset_id') or 'unknown'}"],
-        )
-
-    if tool_name == "inspect_pdf_file":
-        details = [f"File: {arguments.get('file_id') or 'unknown'}"]
-        if isinstance(arguments.get("max_pages"), int):
-            details.append(f"Max pages: {arguments['max_pages']}")
-        return ("PDF inspection", details)
-
-    if tool_name == "get_pdf_page_range":
-        return (
-            "PDF page extraction",
-            [
-                f"File: {arguments.get('file_id') or 'unknown'}",
-                f"Pages: {arguments.get('start_page') or '?'}-{arguments.get('end_page') or '?'}",
-            ],
-        )
-
-    if tool_name == "smart_split_pdf":
-        details = [f"File: {arguments.get('file_id') or 'unknown'}"]
-        if isinstance(arguments.get("goal"), str) and arguments["goal"].strip():
-            details.append(
-                f"Goal: {summarize_for_log(arguments['goal'].strip(), limit=72)}"
-            )
-        return ("Smart PDF split", details)
-
-    if tool_name == "run_aggregate_query":
-        query_plan = arguments.get("query_plan")
-        if isinstance(query_plan, Mapping):
-            return (
-                "Grouped aggregate query",
-                _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan)),
-            )
-
-    if tool_name == "create_dataset":
-        details = [f"File: {arguments.get('filename') or 'unknown'}"]
-        if isinstance(arguments.get("format"), str) and arguments["format"].strip():
-            details.append(f"Format: {arguments['format'].strip()}")
-        query_plan = arguments.get("query_plan")
-        if isinstance(query_plan, Mapping):
-            details.extend(
-                _tool_summary_from_query_plan(cast(Mapping[str, object], query_plan))
-            )
-        return ("Derived dataset artifact", details)
-
-    if tool_name == "render_chart_from_dataset":
-        chart_plan = arguments.get("chart_plan")
-        details = [f"Dataset: {arguments.get('dataset_id') or 'unknown'}"]
-        if isinstance(chart_plan, Mapping):
-            details.append(f"Chart: {chart_plan.get('type') or 'unknown'}")
-        if isinstance(arguments.get("x_key"), str):
-            details.append(f"X key: {arguments['x_key']}")
-        if isinstance(arguments.get("y_key"), str) and arguments["y_key"].strip():
-            details.append(f"Y key: {arguments['y_key']}")
-        if isinstance(arguments.get("series_key"), str) and arguments["series_key"].strip():
-            details.append(f"Series key: {arguments['series_key']}")
-        return ("Client chart render", details)
-
-    generic_details = _generic_tool_argument_lines(arguments)
-    return (
-        format_tool_label(tool_name),
-        generic_details or ["No parameters"],
-    )
-
-
 async def _stream_tool_trace_widget(
     ctx: ChatKitToolContext,
     tool_name: str,
@@ -817,6 +605,17 @@ async def _latest_assistant_item_ids(ctx: ChatKitToolContext) -> list[str]:
         if item.type == "assistant_message":
             return [item.id]
     return []
+
+
+def _document_service(context: ReportAgentContext) -> StoredFileService:
+    return StoredFileService(context.db)
+
+
+def _document_revision_name(file_name: str, suffix: str) -> str:
+    path = PurePosixPath(file_name)
+    stem = path.stem or path.name or "document"
+    extension = path.suffix or ".pdf"
+    return f"{stem}_{suffix}{extension}"
 
 
 def _normalized_feedback_origin(context: ReportAgentContext) -> FeedbackOrigin:
@@ -929,17 +728,473 @@ def _build_hosted_tools(
     if agent_id == "agriculture-agent":
         tools.append(
             WebSearchTool(
-                filters=WebSearchToolFilters(
-                    allowed_domains=AGRICULTURE_WEB_SEARCH_ALLOWED_DOMAINS,
-                ),
                 search_context_size="medium",
             )
         )
 
-    for tool_definition in client_tools:
-        hosted_tool = _build_hosted_client_tool(tool_definition)
-        if hosted_tool is not None:
-            tools.append(hosted_tool)
+    if agent_id == "document-agent":
+
+        @function_tool(name_override="list_document_files")
+        async def list_document_files_tool(
+            ctx: ChatKitToolContext,
+        ) -> dict[str, object]:
+            """List thread-scoped document files available to the current documents thread."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            result = await service.list_document_files(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+            )
+            _log_tool_start(
+                request_context,
+                "list_document_files",
+                thread=ctx.context.thread.id,
+            )
+            _log_tool_end(
+                request_context,
+                "list_document_files",
+                files=len(result.files),
+            )
+            return result.model_dump(mode="json")
+
+        @function_tool(name_override="inspect_document_file")
+        async def inspect_document_file_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+            max_pages: int | None = None,
+        ) -> dict[str, object]:
+            """Inspect a stored PDF and return stable locator ids for text, form fields, and visual candidates."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            if record.kind != "pdf":
+                raise ValueError("inspect_document_file currently requires a PDF.")
+            pdf_bytes = await service.load_file_bytes(record)
+            inspection = inspect_pdf_document(
+                file_summary=service.serialize_document_file(record),
+                pdf_bytes=pdf_bytes,
+                max_pages=max_pages or get_settings().document_preview_max_pages,
+            )
+            _log_tool_start(
+                request_context,
+                "inspect_document_file",
+                file=file_id,
+                pages=inspection.result.page_count,
+            )
+            _log_tool_end(
+                request_context,
+                "inspect_document_file",
+                locators=len(inspection.result.locators),
+            )
+            return inspection.result.model_dump(mode="json")
+
+        @function_tool(name_override="replace_document_text")
+        async def replace_document_text_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+            locator_id: str,
+            replacement_text: str,
+        ) -> dict[str, object]:
+            """Replace text in a PDF by locator id, using direct stream replacement only when it is safe and otherwise falling back to a safe overlay."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            if record.kind != "pdf":
+                raise ValueError("replace_document_text currently requires a PDF.")
+            pdf_bytes = await service.load_file_bytes(record)
+            inspection = inspect_pdf_document(
+                file_summary=service.serialize_document_file(record),
+                pdf_bytes=pdf_bytes,
+                max_pages=get_settings().document_preview_max_pages,
+            )
+            locator = inspection.text_blocks.get(locator_id)
+            if locator is None:
+                raise ValueError("The requested text locator was not found.")
+            updated_pdf_bytes, strategy, warning = replace_text_in_pdf(
+                pdf_bytes=pdf_bytes,
+                locator=locator,
+                replacement_text=replacement_text,
+            )
+            if updated_pdf_bytes is None or strategy is None:
+                raise ValueError(warning or "The requested text replacement could not be applied safely.")
+            revised = await service.create_document_revision(
+                parent_record=record,
+                file_name=_document_revision_name(record.name, "text_update"),
+                file_bytes=updated_pdf_bytes,
+            )
+            result = DocumentEditResult(
+                file=service.serialize_document_file(revised),
+                parent_file_id=record.id,
+                strategy_used=strategy,
+                message="Created a new PDF revision with the requested text update.",
+                warning=warning,
+            )
+            _log_tool_start(
+                request_context,
+                "replace_document_text",
+                file=file_id,
+                locator=locator_id,
+            )
+            _log_tool_end(
+                request_context,
+                "replace_document_text",
+                strategy=strategy,
+                file=revised.id,
+            )
+            return result.model_dump(mode="json")
+
+        @function_tool(name_override="fill_document_form")
+        async def fill_document_form_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+            field_values: list[DocumentFieldValue],
+        ) -> dict[str, object]:
+            """Fill PDF form fields by discovered locator id, returning unresolved locator ids explicitly when a field cannot be resolved."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            if record.kind != "pdf":
+                raise ValueError("fill_document_form currently requires a PDF.")
+            pdf_bytes = await service.load_file_bytes(record)
+            inspection = inspect_pdf_document(
+                file_summary=service.serialize_document_file(record),
+                pdf_bytes=pdf_bytes,
+                max_pages=get_settings().document_preview_max_pages,
+            )
+            values_by_field_name: dict[str, str] = {}
+            unresolved_locator_ids: list[str] = []
+            for field_value in field_values:
+                field_locator = inspection.form_fields.get(field_value.locator_id)
+                if field_locator is None:
+                    unresolved_locator_ids.append(field_value.locator_id)
+                    continue
+                values_by_field_name[field_locator.name] = field_value.value
+            if not values_by_field_name:
+                raise ValueError("None of the requested form field locators could be resolved.")
+            updated_pdf_bytes = fill_form_fields_in_pdf(
+                pdf_bytes=pdf_bytes,
+                field_values=values_by_field_name,
+            )
+            revised = await service.create_document_revision(
+                parent_record=record,
+                file_name=_document_revision_name(record.name, "form_fill"),
+                file_bytes=updated_pdf_bytes,
+            )
+            result = DocumentEditResult(
+                file=service.serialize_document_file(revised),
+                parent_file_id=record.id,
+                strategy_used="form_fill",
+                message="Created a new PDF revision with updated form field values.",
+                warning=(
+                    "Some requested form fields were not resolved."
+                    if unresolved_locator_ids
+                    else None
+                ),
+                unresolved_locator_ids=unresolved_locator_ids,
+            )
+            _log_tool_start(
+                request_context,
+                "fill_document_form",
+                file=file_id,
+                resolved=len(values_by_field_name),
+                unresolved=len(unresolved_locator_ids),
+            )
+            _log_tool_end(
+                request_context,
+                "fill_document_form",
+                file=revised.id,
+            )
+            return result.model_dump(mode="json")
+
+        @function_tool(name_override="update_document_visual_from_dataset")
+        async def update_document_visual_from_dataset_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+            locator_id: str,
+            dataset_file_id: str,
+            title: str | None = None,
+            render_as: Literal["table", "chart"] = "table",
+        ) -> dict[str, object]:
+            """Update a chart or table candidate from a dataset file by replacing a reliable visual region when possible, otherwise appending the update at the end of the PDF."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            dataset_record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=dataset_file_id,
+            )
+            if record.kind != "pdf":
+                raise ValueError("update_document_visual_from_dataset requires a PDF target.")
+            dataset_rows = await service.load_dataset_rows(dataset_record)
+            if not dataset_rows:
+                raise ValueError("The selected dataset file did not contain any usable rows.")
+            pdf_bytes = await service.load_file_bytes(record)
+            inspection = inspect_pdf_document(
+                file_summary=service.serialize_document_file(record),
+                pdf_bytes=pdf_bytes,
+                max_pages=get_settings().document_preview_max_pages,
+            )
+            locator = inspection.visual_locators.get(locator_id)
+            warning: str | None = None
+            if locator is None:
+                raise ValueError("The requested visual locator was not found.")
+            update_title = title.strip() if isinstance(title, str) and title.strip() else f"Updated {locator.label}"
+            if locator.reliability == "high":
+                updated_pdf_bytes = replace_visual_region(
+                    pdf_bytes=pdf_bytes,
+                    locator=locator,
+                    title=update_title,
+                    rows=dataset_rows,
+                    render_as=render_as,
+                )
+                strategy = "visual_replace"
+            else:
+                appendix_pdf_bytes = build_dataset_appendix_pdf(
+                    title=update_title,
+                    rows=dataset_rows,
+                    render_as=render_as,
+                )
+                updated_pdf_bytes = append_pdf_bytes(
+                    base_pdf_bytes=pdf_bytes,
+                    appendix_pdf_bytes=appendix_pdf_bytes,
+                )
+                strategy = "visual_append"
+                warning = (
+                    "The located visual anchor was not reliable enough for in-place replacement, so the updated visual was appended to the end of the PDF."
+                )
+            revised = await service.create_document_revision(
+                parent_record=record,
+                file_name=_document_revision_name(record.name, "visual_update"),
+                file_bytes=updated_pdf_bytes,
+            )
+            result = DocumentEditResult(
+                file=service.serialize_document_file(revised),
+                parent_file_id=record.id,
+                strategy_used=strategy,
+                message="Created a new PDF revision with the requested visual update.",
+                warning=warning,
+            )
+            _log_tool_start(
+                request_context,
+                "update_document_visual_from_dataset",
+                file=file_id,
+                dataset=dataset_file_id,
+                locator=locator_id,
+            )
+            _log_tool_end(
+                request_context,
+                "update_document_visual_from_dataset",
+                strategy=strategy,
+                file=revised.id,
+            )
+            return result.model_dump(mode="json")
+
+        @function_tool(name_override="append_document_appendix_from_dataset")
+        async def append_document_appendix_from_dataset_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+            dataset_file_id: str,
+            title: str,
+            render_as: Literal["table", "chart"] = "table",
+        ) -> dict[str, object]:
+            """Append a table or chart appendix generated from a thread-scoped dataset file."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            dataset_record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=dataset_file_id,
+            )
+            if record.kind != "pdf":
+                raise ValueError("append_document_appendix_from_dataset requires a PDF target.")
+            dataset_rows = await service.load_dataset_rows(dataset_record)
+            appendix_pdf_bytes = build_dataset_appendix_pdf(
+                title=title.strip(),
+                rows=dataset_rows,
+                render_as=render_as,
+            )
+            pdf_bytes = await service.load_file_bytes(record)
+            updated_pdf_bytes = append_pdf_bytes(
+                base_pdf_bytes=pdf_bytes,
+                appendix_pdf_bytes=appendix_pdf_bytes,
+            )
+            revised = await service.create_document_revision(
+                parent_record=record,
+                file_name=_document_revision_name(record.name, "appendix"),
+                file_bytes=updated_pdf_bytes,
+            )
+            result = DocumentEditResult(
+                file=service.serialize_document_file(revised),
+                parent_file_id=record.id,
+                strategy_used="appendix_append",
+                message="Created a new PDF revision with the dataset appendix appended.",
+            )
+            _log_tool_start(
+                request_context,
+                "append_document_appendix_from_dataset",
+                file=file_id,
+                dataset=dataset_file_id,
+            )
+            _log_tool_end(
+                request_context,
+                "append_document_appendix_from_dataset",
+                file=revised.id,
+            )
+            return result.model_dump(mode="json")
+
+        @function_tool(name_override="smart_split_document")
+        async def smart_split_document_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+            goal: str | None = None,
+        ) -> dict[str, object]:
+            """Split a PDF into useful thread-scoped derived files, plus a ZIP bundle and markdown index."""
+            del goal
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            record = await service.get_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            if record.kind != "pdf":
+                raise ValueError("smart_split_document currently requires a PDF.")
+            pdf_bytes = await service.load_file_bytes(record)
+            inspection = inspect_pdf_document(
+                file_summary=service.serialize_document_file(record),
+                pdf_bytes=pdf_bytes,
+                max_pages=get_settings().document_preview_max_pages,
+            )
+            split_plan = plan_smart_split(inspection=inspection)
+            archive_buffer = BytesIO()
+            markdown_lines = [f"# Split Index for {record.name}", ""]
+            entries: list[DocumentSplitEntry] = []
+            with ZipFile(archive_buffer, mode="w") as archive:
+                for index, split_range in enumerate(split_plan, start=1):
+                    split_bytes = extract_page_range_pdf(
+                        pdf_bytes=pdf_bytes,
+                        start_page=split_range.start_page,
+                        end_page=split_range.end_page,
+                    )
+                    part_name = _document_revision_name(record.name, f"part_{index}")
+                    part_record = await service.create_document_revision(
+                        parent_record=record,
+                        file_name=part_name,
+                        file_bytes=split_bytes,
+                    )
+                    archive.writestr(part_name, split_bytes)
+                    markdown_lines.extend(
+                        [
+                            f"## {split_range.title}",
+                            f"- Pages: {split_range.start_page}-{split_range.end_page}",
+                            f"- File id: {part_record.id}",
+                            "",
+                        ]
+                    )
+                    entries.append(
+                        DocumentSplitEntry(
+                            file=service.serialize_document_file(part_record),
+                            title=split_range.title,
+                            start_page=split_range.start_page,
+                            end_page=split_range.end_page,
+                            page_count=split_range.page_count,
+                        )
+                    )
+                markdown = "\n".join(markdown_lines).strip() + "\n"
+                archive.writestr("index.md", markdown.encode("utf-8"))
+
+            index_record = await service.create_document_revision(
+                parent_record=record,
+                file_name=f"{PurePosixPath(record.name).stem or 'document'}_index.md",
+                file_bytes=markdown.encode("utf-8"),
+                mime_type="text/markdown",
+            )
+            archive_record = await service.create_document_revision(
+                parent_record=record,
+                file_name=f"{PurePosixPath(record.name).stem or 'document'}_split.zip",
+                file_bytes=archive_buffer.getvalue(),
+                mime_type="application/zip",
+            )
+            result = DocumentSmartSplitResult(
+                source_file=service.serialize_document_file(record),
+                archive_file=service.serialize_document_file(archive_record),
+                index_file=service.serialize_document_file(index_record),
+                entries=entries,
+                markdown=markdown,
+            )
+            _log_tool_start(
+                request_context,
+                "smart_split_document",
+                file=file_id,
+                entries=len(entries),
+            )
+            _log_tool_end(
+                request_context,
+                "smart_split_document",
+                archive=archive_record.id,
+                index=index_record.id,
+            )
+            return result.model_dump(mode="json")
+
+        @function_tool(name_override="delete_document_file")
+        async def delete_document_file_tool(
+            ctx: ChatKitToolContext,
+            file_id: str,
+        ) -> dict[str, object]:
+            """Delete a thread-scoped document file record."""
+            request_context = ctx.context.request_context
+            service = _document_service(request_context)
+            result = await service.delete_document_file(
+                user_id=request_context.user_id,
+                thread_id=ctx.context.thread.id,
+                file_id=file_id,
+            )
+            _log_tool_start(
+                request_context,
+                "delete_document_file",
+                file=file_id,
+            )
+            _log_tool_end(
+                request_context,
+                "delete_document_file",
+                file=file_id,
+            )
+            return result.model_dump(mode="json")
+
+        tools.extend(
+            [
+                list_document_files_tool,
+                inspect_document_file_tool,
+                replace_document_text_tool,
+                fill_document_form_tool,
+                update_document_visual_from_dataset_tool,
+                append_document_appendix_from_dataset_tool,
+                smart_split_document_tool,
+                delete_document_file_tool,
+            ]
+        )
 
     return tools
 
@@ -1169,7 +1424,7 @@ def build_agent_tools(
             )
             return {
                 "session_id": session["session_id"],
-                "thread_id": ctx.context.thread.id,
+                "chat_id": ctx.context.thread.id,
                 "item_ids": item_ids,
                 "status": "waiting_for_user",
                 "message": "The user has been presented a feedback widget; wait for a response.",
@@ -1181,9 +1436,9 @@ def build_agent_tools(
             message: str,
             sentiment: Literal["positive", "negative"],
             item_ids: list[str] | None = None,
-            thread_id: str | None = None,
+            chat_id: str | None = None,
         ) -> dict[str, object]:
-            """Persist confirmed feedback for the current thread, linked to the latest assistant response by default."""
+            """Persist confirmed feedback for the current chat, linked to the latest assistant response by default."""
             request_context = ctx.context.request_context
             cleaned_message = _normalize_feedback_message(message)
             if cleaned_message is None:
@@ -1202,14 +1457,14 @@ def build_agent_tools(
                 raise ValueError(
                     "There is no assistant response available to attach feedback to."
                 )
-            target_thread_id = (
-                thread_id.strip()
-                if isinstance(thread_id, str) and thread_id.strip()
+            target_chat_id = (
+                chat_id.strip()
+                if isinstance(chat_id, str) and chat_id.strip()
                 else ctx.context.thread.id
             )
-            feedback = ChatItemFeedback(
+            feedback = WorkspaceChatFeedback(
                 id=f"fb_{uuid4().hex}",
-                thread_id=target_thread_id,
+                chat_id=target_chat_id,
                 item_ids_json=target_item_ids,
                 user_email=_normalized_user_email(request_context),
                 kind=sentiment,
@@ -1221,9 +1476,9 @@ def build_agent_tools(
             await request_context.db.commit()
             request_context.thread_metadata.pop("feedback_session", None)
             ctx.context.thread.metadata = dict(request_context.thread_metadata)
-            record = ChatItemFeedbackRecord(
+            record = WorkspaceChatFeedbackRecord(
                 id=feedback.id,
-                thread_id=feedback.thread_id,
+                chat_id=feedback.chat_id,
                 item_ids=list(feedback.item_ids_json),
                 user_email=feedback.user_email,
                 kind=feedback.kind,
@@ -1235,7 +1490,7 @@ def build_agent_tools(
                 "send_feedback",
                 feedback=summarize_pairs_for_log(
                     (
-                        ("thread", target_thread_id),
+                        ("chat", target_chat_id),
                         ("sentiment", sentiment),
                         ("items", summarize_sequence_for_log(target_item_ids)),
                     )
@@ -1251,7 +1506,7 @@ def build_agent_tools(
                 feedback=summarize_pairs_for_log(
                     (
                         ("id", feedback.id),
-                        ("thread", target_thread_id),
+                        ("chat", target_chat_id),
                         ("sentiment", sentiment),
                     )
                 ),

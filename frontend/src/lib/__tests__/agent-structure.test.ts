@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const agentDirs = [
-  "default-agent",
   "agriculture-agent",
   "analysis-agent",
   "chart-agent",
@@ -20,7 +19,7 @@ const agentsRoot = path.resolve(
 );
 
 describe("agent folder structure", () => {
-  it("keeps every agent folder on the conventional public shape", () => {
+  it("keeps every live agent folder on the conventional public shape", () => {
     for (const agentDir of agentDirs) {
       expect(existsSync(path.join(agentsRoot, agentDir, "index.ts"))).toBe(true);
       expect(existsSync(path.join(agentsRoot, agentDir, "tools.ts"))).toBe(true);

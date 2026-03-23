@@ -6,7 +6,7 @@ from backend.app.agents.context import ReportAgentContext
 from backend.app.chatkit.runtime_state import resolve_thread_runtime_state
 
 
-def test_resolve_thread_runtime_state_hydrates_context_from_shell_state() -> None:
+def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() -> None:
     context = ReportAgentContext(
         report_id="pending_thread",
         user_id="user_123",
@@ -25,46 +25,62 @@ def test_resolve_thread_runtime_state_hydrates_context_from_shell_state() -> Non
                     }
                 ],
             },
-            "shell_state": {
-                "version": "v1",
-                "context_id": "workspace-tour",
-                "context_name": "Tour Workspace",
-                "active_agent_id": "analysis-agent",
-                "agents": [
+            "workspace_state": {
+                "version": "v4",
+                "workspace_id": "workspace-tour",
+                "workspace_name": "Tour Workspace",
+                "app_id": "agriculture",
+                "selected_item_id": "file_csv",
+                "items": [
                     {
-                        "agent_id": "analysis-agent",
-                        "goal": "Inspect datasets.",
-                        "resource_count": 2,
-                    }
-                ],
-                "resources": [
-                    {
+                        "origin": "upload",
                         "id": "file_csv",
-                        "owner_agent_id": "analysis-agent",
-                        "kind": "dataset",
-                        "title": "sales.csv",
-                        "created_at": "2026-03-20T09:00:00Z",
-                        "summary": "Uploaded sales data",
-                        "payload_ref": "file:file_csv",
+                        "workspace_id": "workspace-tour",
+                        "name": "sales.csv",
+                        "kind": "csv",
                         "extension": "csv",
-                        "row_count": 2,
-                        "columns": ["region", "revenue"],
-                        "numeric_columns": ["revenue"],
-                        "sample_rows": [{"region": "West", "revenue": 10}],
+                        "content_key": "sha256:file_csv",
+                        "local_status": "available",
+                        "preview": {
+                            "row_count": 2,
+                            "columns": ["region", "revenue"],
+                            "numeric_columns": ["revenue"],
+                            "sample_rows": [{"region": "West", "revenue": 10}],
+                        },
+                        "created_at": "2026-03-20T09:00:00Z",
+                        "updated_at": "2026-03-20T09:00:00Z",
                     },
                     {
+                        "origin": "upload",
                         "id": "file_image",
-                        "owner_agent_id": "analysis-agent",
+                        "workspace_id": "workspace-tour",
+                        "name": "walnut.png",
                         "kind": "image",
-                        "title": "walnut.png",
-                        "created_at": "2026-03-20T09:05:00Z",
-                        "summary": "Leaf photo",
-                        "payload_ref": "file:file_image",
                         "extension": "png",
                         "mime_type": "image/png",
                         "byte_size": 1024,
-                        "width": 1200,
-                        "height": 800,
+                        "content_key": "sha256:file_image",
+                        "local_status": "available",
+                        "preview": {
+                            "width": 1200,
+                            "height": 800,
+                        },
+                        "created_at": "2026-03-20T09:05:00Z",
+                        "updated_at": "2026-03-20T09:05:00Z",
+                    },
+                    {
+                        "origin": "created",
+                        "id": "report-1",
+                        "workspace_id": "workspace-tour",
+                        "kind": "report.v1",
+                        "schema_version": "v1",
+                        "title": "Tour report",
+                        "current_revision": 1,
+                        "created_by_user_id": "user_123",
+                        "summary": {"slide_count": 1},
+                        "latest_op": "item.create",
+                        "created_at": "2026-03-20T09:10:00Z",
+                        "updated_at": "2026-03-20T09:10:00Z",
                     },
                 ],
             },
@@ -78,11 +94,15 @@ def test_resolve_thread_runtime_state_hydrates_context_from_shell_state() -> Non
 
     runtime_state = resolve_thread_runtime_state(thread=thread, context=context)
 
-    assert runtime_state.metadata["shell_state"]["context_id"] == "workspace-tour"
-    assert runtime_state.metadata["shell_state"]["context_name"] == "Tour Workspace"
+    assert runtime_state.metadata["workspace_state"]["workspace_id"] == "workspace-tour"
+    assert runtime_state.metadata["workspace_state"]["workspace_name"] == "Tour Workspace"
+    assert runtime_state.metadata["workspace_state"]["app_id"] == "agriculture"
     assert context.report_id == "thread_123"
+    assert context.workspace_id == "workspace-tour"
+    assert context.workspace_name == "Tour Workspace"
     assert context.agent_id == "analysis-agent"
     assert context.dataset_ids == ["file_csv"]
+    assert context.available_artifacts[0]["id"] == "report-1"
     assert context.available_files[0].csv is not None
     assert context.available_files[1].image is not None
     assert context.available_files[1].image.width == 1200

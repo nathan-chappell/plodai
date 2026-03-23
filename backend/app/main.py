@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
+from sqlalchemy import inspect
 
 from backend.app.api.routes import router
 from backend.app.chatkit.server import (
@@ -36,10 +37,63 @@ def _read_version() -> str:
     return version if isinstance(version, str) and version else "unknown"
 
 
+def _should_reset_sqlite_schema(sync_conn) -> bool:
+    inspector = inspect(sync_conn)
+    table_names = set(inspector.get_table_names())
+    if not table_names:
+        return False
+
+    expected_tables = {
+        "workspaces",
+        "workspace_items",
+        "workspace_item_revisions",
+        "workspace_chats",
+        "workspace_chat_entries",
+        "workspace_chat_attachments",
+        "workspace_chat_feedback",
+        "stored_openai_files",
+    }
+    legacy_tables = {
+        "workspace_files",
+        "workspace_artifacts",
+        "workspace_artifact_revisions",
+        "chat_threads",
+        "chat_messages",
+        "chat_attachments",
+        "chat_feedback",
+    }
+    if legacy_tables & table_names:
+        return True
+    if not expected_tables.issubset(table_names):
+        return True
+
+    workspace_columns = {
+        column["name"] for column in inspector.get_columns("workspaces")
+    }
+    return not {
+        "app_id",
+        "active_chat_id",
+        "selected_item_id",
+        "current_report_item_id",
+    }.issubset(workspace_columns)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     import_models()
     async with engine.begin() as conn:
+        should_reset = (
+            settings.database_url.startswith("sqlite:///")
+            and await conn.run_sync(_should_reset_sqlite_schema)
+        )
+        if should_reset:
+            await conn.run_sync(Base.metadata.drop_all)
+            log_event(
+                logger,
+                logging.WARNING,
+                "startup.sqlite_schema_reset",
+                detail="detected legacy local schema and rebuilt the database",
+            )
         await conn.run_sync(Base.metadata.create_all)
 
     log_event(
@@ -107,13 +161,36 @@ app.add_middleware(
 
 app.include_router(router)
 
-static_path = Path() / "dist"
+static_path = ROOT_DIR / settings.static_dir
 assets_path = static_path / "assets"
 
-if static_path.exists() and assets_path.exists():
-    app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
-else:
-    raise RuntimeError(f"Missing static or assets path: {assets_path.exists()=}")
+
+def _configure_frontend_assets(application: FastAPI) -> None:
+    if not static_path.is_dir():
+        log_event(
+            logger,
+            logging.WARNING,
+            "frontend.static_dir_missing",
+            static_path=str(static_path),
+            detail="frontend build output is missing; API routes remain available",
+        )
+        return
+
+    if not assets_path.is_dir():
+        log_event(
+            logger,
+            logging.WARNING,
+            "frontend.assets_dir_missing",
+            static_path=str(static_path),
+            assets_path=str(assets_path),
+            detail="frontend assets directory is missing; API routes remain available",
+        )
+        return
+
+    application.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+
+_configure_frontend_assets(app)
 
 
 @app.get("/health")

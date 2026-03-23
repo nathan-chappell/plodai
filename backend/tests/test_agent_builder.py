@@ -219,19 +219,19 @@ def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
     assert "get_current_thread_cost" not in report_tool_names
 
 
-def test_default_agent_tour_tools_stop_after_each_client_tool() -> None:
+def test_non_feedback_agents_stop_after_each_client_tool() -> None:
     agent_bundle = {
-        "root_agent_id": "default-agent",
+        "root_agent_id": "agriculture-agent",
         "agents": [
             {
-                "agent_id": "default-agent",
-                "agent_name": "Default",
-                "instructions": "Route work and launch tours.",
+                "agent_id": "agriculture-agent",
+                "agent_name": "Agriculture",
+                "instructions": "Inspect uploaded plant photos.",
                 "client_tools": [
                     {
                         "type": "function",
-                        "name": "list_tour_scenarios",
-                        "description": "List tours.",
+                        "name": "list_image_files",
+                        "description": "List uploaded image files.",
                         "parameters": {
                             "type": "object",
                             "properties": {},
@@ -241,32 +241,19 @@ def test_default_agent_tour_tools_stop_after_each_client_tool() -> None:
                     },
                     {
                         "type": "function",
-                        "name": "launch_tour_scenario",
-                        "description": "Prepare the tour workspace.",
+                        "name": "inspect_image_file",
+                        "description": "Inspect one uploaded image.",
                         "parameters": {
                             "type": "object",
                             "properties": {
-                                "scenario_id": {"type": "string"},
+                                "file_id": {"type": "string"},
                             },
-                            "required": ["scenario_id"],
+                            "required": ["file_id"],
                             "additionalProperties": False,
                         },
                         "strict": True,
                     },
                 ],
-                "delegation_targets": [
-                    {
-                        "agent_id": "agriculture-agent",
-                        "tool_name": "delegate_to_agriculture_agent",
-                        "description": "Delegate agriculture work.",
-                    }
-                ],
-            },
-            {
-                "agent_id": "agriculture-agent",
-                "agent_name": "Agriculture",
-                "instructions": "Inspect plant photos.",
-                "client_tools": [],
                 "delegation_targets": [],
             },
         ],
@@ -285,9 +272,11 @@ def test_default_agent_tour_tools_stop_after_each_client_tool() -> None:
         model=None,
     )
 
-    assert set(agents["default-agent"].tool_use_behavior["stop_at_tool_names"]) == {
-        "list_tour_scenarios",
-        "launch_tour_scenario",
+    assert set(
+        agents["agriculture-agent"].tool_use_behavior["stop_at_tool_names"]
+    ) == {
+        "list_image_files",
+        "inspect_image_file",
     }
 
 

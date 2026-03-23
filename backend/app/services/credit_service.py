@@ -13,13 +13,22 @@ class CreditService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_or_create_balance(self, user_id: str) -> UserCreditBalance:
-        balance = await self.db.get(UserCreditBalance, user_id)
+    @staticmethod
+    async def _get_or_create_balance(
+        db: AsyncSession,
+        user_id: str,
+    ) -> UserCreditBalance:
+        balance = await db.get(UserCreditBalance, user_id)
         if balance is None:
             balance = UserCreditBalance(user_id=user_id, current_credit_usd=0.0)
-            self.db.add(balance)
-            await self.db.commit()
-            await self.db.refresh(balance)
+            db.add(balance)
+            await db.flush()
+        return balance
+
+    async def get_or_create_balance(self, user_id: str) -> UserCreditBalance:
+        balance = await self._get_or_create_balance(self.db, user_id)
+        await self.db.commit()
+        await self.db.refresh(balance)
         return balance
 
     async def list_balance_amounts(self, user_ids: list[str]) -> dict[str, float]:
@@ -74,10 +83,7 @@ class CreditService:
             return
 
         async with AsyncSessionLocal() as db:
-            balance = await db.get(UserCreditBalance, user_id)
-            if balance is None:
-                balance = UserCreditBalance(user_id=user_id, current_credit_usd=0.0)
-                db.add(balance)
+            balance = await CreditService._get_or_create_balance(db, user_id)
 
             db.add(
                 CostEvent(

@@ -10,16 +10,21 @@ import {
 import { inspectPdfBytes } from "./pdf";
 import type {
   LocalDataset,
-  LocalImageFile,
-  LocalOtherFile,
-  LocalPdfFile,
-  LocalWorkspaceFile,
+  LocalImageAttachment,
+  LocalOtherAttachment,
+  LocalPdfAttachment,
+  LocalAttachment,
 } from "../types/report";
 
-export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile> {
+export async function buildWorkspaceFile(
+  file: File,
+  options?: {
+    id?: string;
+  },
+): Promise<LocalAttachment> {
   const extension = getFileExtension(file.name);
   const baseFields = {
-    id: crypto.randomUUID(),
+    id: options?.id ?? crypto.randomUUID(),
     name: file.name,
     extension,
     byte_size: file.size,
@@ -64,7 +69,7 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
       kind: "pdf",
       page_count: preview.pageCount,
       bytes_base64: encodeBytesToBase64(bytes),
-    } satisfies LocalPdfFile;
+    } satisfies LocalPdfAttachment;
   }
 
   if (isImageExtension(extension) || isImageMimeType(file.type)) {
@@ -77,31 +82,31 @@ export async function buildWorkspaceFile(file: File): Promise<LocalWorkspaceFile
       width: dimensions.width,
       height: dimensions.height,
       bytes_base64: encodeBytesToBase64(bytes),
-    } satisfies LocalImageFile;
+    } satisfies LocalImageAttachment;
   }
 
   return {
     ...baseFields,
     kind: "other",
-  } satisfies LocalOtherFile;
+  } satisfies LocalOtherAttachment;
 }
 
-export function getDatasets(files: LocalWorkspaceFile[]): LocalDataset[] {
+export function getDatasets(files: LocalAttachment[]): LocalDataset[] {
   return files.filter(
     (file): file is LocalDataset => file.kind === "csv" || file.kind === "json",
   );
 }
 
-export function getCsvDatasets(files: LocalWorkspaceFile[]): LocalDataset[] {
+export function getCsvDatasets(files: LocalAttachment[]): LocalDataset[] {
   return files.filter((file): file is LocalDataset => file.kind === "csv");
 }
 
-export function getPdfFiles(files: LocalWorkspaceFile[]): LocalPdfFile[] {
-  return files.filter((file): file is LocalPdfFile => file.kind === "pdf");
+export function getPdfFiles(files: LocalAttachment[]): LocalPdfAttachment[] {
+  return files.filter((file): file is LocalPdfAttachment => file.kind === "pdf");
 }
 
-export function getImageFiles(files: LocalWorkspaceFile[]): LocalImageFile[] {
-  return files.filter((file): file is LocalImageFile => file.kind === "image");
+export function getImageFiles(files: LocalAttachment[]): LocalImageAttachment[] {
+  return files.filter((file): file is LocalImageAttachment => file.kind === "image");
 }
 
 export function getFileExtension(filename: string): string {
@@ -113,7 +118,7 @@ export function getFileExtension(filename: string): string {
 }
 
 export function summarizeWorkspaceFiles(
-  files: LocalWorkspaceFile[],
+  files: LocalAttachment[],
   options: { includeSamples?: boolean } = {},
 ): Array<Record<string, unknown>> {
   const includeSamples = options.includeSamples ?? true;
@@ -146,7 +151,7 @@ export function summarizeWorkspaceFiles(
   }));
 }
 
-export function findWorkspaceFile(files: LocalWorkspaceFile[], fileId: string): LocalWorkspaceFile {
+export function findWorkspaceFile(files: LocalAttachment[], fileId: string): LocalAttachment {
   const file = files.find((candidate) => candidate.id === fileId);
   if (!file) {
     throw new Error(`Unknown workspace file: ${fileId}`);

@@ -6,8 +6,10 @@ fastapi
 openai
 openai-agents
 openai-chatkit
+pypdf
 pydantic-settings
 python-multipart
+reportlab
 sqlalchemy
 typer
 uvicorn[standard]

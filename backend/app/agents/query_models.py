@@ -1,4 +1,3 @@
-import json
 from typing import Any, Literal, TypeAlias, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -317,7 +316,3 @@ def build_query_plan_model(
     )
 
     return QueryPlan, QueryPlan.model_json_schema()
-
-
-def summarize_query_schema(schema: dict[str, Any]) -> str:
-    return json.dumps(schema, indent=2)

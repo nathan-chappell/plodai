@@ -1,8 +1,8 @@
 import { decodeBase64ToBytes } from "./base64";
 import { rowsToCsv, rowsToJson } from "./workspace-files";
-import type { LocalWorkspaceFile } from "../types/report";
+import type { LocalAttachment } from "../types/report";
 
-export function buildWorkspaceFilePayload(file: LocalWorkspaceFile): { filename: string; blob: Blob } {
+export function buildWorkspaceFilePayload(file: LocalAttachment): { filename: string; blob: Blob } {
   if (file.kind === "csv") {
     return {
       filename: file.name,
@@ -66,7 +66,7 @@ export function buildWorkspaceFilePayload(file: LocalWorkspaceFile): { filename:
   };
 }
 
-export function downloadWorkspaceFile(file: LocalWorkspaceFile) {
+export function downloadWorkspaceFile(file: LocalAttachment) {
   const payload = buildWorkspaceFilePayload(file);
   const url = URL.createObjectURL(payload.blob);
   const anchor = document.createElement("a");
@@ -76,7 +76,7 @@ export function downloadWorkspaceFile(file: LocalWorkspaceFile) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function openWorkspaceFileInNewTab(file: LocalWorkspaceFile) {
+export function openWorkspaceFileInNewTab(file: LocalAttachment) {
   const payload = buildWorkspaceFilePayload(file);
   const url = URL.createObjectURL(payload.blob);
   window.open(url, "_blank", "noopener,noreferrer");

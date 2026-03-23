@@ -5,7 +5,6 @@ import styled from "styled-components";
 
 import { MetaText } from "../app/styles";
 import { publishToast } from "../app/toasts";
-import { parseSavedChartArtifact } from "../lib/chart-artifacts";
 import {
   resolveReportChartImageDataUrl,
   resolveReportChartSourceLabel,
@@ -13,68 +12,93 @@ import {
   resolveReportImageSourceLabel,
 } from "../lib/report-chart-preview";
 import { downloadReportPdf, type ReportPdfProgress } from "../lib/report-pdf";
-import { listFileResources, resourceFile } from "../lib/shell-resources";
 import {
   buildWorkspaceFilePayload,
   downloadWorkspaceFile,
   formatByteSize,
   openWorkspaceFileInNewTab,
 } from "../lib/workspace-artifacts";
-import type { AgentPreviewModel, AgentResourceRecord } from "../types/shell";
+import { getReportSlideGridTemplate } from "../lib/report-slide-layout";
+import type { LocalPdfAttachment, LocalAttachment } from "../types/report";
 import type {
-  LocalWorkspaceFile,
-} from "../types/report";
+  ChartItemPayloadV1,
+  FarmItemPayloadV1,
+  PdfSplitItemPayloadV1,
+  WorkspaceAppId,
+  WorkspaceCreatedItemDetail,
+  WorkspaceCreatedItemSummary,
+  WorkspaceUploadItemSummary,
+} from "../types/workspace";
 import type {
   ReportChartPanelV1,
   ReportImagePanelV1,
   ReportSlideLayout,
   ReportSlidePanelV1,
+  WorkspaceReportV1,
 } from "../types/workspace-contract";
 import { WorkspaceArtifactInspector } from "./WorkspaceArtifactInspector";
 
-function usePreviewUrl(resource: AgentResourceRecord | null): string | null {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+export type PreviewSelection =
+  | { kind: "file"; id: string }
+  | { kind: "artifact"; id: string }
+  | null;
 
-  useEffect(() => {
-    const file = resource ? resourceFile(resource) : null;
-    if (!file || file.kind !== "pdf") {
-      setPreviewUrl(null);
-      return;
-    }
-    const payload = buildWorkspaceFilePayload(file);
-    const nextUrl = URL.createObjectURL(payload.blob);
-    setPreviewUrl(nextUrl);
-    return () => {
-      URL.revokeObjectURL(nextUrl);
-    };
-  }, [resource]);
+const AGRICULTURE_WATERMARK_DATA_URL = `data:image/svg+xml,${encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360">
+    <defs>
+      <radialGradient id="wash" cx="50%" cy="44%" r="56%">
+        <stop offset="0%" stop-color="#9abca1" stop-opacity="0.16" />
+        <stop offset="100%" stop-color="#9abca1" stop-opacity="0" />
+      </radialGradient>
+    </defs>
+    <circle cx="180" cy="154" r="118" fill="url(#wash)" />
+    <ellipse cx="166" cy="134" rx="74" ry="58" fill="#789d80" fill-opacity="0.13" />
+    <ellipse cx="124" cy="154" rx="42" ry="36" fill="#8db094" fill-opacity="0.11" />
+    <ellipse cx="224" cy="148" rx="50" ry="42" fill="#89ab90" fill-opacity="0.10" />
+    <ellipse cx="208" cy="104" rx="32" ry="28" fill="#a0bfa6" fill-opacity="0.09" />
+    <path d="M174 176c2 18 1 42 1 66 0 12 8 20 20 20 12 0 20-8 20-20v-54c0-10-5-17-14-22-8-4-18-4-27 10z" fill="#7a6046" fill-opacity="0.18" />
+    <path d="M96 264c28-10 52-14 77-12 23 2 48 9 90 7" fill="none" stroke="#72997a" stroke-opacity="0.16" stroke-linecap="round" stroke-width="10" />
+  </svg>
+`)}`;
 
-  return previewUrl;
+function summarizeFileMeta(entry: WorkspaceUploadItemSummary): string {
+  if (entry.kind === "csv" || entry.kind === "json") {
+    return "row_count" in entry.preview
+      ? `${entry.preview.row_count} rows · ${entry.preview.columns.length} columns`
+      : "Dataset";
+  }
+  if (entry.kind === "pdf") {
+    return "page_count" in entry.preview ? `${entry.preview.page_count} pages` : "PDF";
+  }
+  if (entry.kind === "image") {
+    return "width" in entry.preview && "height" in entry.preview
+      ? `${entry.preview.width} x ${entry.preview.height}`
+      : "Image";
+  }
+  return formatByteSize(entry.byte_size ?? undefined);
 }
 
-function summarizeResourceMeta(resource: AgentResourceRecord): string {
-  if (resource.payload.type === "dataset") {
-    return `${resource.payload.file.row_count} rows · ${resource.payload.file.columns.length} columns`;
-  }
-  if (resource.payload.type === "image") {
-    return `${resource.payload.file.width} x ${resource.payload.file.height}`;
-  }
-  if (resource.payload.type === "document" && resource.payload.file.kind === "pdf") {
-    return `${resource.payload.file.page_count} pages`;
-  }
-  if (resource.payload.type === "report") {
-    return resource.payload.report.slides.length === 1
+function summarizeArtifactMeta(artifact: WorkspaceCreatedItemSummary): string {
+  if (artifact.kind === "report.v1" && "slide_count" in artifact.summary) {
+    return artifact.summary.slide_count === 1
       ? "1 slide"
-      : `${resource.payload.report.slides.length} slides`;
+      : `${artifact.summary.slide_count} slides`;
   }
-  const file = resourceFile(resource);
-  return formatByteSize(file?.byte_size);
+  if (artifact.kind === "chart.v1" && "chart_plan_id" in artifact.summary) {
+    return `Chart plan ${artifact.summary.chart_plan_id}`;
+  }
+  if (artifact.kind === "pdf_split.v1" && "entry_count" in artifact.summary) {
+    return artifact.summary.entry_count === 1
+      ? "1 split entry"
+      : `${artifact.summary.entry_count} split entries`;
+  }
+  if (artifact.kind === "farm.v1" && "crop_count" in artifact.summary) {
+    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues · ${artifact.summary.project_count} projects`;
+  }
+  return artifact.kind;
 }
 
-function renderReportPanel(
-  files: LocalWorkspaceFile[],
-  panel: ReportSlidePanelV1,
-) {
+function renderReportPanel(files: LocalAttachment[], panel: ReportSlidePanelV1) {
   if (panel.type === "narrative") {
     return (
       <ReportPanelCard data-panel-type={panel.type} key={panel.id}>
@@ -90,18 +114,13 @@ function renderReportPanel(
       </ReportPanelCard>
     );
   }
-
   if (panel.type === "chart") {
     return renderReportChartPanel(files, panel);
   }
-
   return renderReportImagePanel(files, panel);
 }
 
-function renderReportChartPanel(
-  files: LocalWorkspaceFile[],
-  panel: ReportChartPanelV1,
-) {
+function renderReportChartPanel(files: LocalAttachment[], panel: ReportChartPanelV1) {
   const imageUrl = resolveReportChartImageDataUrl(files, panel);
   const sourceLabel = resolveReportChartSourceLabel(files, panel);
 
@@ -123,10 +142,7 @@ function renderReportChartPanel(
   );
 }
 
-function renderReportImagePanel(
-  files: LocalWorkspaceFile[],
-  panel: ReportImagePanelV1,
-) {
+function renderReportImagePanel(files: LocalAttachment[], panel: ReportImagePanelV1) {
   const imageUrl = resolveReportImageDataUrl(files, panel);
   const sourceLabel = resolveReportImageSourceLabel(files, panel);
 
@@ -149,15 +165,11 @@ function renderReportImagePanel(
 }
 
 function renderReportPreview(
-  resource: AgentResourceRecord,
-  files: LocalWorkspaceFile[],
+  report: WorkspaceReportV1,
+  files: LocalAttachment[],
   activeSlideIndex: number,
   onSelectSlide: (index: number) => void,
 ) {
-  if (resource.payload.type !== "report") {
-    return null;
-  }
-  const report = resource.payload.report;
   const activeSlide = report.slides[activeSlideIndex] ?? report.slides[0] ?? null;
   const canGoPrev = activeSlideIndex > 0;
   const canGoNext = activeSlideIndex < report.slides.length - 1;
@@ -240,29 +252,45 @@ function renderReportPreview(
   );
 }
 
-function renderResourcePreview(resource: AgentResourceRecord, previewUrl: string | null) {
-  if (resource.payload.type === "report") {
-    return null;
+function PdfPreviewFrame({ file }: { file: LocalPdfAttachment }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const payload = buildWorkspaceFilePayload(file);
+    const nextUrl = URL.createObjectURL(payload.blob);
+    setUrl(nextUrl);
+    return () => {
+      URL.revokeObjectURL(nextUrl);
+    };
+  }, [file]);
+
+  if (!url) {
+    return <MetaText>Loading PDF preview…</MetaText>;
   }
 
-  const file = resourceFile(resource);
+  return <PreviewFrame src={url} title={file.name} />;
+}
+
+function renderLocalFilePreview(
+  entry: WorkspaceUploadItemSummary,
+  file: LocalAttachment | null,
+) {
   if (!file) {
-    return <MetaText>No preview is available for this export.</MetaText>;
-  }
-
-  if (resource.payload.type === "chart") {
-    const chartArtifact = parseSavedChartArtifact(file);
-    if (chartArtifact?.imageDataUrl) {
-      return <PreviewImage alt={resource.title} src={chartArtifact.imageDataUrl} />;
-    }
+    return (
+      <MissingPayloadCard>
+        <strong>{entry.name}</strong>
+        <MetaText>Local payload unavailable in this browser.</MetaText>
+        <MetaText>{summarizeFileMeta(entry)}</MetaText>
+      </MissingPayloadCard>
+    );
   }
 
   if (file.kind === "image") {
     return <PreviewImage alt={file.name} src={`data:${file.mime_type};base64,${file.bytes_base64}`} />;
   }
 
-  if (file.kind === "pdf" && previewUrl) {
-    return <PreviewFrame src={previewUrl} title={file.name} />;
+  if (file.kind === "pdf") {
+    return <PdfPreviewFrame file={file} />;
   }
 
   if (file.kind === "csv" || file.kind === "json") {
@@ -280,110 +308,288 @@ function renderResourcePreview(resource: AgentResourceRecord, previewUrl: string
     return <TextPreview>{file.text_content}</TextPreview>;
   }
 
-  return <MetaText>Preview unavailable in shell. Open or download this export to inspect it directly.</MetaText>;
+  return <MetaText>Preview unavailable in shell. Open or download this file to inspect it directly.</MetaText>;
+}
+
+function renderAgricultureImageReference(
+  entry: WorkspaceUploadItemSummary,
+  file: LocalAttachment | null,
+) {
+  if (!file) {
+    return (
+      <MissingPayloadCard>
+        <strong>{entry.name}</strong>
+        <MetaText>Local payload unavailable in this browser.</MetaText>
+        <MetaText>{summarizeFileMeta(entry)}</MetaText>
+      </MissingPayloadCard>
+    );
+  }
+
+  return (
+    <AgricultureImageReference data-testid="agriculture-image-reference">
+      <AgricultureImageReferenceCard>
+        <AgricultureImageReferenceEyebrow>Photo reference</AgricultureImageReferenceEyebrow>
+        <AgricultureImageReferenceTitle>Visible in chat</AgricultureImageReferenceTitle>
+        <MetaText>
+          This image stays attached to the conversation so the agent can inspect it there and you
+          can tag it from the composer with <strong>@</strong>.
+        </MetaText>
+        <AgricultureImageReferenceMeta>
+          <span>{summarizeFileMeta(entry)}</span>
+          {entry.byte_size ? <span>{formatByteSize(entry.byte_size)}</span> : null}
+          {entry.mime_type ? <span>{entry.mime_type}</span> : null}
+        </AgricultureImageReferenceMeta>
+      </AgricultureImageReferenceCard>
+    </AgricultureImageReference>
+  );
+}
+
+function renderArtifactPreview(
+  artifact: WorkspaceCreatedItemDetail,
+  files: LocalAttachment[],
+  activeSlideIndex: number,
+  onSelectSlide: (index: number) => void,
+) {
+  if (artifact.kind === "report.v1") {
+    return renderReportPreview(artifact.payload as WorkspaceReportV1, files, activeSlideIndex, onSelectSlide);
+  }
+  if (artifact.kind === "chart.v1") {
+    const chart = artifact.payload as ChartItemPayloadV1;
+    return chart.image_data_url ? (
+      <PreviewImage alt={artifact.title} src={chart.image_data_url} />
+    ) : (
+      <MetaText>This chart item does not include a preview image yet.</MetaText>
+    );
+  }
+  if (artifact.kind === "farm.v1") {
+    const farm = artifact.payload as FarmItemPayloadV1;
+    return (
+      <FarmPreview data-testid="farm-preview">
+        <FarmHero>
+          <div>
+            <FarmEyebrow>Farm record</FarmEyebrow>
+            <FarmTitle>{farm.farm_name}</FarmTitle>
+            {farm.location ? <MetaText>{farm.location}</MetaText> : null}
+          </div>
+          <FarmMetrics>
+            <FarmMetric>
+              <strong>{farm.crops.length}</strong>
+              <span>Crops</span>
+            </FarmMetric>
+            <FarmMetric>
+              <strong>{farm.issues.length}</strong>
+              <span>Issues</span>
+            </FarmMetric>
+            <FarmMetric>
+              <strong>{farm.projects.length}</strong>
+              <span>Projects</span>
+            </FarmMetric>
+          </FarmMetrics>
+        </FarmHero>
+
+        <FarmSection>
+          <FarmSectionTitle>Crops</FarmSectionTitle>
+          {farm.crops.length ? (
+            <FarmList>
+              {farm.crops.map((crop) => (
+                <FarmListItem key={crop.id}>
+                  <strong>{crop.name}</strong>
+                  <span>{crop.area}</span>
+                  {crop.expected_yield ? <span>Expected yield: {crop.expected_yield}</span> : null}
+                  {crop.notes ? <MetaText>{crop.notes}</MetaText> : null}
+                </FarmListItem>
+              ))}
+            </FarmList>
+          ) : (
+            <MetaText>No crops tracked yet.</MetaText>
+          )}
+        </FarmSection>
+
+        <FarmSectionGrid>
+          <FarmSection>
+            <FarmSectionTitle>Issues</FarmSectionTitle>
+            {farm.issues.length ? (
+              <FarmList>
+                {farm.issues.map((issue) => (
+                  <FarmListItem key={issue.id}>
+                    <strong>{issue.title}</strong>
+                    <FarmStatusPill $tone={issue.status}>{issue.status}</FarmStatusPill>
+                    {issue.notes ? <MetaText>{issue.notes}</MetaText> : null}
+                  </FarmListItem>
+                ))}
+              </FarmList>
+            ) : (
+              <MetaText>No active issues saved.</MetaText>
+            )}
+          </FarmSection>
+
+          <FarmSection>
+            <FarmSectionTitle>Projects</FarmSectionTitle>
+            {farm.projects.length ? (
+              <FarmList>
+                {farm.projects.map((project) => (
+                  <FarmListItem key={project.id}>
+                    <strong>{project.title}</strong>
+                    <FarmStatusPill $tone={project.status}>{project.status}</FarmStatusPill>
+                    {project.notes ? <MetaText>{project.notes}</MetaText> : null}
+                  </FarmListItem>
+                ))}
+              </FarmList>
+            ) : (
+              <MetaText>No projects tracked yet.</MetaText>
+            )}
+          </FarmSection>
+        </FarmSectionGrid>
+
+        <FarmSection>
+          <FarmSectionTitle>Current work</FarmSectionTitle>
+          {farm.current_work.length ? (
+            <FarmChecklist>
+              {farm.current_work.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </FarmChecklist>
+          ) : (
+            <MetaText>No current work logged yet.</MetaText>
+          )}
+        </FarmSection>
+
+        {farm.notes ? (
+          <FarmSection>
+            <FarmSectionTitle>Notes</FarmSectionTitle>
+            <MetaText>{farm.notes}</MetaText>
+          </FarmSection>
+        ) : null}
+      </FarmPreview>
+    );
+  }
+  const pdfSplit = artifact.payload as PdfSplitItemPayloadV1;
+  return (
+    <ArtifactMarkdownPreview>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{pdfSplit.markdown}</ReactMarkdown>
+    </ArtifactMarkdownPreview>
+  );
 }
 
 export function AgentPreviewPane({
-  assetResources,
-  previewModel,
-  resources,
-  selectedResourceId,
+  appId,
+  files,
+  artifacts,
+  resolveLocalFile,
+  getArtifact,
+  selectedItem,
 }: {
-  assetResources?: AgentResourceRecord[];
-  previewModel: AgentPreviewModel;
-  resources: AgentResourceRecord[];
-  selectedResourceId?: string | null;
+  appId?: WorkspaceAppId;
+  files: WorkspaceUploadItemSummary[];
+  artifacts: WorkspaceCreatedItemSummary[];
+  resolveLocalFile: (fileId: string) => Promise<LocalAttachment | null>;
+  getArtifact: (artifactId: string) => Promise<WorkspaceCreatedItemDetail | null>;
+  selectedItem: PreviewSelection;
 }) {
-  const [uncontrolledSelectedResourceId, setUncontrolledSelectedResourceId] = useState<string | null>(
-    previewModel.items[0]?.resource_id ?? null,
-  );
+  const [selectedFile, setSelectedFile] = useState<LocalAttachment | null>(null);
+  const [selectedArtifact, setSelectedArtifact] = useState<WorkspaceCreatedItemDetail | null>(null);
   const [activeReportSlideIndex, setActiveReportSlideIndex] = useState(0);
   const [reportExportProgress, setReportExportProgress] = useState<ReportPdfProgress | null>(null);
-  const resolvedSelectedResourceId =
-    selectedResourceId !== undefined
-      ? selectedResourceId === null
-        ? null
-        : resources.some((resource) => resource.id === selectedResourceId)
-          ? selectedResourceId
-          : previewModel.items[0]?.resource_id ?? resources[0]?.id ?? null
-      : uncontrolledSelectedResourceId;
+
+  const selectedFileEntry = useMemo(
+    () =>
+      selectedItem?.kind === "file"
+        ? files.find((file) => file.id === selectedItem.id) ?? null
+        : null,
+    [files, selectedItem],
+  );
+  const selectedArtifactSummary = useMemo(
+    () =>
+      selectedItem?.kind === "artifact"
+        ? artifacts.find((artifact) => artifact.id === selectedItem.id) ?? null
+        : null,
+    [artifacts, selectedItem],
+  );
 
   useEffect(() => {
-    if (selectedResourceId !== undefined) {
+    let cancelled = false;
+    if (!selectedFileEntry) {
+      setSelectedFile(null);
       return;
     }
-    if (!previewModel.items.length && !resources.length) {
-      setUncontrolledSelectedResourceId(null);
-      return;
-    }
-    setUncontrolledSelectedResourceId((current) =>
-      current && resources.some((resource) => resource.id === current)
-        ? current
-        : previewModel.items[0]?.resource_id ?? resources[0]?.id ?? null,
-    );
-  }, [previewModel, resources, selectedResourceId]);
+    void (async () => {
+      const file = await resolveLocalFile(selectedFileEntry.id);
+      if (!cancelled) {
+        setSelectedFile(file);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolveLocalFile, selectedFileEntry]);
 
-  const selectedResource = useMemo(
-    () =>
-      resources.find((resource) => resource.id === resolvedSelectedResourceId) ??
-      resources[0] ??
-      null,
-    [resolvedSelectedResourceId, resources],
-  );
-  const previewUrl = usePreviewUrl(selectedResource);
-  const selectedFile = selectedResource ? resourceFile(selectedResource) : null;
-  const selectedReport =
-    selectedResource?.payload.type === "report" ? selectedResource.payload.report : null;
-  const reportAssetFiles = useMemo(
-    () => listFileResources(assetResources ?? resources),
-    [assetResources, resources],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedArtifactSummary) {
+      setSelectedArtifact(null);
+      return;
+    }
+    void (async () => {
+      const detail = await getArtifact(selectedArtifactSummary.id);
+      if (!cancelled) {
+        setSelectedArtifact(detail);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [getArtifact, selectedArtifactSummary]);
 
   useEffect(() => {
     setActiveReportSlideIndex(0);
-  }, [selectedReport?.report_id]);
+  }, [selectedArtifact?.id]);
+
+  const loadedArtifactFiles = useMemo(
+    () => files.filter((file) => file.local_status === "available"),
+    [files],
+  );
+  const [artifactLocalFiles, setArtifactLocalFiles] = useState<LocalAttachment[]>([]);
 
   useEffect(() => {
-    if (!selectedReport) {
-      setActiveReportSlideIndex(0);
-      return;
-    }
-    setActiveReportSlideIndex((current) =>
-      Math.min(current, Math.max(selectedReport.slides.length - 1, 0)),
-    );
-  }, [selectedReport]);
+    let cancelled = false;
+    void (async () => {
+      const resolved = await Promise.all(
+        loadedArtifactFiles.map((file) => resolveLocalFile(file.id)),
+      );
+      if (!cancelled) {
+        setArtifactLocalFiles(
+          resolved.filter((file): file is LocalAttachment => file !== null),
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedArtifactFiles, resolveLocalFile]);
 
   async function exportReportPdf() {
-    if (!selectedResource || !selectedReport) {
+    if (!selectedArtifact || selectedArtifact.kind !== "report.v1") {
       return;
     }
-
-    if (!selectedReport.slides.length) {
-      publishToast({
-        title: "Nothing to print",
-        message: "Add at least one slide to the report before printing it as a PDF.",
-        tone: "warning",
-      });
-      return;
-    }
-
-    setReportExportProgress({
-      phase: "preparing",
-      totalPages: selectedReport.slides.length,
-    });
     try {
+      setReportExportProgress({
+        phase: "preparing",
+        totalPages: Math.max((selectedArtifact.payload as WorkspaceReportV1).slides.length, 1),
+      });
       await downloadReportPdf({
-        files: reportAssetFiles,
-        onProgress: setReportExportProgress,
-        report: selectedReport,
+        report: selectedArtifact.payload as WorkspaceReportV1,
+        files: artifactLocalFiles,
+        onProgress: (progress) => setReportExportProgress(progress),
+      });
+      publishToast({
+        title: "PDF export complete",
+        message: `Saved ${selectedArtifact.title} as a PDF.`,
+        tone: "info",
       });
     } catch (error) {
       publishToast({
-        title: "Unable to export PDF",
-        message:
-          error instanceof Error
-            ? error.message
-            : "The report could not be rendered into a PDF in this browser session.",
+        title: "PDF export failed",
+        message: error instanceof Error ? error.message : "Unable to export the current report.",
         tone: "error",
       });
     } finally {
@@ -391,515 +597,640 @@ export function AgentPreviewPane({
     }
   }
 
-  const reportExportLabel =
-    reportExportProgress == null
-      ? "Export PDF"
-      : reportExportProgress.phase === "preparing"
-        ? "Preparing PDF..."
-        : reportExportProgress.phase === "assembling"
-          ? "Finalizing PDF..."
-          : `Rendering ${reportExportProgress.currentPage} / ${reportExportProgress.totalPages}...`;
+  if (!selectedItem) {
+    return (
+      <PaneCard $appId={appId}>
+        {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+        {appId === "agriculture" ? (
+          <AgricultureEmptyState data-testid="agriculture-preview-empty">
+            <AgricultureEmptyCopy>
+              <AgricultureEmptyTitle>Awaiting plant photos</AgricultureEmptyTitle>
+              <MetaText>
+                Add plant photos from the chat composer, then select an upload or created item from
+                the workspace to preview it here.
+              </MetaText>
+            </AgricultureEmptyCopy>
+          </AgricultureEmptyState>
+        ) : (
+          <MetaText>Select an upload or created item from the workspace to preview it here.</MetaText>
+        )}
+      </PaneCard>
+    );
+  }
 
-  return (
-    <PreviewShell data-testid="agent-preview-pane">
-      <PreviewBody data-testid="agent-preview-canvas">
-        {selectedResource ? (
-          <>
-            <PreviewToolbar>
-              <PreviewSelectionMeta>
-                <strong>{selectedResource.title}</strong>
-                <span>{summarizeResourceMeta(selectedResource)}</span>
-              </PreviewSelectionMeta>
-              {selectedReport ? (
-                <PreviewActions>
-                  <PreviewActionButton
-                    disabled={!selectedReport.slides.length || reportExportProgress != null}
-                    onClick={() => {
-                      void exportReportPdf();
-                    }}
-                    type="button"
-                  >
-                    {reportExportLabel}
-                  </PreviewActionButton>
-                </PreviewActions>
-              ) : selectedFile ? (
-                <PreviewActions>
-                  <PreviewActionButton onClick={() => openWorkspaceFileInNewTab(selectedFile)} type="button">
-                    Open
-                  </PreviewActionButton>
-                  <PreviewActionButton onClick={() => downloadWorkspaceFile(selectedFile)} type="button">
-                    Download
-                  </PreviewActionButton>
-                </PreviewActions>
+  if (selectedFileEntry) {
+    const showAgricultureImageReference =
+      appId === "agriculture" && selectedFileEntry.kind === "image";
+
+    return (
+      <PaneCard $appId={appId}>
+        {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+        <PaneHeader>
+          <div>
+            <PaneTitle>{selectedFileEntry.name}</PaneTitle>
+            <MetaText>{summarizeFileMeta(selectedFileEntry)}</MetaText>
+          </div>
+          {selectedFile ? (
+            <PaneActionRow>
+              {(selectedFile.kind === "pdf" ||
+                selectedFile.kind === "json" ||
+                selectedFile.kind === "image" ||
+                (selectedFile.kind === "other" && selectedFile.text_content != null)) ? (
+                <PaneButton onClick={() => openWorkspaceFileInNewTab(selectedFile)} type="button">
+                  Open file
+                </PaneButton>
               ) : null}
-            </PreviewToolbar>
-            <PreviewCanvas>
-              {selectedReport
-                ? renderReportPreview(
-                    selectedResource,
-                    reportAssetFiles,
-                    activeReportSlideIndex,
-                    setActiveReportSlideIndex,
-                  )
-                : renderResourcePreview(selectedResource, previewUrl)}
-            </PreviewCanvas>
+              <PaneButton onClick={() => downloadWorkspaceFile(selectedFile)} type="button">
+                Download
+              </PaneButton>
+            </PaneActionRow>
+          ) : null}
+        </PaneHeader>
+        {showAgricultureImageReference
+          ? renderAgricultureImageReference(selectedFileEntry, selectedFile)
+          : renderLocalFilePreview(selectedFileEntry, selectedFile)}
+      </PaneCard>
+    );
+  }
+
+  if (selectedArtifactSummary) {
+    return (
+      <PaneCard $appId={appId}>
+        {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+        <PaneHeader>
+          <div>
+            <PaneTitle>{selectedArtifactSummary.title}</PaneTitle>
+            <MetaText>{summarizeArtifactMeta(selectedArtifactSummary)}</MetaText>
+            {selectedArtifactSummary.last_edited_by_agent_id ? (
+              <MetaText>Last edited by {selectedArtifactSummary.last_edited_by_agent_id}</MetaText>
+            ) : null}
+          </div>
+          {selectedArtifactSummary.kind === "report.v1" ? (
+            <PaneActionRow>
+              <PaneButton
+                disabled={
+                  reportExportProgress !== null ||
+                  ((selectedArtifact?.payload as WorkspaceReportV1 | undefined)?.slides.length ?? 0) === 0
+                }
+                onClick={() => void exportReportPdf()}
+                type="button"
+              >
+                {reportExportProgress ? "Exporting…" : "Export PDF"}
+              </PaneButton>
+            </PaneActionRow>
+          ) : null}
+        </PaneHeader>
+        {selectedArtifact ? (
+          <>
+            {renderArtifactPreview(selectedArtifact, artifactLocalFiles, activeReportSlideIndex, setActiveReportSlideIndex)}
           </>
         ) : (
-          <PreviewEmptyState>
-            {resources.length
-              ? "Select a workspace file or output to inspect it here."
-              : "No files yet for this workspace."}
-          </PreviewEmptyState>
+          <MetaText>Loading created item preview…</MetaText>
         )}
-      </PreviewBody>
-    </PreviewShell>
+      </PaneCard>
+    );
+  }
+
+  return (
+    <PaneCard $appId={appId}>
+      {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+      <MetaText>Select an upload or created item from the workspace to preview it here.</MetaText>
+    </PaneCard>
   );
 }
 
-const PreviewShell = styled.section`
-  min-height: 0;
-  height: 100%;
-`;
-
-const PreviewBody = styled.section`
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
+const PaneCard = styled.section<{ $appId?: WorkspaceAppId }>`
+  position: relative;
   display: grid;
   gap: 0.8rem;
-  grid-template-rows: auto minmax(0, 1fr);
-  padding: 1rem;
+  min-height: 0;
+  height: 100%;
+  align-content: start;
+  padding: 0.92rem;
   border-radius: var(--radius-xl);
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 242, 236, 0.78)),
-    rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(31, 41, 55, 0.12);
   overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(249, 244, 238, 0.9)),
+    var(--panel);
+
+  > :not([data-watermark="true"]) {
+    position: relative;
+    z-index: 1;
+  }
 `;
 
-const PreviewToolbar = styled.div`
+const AgriculturePaneWatermark = styled.div`
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 1;
+  background-image: url("${AGRICULTURE_WATERMARK_DATA_URL}");
+  background-repeat: no-repeat;
+  background-position: right 2.6rem bottom 2rem;
+  background-size: min(46%, 360px);
+  filter: saturate(0.94);
+`;
+
+const PaneHeader = styled.div`
   display: flex;
-  align-items: start;
   justify-content: space-between;
-  gap: 0.7rem;
-  flex-wrap: wrap;
+  gap: 0.8rem;
 `;
 
-const PreviewSelectionMeta = styled.div`
+const PaneTitle = styled.h3`
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.12;
+`;
+
+const FarmPreview = styled.div`
+  display: grid;
+  gap: 0.9rem;
+`;
+
+const FarmHero = styled.section`
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(117, 158, 126, 0.13), rgba(255, 255, 255, 0.88));
+  border: 1px solid rgba(101, 144, 115, 0.12);
+`;
+
+const FarmEyebrow = styled.div`
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-deep) 74%, var(--ink) 26%);
+`;
+
+const FarmTitle = styled.h4`
+  margin: 0.18rem 0 0;
+  font-size: 1.22rem;
+  line-height: 1.08;
+`;
+
+const FarmMetrics = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 0.6rem;
+`;
+
+const FarmMetric = styled.div`
   display: grid;
   gap: 0.16rem;
+  padding: 0.68rem 0.72rem;
+  border-radius: 0.92rem;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(31, 41, 55, 0.08);
 
   strong {
-    font-size: 0.86rem;
-    line-height: 1.12;
-    color: var(--ink);
+    font-size: 1.05rem;
+    line-height: 1;
   }
 
   span {
     font-size: 0.74rem;
-    line-height: 1.35;
     color: var(--muted);
   }
 `;
 
-const PreviewCanvas = styled.div`
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
+const FarmSectionGrid = styled.div`
   display: grid;
-  align-items: stretch;
-  gap: 0.8rem;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+`;
+
+const FarmSection = styled.section`
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.78);
+`;
+
+const FarmSectionTitle = styled.h5`
+  margin: 0;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+`;
+
+const FarmList = styled.div`
+  display: grid;
+  gap: 0.55rem;
+`;
+
+const FarmListItem = styled.div`
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.75rem 0.82rem;
+  border-radius: 0.88rem;
+  background: color-mix(in srgb, rgba(117, 158, 126, 0.08) 45%, white 55%);
+  border: 1px solid rgba(101, 144, 115, 0.08);
+
+  strong {
+    font-size: 0.92rem;
+    line-height: 1.15;
+  }
+
+  span {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+`;
+
+const FarmStatusPill = styled.span<{ $tone: string }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: ${({ $tone }) =>
+    $tone === "resolved" || $tone === "done"
+      ? "rgba(121, 160, 106, 0.16)"
+      : $tone === "active"
+        ? "rgba(178, 128, 55, 0.14)"
+        : "rgba(92, 122, 153, 0.14)"};
+  color: ${({ $tone }) =>
+    $tone === "resolved" || $tone === "done"
+      ? "#35533d"
+      : $tone === "active"
+        ? "#6f4b1d"
+        : "#34546d"};
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: capitalize;
+`;
+
+const FarmChecklist = styled.ul`
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.35rem;
+
+  li {
+    color: var(--ink);
+  }
+`;
+
+const AgricultureEmptyState = styled.div`
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 0.75rem;
+  min-height: 100%;
+  padding: 1.5rem 1rem;
+  text-align: center;
+`;
+
+const AgricultureEmptyCopy = styled.div`
+  display: grid;
+  gap: 0.45rem;
+  max-width: 28rem;
+  padding: 1rem 1.2rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(2px);
+`;
+
+const AgricultureEmptyTitle = styled.h3`
+  margin: 0;
+  font-size: 1.02rem;
+  color: color-mix(in srgb, var(--accent-deep) 78%, var(--ink) 22%);
+`;
+
+const AgricultureImageReference = styled.div`
+  display: grid;
+  place-items: center;
+  min-height: min(58vh, 34rem);
+  padding: 1.25rem 0.5rem 0.75rem;
+`;
+
+const AgricultureImageReferenceCard = styled.div`
+  display: grid;
+  gap: 0.52rem;
+  width: min(100%, 28rem);
+  padding: 1.15rem 1.2rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(101, 144, 115, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(245, 250, 245, 0.62));
+  box-shadow: 0 18px 44px rgba(54, 82, 58, 0.06);
+  backdrop-filter: blur(3px);
+`;
+
+const AgricultureImageReferenceEyebrow = styled.div`
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-deep) 74%, var(--ink) 26%);
+`;
+
+const AgricultureImageReferenceTitle = styled.h4`
+  margin: 0;
+  font-size: 1.28rem;
+  line-height: 1.08;
+  color: var(--ink);
+`;
+
+const AgricultureImageReferenceMeta = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+  margin-top: 0.2rem;
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.9rem;
+    padding: 0.28rem 0.62rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(31, 41, 55, 0.08);
+    color: color-mix(in srgb, var(--accent-deep) 56%, var(--ink) 44%);
+    font-size: 0.74rem;
+    font-weight: 700;
+  }
+`;
+
+const PaneActionRow = styled.div`
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+`;
+
+const PaneButton = styled.button`
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.42rem 0.72rem;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.52;
+  }
+`;
+
+const MissingPayloadCard = styled.div`
+  display: grid;
+  gap: 0.28rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px dashed rgba(31, 41, 55, 0.18);
+  background: rgba(255, 255, 255, 0.6);
 `;
 
 const PreviewImage = styled.img`
   width: 100%;
-  min-height: clamp(260px, 38vh, 420px);
-  max-height: clamp(360px, 58vh, 680px);
+  max-height: 420px;
   object-fit: contain;
   border-radius: 18px;
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  background: rgba(248, 246, 242, 0.82);
+  border: 1px solid rgba(31, 41, 55, 0.12);
+  background: rgba(255, 255, 255, 0.82);
 `;
 
 const PreviewFrame = styled.iframe`
   width: 100%;
-  min-height: clamp(360px, 56vh, 720px);
-  border: 1px solid rgba(31, 41, 55, 0.08);
+  min-height: 560px;
+  border: 1px solid rgba(31, 41, 55, 0.12);
   border-radius: 18px;
   background: white;
 `;
 
 const MarkdownPreview = styled.div`
-  min-width: 0;
-  padding: 0.9rem 1rem;
-  border-radius: 18px;
-  background: rgba(248, 246, 242, 0.82);
-  border: 1px solid rgba(31, 41, 55, 0.08);
+  max-height: 420px;
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.8rem;
   color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.55;
 
   p,
   ul,
   ol {
-    margin: 0 0 0.75rem;
+    margin: 0 0 0.5rem;
   }
+`;
 
-  > :last-child {
-    margin-bottom: 0;
-  }
+const ArtifactMarkdownPreview = styled(MarkdownPreview)`
+  max-height: none;
 `;
 
 const TextPreview = styled.pre`
   margin: 0;
-  padding: 0.9rem 1rem;
-  border-radius: 18px;
-  background: rgba(248, 246, 242, 0.82);
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  color: var(--ink);
+  max-height: 420px;
   overflow: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  padding: 0.85rem 0.95rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 `;
 
 const ReportPreview = styled.div`
-  min-height: 0;
-  height: 100%;
   display: grid;
-  align-items: stretch;
+  gap: 1rem;
 `;
 
 const ReportSlideDeck = styled.div`
-  min-height: 0;
-  height: 100%;
   display: grid;
-  gap: 0.55rem;
-  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.75rem;
 `;
 
 const ReportSlideViewport = styled.div`
   position: relative;
-  min-height: 0;
-  height: 100%;
-  display: grid;
-  place-items: center;
   outline: none;
 `;
 
 const ReportSlidePage = styled.article`
-  width: 100%;
-  max-width: calc(min(72vh, 760px) * 16 / 9);
-  height: auto;
-  aspect-ratio: 16 / 9;
+  position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0.8rem;
-  padding: 0.95rem;
-  border-radius: 22px;
+  gap: 1rem;
+  padding: 1.1rem;
+  min-height: 460px;
+  border-radius: 26px;
   border: 1px solid rgba(31, 41, 55, 0.12);
   background:
-    radial-gradient(circle at top right, rgba(201, 111, 59, 0.08), transparent 26%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 244, 238, 0.96));
-  box-shadow: 0 18px 40px rgba(53, 39, 28, 0.08);
-`;
-
-const ReportSlideHotspot = styled.button<{ $side: "left" | "right" }>`
-  position: absolute;
-  ${({ $side }) => ($side === "left" ? "left: 0.38rem;" : "right: 0.38rem;")}
-  top: 0.42rem;
-  bottom: 0.42rem;
-  width: clamp(40px, 7%, 58px);
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 18px;
-  background: transparent;
-  cursor: pointer;
-  z-index: 2;
-
-  &:hover {
-    background: linear-gradient(
-      ${({ $side }) => ($side === "left" ? "90deg" : "270deg")},
-      rgba(31, 41, 55, 0.08),
-      transparent 72%
-    );
-  }
-`;
-
-const ReportSlideHotspotArrow = styled.span`
-  width: 1.9rem;
-  height: 1.9rem;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(31, 41, 55, 0.1);
-  color: var(--muted);
-  font-size: 1.3rem;
-  line-height: 1;
-  box-shadow: 0 10px 26px rgba(32, 26, 20, 0.08);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(249, 244, 238, 0.92)),
+    var(--panel);
+  box-shadow: 0 24px 56px rgba(17, 24, 39, 0.1);
 `;
 
 const ReportSlideHeader = styled.header`
   display: flex;
-  align-items: end;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.7rem;
-  padding-bottom: 0.55rem;
-  border-bottom: 1px solid rgba(31, 41, 55, 0.12);
+  gap: 1rem;
 `;
 
 const ReportSlideEyebrow = styled.div`
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--accent-deep);
 `;
 
 const ReportSlideTitle = styled.h3`
-  margin: 0.12rem 0 0;
-  font-family: var(--font-display);
-  font-size: 1.18rem;
-  line-height: 1.02;
+  margin: 0.2rem 0 0;
+  font-size: clamp(1.1rem, 2vw, 1.45rem);
+  line-height: 1.08;
+  color: var(--ink);
 `;
 
 const ReportSlideCounter = styled.div`
-  flex-shrink: 0;
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.2;
-  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent-deep) 70%, rgba(31, 41, 55, 0.8));
+`;
+
+const ReportSlideHotspot = styled.button<{ $side: "left" | "right" }>`
+  position: absolute;
+  top: 50%;
+  ${({ $side }) => ($side === "left" ? "left: -0.9rem;" : "right: -0.9rem;")}
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 3.5rem;
+  border: 1px solid rgba(31, 41, 55, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--accent-deep);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+`;
+
+const ReportSlideHotspotArrow = styled.span`
+  font-size: 1.65rem;
+  line-height: 1;
 `;
 
 const ReportSlideProgress = styled.div`
   display: flex;
   justify-content: center;
-  gap: 0.34rem;
+  gap: 0.5rem;
 `;
 
 const ReportSlideDot = styled.button<{ $active: boolean }>`
-  width: ${({ $active }) => ($active ? "1.5rem" : "0.52rem")};
-  height: 0.52rem;
-  border: 0;
+  width: ${({ $active }) => ($active ? "1.5rem" : "0.72rem")};
+  height: 0.72rem;
   border-radius: 999px;
+  border: none;
   background: ${({ $active }) =>
-    $active ? "var(--accent)" : "rgba(31, 41, 55, 0.14)"};
+    $active
+      ? "color-mix(in srgb, var(--accent) 62%, rgba(31, 41, 55, 0.2))"
+      : "rgba(31, 41, 55, 0.18)"};
   cursor: pointer;
-  transition:
-    width 180ms ease,
-    background 180ms ease;
 `;
 
-const reportSlideLayoutStyles = {
-  "1x1": `
-    grid-template-columns: minmax(0, 1fr);
-  `,
-  "1x2": `
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(2, minmax(0, 1fr));
-  `,
-  "2x2": `
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
-  `,
-} satisfies Record<ReportSlideLayout, string>;
-
-const ReportSlideGrid = styled.section<{ $layout: ReportSlideLayout }>`
-  min-height: 0;
+const ReportSlideGrid = styled.div<{ $layout: ReportSlideLayout }>`
   display: grid;
-  gap: 0.7rem;
-  ${({ $layout }) => reportSlideLayoutStyles[$layout]}
-
-  @media (max-width: 880px) {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
-  }
+  gap: 0.9rem;
+  min-height: 0;
+  grid-template-columns: ${({ $layout }) => getReportSlideGridTemplate($layout).columns};
+  ${({ $layout }) => {
+    const { rows } = getReportSlideGridTemplate($layout);
+    return rows ? `grid-template-rows: ${rows};` : "";
+  }}
 `;
 
 const ReportPanelCard = styled.section`
-  min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 0.42rem;
-  padding: 0.75rem;
-  border-radius: 16px;
+  gap: 0.75rem;
+  min-height: 0;
+  padding: 0.95rem;
+  border-radius: 18px;
   border: 1px solid rgba(31, 41, 55, 0.12);
-  background: rgba(255, 255, 255, 0.9);
-  overflow: hidden;
+  background: rgba(255, 255, 255, 0.82);
 `;
 
 const ReportPanelHeader = styled.header`
   display: flex;
-  align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  align-items: baseline;
 
   strong {
-    font-size: 0.88rem;
-    line-height: 1.2;
-    color: var(--ink);
+    font-size: 0.92rem;
+    line-height: 1.25;
   }
 
   span {
-    flex-shrink: 0;
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--muted);
+    letter-spacing: 0.06em;
+    color: color-mix(in srgb, var(--accent-deep) 70%, rgba(31, 41, 55, 0.8));
   }
 `;
 
 const ReportPanelBody = styled.div`
   min-height: 0;
-  display: grid;
-  align-items: stretch;
-  overflow: hidden;
-`;
-
-const ReportPanelImage = styled.img`
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  object-fit: contain;
-  border-radius: 14px;
-  background: rgba(247, 243, 237, 0.84);
-`;
-
-const ReportPanelPlaceholder = styled.div`
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  border-radius: 14px;
-  border: 1px dashed rgba(31, 41, 55, 0.18);
-  background: rgba(247, 243, 237, 0.72);
-  color: var(--muted);
-  text-align: center;
-  line-height: 1.5;
-`;
-
-const ReportPanelMeta = styled.div`
-  color: var(--muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
 `;
 
 const ReportMarkdownPanel = styled.div`
-  min-height: 0;
-  overflow: auto;
   color: var(--ink);
   font-size: 0.84rem;
   line-height: 1.55;
 
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    margin: 0 0 0.55rem;
-    font-family: var(--font-display);
-    line-height: 1.05;
-  }
-
-  h1 {
-    font-size: 1.34rem;
-  }
-
-  h2 {
-    font-size: 1.12rem;
-  }
-
-  h3 {
-    font-size: 0.98rem;
-  }
-
   p,
   ul,
-  ol,
-  blockquote,
-  pre,
-  table {
-    margin: 0 0 0.7rem;
-  }
-
-  ul,
   ol {
-    padding-left: 1.1rem;
+    margin: 0 0 0.55rem;
   }
 
-  li + li {
-    margin-top: 0.2rem;
-  }
-
-  blockquote {
-    padding-left: 0.75rem;
-    border-left: 3px solid rgba(201, 111, 59, 0.28);
-    color: color-mix(in srgb, var(--ink) 86%, white 14%);
-  }
-
-  code {
-    font-family: "SFMono-Regular", "Consolas", monospace;
-    font-size: 0.78rem;
-    background: rgba(31, 41, 55, 0.08);
-    border-radius: 6px;
-    padding: 0.05rem 0.24rem;
-  }
-
-  pre {
-    overflow: auto;
-    padding: 0.75rem;
-    border-radius: 12px;
-    background: rgba(31, 41, 55, 0.94);
-    color: #f8fafc;
-  }
-
-  pre code {
-    padding: 0;
-    background: transparent;
-    color: inherit;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.76rem;
-  }
-
-  th,
-  td {
-    padding: 0.4rem 0.45rem;
-    border: 1px solid rgba(31, 41, 55, 0.12);
-    text-align: left;
-    vertical-align: top;
+  p:last-child,
+  ul:last-child,
+  ol:last-child {
+    margin-bottom: 0;
   }
 `;
 
-const PreviewActions = styled.div`
-  display: flex;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+const ReportPanelImage = styled.img`
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 14px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background: rgba(255, 255, 255, 0.76);
 `;
 
-const PreviewActionButton = styled.button`
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  border-radius: 999px;
-  padding: 0.48rem 0.8rem;
-  background: rgba(255, 255, 255, 0.82);
-  color: var(--ink);
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
+const ReportPanelPlaceholder = styled.div`
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  padding: 1rem;
+  border-radius: 14px;
+  border: 1px dashed rgba(31, 41, 55, 0.16);
+  color: rgba(31, 41, 55, 0.72);
+  background: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1.45;
 `;
 
-const PreviewEmptyState = styled(MetaText)`
-  padding: 0.4rem 0;
-  align-self: center;
+const ReportPanelMeta = styled.div`
+  font-size: 0.72rem;
+  color: rgba(31, 41, 55, 0.74);
 `;

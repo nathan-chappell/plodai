@@ -1,4 +1,4 @@
-import type { LocalWorkspaceFile } from "../types/report";
+import type { LocalAttachment } from "../types/report";
 
 export type SavedChartArtifact = {
   title: string;
@@ -34,7 +34,7 @@ function trimFilenameBase(value: string, maxLength = 72): string {
 }
 
 export function parseSavedChartArtifact(
-  file: LocalWorkspaceFile,
+  file: LocalAttachment,
 ): SavedChartArtifact | null {
   if (file.kind !== "other" || !file.text_content) {
     return null;
@@ -66,7 +66,7 @@ export function parseSavedChartArtifact(
   }
 }
 
-export function savedChartArtifactLabel(file: LocalWorkspaceFile): string | null {
+export function savedChartArtifactLabel(file: LocalAttachment): string | null {
   return parseSavedChartArtifact(file)?.title ?? null;
 }
 

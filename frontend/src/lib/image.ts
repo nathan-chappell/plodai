@@ -1,4 +1,4 @@
-import type { LocalImageFile } from "../types/report";
+import type { LocalImageAttachment } from "../types/report";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
 
@@ -53,7 +53,7 @@ export async function readImageDimensionsFromFile(
 }
 
 export async function buildModelSafeImageDataUrl(
-  file: LocalImageFile,
+  file: LocalImageAttachment,
   options: {
     maxDimension?: number;
   } = {},

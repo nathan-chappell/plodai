@@ -18,8 +18,7 @@ describe("authenticatedFetch attachments", () => {
   it("creates local attachments and strips synthetic ids before forwarding the message", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
     const attachmentHandler = vi.fn(async () => ({
-      agentId: "analysis-agent",
-      resourceIds: ["resource_csv"],
+      fileIds: ["file_csv"],
     }));
 
     setChatKitAttachmentHandler(attachmentHandler);
@@ -97,8 +96,7 @@ describe("authenticatedFetch attachments", () => {
 
     setChatKitAttachmentHandler(
       async () => ({
-        agentId: "document-agent",
-        resourceIds: ["resource_pdf"],
+        fileIds: ["file_pdf"],
       }),
       deleteHandler,
     );
@@ -141,11 +139,52 @@ describe("authenticatedFetch attachments", () => {
     expect(deleteHandler).toHaveBeenCalledWith(
       expect.objectContaining({
         attachmentId: attachmentPayload.id,
-        agentId: "document-agent",
         name: "report.pdf",
-        resourceIds: ["resource_pdf"],
+        fileIds: ["file_pdf"],
       }),
     );
     await expect(deleteResponse.json()).resolves.toEqual({});
+  });
+
+  it("keeps the backend image attachment payload as the source of truth", async () => {
+    setChatKitAttachmentHandler(async ({ attachmentId }) => ({
+      attachment: {
+        type: "image",
+        id: attachmentId,
+        name: "orchard.png",
+        mime_type: "image/png",
+        preview_url: "/api/stored-files/file_image/preview?token=test-token",
+      },
+      fileIds: ["file_image"],
+      stripBeforeForwarding: false,
+    }));
+
+    const file = new File(["image"], "orchard.png", {
+      type: "image/png",
+    });
+    registerChatKitLocalFiles([file]);
+
+    const attachmentResponse = await authenticatedFetch(getChatKitConfig().url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "attachments.create",
+        params: {
+          name: file.name,
+          size: file.size,
+          mime_type: file.type,
+        },
+      }),
+    });
+
+    await expect(attachmentResponse.json()).resolves.toEqual({
+      type: "image",
+      id: expect.any(String),
+      name: "orchard.png",
+      mime_type: "image/png",
+      preview_url: "/api/stored-files/file_image/preview?token=test-token",
+    });
   });
 });

@@ -6,6 +6,7 @@ import type {
   CreateDatasetToolArgs,
   CreateReportToolArgs,
   DataRow,
+  GetFarmStateToolArgs,
   GetReportToolArgs,
   InspectDatasetSchemaToolArgs,
   InspectImageFileToolArgs,
@@ -16,8 +17,9 @@ import type {
   RemoveReportSlideToolArgs,
   RenderChartFromDatasetToolArgs,
   RunAggregateQueryToolArgs,
+  SaveFarmStateToolArgs,
 } from "../types/analysis";
-import type { LocalDataset, LocalWorkspaceFile } from "../types/report";
+import type { LocalDataset, LocalAttachment } from "../types/report";
 
 import { executeQueryPlan } from "./analysis";
 import { renderChartToDataUrl } from "./chart";
@@ -33,7 +35,7 @@ export type ClientToolExecutionResult = {
   effects: ClientEffect[];
 };
 
-function findImageFile(files: LocalWorkspaceFile[], fileId: string) {
+function findImageFile(files: LocalAttachment[], fileId: string) {
   const file = files.find((candidate) => candidate.id === fileId);
   if (!file || file.kind !== "image") {
     throw new Error(`Unknown image file: ${fileId}`);
@@ -111,10 +113,10 @@ export async function executeClientTool<Name extends ClientToolName>(
     }
     case "list_image_files": {
       void (toolCall.arguments as ListImageFilesToolArgs);
-      const imageFiles = (datasets as unknown as LocalWorkspaceFile[]).filter(
+      const imageFiles = (datasets as unknown as LocalAttachment[]).filter(
         (
           file,
-        ): file is Extract<LocalWorkspaceFile, { kind: "image" }> => file.kind === "image",
+        ): file is Extract<LocalAttachment, { kind: "image" }> => file.kind === "image",
       );
       return {
         payload: {
@@ -221,7 +223,7 @@ export async function executeClientTool<Name extends ClientToolName>(
     }
     case "inspect_image_file": {
       const args = toolCall.arguments as InspectImageFileToolArgs;
-      const file = findImageFile(datasets as unknown as LocalWorkspaceFile[], args.file_id);
+      const file = findImageFile(datasets as unknown as LocalAttachment[], args.file_id);
       return {
         payload: {
           workspace_id: "smoke",
@@ -297,6 +299,37 @@ export async function executeClientTool<Name extends ClientToolName>(
           report_id: args.report_id,
           slide_id: args.slide_id,
           removed: true,
+        },
+        effects: [],
+      };
+    }
+    case "get_farm_state": {
+      void (toolCall.arguments as GetFarmStateToolArgs);
+      return {
+        payload: {
+          artifact_id: null,
+          farm: null,
+        },
+        effects: [],
+      };
+    }
+    case "save_farm_state": {
+      const args = toolCall.arguments as SaveFarmStateToolArgs;
+      return {
+        payload: {
+          artifact_id: "farm-overview",
+          artifact_kind: "farm.v1",
+          revision: 1,
+          farm: {
+            version: "v1",
+            farm_name: args.farm_name,
+            location: args.location ?? null,
+            crops: args.crops,
+            issues: args.issues,
+            projects: args.projects,
+            current_work: args.current_work,
+            notes: args.notes ?? null,
+          },
         },
         effects: [],
       };

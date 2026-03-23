@@ -1,18 +1,18 @@
 import type { ClientChartSpec, DataRow } from "./analysis";
 
-export type WorkspaceFileKind = "csv" | "json" | "pdf" | "image" | "other";
+export type LocalAttachmentKind = "csv" | "json" | "pdf" | "image" | "other";
 export type DatasetKind = "csv" | "json";
 
-export type WorkspaceFileSummary = {
+export type LocalAttachmentSummary = {
   id: string;
   name: string;
-  kind: WorkspaceFileKind;
+  kind: LocalAttachmentKind;
   extension: string;
   byte_size?: number;
   mime_type?: string;
 };
 
-export type DatasetSummary = WorkspaceFileSummary & {
+export type DatasetSummary = LocalAttachmentSummary & {
   kind: DatasetKind;
   row_count: number;
   columns: string[];
@@ -26,30 +26,30 @@ export type LocalDataset = DatasetSummary & {
   json_text?: string;
 };
 
-export type LocalPdfFile = WorkspaceFileSummary & {
+export type LocalPdfAttachment = LocalAttachmentSummary & {
   kind: "pdf";
   page_count: number;
   bytes_base64: string;
 };
 
-export type LocalImageFile = WorkspaceFileSummary & {
+export type LocalImageAttachment = LocalAttachmentSummary & {
   kind: "image";
   width: number;
   height: number;
   bytes_base64: string;
 };
 
-export type LocalOtherFile = WorkspaceFileSummary & {
+export type LocalOtherAttachment = LocalAttachmentSummary & {
   kind: "other";
   text_content?: string;
   bytes_base64?: string;
 };
 
-export type LocalWorkspaceFile =
+export type LocalAttachment =
   | LocalDataset
-  | LocalPdfFile
-  | LocalImageFile
-  | LocalOtherFile;
+  | LocalPdfAttachment
+  | LocalImageAttachment
+  | LocalOtherAttachment;
 
 export type ReportSection = {
   id: string;

@@ -2,7 +2,9 @@ import { buildReportAgentClientToolCatalog, createReportAgentClientTools } from 
 import { agricultureAgentDefinition } from "../definitions";
 import type { AgentRuntimeModule } from "../types";
 import {
+  buildAgricultureAgentFarmToolCatalog,
   buildAgricultureAgentImageToolCatalog,
+  createAgricultureAgentFarmTools,
   createAgricultureAgentImageTools,
 } from "./tools";
 
@@ -28,6 +30,8 @@ Important operating rules:
 10. If the user later adds orchard history, revise the same report instead of starting over unless they clearly want a separate report.
 11. Delegate to Analysis for tabular follow-up and to Documents for supporting PDF context when needed.
 12. Keep the output practical for a grower: visible evidence, likely possibilities, confidence limits, and next actions.
+13. Use get_farm_state before changing the saved farm record, and use save_farm_state when the user wants durable farm context like crops, issues, projects, or current work tracked over time.
+14. Treat tagged thread images and tagged farm entities as durable workspace references, and connect them back to the saved farm record when the user is organizing ongoing orchard context.
 `.trim();
 
 export const agricultureAgentRuntimeModule: AgentRuntimeModule = {
@@ -38,6 +42,7 @@ export const agricultureAgentRuntimeModule: AgentRuntimeModule = {
     instructions: AGRICULTURE_AGENT_INSTRUCTIONS,
     client_tools: [
       ...buildAgricultureAgentImageToolCatalog(),
+      ...buildAgricultureAgentFarmToolCatalog(),
       ...buildReportAgentClientToolCatalog(workspace),
     ],
     delegation_targets: [
@@ -60,6 +65,7 @@ export const agricultureAgentRuntimeModule: AgentRuntimeModule = {
   }),
   bindClientTools: (workspace) => [
     ...createAgricultureAgentImageTools(workspace),
+    ...createAgricultureAgentFarmTools(workspace),
     ...createReportAgentClientTools(workspace),
   ],
 };

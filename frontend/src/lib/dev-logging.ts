@@ -38,18 +38,6 @@ type ChatKitGateLog = {
   emptyMessage?: string;
 };
 
-type TourStateLog = {
-  agentId: string;
-  active: boolean;
-  ready: boolean;
-  loading: boolean;
-  fileCount?: number;
-  seedCount?: number;
-  tourReady?: boolean;
-  error?: string | null;
-  scenarioId?: string | null;
-};
-
 type WorkspaceEventLog = {
   surfaceKey: string;
   event: string;
@@ -64,7 +52,6 @@ export type DevLogger = {
   clientToolError: (payload: ClientToolErrorLog) => void;
   clientToolStart: (payload: ClientToolLogContext & { args: unknown }) => void;
   clientToolSuccess: (payload: ClientToolSuccessLog) => void;
-  tourState: (payload: TourStateLog) => void;
   responseEnd: (payload: ResponseLog) => void;
   responseStart: (payload: ResponseLog) => void;
   workspaceEvent: (payload: WorkspaceEventLog) => void;
@@ -182,7 +169,6 @@ function buildNoopLogger(): DevLogger {
     clientToolError() {},
     clientToolStart() {},
     clientToolSuccess() {},
-    tourState() {},
     responseEnd() {},
     responseStart() {},
     workspaceEvent() {},
@@ -250,9 +236,6 @@ export function createDevLogger({
         durationMs: payload.durationMs,
         ...summarizeError(payload.error),
       });
-    },
-    tourState(payload) {
-      writeGroup(sink, "info", "[tour] state", compactRecord(payload));
     },
     workspaceEvent(payload) {
       writeGroup(sink, "info", `[workspace] ${payload.event}`, compactRecord({

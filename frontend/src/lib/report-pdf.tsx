@@ -7,7 +7,7 @@ import {
   ReportPdfDocument,
   REPORT_PDF_PAGE_SELECTOR,
 } from "../components/ReportPdfDocument";
-import type { LocalWorkspaceFile } from "../types/report";
+import type { LocalAttachment } from "../types/report";
 import type { WorkspaceReportV1 } from "../types/workspace-contract";
 
 type HtmlToImageModule = typeof import("html-to-image");
@@ -22,7 +22,7 @@ export type ReportPdfProgress =
   | { phase: "assembling"; totalPages: number };
 
 export async function createReportPdfFile(args: {
-  files: LocalWorkspaceFile[];
+  files: LocalAttachment[];
   onProgress?: (progress: ReportPdfProgress) => void;
   report: WorkspaceReportV1;
 }): Promise<{ blob: Blob; filename: string }> {
@@ -84,6 +84,8 @@ export async function createReportPdfFile(args: {
         canvasHeight: captureHeight * 2,
         canvasWidth: captureWidth * 2,
         pixelRatio: 2,
+        preferredFontFormat: "woff2",
+        skipFonts: true,
       });
       const pngBytes = await canvasToPngBytes(canvas);
       const image = await pdf.embedPng(pngBytes);
@@ -114,7 +116,7 @@ export async function createReportPdfFile(args: {
 }
 
 export async function downloadReportPdf(args: {
-  files: LocalWorkspaceFile[];
+  files: LocalAttachment[];
   onProgress?: (progress: ReportPdfProgress) => void;
   report: WorkspaceReportV1;
 }): Promise<{ blob: Blob; filename: string }> {

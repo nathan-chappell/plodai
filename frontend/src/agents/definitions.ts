@@ -18,37 +18,15 @@ const PDF_ATTACHMENTS = {
   "application/pdf": [".pdf"],
 } as const;
 
+const DOCUMENT_THREAD_ATTACHMENTS = {
+  "application/pdf": [".pdf"],
+  "text/csv": [".csv"],
+  "application/json": [".json"],
+} as const;
+
 const IMAGE_ATTACHMENTS = {
   "image/*": [".png", ".jpg", ".jpeg", ".webp"],
 } as const;
-
-export const defaultAgentDefinition: AgentDefinition = {
-  id: "default-agent",
-  path: "/workspace",
-  navLabel: "Workspace",
-  title: "Default",
-  eyebrow: "Workspace",
-  description:
-    "Shared workspace shell for browsing artifacts, choosing the right workflow, and launching guided tours.",
-  chatkitLead:
-    "You are in the shared workspace. I can help you choose the right workflow or start a guided tour.",
-  chatkitPlaceholder: "Ask what this app can do, which workflow to use, or start the report or document tour",
-  tabs: [],
-  showInSidebar: true,
-  showInComposer: false,
-  composerOrder: 0,
-  composerLabel: "Default",
-  composerShortLabel: "Default",
-  composerIcon: "cube",
-  composerPlaceholder: "Explain the app, route to the right workflow, or launch a guided tour workspace.",
-  previewPriority: 0,
-  attachmentConfig: {
-    enabled: true,
-    accept: COMMON_WORKSPACE_ATTACHMENTS,
-    maxCount: 10,
-    maxSize: 100 * 1024 * 1024,
-  },
-};
 
 export const reportAgentDefinition: AgentDefinition = {
   id: "report-agent",
@@ -84,7 +62,7 @@ export const analysisAgentDefinition: AgentDefinition = {
   eyebrow: "Hidden",
   description: "Tabular inspection, grouped analysis, and derived dataset exports.",
   chatkitLead: "Use Analysis to inspect datasets, compare segments, and create reusable derived tables.",
-  chatkitPlaceholder: "Ask for a grouped query, a derived dataset artifact, or a compact data summary",
+  chatkitPlaceholder: "Ask for a grouped query, a derived dataset export, or a compact data summary",
   tabs: [],
   showInSidebar: false,
   showInComposer: false,
@@ -130,15 +108,15 @@ export const chartAgentDefinition: AgentDefinition = {
 
 export const documentAgentDefinition: AgentDefinition = {
   id: "document-agent",
-  path: "/workspace/documents",
+  path: "/documents",
   navLabel: "Documents",
   title: "Documents",
-  eyebrow: "Mode",
+  eyebrow: "App",
   description: "PDF inspection, extraction, and smart document splits.",
   chatkitLead: "Use Documents to inspect PDFs, extract pages, or split a packet into useful sections.",
   chatkitPlaceholder: "Ask to inspect a PDF, extract a page range, or perform a smart split",
   tabs: [],
-  showInSidebar: false,
+  showInSidebar: true,
   showInComposer: false,
   composerOrder: 40,
   composerLabel: "Documents",
@@ -148,7 +126,7 @@ export const documentAgentDefinition: AgentDefinition = {
   previewPriority: 40,
   attachmentConfig: {
     enabled: true,
-    accept: PDF_ATTACHMENTS,
+    accept: DOCUMENT_THREAD_ATTACHMENTS,
     maxCount: 10,
     maxSize: 100 * 1024 * 1024,
   },
@@ -156,15 +134,15 @@ export const documentAgentDefinition: AgentDefinition = {
 
 export const agricultureAgentDefinition: AgentDefinition = {
   id: "agriculture-agent",
-  path: "/workspace/agriculture",
+  path: "/agriculture",
   navLabel: "Agriculture",
   title: "Agriculture",
-  eyebrow: "Mode",
+  eyebrow: "App",
   description: "Inspect plant photos, check trusted extension sources, and draft practical next steps.",
   chatkitLead: "Use Agriculture to inspect plant photos and turn visible evidence into practical next steps.",
   chatkitPlaceholder: "Ask the agriculture agent to inspect plant photos, summarize visible evidence, and create a concise report update",
   tabs: [],
-  showInSidebar: false,
+  showInSidebar: true,
   showInComposer: false,
   composerOrder: 50,
   composerLabel: "Agriculture",
@@ -176,7 +154,7 @@ export const agricultureAgentDefinition: AgentDefinition = {
     enabled: true,
     accept: IMAGE_ATTACHMENTS,
     maxCount: 10,
-    maxSize: 100 * 1024 * 1024,
+    maxSize: 10 * 1024 * 1024,
   },
 };
 
@@ -186,8 +164,8 @@ export const feedbackAgentDefinition: AgentDefinition = {
   navLabel: "Feedback",
   title: "Feedback",
   eyebrow: "Backend",
-  description: "Structured feedback capture for the active thread.",
-  chatkitLead: "Use Feedback to leave a clear reaction or suggestion about this thread.",
+  description: "Structured feedback capture for the active chat.",
+  chatkitLead: "Use Feedback to leave a clear reaction or suggestion about this chat.",
   chatkitPlaceholder: "Ask the feedback flow to capture a precise reaction or suggestion",
   tabs: [],
   showInSidebar: false,
@@ -217,7 +195,6 @@ export const adminDefinition: AgentDefinition = {
 };
 
 export const runtimeAgentDefinitions: AgentDefinition[] = [
-  defaultAgentDefinition,
   reportAgentDefinition,
   analysisAgentDefinition,
   chartAgentDefinition,
@@ -226,7 +203,10 @@ export const runtimeAgentDefinitions: AgentDefinition[] = [
   feedbackAgentDefinition,
 ];
 
-export const surfaceDefinitions: AgentDefinition[] = [defaultAgentDefinition];
+export const surfaceDefinitions: AgentDefinition[] = [
+  agricultureAgentDefinition,
+  documentAgentDefinition,
+];
 
 export const allAgentDefinitions: AgentDefinition[] = [
   ...surfaceDefinitions,

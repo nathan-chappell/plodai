@@ -1,18 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Report Foundry">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI Portfolio Agriculture">
   <defs>
-    <linearGradient id="rf-bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fff7ef" />
-      <stop offset="1" stop-color="#f1dcc8" />
+    <linearGradient id="farm-bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f7fbf4" />
+      <stop offset="1" stop-color="#dcead7" />
     </linearGradient>
-    <linearGradient id="rf-bars" x1="18" y1="20" x2="47" y2="45" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#c96f3b" />
-      <stop offset="1" stop-color="#497fa2" />
+    <linearGradient id="farm-ground" x1="18" y1="45" x2="47" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8eb097" />
+      <stop offset="1" stop-color="#6e957b" />
     </linearGradient>
   </defs>
-  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#rf-bg)" />
-  <path d="M18 44h28" stroke="#22303c" stroke-width="3" stroke-linecap="round" opacity=".22" />
-  <rect x="18" y="30" width="7" height="14" rx="3.5" fill="url(#rf-bars)" />
-  <rect x="29" y="22" width="7" height="22" rx="3.5" fill="url(#rf-bars)" />
-  <rect x="40" y="16" width="7" height="28" rx="3.5" fill="url(#rf-bars)" />
-  <path d="M18 18c4-4 9-6 14-6 6 0 11 2 15 7" fill="none" stroke="#22303c" stroke-width="3" stroke-linecap="round" opacity=".85" />
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#farm-bg)" />
+  <circle cx="32" cy="31" r="18" fill="#c7dbcb" opacity=".34" />
+  <ellipse cx="30.5" cy="27.4" rx="13.5" ry="10.7" fill="#6a9a77" opacity=".18" />
+  <ellipse cx="22.6" cy="33.1" rx="7.9" ry="7" fill="#8ab095" opacity=".2" />
+  <ellipse cx="40.2" cy="32.1" rx="9.5" ry="8.1" fill="#7fa888" opacity=".18" />
+  <ellipse cx="37.7" cy="24.2" rx="6" ry="5.1" fill="#a4c2aa" opacity=".16" />
+  <ellipse cx="28.2" cy="24.1" rx="5.1" ry="4.4" fill="#a4c2aa" opacity=".12" />
+  <path d="M29 33c0 4 0 8.6.3 12.7.1 2.2 1 3.7 3 3.7 2.1 0 3.1-1.6 3.1-4V36.1c0-1.6-.9-2.6-2.7-3.1-1.2-.3-2.4-.3-3.7 0Z" fill="#8a6f56" opacity=".48" />
+  <ellipse cx="31.8" cy="35.7" rx="3.1" ry="2.4" fill="#8a6f56" opacity=".18" />
+  <path d="M19 49c4.9-2.1 9.1-2.8 13.2-2 4 .7 8 2.4 12.8 1.8" fill="none" stroke="url(#farm-ground)" stroke-linecap="round" stroke-width="4.5" opacity=".56" />
 </svg>

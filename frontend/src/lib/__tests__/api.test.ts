@@ -9,6 +9,7 @@ vi.mock("../../app/toasts", () => ({
 import {
   authenticatedFetch,
   getChatKitConfig,
+  searchAgricultureEntities,
   setChatKitMetadataGetter,
   setChatKitNativeFeedbackHandler,
 } from "../api";
@@ -54,7 +55,7 @@ describe("authenticatedFetch", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
     setChatKitMetadataGetter(() => ({
       origin: "interactive",
-      shell_state: "workspace",
+      workspace_state: { workspace_id: "workspace" },
     }));
 
     await authenticatedFetch(getChatKitConfig().url, {
@@ -79,8 +80,68 @@ describe("authenticatedFetch", () => {
       type: "threads.create",
       metadata: {
         origin: "interactive",
-        shell_state: "workspace",
+        workspace_state: { workspace_id: "workspace" },
       },
+    });
+  });
+
+  it("forwards ordinary ChatKit messages without rewriting their text", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+
+    await authenticatedFetch(getChatKitConfig().url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "threads.create",
+        params: {
+          input: {
+            text: "Inspect the current orchard photos.",
+          },
+        },
+      }),
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [, requestInit] = fetchSpy.mock.calls[0] ?? [];
+    expect(JSON.parse(String(requestInit?.body))).toMatchObject({
+      params: {
+        input: {
+          text: "Inspect the current orchard photos.",
+        },
+      },
+    });
+  });
+
+  it("posts agriculture entity searches with the expected request shape", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          entities: [],
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+
+    await searchAgricultureEntities({
+      appId: "agriculture",
+      workspaceId: "workspace_123",
+      threadId: "thread_123",
+      query: "orchard",
+    });
+
+    const [requestUrl, requestInit] = fetchSpy.mock.calls[0] ?? [];
+    expect(requestUrl).toBe("/api/agriculture/entities/search");
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      app_id: "agriculture",
+      workspace_id: "workspace_123",
+      thread_id: "thread_123",
+      query: "orchard",
     });
   });
 });

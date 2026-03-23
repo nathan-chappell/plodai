@@ -1,4 +1,4 @@
-import type { ShellStateMetadata } from "./shell";
+import type { WorkspaceState } from "./workspace";
 
 export type PrimitiveValue = string | number | boolean | null;
 export type DataRow = Record<string, PrimitiveValue>;
@@ -165,21 +165,6 @@ export type AgentDelegationTargetMetadata = {
   description: string;
 };
 
-export type TourPickerDisplayScenarioMetadata = {
-  scenario_id: string;
-  title: string;
-  summary: string;
-  workspace_name: string;
-  target_agent_id: string;
-  default_asset_count: number;
-};
-
-export type TourPickerDisplayMetadata = {
-  title: string;
-  summary: string;
-  scenarios: TourPickerDisplayScenarioMetadata[];
-};
-
 export type AgentSpecMetadata = {
   agent_id: string;
   agent_name: string;
@@ -195,7 +180,6 @@ export type AgentSpecMetadata = {
       prominent_args?: string[];
       omit_args?: string[];
       arg_labels?: Record<string, string>;
-      tour_picker?: TourPickerDisplayMetadata;
     };
   }>;
   delegation_targets: AgentDelegationTargetMetadata[];
@@ -208,7 +192,7 @@ export type AgentBundleMetadata = {
 
 export type FeedbackOrigin = "interactive" | "ui_integration_test";
 
-export type AppThreadMetadata = {
+export type AppChatMetadata = {
   title?: string;
   investigation_brief?: string;
   plan?: AgentPlan;
@@ -217,13 +201,13 @@ export type AppThreadMetadata = {
   chart_cache?: Record<string, string>;
   surface_key?: string;
   agent_bundle?: AgentBundleMetadata;
-  shell_state?: ShellStateMetadata;
+  workspace_state?: WorkspaceState;
   openai_conversation_id?: string;
   openai_previous_response_id?: string;
   origin?: FeedbackOrigin;
 };
 
-export type UpdateThreadMetadataPayload = Partial<AppThreadMetadata>;
+export type UpdateChatMetadataPayload = Partial<AppChatMetadata>;
 
 export type RunAggregateQueryToolArgs = {
   query_plan: QueryPlan;
@@ -247,18 +231,6 @@ export type GetPdfPageRangeToolArgs = {
 
 export type ListDatasetsToolArgs = {
   includeSamples?: boolean;
-};
-
-export type ListTourScenariosToolArgs = Record<string, never>;
-
-export type LaunchTourScenarioToolArgs = {
-  scenario_id: string;
-};
-
-export type TourUploadConfig = {
-  accept: Record<string, readonly string[]>;
-  max_count: number;
-  helper_text: string;
 };
 
 export type ListImageFilesToolArgs = Record<string, never>;
@@ -340,9 +312,41 @@ export type RemoveReportSlideToolArgs = {
   slide_id: string;
 };
 
+export type GetFarmStateToolArgs = Record<string, never>;
+
+export type FarmCropDraft = {
+  id: string;
+  name: string;
+  area: string;
+  expected_yield?: string | null;
+  notes?: string | null;
+};
+
+export type FarmIssueDraft = {
+  id: string;
+  title: string;
+  status: "open" | "watching" | "resolved";
+  notes?: string | null;
+};
+
+export type FarmProjectDraft = {
+  id: string;
+  title: string;
+  status: "planned" | "active" | "done";
+  notes?: string | null;
+};
+
+export type SaveFarmStateToolArgs = {
+  farm_name: string;
+  location?: string | null;
+  crops: FarmCropDraft[];
+  issues: FarmIssueDraft[];
+  projects: FarmProjectDraft[];
+  current_work: string[];
+  notes?: string | null;
+};
+
 export type ClientToolArgsMap = {
-  list_tour_scenarios: ListTourScenariosToolArgs;
-  launch_tour_scenario: LaunchTourScenarioToolArgs;
   list_datasets: ListDatasetsToolArgs;
   list_image_files: ListImageFilesToolArgs;
   run_aggregate_query: RunAggregateQueryToolArgs;
@@ -359,6 +363,8 @@ export type ClientToolArgsMap = {
   create_report: CreateReportToolArgs;
   append_report_slide: AppendReportSlideToolArgs;
   remove_report_slide: RemoveReportSlideToolArgs;
+  get_farm_state: GetFarmStateToolArgs;
+  save_farm_state: SaveFarmStateToolArgs;
 };
 
 export type ClientToolName = keyof ClientToolArgsMap;
@@ -404,19 +410,7 @@ export type PdfSmartSplitEffect = {
   markdown: string;
 };
 
-export type TourRequestedEffect = {
-  type: "tour_requested";
-  scenarioId: string;
-  title: string;
-  summary: string;
-  workspaceName: string;
-  targetAgentId: string;
-  uploadConfig: TourUploadConfig;
-  defaultAssetCount: number;
-};
-
 export type ClientEffect =
   | ChartRenderedEffect
   | ReportSectionEffect
-  | PdfSmartSplitEffect
-  | TourRequestedEffect;
+  | PdfSmartSplitEffect;

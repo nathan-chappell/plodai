@@ -17,7 +17,6 @@ JsonSchemaPrimitive: TypeAlias = str | int | float | bool | None
 
 ALLOWED_AGENT_IDS = frozenset(
     {
-        "default-agent",
         "report-agent",
         "analysis-agent",
         "chart-agent",
@@ -80,27 +79,11 @@ class ClientToolDefinition(TypedDict, total=False):
     display: "ToolDisplaySpec"
 
 
-class TourPickerDisplayScenario(TypedDict):
-    scenario_id: str
-    title: str
-    summary: str
-    workspace_name: str
-    target_agent_id: str
-    default_asset_count: int
-
-
-class TourPickerDisplaySpec(TypedDict):
-    title: str
-    summary: str
-    scenarios: list[TourPickerDisplayScenario]
-
-
 class ToolDisplaySpec(TypedDict, total=False):
     label: str
     prominent_args: list[str]
     omit_args: list[str]
     arg_labels: dict[str, str]
-    tour_picker: TourPickerDisplaySpec
 
 
 class AgentDelegationTarget(TypedDict):
@@ -122,42 +105,73 @@ class AgentBundle(TypedDict):
     agents: list[AgentSpec]
 
 
-class ShellStateAgentSummary(TypedDict, total=False):
-    agent_id: str
-    goal: str | None
-    resource_count: int
-    current_report_id: str | None
-
-
-class ShellStateResourceSummary(TypedDict, total=False):
-    id: str
-    owner_agent_id: str
-    origin: Literal["uploaded", "generated"]
-    kind: Literal["dataset", "chart", "document", "image", "report", "text", "blob"]
-    title: str
-    created_at: str
-    summary: str | None
-    payload_ref: str
-    extension: str | None
-    mime_type: str | None
-    byte_size: int | None
-    row_count: int | None
+class WorkspaceUploadPreviewSummary(TypedDict, total=False):
+    row_count: int
     columns: list[str]
     numeric_columns: list[str]
     sample_rows: list[dict[str, object]]
-    page_count: int | None
-    width: int | None
-    height: int | None
-    slide_count: int | None
+    page_count: int
+    width: int
+    height: int
 
 
-class ShellState(TypedDict):
-    version: Literal["v1"]
-    context_id: str
-    context_name: str
-    active_agent_id: str
-    agents: list[ShellStateAgentSummary]
-    resources: list[ShellStateResourceSummary]
+class WorkspaceCreatedItemSummaryData(TypedDict, total=False):
+    slide_count: int
+    source_file_id: str
+    chart_plan_id: str
+    projection_file_id: str | None
+    entry_count: int
+    archive_file_id: str
+    index_file_id: str
+    crop_count: int
+    issue_count: int
+    project_count: int
+
+
+class WorkspaceItemSummary(TypedDict, total=False):
+    origin: Literal["upload", "created"]
+    id: str
+    workspace_id: str
+    name: str
+    kind: Literal[
+        "csv",
+        "json",
+        "pdf",
+        "image",
+        "other",
+        "report.v1",
+        "chart.v1",
+        "pdf_split.v1",
+        "farm.v1",
+    ]
+    extension: str
+    mime_type: str | None
+    byte_size: int | None
+    source_item_id: str | None
+    content_key: str
+    local_status: Literal["available", "missing"]
+    preview: WorkspaceUploadPreviewSummary
+    schema_version: Literal["v1"]
+    title: str
+    current_revision: int
+    created_by_user_id: str
+    created_by_agent_id: str | None
+    last_edited_by_agent_id: str | None
+    summary: WorkspaceCreatedItemSummaryData
+    latest_op: str
+    created_at: str
+    updated_at: str
+
+
+class WorkspaceState(TypedDict):
+    version: Literal["v4"]
+    workspace_id: str
+    workspace_name: str
+    app_id: Literal["agriculture", "documents"]
+    active_chat_id: NotRequired[str | None]
+    selected_item_id: NotRequired[str | None]
+    current_report_item_id: NotRequired[str | None]
+    items: list[WorkspaceItemSummary]
 
 
 class PendingFeedbackSession(TypedDict):
@@ -169,7 +183,7 @@ class PendingFeedbackSession(TypedDict):
     mode: Literal["recommendations", "confirmation"]
 
 
-class ThreadMetadataPatch(TypedDict, total=False):
+class ChatMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
     plan: AgentPlan
@@ -181,12 +195,12 @@ class ThreadMetadataPatch(TypedDict, total=False):
     openai_previous_response_id: str
     usage: ThreadUsageTotals
     agent_bundle: AgentBundle
-    shell_state: ShellState
+    workspace_state: WorkspaceState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
 
-class AppThreadMetadata(TypedDict, total=False):
+class AppChatMetadata(TypedDict, total=False):
     title: str
     investigation_brief: str
     plan: AgentPlan
@@ -198,7 +212,7 @@ class AppThreadMetadata(TypedDict, total=False):
     openai_previous_response_id: str
     usage: ThreadUsageTotals
     agent_bundle: AgentBundle
-    shell_state: ShellState
+    workspace_state: WorkspaceState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
@@ -540,7 +554,6 @@ class ToolDisplaySpecModel(_MetadataModel):
     prominent_args: list[str] | None = None
     omit_args: list[str] | None = None
     arg_labels: dict[str, str] | None = None
-    tour_picker: "TourPickerDisplaySpecModel | None" = None
 
     @field_validator("label", mode="before")
     @classmethod
@@ -570,81 +583,6 @@ class ToolDisplaySpecModel(_MetadataModel):
             and (cleaned := _strip_string(raw_value)) is not None
         }
         return labels or None
-
-    @field_validator("tour_picker", mode="before")
-    @classmethod
-    def _tour_picker(
-        cls,
-        value: object,
-    ) -> "TourPickerDisplaySpecModel | None":
-        validated = _validated_model_or_none(TourPickerDisplaySpecModel, value)
-        return cast(TourPickerDisplaySpecModel | None, validated)
-
-
-class TourPickerDisplayScenarioModel(_MetadataModel):
-    scenario_id: str
-    title: str
-    summary: str
-    workspace_name: str
-    target_agent_id: str
-    default_asset_count: int
-
-    @field_validator(
-        "scenario_id",
-        "title",
-        "summary",
-        "workspace_name",
-        mode="before",
-    )
-    @classmethod
-    def _required_text(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty string")
-        return text
-
-    @field_validator("target_agent_id", mode="before")
-    @classmethod
-    def _target_agent_id(cls, value: object) -> str:
-        return _required_agent_id(value)
-
-    @field_validator("default_asset_count", mode="before")
-    @classmethod
-    def _default_asset_count(cls, value: object) -> int:
-        if not isinstance(value, int):
-            raise ValueError("expected an integer")
-        if value < 0:
-            raise ValueError("expected default_asset_count >= 0")
-        return value
-
-
-class TourPickerDisplaySpecModel(_MetadataModel):
-    title: str
-    summary: str
-    scenarios: list[TourPickerDisplayScenarioModel] = Field(default_factory=list)
-
-    @field_validator("title", "summary", mode="before")
-    @classmethod
-    def _required_text(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty string")
-        return text
-
-    @field_validator("scenarios", mode="before")
-    @classmethod
-    def _scenarios(
-        cls,
-        value: object,
-    ) -> list[TourPickerDisplayScenarioModel]:
-        validated = _validated_model_list(TourPickerDisplayScenarioModel, value)
-        return cast(list[TourPickerDisplayScenarioModel], validated)
-
-    @model_validator(mode="after")
-    def _require_scenarios(self) -> "TourPickerDisplaySpecModel":
-        if not self.scenarios:
-            raise ValueError("expected at least one tour picker scenario")
-        return self
 
 
 class AgentDelegationTargetModel(_MetadataModel):
@@ -745,40 +683,7 @@ class AgentBundleModel(_MetadataModel):
         return self
 
 
-class ShellStateAgentSummaryModel(_MetadataModel):
-    agent_id: str
-    goal: str | None = None
-    resource_count: int = 0
-    current_report_id: str | None = None
-
-    @field_validator("agent_id", mode="before")
-    @classmethod
-    def _required_string(cls, value: object) -> str:
-        return _required_agent_id(value)
-
-    @field_validator("goal", "current_report_id", mode="before")
-    @classmethod
-    def _optional_string(cls, value: object) -> str | None:
-        return _strip_string(value)
-
-    @field_validator("resource_count", mode="before")
-    @classmethod
-    def _resource_count(cls, value: object) -> int:
-        return value if isinstance(value, int) and value >= 0 else 0
-
-
-class ShellStateResourceSummaryModel(_MetadataModel):
-    id: str
-    owner_agent_id: str
-    origin: Literal["uploaded", "generated"] | None = None
-    kind: Literal["dataset", "chart", "document", "image", "report", "text", "blob"]
-    title: str
-    created_at: str
-    summary: str | None = None
-    payload_ref: str
-    extension: str | None = None
-    mime_type: str | None = None
-    byte_size: int | None = None
+class WorkspaceUploadPreviewSummaryModel(_MetadataModel):
     row_count: int | None = None
     columns: list[str] | None = None
     numeric_columns: list[str] | None = None
@@ -786,55 +691,17 @@ class ShellStateResourceSummaryModel(_MetadataModel):
     page_count: int | None = None
     width: int | None = None
     height: int | None = None
-    slide_count: int | None = None
-
-    @field_validator("owner_agent_id", mode="before")
-    @classmethod
-    def _owner_agent_id(cls, value: object) -> str:
-        return _required_agent_id(value)
 
     @field_validator(
-        "id",
-        "title",
-        "created_at",
-        "payload_ref",
-        mode="before",
-    )
-    @classmethod
-    def _required_string(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty string")
-        return text
-
-    @field_validator("summary", "extension", "mime_type", mode="before")
-    @classmethod
-    def _optional_string(cls, value: object) -> str | None:
-        return _strip_string(value)
-
-    @field_validator("origin", mode="before")
-    @classmethod
-    def _origin(
-        cls, value: object
-    ) -> Literal["uploaded", "generated"] | None:
-        return (
-            value
-            if value in {"uploaded", "generated"}
-            else None
-        )
-
-    @field_validator(
-        "byte_size",
         "row_count",
         "page_count",
         "width",
         "height",
-        "slide_count",
         mode="before",
     )
     @classmethod
     def _optional_int(cls, value: object) -> int | None:
-        return value if isinstance(value, int) else None
+        return value if isinstance(value, int) and value >= 0 else None
 
     @field_validator("columns", "numeric_columns", mode="before")
     @classmethod
@@ -859,20 +726,84 @@ class ShellStateResourceSummaryModel(_MetadataModel):
         return rows or None
 
 
-class ShellStateModel(_MetadataModel):
-    version: Literal["v1"]
-    context_id: str
-    context_name: str
-    active_agent_id: str
-    agents: list[ShellStateAgentSummaryModel] = Field(default_factory=list)
-    resources: list[ShellStateResourceSummaryModel] = Field(default_factory=list)
+class WorkspaceCreatedItemSummaryDataModel(_MetadataModel):
+    slide_count: int | None = None
+    source_file_id: str | None = None
+    chart_plan_id: str | None = None
+    projection_file_id: str | None = None
+    entry_count: int | None = None
+    archive_file_id: str | None = None
+    index_file_id: str | None = None
+    crop_count: int | None = None
+    issue_count: int | None = None
+    project_count: int | None = None
 
-    @field_validator("active_agent_id", mode="before")
+    @field_validator(
+        "source_file_id",
+        "chart_plan_id",
+        "projection_file_id",
+        "archive_file_id",
+        "index_file_id",
+        mode="before",
+    )
     @classmethod
-    def _active_agent_id(cls, value: object) -> str:
-        return _required_agent_id(value)
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
 
-    @field_validator("context_id", "context_name", mode="before")
+    @field_validator(
+        "slide_count",
+        "entry_count",
+        "crop_count",
+        "issue_count",
+        "project_count",
+        mode="before",
+    )
+    @classmethod
+    def _optional_int(cls, value: object) -> int | None:
+        return value if isinstance(value, int) and value >= 0 else None
+
+
+class WorkspaceItemSummaryModel(_MetadataModel):
+    origin: Literal["upload", "created"] | None = None
+    id: str
+    workspace_id: str
+    kind: Literal[
+        "csv",
+        "json",
+        "pdf",
+        "image",
+        "other",
+        "report.v1",
+        "chart.v1",
+        "pdf_split.v1",
+        "farm.v1",
+    ]
+    name: str | None = None
+    extension: str = ""
+    mime_type: str | None = None
+    byte_size: int | None = None
+    source_item_id: str | None = None
+    content_key: str | None = None
+    local_status: Literal["available", "missing"] | None = None
+    preview: WorkspaceUploadPreviewSummaryModel | None = None
+    schema_version: Literal["v1"] | None = None
+    title: str | None = None
+    current_revision: int | None = None
+    created_by_user_id: str | None = None
+    created_by_agent_id: str | None = None
+    last_edited_by_agent_id: str | None = None
+    summary: WorkspaceCreatedItemSummaryDataModel | None = None
+    latest_op: str | None = None
+    created_at: str
+    updated_at: str
+
+    @field_validator(
+        "id",
+        "workspace_id",
+        "created_at",
+        "updated_at",
+        mode="before",
+    )
     @classmethod
     def _required_string(cls, value: object) -> str:
         text = _strip_string(value)
@@ -880,26 +811,120 @@ class ShellStateModel(_MetadataModel):
             raise ValueError("expected a non-empty string")
         return text
 
-    @field_validator("agents", mode="before")
+    @field_validator(
+        "name",
+        "mime_type",
+        "source_item_id",
+        "content_key",
+        "title",
+        "created_by_user_id",
+        "created_by_agent_id",
+        "last_edited_by_agent_id",
+        "latest_op",
+        mode="before",
+    )
     @classmethod
-    def _agents(
-        cls,
-        value: object,
-    ) -> list[ShellStateAgentSummaryModel]:
-        return cast(
-            list[ShellStateAgentSummaryModel],
-            _validated_model_list(ShellStateAgentSummaryModel, value),
-        )
+    def _optional_string(cls, value: object) -> str | None:
+        return _strip_string(value)
 
-    @field_validator("resources", mode="before")
+    @field_validator("origin", mode="before")
     @classmethod
-    def _resources(
+    def _origin(
+        cls, value: object
+    ) -> Literal["upload", "created"] | None:
+        return value if value in {"upload", "created"} else None
+
+    @field_validator("extension", mode="before")
+    @classmethod
+    def _extension(cls, value: object) -> str:
+        return _strip_string(value) or ""
+
+    @field_validator("local_status", mode="before")
+    @classmethod
+    def _local_status(
+        cls, value: object
+    ) -> Literal["available", "missing"] | None:
+        return value if value in {"available", "missing"} else None
+
+    @field_validator("byte_size", mode="before")
+    @classmethod
+    def _byte_size(cls, value: object) -> int | None:
+        return value if isinstance(value, int) and value >= 0 else None
+
+    @field_validator("current_revision", mode="before")
+    @classmethod
+    def _current_revision(cls, value: object) -> int | None:
+        if value is None:
+            return None
+        if not isinstance(value, int) or value < 1:
+            raise ValueError("current_revision must be >= 1")
+        return value
+
+    @field_validator("preview", mode="before")
+    @classmethod
+    def _preview(
+        cls, value: object
+    ) -> WorkspaceUploadPreviewSummaryModel | None:
+        validated = _validated_model_or_none(WorkspaceUploadPreviewSummaryModel, value)
+        return cast(WorkspaceUploadPreviewSummaryModel | None, validated)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _summary(
+        cls, value: object
+    ) -> WorkspaceCreatedItemSummaryDataModel | None:
+        validated = _validated_model_or_none(WorkspaceCreatedItemSummaryDataModel, value)
+        return cast(WorkspaceCreatedItemSummaryDataModel | None, validated)
+
+
+class WorkspaceStateModel(_MetadataModel):
+    version: Literal["v4"]
+    workspace_id: str
+    workspace_name: str
+    app_id: Literal["agriculture", "documents"]
+    active_chat_id: str | None = None
+    selected_item_id: str | None = None
+    current_report_item_id: str | None = None
+    items: list[WorkspaceItemSummaryModel] = Field(default_factory=list)
+
+    @field_validator("app_id", mode="before")
+    @classmethod
+    def _app_id(cls, value: object) -> Literal["agriculture", "documents"]:
+        text = _strip_string(value)
+        if text not in {"agriculture", "documents"}:
+            raise ValueError("expected app_id to be 'agriculture' or 'documents'")
+        return cast(Literal["agriculture", "documents"], text)
+
+    @field_validator(
+        "workspace_id",
+        "workspace_name",
+        "active_chat_id",
+        "selected_item_id",
+        "current_report_item_id",
+        mode="before",
+    )
+    @classmethod
+    def _required_or_optional_string(cls, value: object, info) -> str | None:
+        text = _strip_string(value)
+        if info.field_name in {
+            "active_chat_id",
+            "selected_item_id",
+            "current_report_item_id",
+        }:
+            return text
+        if text is None:
+            raise ValueError("expected a non-empty string")
+        return text
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _items(
         cls,
         value: object,
-    ) -> list[ShellStateResourceSummaryModel]:
+    ) -> list[WorkspaceItemSummaryModel]:
         return cast(
-            list[ShellStateResourceSummaryModel],
-            _validated_model_list(ShellStateResourceSummaryModel, value),
+            list[WorkspaceItemSummaryModel],
+            _validated_model_list(WorkspaceItemSummaryModel, value),
         )
 
 
@@ -954,7 +979,7 @@ class PendingFeedbackSessionModel(_MetadataModel):
         return value if value in {"positive", "negative"} else None
 
 
-class AppThreadMetadataModel(_MetadataModel):
+class AppChatMetadataModel(_MetadataModel):
     title: str | None = None
     investigation_brief: str | None = None
     plan: AgentPlanModel | None = None
@@ -966,7 +991,7 @@ class AppThreadMetadataModel(_MetadataModel):
     openai_previous_response_id: str | None = None
     usage: ThreadUsageTotalsModel | None = None
     agent_bundle: AgentBundleModel | None = None
-    shell_state: ShellStateModel | None = None
+    workspace_state: WorkspaceStateModel | None = None
     origin: FeedbackOrigin | None = None
     feedback_session: PendingFeedbackSessionModel | None = None
 
@@ -1022,11 +1047,11 @@ class AppThreadMetadataModel(_MetadataModel):
         validated = _validated_model_or_none(AgentBundleModel, value)
         return cast(AgentBundleModel | None, validated)
 
-    @field_validator("shell_state", mode="before")
+    @field_validator("workspace_state", mode="before")
     @classmethod
-    def _shell_state(cls, value: object) -> ShellStateModel | None:
-        validated = _validated_model_or_none(ShellStateModel, value)
-        return cast(ShellStateModel | None, validated)
+    def _workspace_state(cls, value: object) -> WorkspaceStateModel | None:
+        validated = _validated_model_or_none(WorkspaceStateModel, value)
+        return cast(WorkspaceStateModel | None, validated)
 
     @field_validator("feedback_session", mode="before")
     @classmethod
@@ -1043,17 +1068,17 @@ class AppThreadMetadataModel(_MetadataModel):
         return value if value in {"interactive", "ui_integration_test"} else None
 
 
-def parse_thread_metadata(raw_metadata: object | None) -> AppThreadMetadata:
+def parse_chat_metadata(raw_metadata: object | None) -> AppChatMetadata:
     if not isinstance(raw_metadata, dict):
         return {}
-    parsed = AppThreadMetadataModel.model_validate(raw_metadata)
-    return cast(AppThreadMetadata, parsed.model_dump(exclude_none=True))
+    parsed = AppChatMetadataModel.model_validate(raw_metadata)
+    return cast(AppChatMetadata, parsed.model_dump(exclude_none=True))
 
 
-def merge_thread_metadata(
-    current: AppThreadMetadata, patch: ThreadMetadataPatch
-) -> AppThreadMetadata:
-    merged: AppThreadMetadata = {**current}
+def merge_chat_metadata(
+    current: AppChatMetadata, patch: ChatMetadataPatch
+) -> AppChatMetadata:
+    merged: AppChatMetadata = {**current}
     for key, value in patch.items():
         if value is None:
             merged.pop(key, None)

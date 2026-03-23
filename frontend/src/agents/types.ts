@@ -2,8 +2,17 @@ import type { ComponentType } from "react";
 
 import type { ClientEffect } from "../types/analysis";
 import type { JsonSchema } from "../types/json-schema";
-import type { LocalWorkspaceFile } from "../types/report";
-import type { AgentResourceRecord, AgentShellState } from "../types/shell";
+import type { LocalAttachment } from "../types/report";
+import type {
+  ApplyWorkspaceItemOperationPayload,
+  WorkspaceItemCreatePayload,
+  WorkspaceCreatedItemDetail,
+  WorkspaceItemRevision,
+  WorkspaceCreatedItemSummary,
+  WorkspaceUploadItemSummary,
+  WorkspaceState,
+  WorkspaceUpdatePayload,
+} from "../types/workspace";
 
 export type FunctionToolDefinition = {
   type: "function";
@@ -14,27 +23,11 @@ export type FunctionToolDefinition = {
   display?: ToolDisplaySpec;
 };
 
-export type TourPickerDisplayScenario = {
-  scenario_id: string;
-  title: string;
-  summary: string;
-  workspace_name: string;
-  target_agent_id: string;
-  default_asset_count: number;
-};
-
-export type TourPickerDisplaySpec = {
-  title: string;
-  summary: string;
-  scenarios: TourPickerDisplayScenario[];
-};
-
 export type ToolDisplaySpec = {
   label?: string;
   prominent_args?: string[];
   omit_args?: string[];
   arg_labels?: Record<string, string>;
-  tour_picker?: TourPickerDisplaySpec;
 };
 
 export type ComposerToolIcon =
@@ -55,11 +48,6 @@ export type AgentAttachmentConfig = {
 export type ClientToolHandlerContext = {
   emitEffect: (effect: ClientEffect) => void;
   emitEffects: (effects: ClientEffect[]) => void;
-  selectAgent: (agentId: string) => void;
-  replaceAgentResources: (
-    agentId: string,
-    resources: AgentResourceRecord[],
-  ) => void;
 };
 
 export type ClientToolHandler<
@@ -124,22 +112,37 @@ export type AgentDefinition = {
 };
 
 export type AgentRuntimeContext = {
+  workspaceId: string;
+  workspaceName: string;
   agentId?: string;
   agentTitle?: string;
   activeAgentId: string;
-  getAgentState: (agentId?: string) => AgentShellState;
-  updateAgentState: (
-    agentId: string | undefined,
-    updater: (state: AgentShellState) => AgentShellState,
-  ) => void;
-  replaceAgentResources: (
-    agentId: string | undefined,
-    resources: AgentResourceRecord[],
-  ) => void;
-  listAgentResources: (agentId?: string) => AgentResourceRecord[];
-  listSharedResources: () => AgentResourceRecord[];
-  resolveResource: (resourceId: string) => AgentResourceRecord | null;
-  selectAgent: (agentId: string) => void;
+  selectedFileId?: string | null;
+  selectedArtifactId?: string | null;
+  currentReportArtifactId?: string | null;
+  listFiles: () => WorkspaceUploadItemSummary[];
+  getFile: (fileId: string) => WorkspaceUploadItemSummary | null;
+  resolveLocalFile: (fileId: string) => Promise<LocalAttachment | null>;
+  registerFile: (
+    file: LocalAttachment,
+    options?: {
+      sourceItemId?: string | null;
+    },
+  ) => Promise<WorkspaceUploadItemSummary>;
+  removeFile: (fileId: string) => Promise<void>;
+  listArtifacts: () => WorkspaceCreatedItemSummary[];
+  getArtifact: (artifactId: string) => Promise<WorkspaceCreatedItemDetail | null>;
+  listArtifactRevisions: (
+    artifactId: string,
+  ) => Promise<WorkspaceItemRevision[]>;
+  createArtifact: (
+    payload: WorkspaceItemCreatePayload,
+  ) => Promise<WorkspaceCreatedItemDetail>;
+  applyArtifactOperation: (
+    artifactId: string,
+    payload: ApplyWorkspaceItemOperationPayload,
+  ) => Promise<WorkspaceCreatedItemDetail>;
+  updateWorkspace: (payload: WorkspaceUpdatePayload) => Promise<WorkspaceState | null>;
 };
 
 export type AgentModule = {

@@ -25,7 +25,7 @@ export type ReportSlidePanelType = (typeof REPORT_SLIDE_PANEL_TYPE_VALUES)[numbe
 
 export type WorkspaceAppStateV1 = {
   version: WorkspaceContractVersion;
-  active_agent_id: string | null;
+  app_id: string | null;
   active_workspace_tab: string | null;
   current_report_id: string | null;
   current_goal: string | null;
@@ -190,7 +190,7 @@ export function buildDefaultWorkspaceAppState(
 ): WorkspaceAppStateV1 {
   return {
     version: WORKSPACE_CONTRACT_VERSION,
-    active_agent_id: defaults.active_agent_id ?? null,
+    app_id: defaults.app_id ?? null,
     active_workspace_tab: defaults.active_workspace_tab ?? null,
     current_report_id: defaults.current_report_id ?? null,
     current_goal: defaults.current_goal ?? null,

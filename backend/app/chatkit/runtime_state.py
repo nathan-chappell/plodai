@@ -14,76 +14,66 @@ from backend.app.agents.workspace_file import (
     WorkspaceFileMetadata,
 )
 from backend.app.chatkit.metadata import (
-    AppThreadMetadata,
-    ShellState,
-    ShellStateResourceSummary,
-    ThreadMetadataPatch,
-    merge_thread_metadata,
-    parse_thread_metadata,
+    AppChatMetadata,
+    ChatMetadataPatch,
+    WorkspaceItemSummary,
+    WorkspaceState,
+    merge_chat_metadata,
+    parse_chat_metadata,
 )
 from chatkit.types import ThreadMetadata
 
 
 @dataclass(kw_only=True)
 class ResolvedThreadRuntimeState:
-    metadata: AppThreadMetadata
+    metadata: AppChatMetadata
     available_files: list[WorkspaceFileMetadata]
     query_plan_model: type[BaseModel]
 
-def _workspace_file_from_shell_resource(
-    resource_summary: ShellStateResourceSummary,
+def _workspace_file_from_workspace_entry(
+    item_summary: WorkspaceItemSummary,
 ) -> WorkspaceFileMetadata | None:
-    resource_kind = resource_summary["kind"]
-    if resource_kind == "report":
+    if item_summary.get("origin") != "upload":
         return None
-
-    extension = (resource_summary.get("extension") or "").lower()
-    mime_type = resource_summary.get("mime_type")
-    if resource_kind == "dataset":
-        kind = "json" if extension == "json" else "csv"
-    elif resource_kind == "document":
-        kind = "pdf" if extension == "pdf" or mime_type == "application/pdf" else "other"
-    elif resource_kind == "image":
-        kind = "image"
-    else:
-        kind = "other"
+    kind = item_summary["kind"]
+    preview = item_summary.get("preview") or {}
 
     return WorkspaceFileMetadata(
-        id=resource_summary["id"],
-        name=resource_summary["title"],
+        id=item_summary["id"],
+        name=item_summary["name"],
         kind=kind,
-        extension=resource_summary.get("extension") or "",
-        mime_type=mime_type,
-        byte_size=resource_summary.get("byte_size"),
+        extension=item_summary.get("extension") or "",
+        mime_type=item_summary.get("mime_type"),
+        byte_size=item_summary.get("byte_size"),
         csv=(
             CsvWorkspaceMetadata(
-                row_count=resource_summary.get("row_count") or 0,
-                columns=list(resource_summary.get("columns", [])),
-                numeric_columns=list(resource_summary.get("numeric_columns", [])),
-                sample_rows=list(resource_summary.get("sample_rows", [])),
+                row_count=preview.get("row_count") or 0,
+                columns=list(preview.get("columns", [])),
+                numeric_columns=list(preview.get("numeric_columns", [])),
+                sample_rows=list(preview.get("sample_rows", [])),
             )
             if kind == "csv"
             else None
         ),
         json=(
             JsonWorkspaceMetadata(
-                row_count=resource_summary.get("row_count") or 0,
-                columns=list(resource_summary.get("columns", [])),
-                numeric_columns=list(resource_summary.get("numeric_columns", [])),
-                sample_rows=list(resource_summary.get("sample_rows", [])),
+                row_count=preview.get("row_count") or 0,
+                columns=list(preview.get("columns", [])),
+                numeric_columns=list(preview.get("numeric_columns", [])),
+                sample_rows=list(preview.get("sample_rows", [])),
             )
             if kind == "json"
             else None
         ),
         pdf=(
-            PdfWorkspaceMetadata(page_count=resource_summary.get("page_count"))
+            PdfWorkspaceMetadata(page_count=preview.get("page_count"))
             if kind == "pdf"
             else None
         ),
         image=(
             ImageWorkspaceMetadata(
-                width=resource_summary.get("width"),
-                height=resource_summary.get("height"),
+                width=preview.get("width"),
+                height=preview.get("height"),
             )
             if kind == "image"
             else None
@@ -91,14 +81,14 @@ def _workspace_file_from_shell_resource(
     )
 
 
-def workspace_files_from_shell_state(
-    shell_state: ShellState | None,
+def workspace_files_from_workspace_state(
+    workspace_state: WorkspaceState | None,
 ) -> list[WorkspaceFileMetadata]:
-    if shell_state is None:
+    if workspace_state is None:
         return []
     files: list[WorkspaceFileMetadata] = []
-    for resource_summary in shell_state.get("resources", []):
-        file_metadata = _workspace_file_from_shell_resource(resource_summary)
+    for item_summary in workspace_state.get("items", []):
+        file_metadata = _workspace_file_from_workspace_entry(item_summary)
         if file_metadata is not None:
             files.append(file_metadata)
     return files
@@ -106,10 +96,10 @@ def workspace_files_from_shell_state(
 
 def build_runtime_metadata_patch(
     *,
-    current_metadata: AppThreadMetadata,
-    request_metadata: AppThreadMetadata,
-) -> ThreadMetadataPatch:
-    patch: ThreadMetadataPatch = {}
+    current_metadata: AppChatMetadata,
+    request_metadata: AppChatMetadata,
+) -> ChatMetadataPatch:
+    patch: ChatMetadataPatch = {}
 
     request_surface_key = request_metadata.get("surface_key")
     if (
@@ -125,12 +115,12 @@ def build_runtime_metadata_patch(
     ):
         patch["agent_bundle"] = request_bundle
 
-    request_shell_state = request_metadata.get("shell_state")
+    request_workspace_state = request_metadata.get("workspace_state")
     if (
-        request_shell_state is not None
-        and current_metadata.get("shell_state") != request_shell_state
+        request_workspace_state is not None
+        and current_metadata.get("workspace_state") != request_workspace_state
     ):
-        patch["shell_state"] = request_shell_state
+        patch["workspace_state"] = request_workspace_state
 
     request_origin = request_metadata.get("origin")
     if request_origin and current_metadata.get("origin") != request_origin:
@@ -144,14 +134,14 @@ def resolve_thread_runtime_state(
     thread: ThreadMetadata,
     context: ReportAgentContext,
 ) -> ResolvedThreadRuntimeState:
-    current_metadata = parse_thread_metadata(thread.metadata)
-    request_metadata = parse_thread_metadata(context.request_metadata)
+    current_metadata = parse_chat_metadata(thread.metadata)
+    request_metadata = parse_chat_metadata(context.request_metadata)
     runtime_patch = build_runtime_metadata_patch(
         current_metadata=current_metadata,
         request_metadata=request_metadata,
     )
     metadata = (
-        merge_thread_metadata(current_metadata, runtime_patch)
+        merge_chat_metadata(current_metadata, runtime_patch)
         if runtime_patch
         else current_metadata
     )
@@ -159,8 +149,24 @@ def resolve_thread_runtime_state(
     context.report_id = thread.id
     context.thread_metadata = metadata
     context.chart_cache = dict(metadata.get("chart_cache") or {})
-    context.available_files = workspace_files_from_shell_state(
-        metadata.get("shell_state")
+    workspace_state = metadata.get("workspace_state")
+    context.workspace_id = (
+        workspace_state.get("workspace_id")
+        if workspace_state is not None
+        else None
+    )
+    context.workspace_name = (
+        workspace_state.get("workspace_name")
+        if workspace_state is not None
+        else None
+    )
+    context.available_artifacts = [
+        item
+        for item in (workspace_state.get("items", []) if workspace_state is not None else [])
+        if item.get("origin") == "created"
+    ]
+    context.available_files = workspace_files_from_workspace_state(
+        workspace_state
     )
     context.agent_bundle = metadata.get("agent_bundle")
     query_plan_model, _ = build_query_plan_model(context.available_datasets)

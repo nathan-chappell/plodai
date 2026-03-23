@@ -1,7 +1,7 @@
 import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from "react";
 
 import { AppStateProvider } from "./app/context";
-import { WorkspaceProvider, useAgentShell } from "./app/workspace";
+import { WorkspaceProvider } from "./app/workspace";
 import { useAppRouteGuards, useAppSessionState, useToastState } from "./app/hooks";
 import {
   AppEmptyMetaText,
@@ -17,6 +17,7 @@ import { SignInPage } from "./components/SignInPage";
 import { allAgentDefinitions } from "./agents/definitions";
 import { navigate, usePathname } from "./lib/router";
 import { isWritingPath } from "./lib/writing";
+import type { WorkspaceAppId } from "./types/workspace";
 
 type AgentPageProps = Record<string, never>;
 
@@ -27,9 +28,14 @@ const WritingPage = lazy(async () => {
   return { default: module.WritingPage };
 });
 
-const DefaultAgentPage = lazy(async () => {
-  const module = await import("./agents/defaultAgent");
-  return { default: module.DefaultAgentPage };
+const AgricultureAgentPage = lazy(async () => {
+  const module = await import("./agents/workspaceApp");
+  return { default: module.AgricultureWorkspacePage };
+});
+
+const DocumentAgentPage = lazy(async () => {
+  const module = await import("./agents/workspaceApp");
+  return { default: module.DocumentWorkspacePage };
 });
 
 const AdminUsersPage = lazy(async () => {
@@ -39,7 +45,8 @@ const AdminUsersPage = lazy(async () => {
 });
 
 const agentPages: Record<string, LazyExoticComponent<AgentPageComponent>> = {
-  "default-agent": DefaultAgentPage,
+  "agriculture-agent": AgricultureAgentPage,
+  "document-agent": DocumentAgentPage,
   "admin-users": AdminUsersPage,
 };
 
@@ -62,10 +69,17 @@ function filterAgents(role: "admin" | "user") {
 
 function resolveVisibleAgent(pathname: string, role: "admin" | "user") {
   const agents = filterAgents(role);
-  if (pathname === "/workspace" || pathname.startsWith("/workspace/")) {
-    return agents.find((agent) => agent.id === "default-agent") ?? null;
-  }
   return agents.find((agent) => agent.path === pathname) ?? null;
+}
+
+function workspaceAppIdForAgent(agentId: string | null): WorkspaceAppId | null {
+  if (agentId === "agriculture-agent") {
+    return "agriculture";
+  }
+  if (agentId === "document-agent") {
+    return "documents";
+  }
+  return null;
 }
 
 function WorkspaceShellFrame({
@@ -77,17 +91,11 @@ function WorkspaceShellFrame({
   activeAgent: ReturnType<typeof resolveVisibleAgent>;
   ActiveAgentPage: LazyExoticComponent<AgentPageComponent> | null;
 }) {
-  const { selectedAgentId } = useAgentShell();
-  const themeAgentId =
-    activeAgent?.id === "default-agent"
-      ? selectedAgentId
-      : activeAgent?.id ?? null;
-
   return (
     <PlatformShell
       agents={agents}
       activeAgentId={activeAgent?.id ?? null}
-      themeAgentId={themeAgentId}
+      themeAgentId={activeAgent?.id ?? null}
       onSelectAgent={navigate}
     >
       {!activeAgent ? (
@@ -157,10 +165,11 @@ export function App() {
 
   const agents = filterAgents(currentUser.role);
   const activeAgent = resolveVisibleAgent(pathname, currentUser.role);
+  const activeWorkspaceAppId = workspaceAppIdForAgent(activeAgent?.id ?? null);
   const ActiveAgentPage = activeAgent ? agentPages[activeAgent.id] : null;
   return (
     <AppStateProvider value={{ authError, setAuthError, user: currentUser, setUser }}>
-      <WorkspaceProvider>
+      <WorkspaceProvider appId={activeWorkspaceAppId}>
         <WorkspaceShellFrame
           agents={agents}
           activeAgent={activeAgent}

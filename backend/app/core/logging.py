@@ -316,12 +316,6 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"{APP_LOGGER_NAME}.{suffix}")
 
 
-def response_logs_url(response_id: str | None) -> str | None:
-    if not response_id:
-        return None
-    return f"https://platform.openai.com/logs/{response_id}"
-
-
 def log_event(
     logger: logging.Logger,
     level: int,

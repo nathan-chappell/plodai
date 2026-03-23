@@ -16,7 +16,7 @@ from chatkit.types import (
 import backend.app.chatkit.streaming as streaming_module
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.tools import build_agent_tools
-from backend.app.chatkit.metadata import active_plan_execution, parse_thread_metadata
+from backend.app.chatkit.metadata import active_plan_execution, parse_chat_metadata
 from backend.app.chatkit.streaming import stream_agent_response_with_plan_workflow
 
 
@@ -107,8 +107,8 @@ def _make_make_plan_tool():
     )
 
 
-def test_parse_thread_metadata_keeps_plan_execution_and_execution_hints() -> None:
-    metadata = parse_thread_metadata(
+def test_parse_chat_metadata_keeps_plan_execution_and_execution_hints() -> None:
+    metadata = parse_chat_metadata(
         {
             "plan": {
                 "id": "plan_123",
@@ -159,8 +159,8 @@ def test_parse_thread_metadata_keeps_plan_execution_and_execution_hints() -> Non
     }
 
 
-def test_parse_thread_metadata_rejects_extra_fields_in_plan_execution_shapes() -> None:
-    invalid_execution_metadata = parse_thread_metadata(
+def test_parse_chat_metadata_rejects_extra_fields_in_plan_execution_shapes() -> None:
+    invalid_execution_metadata = parse_chat_metadata(
         {
             "plan_execution": {
                 "plan_id": "plan_123",
@@ -173,7 +173,7 @@ def test_parse_thread_metadata_rejects_extra_fields_in_plan_execution_shapes() -
             }
         }
     )
-    invalid_hint_metadata = parse_thread_metadata(
+    invalid_hint_metadata = parse_chat_metadata(
         {
             "plan": {
                 "id": "plan_123",

@@ -7,12 +7,16 @@ from backend.app.chatkit.feedback_types import FeedbackKind, FeedbackOrigin
 from backend.app.db.session import Base
 
 
-class ChatThread(Base):
-    __tablename__ = "chat_threads"
+class WorkspaceChat(Base, kw_only=True):
+    __tablename__ = "workspace_chats"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[str] = mapped_column(Text, index=True)
-    title: Mapped[str | None] = mapped_column(Text, default="New report")
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"),
+        index=True,
+    )
+    title: Mapped[str | None] = mapped_column(Text, default="New chat")
     metadata_json: Mapped[dict] = mapped_column(JSON, default_factory=dict)
     status_json: Mapped[dict] = mapped_column(
         JSON, default_factory=lambda: {"type": "active"}
@@ -32,18 +36,18 @@ class ChatThread(Base):
         default_factory=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-    items: Mapped[list["ChatItem"]] = relationship(
-        back_populates="thread",
+    entries: Mapped[list["WorkspaceChatEntry"]] = relationship(
+        back_populates="chat",
         default_factory=list,
         cascade="all, delete-orphan",
     )
 
 
-class ChatItem(Base):
-    __tablename__ = "chat_items"
+class WorkspaceChatEntry(Base, kw_only=True):
+    __tablename__ = "workspace_chat_entries"
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    chat_id: Mapped[str] = mapped_column(ForeignKey("workspace_chats.id"), index=True)
     kind: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSON, default_factory=dict)
     sequence: Mapped[int] = mapped_column(Integer, index=True, default=0)
@@ -52,11 +56,11 @@ class ChatItem(Base):
         init=False,
         default_factory=lambda: datetime.now(UTC),
     )
-    thread: Mapped[ChatThread] = relationship(back_populates="items", init=False)
+    chat: Mapped[WorkspaceChat] = relationship(back_populates="entries", init=False)
 
 
-class ChatAttachment(Base):
-    __tablename__ = "chat_attachments"
+class WorkspaceWorkspaceChatAttachment(Base, kw_only=True):
+    __tablename__ = "workspace_chat_attachments"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(Text)
@@ -68,11 +72,11 @@ class ChatAttachment(Base):
     )
 
 
-class ChatItemFeedback(Base):
-    __tablename__ = "chat_item_feedback"
+class WorkspaceChatFeedback(Base, kw_only=True):
+    __tablename__ = "workspace_chat_feedback"
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    chat_id: Mapped[str] = mapped_column(ForeignKey("workspace_chats.id"), index=True)
     item_ids_json: Mapped[list[str]] = mapped_column(JSON, default_factory=list)
     user_email: Mapped[str | None] = mapped_column(Text, index=True, default=None)
     kind: Mapped[FeedbackKind | None] = mapped_column(Text, default=None)

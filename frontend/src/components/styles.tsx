@@ -708,10 +708,8 @@ export const PlatformSidebar = styled.aside`
 export const PlatformMain = styled.div`
   min-width: 0;
   min-height: 0;
-  height: 100vh;
-  height: 100dvh;
-  max-height: 100vh;
-  max-height: 100dvh;
+  height: 100%;
+  max-height: 100%;
   overflow: auto;
   ${gridStackCss("0.7rem")};
   align-content: stretch;
