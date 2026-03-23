@@ -47,6 +47,33 @@ function buildReport(slideCount = 1): WorkspaceReportV1 {
   };
 }
 
+function buildImagePanelReport(): WorkspaceReportV1 {
+  return {
+    version: "v1",
+    report_id: "report-images",
+    title: "Crop watch",
+    created_at: "2026-03-20T09:00:00.000Z",
+    updated_at: "2026-03-20T10:05:00.000Z",
+    slides: [
+      {
+        id: "slide-image-1",
+        created_at: "2026-03-20T10:00:00.000Z",
+        title: "Visible evidence",
+        layout: "1x1",
+        panels: [
+          {
+            id: "panel-image-1",
+            type: "image",
+            title: "Leaf spotting",
+            file_id: "thread-photo-1",
+            alt_text: "Leaf spotting",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function buildReportArtifact(slideCount = 1): {
   summary: WorkspaceCreatedItemSummary;
   detail: WorkspaceCreatedItemDetail;
@@ -237,7 +264,8 @@ describe("AgentPreviewPane", () => {
       container.querySelector("[data-testid='agriculture-preview-watermark']"),
     ).not.toBeNull();
     expect(container.textContent).toContain("Awaiting plant photos");
-    expect(container.textContent).toContain("Add plant photos from the chat composer");
+    expect(container.textContent).toContain("Add plant photos in chat");
+    expect(container.textContent).toContain("saved farm records, reports, and other model-created artifacts");
   });
 
   it("does not render the agriculture watermark for document previews", async () => {
@@ -349,5 +377,59 @@ describe("AgentPreviewPane", () => {
     expect(container.textContent).toContain("Honeycrisp apples");
     expect(container.textContent).toContain("Leaf curl in row 3");
     expect(container.textContent).toContain("Irrigation refresh");
+  });
+
+  it("resolves report image panels from supplemental agriculture files", async () => {
+    const report = buildImagePanelReport();
+    const artifact: WorkspaceCreatedItemDetail = {
+      origin: "created",
+      id: report.report_id,
+      workspace_id: "workspace-default",
+      kind: "report.v1",
+      schema_version: "v1",
+      title: report.title,
+      current_revision: 1,
+      created_by_user_id: "user_123",
+      created_by_agent_id: "agriculture-agent",
+      last_edited_by_agent_id: "agriculture-agent",
+      summary: {
+        slide_count: report.slides.length,
+      },
+      latest_op: "report.append_slide",
+      created_at: report.created_at,
+      updated_at: report.updated_at,
+      payload: report,
+    };
+
+    await act(async () => {
+      root.render(
+        <AgentPreviewPane
+          appId="agriculture"
+          files={[]}
+          artifacts={[artifact as WorkspaceCreatedItemSummary]}
+          resolveLocalFile={async () => null}
+          resolveSupplementalLocalFile={async (fileId) =>
+            fileId === "thread-photo-1"
+              ? {
+                  id: "thread-photo-1",
+                  name: "orchard.jpeg",
+                  kind: "image",
+                  extension: "jpeg",
+                  mime_type: "image/jpeg",
+                  width: 1536,
+                  height: 2048,
+                  bytes_base64: "Zm9v",
+                  byte_size: 1_572_864,
+                }
+              : null
+          }
+          getArtifact={async () => artifact}
+          selectedItem={{ kind: "artifact", id: artifact.id }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector("img[alt='Leaf spotting']")).not.toBeNull();
   });
 });

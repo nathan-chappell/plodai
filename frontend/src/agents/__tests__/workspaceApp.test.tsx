@@ -59,9 +59,10 @@ describe("workspace app browsers", () => {
           onCreateWorkspace={() => undefined}
           onSelectWorkspace={() => undefined}
           onSelectItem={() => undefined}
-          emptyUploadsMessage="Add plant photos from the chat composer to populate this workspace."
+          emptyUploadsMessage="Model-created artifacts like farm records, reports, and charts appear here."
           files={[]}
           selectedItem={null}
+          showFiles={false}
         />,
       );
     });
@@ -78,13 +79,13 @@ describe("workspace app browsers", () => {
     ).toBeNull();
     expect(
       container.querySelector("[data-testid='workspace-inventory-summary']")?.textContent,
-    ).toContain("Stuff");
+    ).toContain("Artifacts");
     expect(container.textContent).toContain(
-      "Add plant photos from the chat composer to populate this workspace.",
+      "Model-created artifacts like farm records, reports, and charts appear here.",
     );
   });
 
-  it("keeps the document upload controls available", async () => {
+  it("keeps the document agent-access upload controls available", async () => {
     await act(async () => {
       root.render(
         <DocumentBrowserPanel
@@ -110,6 +111,6 @@ describe("workspace app browsers", () => {
       );
     });
 
-    expect(container.textContent).toContain("Upload documents");
+    expect(container.textContent).toContain("Attach for agent access");
   });
 });

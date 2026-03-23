@@ -1,7 +1,10 @@
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.core.auth import (
     AuthenticatedUser,
     require_admin_user,
@@ -32,7 +35,6 @@ from backend.app.schemas.stored_file import (
     ChatAttachmentUploadResponse,
     DeleteDocumentFileResponse,
     DocumentFileListResponse,
-    DocumentUrlImportRequest,
 )
 from backend.app.services.agriculture_entity_service import AgricultureEntityService
 from backend.app.services.stored_file_service import StoredFileService
@@ -313,6 +315,9 @@ async def upload_chatkit_attachment(
     workspace_id: str = Form(...),
     app_id: WorkspaceAppId = Form(...),
     scope: str = Form("chat_attachment"),
+    source_kind: str | None = Form(default=None),
+    parent_file_id: str | None = Form(default=None),
+    preview_json: str | None = Form(default=None),
     attachment_id: str | None = Form(default=None),
     thread_id: str | None = Form(default=None),
     create_attachment: bool = Form(default=True),
@@ -324,6 +329,15 @@ async def upload_chatkit_attachment(
         raise HTTPException(status_code=400, detail="Unsupported file scope.")
     if attachment_id is None and create_attachment:
         raise HTTPException(status_code=400, detail="attachment_id is required.")
+    parsed_preview_json: dict[str, object] | None = None
+    if preview_json:
+        try:
+            decoded_preview = json.loads(preview_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="preview_json must be valid JSON.") from exc
+        if not isinstance(decoded_preview, dict):
+            raise HTTPException(status_code=400, detail="preview_json must be a JSON object.")
+        parsed_preview_json = decoded_preview
     file_bytes = await file.read()
     return await StoredFileService(db).create_chat_attachment_upload(
         user_id=user.id,
@@ -336,7 +350,59 @@ async def upload_chatkit_attachment(
         scope=scope,  # type: ignore[arg-type]
         thread_id=thread_id,
         create_attachment=create_attachment,
+        source_kind=source_kind,  # type: ignore[arg-type]
+        parent_file_id=parent_file_id,
+        preview_json=parsed_preview_json,
         public_base_url=str(request.base_url).rstrip("/"),
+    )
+
+
+@router.post("/chatkit/attachments/{attachment_id}/content")
+async def complete_chatkit_attachment_upload(
+    attachment_id: str,
+    request: Request,
+    token: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+):
+    file_bytes = await request.body()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Attachment upload body is required.")
+
+    store = DatabaseMemoryStore(db)
+    pending_upload = await store.resolve_pending_attachment_upload(
+        attachment_id=attachment_id,
+        token=token,
+    )
+    if pending_upload.is_completed:
+        return Response(
+            content=pending_upload.attachment.model_dump_json(exclude_none=True),
+            media_type="application/json",
+        )
+    if len(file_bytes) != pending_upload.declared_size:
+        raise HTTPException(
+            status_code=400,
+            detail="Attachment upload size did not match the initialized file metadata.",
+        )
+
+    response = await StoredFileService(db).create_chat_attachment_upload(
+        user_id=pending_upload.user_id,
+        workspace_id=pending_upload.workspace_id,
+        app_id=pending_upload.app_id,  # type: ignore[arg-type]
+        file_name=pending_upload.attachment.name,
+        mime_type=pending_upload.attachment.mime_type,
+        file_bytes=file_bytes,
+        attachment_id=attachment_id,
+        scope="chat_attachment",
+        thread_id=pending_upload.attachment.thread_id,
+        create_attachment=True,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+    if response.attachment is None:
+        raise HTTPException(status_code=500, detail="Attachment upload did not finalize.")
+
+    return Response(
+        content=response.attachment.model_dump_json(exclude_none=True),
+        media_type="application/json",
     )
 
 
@@ -353,25 +419,6 @@ async def delete_chatkit_attachment(
         user_id=user.id,
         attachment_id=attachment_id,
     )
-
-
-@router.post(
-    "/document-threads/import-url",
-    response_model=ChatAttachmentUploadResponse,
-)
-async def import_document_url(
-    payload: DocumentUrlImportRequest,
-    user: AuthenticatedUser = Depends(require_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    return await StoredFileService(db).import_document_url(
-        user_id=user.id,
-        workspace_id=payload.workspace_id,
-        thread_id=payload.thread_id,
-        url=payload.url,
-        headers=payload.headers,
-    )
-
 
 @router.get(
     "/document-threads/{thread_id}/files",

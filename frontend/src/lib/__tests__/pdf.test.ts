@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 
 import { setBase64CodecForTests } from "../base64";
 import {
+  appendDatasetAppendixToPdfBytes,
   base64ToUint8Array,
   buildSmartSplitPlan,
   buildSubPdfFilename,
   extractPdfPageRangeFromBytes,
+  fillDocumentFormInPdfBytes,
+  inspectDocumentPdfBytes,
   inspectPdfBytes,
+  replaceDocumentTextInPdfBytes,
   smartSplitPdfBytes,
   uint8ArrayToBase64,
 } from "../pdf";
@@ -20,6 +24,63 @@ async function buildPdf(pageCount: number): Promise<Uint8Array> {
   return document.save();
 }
 
+async function buildTextPdf(text: string): Promise<Uint8Array> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([400, 400]);
+  page.drawText(text, {
+    x: 48,
+    y: 320,
+    size: 14,
+    font,
+  });
+  return document.save();
+}
+
+async function buildDocumentFormPdf(): Promise<Uint8Array> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([420, 420]);
+  page.drawText("Quarterly Summary", {
+    x: 48,
+    y: 360,
+    size: 18,
+    font,
+  });
+  page.drawText("Revenue rose 12 percent year over year.", {
+    x: 48,
+    y: 330,
+    size: 12,
+    font,
+  });
+
+  const form = document.getForm();
+  const nameField = form.createTextField("customer_name");
+  nameField.addToPage(page, {
+    x: 48,
+    y: 250,
+    width: 180,
+    height: 24,
+  });
+  const approvedField = form.createCheckBox("approved");
+  approvedField.addToPage(page, {
+    x: 48,
+    y: 210,
+    width: 20,
+    height: 20,
+  });
+  const departmentField = form.createDropdown("department");
+  departmentField.setOptions(["Sales", "Support"]);
+  departmentField.addToPage(page, {
+    x: 48,
+    y: 170,
+    width: 180,
+    height: 24,
+  });
+
+  return document.save();
+}
+
 describe("pdf helpers", () => {
   afterEach(() => {
     setBase64CodecForTests(null);
@@ -28,6 +89,33 @@ describe("pdf helpers", () => {
   it("inspects page counts", async () => {
     const bytes = await buildPdf(4);
     await expect(inspectPdfBytes(bytes)).resolves.toMatchObject({ pageCount: 4 });
+  });
+
+  it("inspects document text locators, form fields, and page summaries", async () => {
+    const bytes = await buildDocumentFormPdf();
+
+    const inspection = await inspectDocumentPdfBytes(bytes, { maxPages: 1 });
+
+    expect(inspection.pageCount).toBe(1);
+    expect(inspection.pageSummaries).toEqual([
+      expect.objectContaining({
+        page_number: 1,
+      }),
+    ]);
+    expect(
+      inspection.pageSummaries[0]?.summary,
+    ).toContain("Quarterly Summary");
+    expect(
+      inspection.locators.some(
+        (locator) =>
+          locator.kind === "text" &&
+          (locator.label.includes("Quarterly Summary") ||
+            locator.text_preview?.includes("Revenue rose")),
+      ),
+    ).toBe(true);
+    expect(
+      inspection.locators.filter((locator) => locator.kind === "form_field").map((locator) => locator.label),
+    ).toEqual(expect.arrayContaining(["customer_name", "approved", "department"]));
   });
 
   it("routes base64 conversion through the injected codec override", () => {
@@ -96,6 +184,71 @@ describe("pdf helpers", () => {
         pageCount: 2,
       },
     });
+  });
+
+  it("replaces a direct text locator without falling back to overlay mode", async () => {
+    const bytes = await buildTextPdf("Original copy");
+    const inspection = await inspectDocumentPdfBytes(bytes);
+    const locator = Object.values(inspection.textLocators).find((entry) =>
+      entry.text.includes("Original copy"),
+    );
+
+    expect(locator).toBeTruthy();
+
+    const replaced = await replaceDocumentTextInPdfBytes(bytes, inspection, {
+      locatorId: locator!.id,
+      replacementText: "New copy",
+    });
+
+    expect(replaced.strategyUsed).toBe("direct_replace");
+    const updatedInspection = await inspectDocumentPdfBytes(replaced.pdfBytes);
+    expect(
+      Object.values(updatedInspection.textLocators).some((entry) =>
+        entry.text.includes("New copy"),
+      ),
+    ).toBe(true);
+  });
+
+  it("fills supported form fields and reports unresolved ones", async () => {
+    const bytes = await buildDocumentFormPdf();
+    const inspection = await inspectDocumentPdfBytes(bytes);
+    const nameLocator = inspection.locators.find((locator) => locator.label === "customer_name");
+    const approvedLocator = inspection.locators.find((locator) => locator.label === "approved");
+    const departmentLocator = inspection.locators.find((locator) => locator.label === "department");
+
+    expect(nameLocator).toBeTruthy();
+    expect(approvedLocator).toBeTruthy();
+    expect(departmentLocator).toBeTruthy();
+
+    const filled = await fillDocumentFormInPdfBytes(bytes, inspection, [
+      { locator_id: nameLocator!.id, value: "Ada Lovelace" },
+      { locator_id: approvedLocator!.id, value: "yes" },
+      { locator_id: departmentLocator!.id, value: "Unknown" },
+    ]);
+
+    expect(filled.resolvedCount).toBe(2);
+    expect(filled.unresolvedLocatorIds).toEqual([departmentLocator!.id]);
+
+    const loaded = await PDFDocument.load(filled.pdfBytes);
+    const form = loaded.getForm();
+    expect(form.getTextField("customer_name").getText()).toBe("Ada Lovelace");
+    expect(form.getCheckBox("approved").isChecked()).toBe(true);
+  });
+
+  it("appends a dataset appendix as new PDF pages", async () => {
+    const bytes = await buildPdf(1);
+    const appended = await appendDatasetAppendixToPdfBytes(bytes, {
+      title: "Revenue appendix",
+      renderAs: "table",
+      rows: [
+        { region: "West", revenue: 12 },
+        { region: "East", revenue: 9 },
+      ],
+    });
+
+    const loaded = await PDFDocument.load(appended.pdfBytes);
+    expect(loaded.getPageCount()).toBeGreaterThan(1);
+    expect(appended.warning).toBeUndefined();
   });
 
   it("prefers section boundaries when the PDF clearly exposes them", () => {

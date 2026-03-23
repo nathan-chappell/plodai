@@ -9,14 +9,11 @@ import mimetypes
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from email.message import Message
 from io import BytesIO, StringIO
 from pathlib import PurePosixPath
 from typing import Literal
-from urllib.parse import urlparse
 from uuid import uuid4
 
-import httpx
 from chatkit.types import FileAttachment, ImageAttachment
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI
@@ -34,9 +31,8 @@ from backend.app.schemas.stored_file import (
     ChatAttachmentUploadResponse,
     DatasetStoredFilePreview,
     DeleteDocumentFileResponse,
-    DocumentFileListResponse,
     DocumentFileSummary,
-    DocumentImportHeader,
+    DocumentFileListResponse,
     EmptyStoredFilePreview,
     ImageStoredFilePreview,
     PdfStoredFilePreview,
@@ -87,6 +83,9 @@ class StoredFileService:
         scope: StoredFileScope,
         thread_id: str | None,
         create_attachment: bool,
+        source_kind: StoredFileSourceKind | None = None,
+        parent_file_id: str | None = None,
+        preview_json: dict[str, object] | None = None,
         public_base_url: str | None = None,
     ) -> ChatAttachmentUploadResponse:
         workspace = await self._get_workspace(
@@ -108,6 +107,12 @@ class StoredFileService:
                 workspace=workspace,
                 thread_id=thread_id,
             )
+        resolved_source_kind = source_kind or "upload"
+        if resolved_source_kind not in {"upload", "url_import", "derived"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported source_kind.",
+            )
 
         stored_file = await self._upload_file_bytes(
             user_id=user_id,
@@ -116,11 +121,12 @@ class StoredFileService:
             thread_id=ensured_thread_id,
             attachment_id=attachment_id if create_attachment else None,
             scope=scope,
-            source_kind="upload",
-            parent_file_id=None,
+            source_kind=resolved_source_kind,
+            parent_file_id=parent_file_id,
             file_name=file_name,
             mime_type=mime_type,
             file_bytes=file_bytes,
+            preview_json=preview_json,
         )
         serialized_attachment: SerializedChatAttachment | None = None
         if create_attachment:
@@ -144,48 +150,6 @@ class StoredFileService:
         return ChatAttachmentUploadResponse(
             attachment=serialized_attachment,
             stored_file=self.serialize_stored_file(stored_file),
-            thread_id=ensured_thread_id,
-        )
-
-    async def import_document_url(
-        self,
-        *,
-        user_id: str,
-        workspace_id: str,
-        thread_id: str | None,
-        url: str,
-        headers: list[DocumentImportHeader],
-    ) -> ChatAttachmentUploadResponse:
-        workspace = await self._get_workspace(
-            user_id=user_id,
-            workspace_id=workspace_id,
-            app_id="documents",
-        )
-        ensured_thread_id = await self.ensure_document_thread_id(
-            user_id=user_id,
-            workspace=workspace,
-            thread_id=thread_id,
-        )
-        file_name, mime_type, file_bytes = await self._download_document_url(
-            url=url,
-            headers=headers,
-        )
-        stored_file = await self._upload_file_bytes(
-            user_id=user_id,
-            app_id=workspace.app_id,
-            workspace_id=workspace.id,
-            thread_id=ensured_thread_id,
-            attachment_id=None,
-            scope="document_thread_file",
-            source_kind="url_import",
-            parent_file_id=None,
-            file_name=file_name,
-            mime_type=mime_type,
-            file_bytes=file_bytes,
-        )
-        return ChatAttachmentUploadResponse(
-            attachment=None,
-            stored_file=self.serialize_document_file(stored_file),
             thread_id=ensured_thread_id,
         )
 
@@ -436,6 +400,7 @@ class StoredFileService:
         file_name: str,
         mime_type: str | None,
         file_bytes: bytes,
+        preview_json: dict[str, object] | None = None,
     ) -> StoredOpenAIFile:
         resolved_mime_type = mime_type or mimetypes.guess_type(file_name)[0]
         extension = _extension_for_name(file_name)
@@ -459,6 +424,7 @@ class StoredFileService:
             kind=kind,
             mime_type=resolved_mime_type,
             file_bytes=file_bytes,
+            preview_json=preview_json,
         )
         uploaded_file = await self.openai_client.files.create(
             file=(
@@ -512,50 +478,6 @@ class StoredFileService:
             ),
         )
         return record
-
-    async def _download_document_url(
-        self,
-        *,
-        url: str,
-        headers: list[DocumentImportHeader],
-    ) -> tuple[str, str | None, bytes]:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only http and https URLs are supported.",
-            )
-
-        request_headers = {
-            header.name.strip(): header.value
-            for header in headers
-            if header.name.strip()
-        }
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=httpx.Timeout(30.0, connect=10.0),
-        ) as client:
-            response = await client.get(url, headers=request_headers)
-        if response.status_code >= 400:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to download the provided document URL.",
-            )
-        file_bytes = response.content
-        if len(file_bytes) > self.settings.document_thread_max_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail="The downloaded document exceeds the document upload size limit.",
-            )
-        content_type = response.headers.get("content-type")
-        file_name = _filename_from_response(url, response.headers)
-        kind = _kind_for_file(file_name=file_name, mime_type=content_type)
-        if kind != "pdf":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Document URL imports currently require a PDF.",
-            )
-        return (file_name, content_type, file_bytes)
 
     async def _delete_file_record(
         self,
@@ -613,13 +535,26 @@ class StoredFileService:
         kind: StoredFileKind,
         mime_type: str | None,
         file_bytes: bytes,
+        preview_json: dict[str, object] | None = None,
     ) -> StoredFilePreview:
+        if preview_json is not None:
+            validated_preview = self._preview_from_json(preview_json)
+            preview_kind = validated_preview.kind
+            if preview_kind == "empty":
+                return validated_preview
+            if kind == "pdf" and preview_kind == "pdf":
+                return validated_preview
+            if kind in {"csv", "json"} and preview_kind == "dataset":
+                return validated_preview
+            if kind == "image" and preview_kind == "image":
+                return validated_preview
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="preview_json did not match the uploaded file kind.",
+            )
         del mime_type
         if kind == "pdf":
-            from pypdf import PdfReader
-
-            reader = PdfReader(BytesIO(file_bytes))
-            return PdfStoredFilePreview(page_count=len(reader.pages))
+            return EmptyStoredFilePreview()
         if kind == "image":
             from PIL import Image
 
@@ -811,21 +746,6 @@ def _kind_for_file(
     if mime_type and mime_type.startswith("image/"):
         return "image"
     return "other"
-
-
-def _filename_from_response(url: str, headers: httpx.Headers) -> str:
-    disposition = headers.get("content-disposition")
-    if disposition:
-        message = Message()
-        message["content-disposition"] = disposition
-        filename = message.get_param("filename", header="content-disposition")
-        if isinstance(filename, str) and filename.strip():
-            return PurePosixPath(filename.strip()).name
-    parsed = urlparse(url)
-    candidate = PurePosixPath(parsed.path).name
-    if candidate:
-        return candidate
-    return f"document_{uuid4().hex}.pdf"
 
 
 def _load_dataset_rows(

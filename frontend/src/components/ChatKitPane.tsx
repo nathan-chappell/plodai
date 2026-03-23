@@ -4,13 +4,9 @@ import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-rea
 
 import {
   authenticatedFetch,
-  deleteStoredChatAttachment,
   getChatKitConfig,
-  registerChatKitLocalFiles,
-  setChatKitAttachmentHandler,
   setChatKitMetadataGetter,
   setChatKitNativeFeedbackHandler,
-  uploadStoredFile,
 } from "../lib/api";
 import { getAgentDefinition } from "../agents/definitions";
 import type { AgentAttachmentConfig, AgentBundle, AgentClientTool } from "../agents/types";
@@ -166,89 +162,6 @@ function scrollElementToBottom(element: HTMLElement): void {
   element.scrollTop = element.scrollHeight;
 }
 
-function bindChatKitComposerFileInputs(
-  host: HTMLElement | null,
-  onFiles: (files: File[]) => void,
-): () => void {
-  if (!host || typeof MutationObserver === "undefined") {
-    return () => undefined;
-  }
-
-  const cleanupByInput = new Map<HTMLInputElement, () => void>();
-  let observer: MutationObserver | null = null;
-  let frameId: number | null = null;
-  let attempts = 0;
-
-  const bindInput = (input: HTMLInputElement) => {
-    if (cleanupByInput.has(input)) {
-      return;
-    }
-    const handleChange = (event: Event) => {
-      const files = (event.target as HTMLInputElement | null)?.files;
-      if (!files?.length) {
-        return;
-      }
-      onFiles(Array.from(files));
-    };
-    input.addEventListener("change", handleChange, true);
-    cleanupByInput.set(input, () => {
-      input.removeEventListener("change", handleChange, true);
-    });
-  };
-
-  const scanInputs = (): boolean => {
-    const shadowRoot = host.shadowRoot;
-    if (!shadowRoot) {
-      return false;
-    }
-    shadowRoot.querySelectorAll("input[type='file']").forEach((node) => {
-      if (node instanceof HTMLInputElement) {
-        bindInput(node);
-      }
-    });
-    return true;
-  };
-
-  const startObserving = () => {
-    const shadowRoot = host.shadowRoot;
-    if (!shadowRoot) {
-      return false;
-    }
-    observer = new MutationObserver(() => {
-      scanInputs();
-    });
-    observer.observe(shadowRoot, {
-      childList: true,
-      subtree: true,
-    });
-    return true;
-  };
-
-  const connect = () => {
-    attempts += 1;
-    if (scanInputs()) {
-      startObserving();
-      return;
-    }
-    if (typeof window === "undefined" || attempts >= 24) {
-      return;
-    }
-    frameId = window.requestAnimationFrame(connect);
-  };
-
-  connect();
-
-  return () => {
-    if (frameId !== null && typeof window !== "undefined") {
-      window.cancelAnimationFrame(frameId);
-    }
-    observer?.disconnect();
-    for (const cleanup of cleanupByInput.values()) {
-      cleanup();
-    }
-  };
-}
-
 function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "document" {
   switch (tool) {
     case "list_datasets":
@@ -272,6 +185,13 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
     case "inspect_pdf_file":
     case "get_pdf_page_range":
     case "smart_split_pdf":
+    case "list_document_files":
+    case "inspect_document_file":
+    case "replace_document_text":
+    case "fill_document_form":
+    case "append_document_appendix_from_dataset":
+    case "smart_split_document":
+    case "delete_document_file":
       return "document";
   }
   return "cube";
@@ -350,8 +270,6 @@ export function ChatKitHarness({
   onRunEnd,
   attachmentConfig,
   entitiesConfig,
-  onAddAttachments,
-  onRemoveWorkspaceFile,
 }: {
   agentBundle: AgentBundle;
   files: LocalAttachment[];
@@ -380,14 +298,6 @@ export function ChatKitHarness({
   onRunEnd?: () => void;
   attachmentConfig?: AgentAttachmentConfig;
   entitiesConfig?: ChatKitEntityConfig;
-  onAddAttachments?: (
-    files: FileList | Iterable<File> | null | undefined,
-    options?: {
-      workspaceFileId?: string;
-      sourceItemId?: string | null;
-    },
-  ) => Promise<LocalAttachment[]>;
-  onRemoveWorkspaceFile?: (fileId: string) => Promise<void> | void;
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -409,8 +319,6 @@ export function ChatKitHarness({
   const workspaceStateRef = useRef(workspaceState);
   const investigationBriefRef = useRef(investigationBrief);
   const threadOriginRef = useRef(threadOrigin);
-  const onAddAttachmentsRef = useRef(onAddAttachments);
-  const onRemoveWorkspaceFileRef = useRef(onRemoveWorkspaceFile);
   const onActiveChatChangeRef = useRef(onActiveChatChange);
   const applyingComposerDraftIdRef = useRef<string | null>(null);
 
@@ -445,14 +353,6 @@ export function ChatKitHarness({
   useEffect(() => {
     threadOriginRef.current = threadOrigin;
   }, [threadOrigin]);
-
-  useEffect(() => {
-    onAddAttachmentsRef.current = onAddAttachments;
-  }, [onAddAttachments]);
-
-  useEffect(() => {
-    onRemoveWorkspaceFileRef.current = onRemoveWorkspaceFile;
-  }, [onRemoveWorkspaceFile]);
 
   useEffect(() => {
     onActiveChatChangeRef.current = onActiveChatChange;
@@ -506,82 +406,6 @@ export function ChatKitHarness({
       setChatKitNativeFeedbackHandler(null);
     };
   }, []);
-
-  useEffect(() => {
-    if (!attachmentConfig?.enabled) {
-      setChatKitAttachmentHandler(null);
-      return;
-    }
-
-    setChatKitAttachmentHandler(
-      async ({ attachmentId, file }) => {
-        const activeWorkspace = workspaceStateRef.current;
-        if (!activeWorkspace?.workspace_id) {
-          throw new Error("An active workspace is required before uploading attachments.");
-        }
-        const isDocumentSurface = activeWorkspace.app_id === "documents";
-        const uploadResult = await uploadStoredFile({
-          file,
-          workspaceId: activeWorkspace.workspace_id,
-          appId: activeWorkspace.app_id,
-          scope: isDocumentSurface ? "document_thread_file" : "chat_attachment",
-          attachmentId,
-          threadId: threadIdRef.current,
-          createAttachment: true,
-        });
-        const nextThreadId = uploadResult.thread_id ?? null;
-        if (nextThreadId && nextThreadId !== threadIdRef.current) {
-          threadIdRef.current = nextThreadId;
-          setThreadId(nextThreadId);
-          void chatKitRef.current?.setThreadId(nextThreadId);
-          void onActiveChatChangeRef.current?.(nextThreadId);
-        }
-        let builtFiles: LocalAttachment[] = [];
-        if (!isDocumentSurface) {
-          try {
-            builtFiles =
-              (await onAddAttachmentsRef.current?.([file], {
-                workspaceFileId: uploadResult.stored_file.id,
-                sourceItemId: uploadResult.stored_file.id,
-              })) ?? [];
-          } catch (error) {
-            devLogger.workspaceEvent({
-              surfaceKey: agentBundleRef.current.root_agent_id,
-              event: "chat_attachment.workspace_mirror_failed",
-              detail: {
-                attachmentId,
-                fileName: file.name,
-                error: error instanceof Error ? error.message : "unknown",
-              },
-            });
-          }
-        }
-        return {
-          attachment:
-            uploadResult.attachment ??
-            {
-              type: "file",
-              id: attachmentId,
-              name: file.name,
-              mime_type: file.type || "application/octet-stream",
-            },
-          fileIds: builtFiles.map((builtFile) => builtFile.id),
-          threadId: nextThreadId,
-          stripBeforeForwarding: false,
-        };
-      },
-      async (record) => {
-        await deleteStoredChatAttachment(record.attachmentId);
-        for (const fileId of record.fileIds) {
-          void onRemoveWorkspaceFileRef.current?.(fileId);
-        }
-      },
-    );
-
-    return () => {
-      setChatKitAttachmentHandler(null);
-    };
-  }, [attachmentConfig?.enabled]);
 
   function resolveScrollTarget(): HTMLElement | null {
     const chatKitElement = chatKitRef.current?.ref.current;
@@ -921,16 +745,6 @@ export function ChatKitHarness({
   }, [activeChatId, chatKit]);
 
   useEffect(() => {
-    if (!attachmentConfig?.enabled) {
-      return;
-    }
-    return bindChatKitComposerFileInputs(
-      chatKit.ref.current,
-      registerChatKitLocalFiles,
-    );
-  }, [attachmentConfig?.enabled, chatKit]);
-
-  useEffect(() => {
     if (
       !composerDraft ||
       running ||
@@ -1069,8 +883,6 @@ export function ChatKitPane({
   onRunEnd,
   attachmentConfig,
   entitiesConfig,
-  onAddAttachments,
-  onRemoveWorkspaceFile,
 }: {
   agentBundle: AgentBundle;
   enabled: boolean;
@@ -1106,14 +918,6 @@ export function ChatKitPane({
   onRunEnd?: () => void;
   attachmentConfig?: AgentAttachmentConfig;
   entitiesConfig?: ChatKitEntityConfig;
-  onAddAttachments?: (
-    files: FileList | Iterable<File> | null | undefined,
-    options?: {
-      workspaceFileId?: string;
-      sourceItemId?: string | null;
-    },
-  ) => Promise<LocalAttachment[]>;
-  onRemoveWorkspaceFile?: (fileId: string) => Promise<void> | void;
 }) {
   const canInvestigate =
     enabled &&
@@ -1186,8 +990,6 @@ export function ChatKitPane({
           onRunEnd={onRunEnd}
           attachmentConfig={attachmentConfig}
           entitiesConfig={entitiesConfig}
-          onAddAttachments={onAddAttachments}
-          onRemoveWorkspaceFile={onRemoveWorkspaceFile}
         />
       ) : (
         <ChatKitPaneSurface $minHeight={surfaceMinHeight} data-testid="chatkit-surface">

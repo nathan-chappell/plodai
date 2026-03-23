@@ -258,6 +258,45 @@ export type SmartSplitPdfToolArgs = {
   goal?: string;
 };
 
+export type ListDocumentFilesToolArgs = Record<string, never>;
+
+export type InspectDocumentFileToolArgs = {
+  file_id: string;
+  max_pages?: number;
+};
+
+export type ReplaceDocumentTextToolArgs = {
+  file_id: string;
+  locator_id: string;
+  replacement_text: string;
+};
+
+export type DocumentFieldValueInput = {
+  locator_id: string;
+  value: string;
+};
+
+export type FillDocumentFormToolArgs = {
+  file_id: string;
+  field_values: DocumentFieldValueInput[];
+};
+
+export type AppendDocumentAppendixFromDatasetToolArgs = {
+  file_id: string;
+  dataset_file_id: string;
+  title: string;
+  render_as?: "table" | "chart";
+};
+
+export type SmartSplitDocumentToolArgs = {
+  file_id: string;
+  goal?: string;
+};
+
+export type DeleteDocumentFileToolArgs = {
+  file_id: string;
+};
+
 export type InspectImageFileToolArgs = {
   file_id: string;
   max_dimension?: number;
@@ -358,6 +397,13 @@ export type ClientToolArgsMap = {
   inspect_image_file: InspectImageFileToolArgs;
   get_pdf_page_range: GetPdfPageRangeToolArgs;
   smart_split_pdf: SmartSplitPdfToolArgs;
+  list_document_files: ListDocumentFilesToolArgs;
+  inspect_document_file: InspectDocumentFileToolArgs;
+  replace_document_text: ReplaceDocumentTextToolArgs;
+  fill_document_form: FillDocumentFormToolArgs;
+  append_document_appendix_from_dataset: AppendDocumentAppendixFromDatasetToolArgs;
+  smart_split_document: SmartSplitDocumentToolArgs;
+  delete_document_file: DeleteDocumentFileToolArgs;
   list_reports: ListReportsToolArgs;
   get_report: GetReportToolArgs;
   create_report: CreateReportToolArgs;

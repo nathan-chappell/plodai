@@ -12,6 +12,7 @@ function createWorkspaceContext(): AgentRuntimeContext {
   return {
     workspaceId: "workspace-agriculture",
     workspaceName: "Agriculture workspace",
+    activeThreadId: null,
     activeAgentId: "agriculture-agent",
     selectedFileId: null,
     selectedArtifactId: null,
@@ -102,7 +103,6 @@ describe("agent registry", () => {
       "inspect_document_file",
       "replace_document_text",
       "fill_document_form",
-      "update_document_visual_from_dataset",
       "append_document_appendix_from_dataset",
       "smart_split_document",
       "delete_document_file",

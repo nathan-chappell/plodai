@@ -65,7 +65,7 @@ describe("PlatformShell", () => {
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  it("shows the branded chrome with the current themed app name", async () => {
+  it("shows the active agent name with the shared shell logo", async () => {
     await act(async () => {
       root.render(
         <PlatformShell
@@ -79,9 +79,10 @@ describe("PlatformShell", () => {
       );
     });
 
-    expect(container.textContent).toContain("AI Portfolio");
-    expect(container.textContent).toContain("Documents");
+    expect(container.textContent).toContain("Agriculture");
+    expect(container.textContent).not.toContain("AI Portfolio");
     expect(container.textContent).not.toContain("Workspace");
+    expect(container.querySelector("[data-testid='shell-logo']")).not.toBeNull();
     expect(container.querySelector("[data-testid='auth-panel']")).not.toBeNull();
   });
 });

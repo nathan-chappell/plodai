@@ -1,31 +1,136 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hashlib
+import hmac
+import logging
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
 from typing import cast
 
+from fastapi import HTTPException, status
+from openai import AsyncOpenAI
 from pydantic import TypeAdapter
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chatkit.store import NotFoundError, Store
-from chatkit.types import Attachment, Page, ThreadItem, ThreadMetadata, ThreadStatus
+from chatkit.store import AttachmentStore, NotFoundError, Store
+from chatkit.types import (
+    Attachment,
+    AttachmentCreateParams,
+    AttachmentUploadDescriptor,
+    FileAttachment,
+    Page,
+    ThreadItem,
+    ThreadMetadata,
+    ThreadStatus,
+)
 
 from backend.app.agents.context import ReportAgentContext
+from backend.app.core.config import Settings, get_settings
+from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.models.chatkit import (
     WorkspaceChat,
     WorkspaceWorkspaceChatAttachment,
     WorkspaceChatEntry,
 )
 from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.workspace import Workspace
 
 
 THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
 ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
+UPLOAD_TOKEN_TTL_SECONDS = 15 * 60
+logger = get_logger("chatkit.memory_store")
 
 
-class DatabaseMemoryStore(Store[ReportAgentContext]):
-    def __init__(self, db: AsyncSession):
+@dataclass(kw_only=True)
+class PendingAttachmentUpload:
+    attachment: Attachment
+    user_id: str
+    workspace_id: str
+    app_id: str
+    declared_size: int
+    is_completed: bool = False
+
+
+class DatabaseMemoryStore(
+    Store[ReportAgentContext],
+    AttachmentStore[ReportAgentContext],
+):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        settings: Settings | None = None,
+        public_base_url: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+    ):
         self.db = db
+        self.settings = settings or get_settings()
+        self.public_base_url = (public_base_url or "http://localhost").rstrip("/")
+        self._openai_client = openai_client
+
+    @property
+    def openai_client(self) -> AsyncOpenAI:
+        if self._openai_client is None:
+            self._openai_client = AsyncOpenAI(
+                api_key=self.settings.OPENAI_API_KEY or None,
+                max_retries=self.settings.openai_max_retries,
+            )
+        return self._openai_client
+
+    async def create_attachment(
+        self,
+        input: AttachmentCreateParams,
+        context: ReportAgentContext,
+    ) -> Attachment:
+        workspace = await self._require_workspace(context)
+        self._validate_pending_attachment_input(
+            workspace=workspace,
+            file_name=input.name,
+            mime_type=input.mime_type,
+            byte_size=input.size,
+        )
+
+        attachment_id = self.generate_attachment_id(input.mime_type, context)
+        token = self._build_upload_token(
+            attachment_id=attachment_id,
+            user_id=context.user_id,
+        )
+        upload_url = (
+            f"{self.public_base_url}/api/chatkit/attachments/"
+            f"{attachment_id}/content?token={token}"
+        )
+        return FileAttachment(
+            id=attachment_id,
+            name=input.name,
+            mime_type=input.mime_type,
+            upload_descriptor=AttachmentUploadDescriptor(
+                url=upload_url,
+                method="POST",
+            ),
+            thread_id=None,
+            metadata={
+                "user_id": context.user_id,
+                "workspace_id": workspace.id,
+                "app_id": workspace.app_id,
+                "declared_size": input.size,
+                "scope": "chat_attachment",
+                "attach_mode": "model_input",
+                "input_kind": (
+                    "image"
+                    if _kind_for_attachment_input(
+                        file_name=input.name,
+                        mime_type=input.mime_type,
+                    )
+                    == "image"
+                    else "file"
+                ),
+                "upload_state": "pending",
+            },
+        )
 
     async def load_thread(
         self, thread_id: str, context: ReportAgentContext
@@ -134,10 +239,87 @@ class DatabaseMemoryStore(Store[ReportAgentContext]):
     async def delete_attachment(
         self, attachment_id: str, context: ReportAgentContext
     ) -> None:
+        result = await self.db.execute(
+            select(StoredOpenAIFile).where(
+                StoredOpenAIFile.attachment_id == attachment_id,
+                StoredOpenAIFile.status != "deleted",
+            )
+        )
+        stored_files = list(result.scalars().all())
+        for stored_file in stored_files:
+            try:
+                await self.openai_client.files.delete(stored_file.openai_file_id)
+            except Exception:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "attachment.remote_delete_failed",
+                    summary=summarize_pairs_for_log(
+                        (
+                            ("attachment", attachment_id),
+                            ("stored_file", stored_file.id),
+                        )
+                    ),
+                )
+            stored_file.status = "deleted"
+
         attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
         if attachment is not None:
             await self.db.delete(attachment)
-            await self.db.commit()
+        await self.db.commit()
+
+    async def resolve_pending_attachment_upload(
+        self,
+        *,
+        attachment_id: str,
+        token: str,
+    ) -> PendingAttachmentUpload:
+        try:
+            attachment = await self.load_attachment(attachment_id, context=None)
+        except NotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment upload not found.",
+            ) from exc
+        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else None
+        if metadata is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment upload not found.",
+            )
+
+        user_id = metadata.get("user_id")
+        workspace_id = metadata.get("workspace_id")
+        app_id = metadata.get("app_id")
+        declared_size = metadata.get("declared_size")
+        if (
+            not isinstance(user_id, str)
+            or not user_id.strip()
+            or not isinstance(workspace_id, str)
+            or not workspace_id.strip()
+            or not isinstance(app_id, str)
+            or not app_id.strip()
+            or not isinstance(declared_size, int)
+            or declared_size < 0
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment upload not found.",
+            )
+
+        self._assert_upload_token(
+            attachment_id=attachment_id,
+            user_id=user_id.strip(),
+            token=token,
+        )
+        return PendingAttachmentUpload(
+            attachment=attachment,
+            user_id=user_id.strip(),
+            workspace_id=workspace_id.strip(),
+            app_id=app_id.strip(),
+            declared_size=declared_size,
+            is_completed=attachment.upload_descriptor is None,
+        )
 
     async def load_threads(
         self,
@@ -262,6 +444,116 @@ class DatabaseMemoryStore(Store[ReportAgentContext]):
         current = result.scalar_one()
         return int(current or 0) + 1
 
+    async def _require_workspace(self, context: ReportAgentContext) -> Workspace:
+        workspace_id = context.workspace_id
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="workspace_id is required for attachment uploads.",
+            )
+        workspace = await self.db.get(Workspace, workspace_id.strip())
+        if workspace is None or workspace.user_id != context.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workspace not found.",
+            )
+        return workspace
+
+    def _validate_pending_attachment_input(
+        self,
+        *,
+        workspace: Workspace,
+        file_name: str,
+        mime_type: str,
+        byte_size: int,
+    ) -> None:
+        if workspace.app_id == "agriculture":
+            if (
+                _kind_for_attachment_input(file_name=file_name, mime_type=mime_type)
+                != "image"
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Agriculture chat attachments must be image files.",
+                )
+            if byte_size > self.settings.agriculture_chat_attachment_max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail="Agriculture chat attachments must be 10 MB or smaller.",
+                )
+
+        if byte_size > self.settings.chat_attachment_max_model_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="The selected file is too large for this upload path.",
+            )
+
+    def _build_upload_token(
+        self,
+        *,
+        attachment_id: str,
+        user_id: str,
+    ) -> str:
+        expires_ts = int(
+            (
+                datetime.now(UTC)
+                + timedelta(seconds=UPLOAD_TOKEN_TTL_SECONDS)
+            ).timestamp()
+        )
+        payload = f"{attachment_id}:{user_id}:{expires_ts}"
+        signature = hmac.new(
+            self._upload_secret(),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        encoded = urlsafe_b64encode(f"{expires_ts}:{signature}".encode("utf-8"))
+        return encoded.decode("utf-8").rstrip("=")
+
+    def _assert_upload_token(
+        self,
+        *,
+        attachment_id: str,
+        user_id: str,
+        token: str,
+    ) -> None:
+        padded_token = token + "=" * (-len(token) % 4)
+        try:
+            decoded = urlsafe_b64decode(padded_token.encode("utf-8")).decode("utf-8")
+            expires_raw, signature = decoded.split(":", 1)
+            expires_ts = int(expires_raw)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment upload not found.",
+            ) from exc
+
+        if expires_ts <= int(datetime.now(UTC).timestamp()):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment upload has expired.",
+            )
+
+        payload = f"{attachment_id}:{user_id}:{expires_ts}"
+        expected_signature = hmac.new(
+            self._upload_secret(),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Attachment upload not found.",
+            )
+
+    def _upload_secret(self) -> bytes:
+        secret = (
+            self.settings.CLERK_SECRET_KEY
+            or self.settings.CLERK_JWT_KEY
+            or self.settings.OPENAI_API_KEY
+            or "ai-portfolio-chatkit-attachment-secret"
+        )
+        return secret.encode("utf-8")
+
     def _to_thread_metadata(self, chat: WorkspaceChat) -> ThreadMetadata:
         return ThreadMetadata(
             id=chat.id,
@@ -274,3 +566,16 @@ class DatabaseMemoryStore(Store[ReportAgentContext]):
 
     def _to_thread_item(self, item: WorkspaceChatEntry) -> ThreadItem:
         return THREAD_ITEM_ADAPTER.validate_python(item.payload)
+
+
+def _kind_for_attachment_input(
+    *,
+    file_name: str,
+    mime_type: str | None,
+) -> str:
+    extension = PurePosixPath(file_name).suffix.lower()
+    if extension in {".png", ".jpg", ".jpeg", ".webp"}:
+        return "image"
+    if isinstance(mime_type, str) and mime_type.startswith("image/"):
+        return "image"
+    return "other"

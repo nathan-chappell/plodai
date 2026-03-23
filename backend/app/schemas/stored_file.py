@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StoredFileSchemaBase(BaseModel):
@@ -14,14 +14,12 @@ StoredFileScope: TypeAlias = Literal["chat_attachment", "document_thread_file"]
 StoredFileSourceKind: TypeAlias = Literal["upload", "url_import", "derived"]
 StoredFileStatus: TypeAlias = Literal["available", "deleted", "expired"]
 AttachmentInputKind: TypeAlias = Literal["file", "image"]
-DocumentLocatorKind: TypeAlias = Literal["text", "form_field", "visual"]
+DocumentLocatorKind: TypeAlias = Literal["text", "form_field"]
 DocumentLocatorReliability: TypeAlias = Literal["high", "medium", "low"]
 DocumentEditStrategy: TypeAlias = Literal[
     "direct_replace",
     "overlay_replace",
     "form_fill",
-    "visual_replace",
-    "visual_append",
     "appendix_append",
     "smart_split",
 ]
@@ -117,24 +115,6 @@ class ChatAttachmentUploadResponse(StoredFileSchemaBase):
 class ChatAttachmentDeleteResponse(StoredFileSchemaBase):
     attachment_id: str
     deleted: bool
-
-
-class DocumentImportHeader(StoredFileSchemaBase):
-    name: str
-    value: str
-
-    @model_validator(mode="after")
-    def _validate_name(self) -> "DocumentImportHeader":
-        if not self.name.strip():
-            raise ValueError("header name must be non-empty")
-        return self
-
-
-class DocumentUrlImportRequest(StoredFileSchemaBase):
-    workspace_id: str
-    thread_id: str | None = None
-    url: str
-    headers: list[DocumentImportHeader] = Field(default_factory=list)
 
 
 class DocumentFileListResponse(StoredFileSchemaBase):

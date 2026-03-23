@@ -215,3 +215,37 @@ def test_feedback_get_feedback_tool_streams_widget_and_wait_state() -> None:
     assert widget["confirm"]["action"]["type"] == "submit_feedback_session"
     assert widget["cancel"]["action"]["type"] == "cancel_feedback_session"
     assert copy_text == "Feedback form for msg_123."
+
+
+def test_document_agent_uses_client_proxy_tools_without_server_pdf_hosting() -> None:
+    context = ReportAgentContext(
+        report_id="report_123",
+        user_id="user_123",
+        user_email=None,
+        db=None,
+    )
+    tools = build_agent_tools(
+        context,
+        agent_id="document-agent",
+        client_tools=[
+            {
+                "name": "inspect_document_file",
+                "description": "Inspect a document in the browser.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_id": {"type": "string"},
+                    },
+                    "required": ["file_id"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            }
+        ],
+    )
+
+    assert [tool.name for tool in tools] == [
+        "name_current_thread",
+        "make_plan",
+        "inspect_document_file",
+    ]

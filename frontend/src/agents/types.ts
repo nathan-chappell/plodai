@@ -114,6 +114,7 @@ export type AgentDefinition = {
 export type AgentRuntimeContext = {
   workspaceId: string;
   workspaceName: string;
+  activeThreadId?: string | null;
   agentId?: string;
   agentTitle?: string;
   activeAgentId: string;

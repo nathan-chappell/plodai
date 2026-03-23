@@ -4,12 +4,13 @@ import styled from "styled-components";
 import { AuthPanel } from "./AuthPanel";
 import type { AgentDefinition } from "../agents/types";
 import { getAgentDefinition } from "../agents/definitions";
-import { hasAgentTheme, PlatformThemeProvider } from "./platformTheme";
+import { BRAND_MARK_URL } from "../lib/brand";
+import { PlatformThemeProvider } from "./platformTheme";
 import { PlatformMain, PlatformPage } from "./styles";
 
 export function PlatformShell({
   agents: _agents,
-  activeAgentId: _activeAgentId,
+  activeAgentId,
   themeAgentId,
   onSelectAgent: _onSelectAgent,
   children,
@@ -20,8 +21,9 @@ export function PlatformShell({
   onSelectAgent: (path: string) => void;
   children: ReactNode;
 }) {
+  const activeAgent = activeAgentId ? getAgentDefinition(activeAgentId) : null;
   const themedAgent = themeAgentId ? getAgentDefinition(themeAgentId) : null;
-  const modeLabel = themedAgent && hasAgentTheme(themedAgent.id) ? themedAgent.title : null;
+  const brandLabel = activeAgent?.title ?? themedAgent?.title ?? "Workspace";
 
   return (
     <PlatformThemeProvider agentId={themeAgentId}>
@@ -31,8 +33,8 @@ export function PlatformShell({
             <TopChromeRow>
               <BrandCluster>
                 <BrandBlock>
-                  <BrandTitle>AI Portfolio</BrandTitle>
-                  {modeLabel ? <BrandModePill>{modeLabel}</BrandModePill> : null}
+                  <BrandLogo alt="" aria-hidden="true" data-testid="shell-logo" src={BRAND_MARK_URL} />
+                  <BrandTitle>{brandLabel}</BrandTitle>
                 </BrandBlock>
               </BrandCluster>
 
@@ -124,6 +126,19 @@ const BrandBlock = styled.div`
   }
 `;
 
+const BrandLogo = styled.img`
+  width: 2.1rem;
+  height: 2.1rem;
+  flex: 0 0 auto;
+  display: block;
+  object-fit: contain;
+
+  @media (max-width: 740px) {
+    width: 1.9rem;
+    height: 1.9rem;
+  }
+`;
+
 const BrandTitle = styled.h1`
   margin: 0;
   font-size: clamp(1.02rem, 1.35vw, 1.2rem);
@@ -134,22 +149,6 @@ const BrandTitle = styled.h1`
   @media (max-width: 740px) {
     font-size: 0.94rem;
   }
-`;
-
-const BrandModePill = styled.div`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.85rem;
-  padding: 0.36rem 0.78rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, rgba(31, 41, 55, 0.08));
-  background: color-mix(in srgb, var(--accent) 10%, white 90%);
-  color: var(--accent-deep);
-  font-size: 0.74rem;
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
 `;
 
 const TopActions = styled.div`

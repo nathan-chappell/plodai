@@ -15,6 +15,7 @@ import type {
   LocalPdfAttachment,
   LocalAttachment,
 } from "../types/report";
+import type { StoredFilePreview } from "../types/stored-file";
 
 export async function buildWorkspaceFile(
   file: File,
@@ -89,6 +90,66 @@ export async function buildWorkspaceFile(
     ...baseFields,
     kind: "other",
   } satisfies LocalOtherAttachment;
+}
+
+export async function buildStoredFilePreviewFromFile(
+  file: File,
+): Promise<StoredFilePreview> {
+  const extension = getFileExtension(file.name);
+
+  if (extension === "csv") {
+    const preview = await parseCsvPreview(file);
+    return {
+      kind: "dataset",
+      row_count: preview.rowCount,
+      columns: preview.columns,
+      numeric_columns: preview.numericColumns,
+    };
+  }
+
+  if (extension === "json") {
+    const preview = await parseJsonPreview(file);
+    return {
+      kind: "dataset",
+      row_count: preview.rowCount,
+      columns: preview.columns,
+      numeric_columns: preview.numericColumns,
+    };
+  }
+
+  if (extension === "pdf") {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const preview = await inspectPdfBytes(bytes);
+      return {
+        kind: "pdf",
+        page_count: preview.pageCount,
+      };
+    } catch {
+      return {
+        kind: "empty",
+      };
+    }
+  }
+
+  if (isImageExtension(extension) || isImageMimeType(file.type)) {
+    try {
+      const dimensions = await readImageDimensionsFromFile(file);
+      return {
+        kind: "image",
+        width: dimensions.width,
+        height: dimensions.height,
+      };
+    } catch {
+      return {
+        kind: "empty",
+      };
+    }
+  }
+
+  return {
+    kind: "empty",
+  };
 }
 
 export function getDatasets(files: LocalAttachment[]): LocalDataset[] {

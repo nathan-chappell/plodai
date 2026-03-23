@@ -4,14 +4,12 @@ export type StoredFileKind = "csv" | "json" | "pdf" | "image" | "other";
 export type StoredFileScope = "chat_attachment" | "document_thread_file";
 export type StoredFileSourceKind = "upload" | "url_import" | "derived";
 export type StoredFileStatus = "available" | "deleted" | "expired";
-export type DocumentLocatorKind = "text" | "form_field" | "visual";
+export type DocumentLocatorKind = "text" | "form_field";
 export type DocumentLocatorReliability = "high" | "medium" | "low";
 export type DocumentEditStrategy =
   | "direct_replace"
   | "overlay_replace"
   | "form_fill"
-  | "visual_replace"
-  | "visual_append"
   | "appendix_append"
   | "smart_split";
 
@@ -105,13 +103,6 @@ export type DocumentImportHeader = {
   value: string;
 };
 
-export type DocumentUrlImportRequest = {
-  workspace_id: string;
-  thread_id?: string | null;
-  url: string;
-  headers: DocumentImportHeader[];
-};
-
 export type DocumentFileListResponse = {
   thread_id: string;
   files: DocumentFileSummary[];
@@ -164,4 +155,20 @@ export type DocumentEditResult = {
   message: string;
   warning?: string | null;
   unresolved_locator_ids: string[];
+};
+
+export type DocumentSplitEntry = {
+  file: DocumentFileSummary;
+  title: string;
+  start_page: number;
+  end_page: number;
+  page_count: number;
+};
+
+export type DocumentSmartSplitResult = {
+  source_file: DocumentFileSummary;
+  archive_file: DocumentFileSummary;
+  index_file: DocumentFileSummary;
+  entries: DocumentSplitEntry[];
+  markdown: string;
 };

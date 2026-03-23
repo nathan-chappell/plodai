@@ -9,6 +9,7 @@ import {
 import type { Entity } from "@openai/chatkit";
 import styled from "styled-components";
 
+import { publishToast } from "../app/toasts";
 import { MetaText } from "../app/styles";
 import { useAppState } from "../app/context";
 import { useAgentShell } from "../app/workspace";
@@ -18,13 +19,15 @@ import { AuthPanel } from "../components/AuthPanel";
 import {
   deleteDocumentFile,
   fetchStoredFileBlob,
-  importDocumentFileFromUrl,
   listDocumentFiles,
   searchAgricultureEntities,
   uploadStoredFile,
 } from "../lib/api";
 import { buildAgricultureEntityPreview } from "../lib/agriculture-entities";
-import { buildWorkspaceFile } from "../lib/workspace-files";
+import {
+  buildStoredFilePreviewFromFile,
+  buildWorkspaceFile,
+} from "../lib/workspace-files";
 import {
   bindClientToolsForAgentBundle,
   buildAgentBundleForRoot,
@@ -199,6 +202,80 @@ function getStarterPromptsForApp(appId: WorkspaceAppId) {
     : AGRICULTURE_STARTER_PROMPTS;
 }
 
+function normalizeDocumentImportHeaders(
+  headers: DocumentImportHeader[],
+): Record<string, string> {
+  return Object.fromEntries(
+    headers
+      .map((header) => ({
+        name: header.name.trim(),
+        value: header.value.trim(),
+      }))
+      .filter((header) => header.name && header.value)
+      .map((header) => [header.name, header.value]),
+  );
+}
+
+function parseContentDispositionFilename(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const encodedMatch = value.match(/filename\*\s*=\s*([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    const encodedValue = encodedMatch[1]
+      .trim()
+      .replace(/^UTF-8''/i, "")
+      .replace(/^["']|["']$/g, "");
+    try {
+      return decodeURIComponent(encodedValue);
+    } catch {
+      return encodedValue;
+    }
+  }
+  const simpleMatch = value.match(/filename\s*=\s*([^;]+)/i);
+  return simpleMatch?.[1]?.trim().replace(/^["']|["']$/g, "") ?? null;
+}
+
+function buildImportedPdfFilename(
+  url: string,
+  contentDisposition: string | null,
+  contentType: string | null,
+): string {
+  const fromDisposition = parseContentDispositionFilename(contentDisposition);
+  const fromUrl = (() => {
+    try {
+      const parsed = new URL(url);
+      return decodeURIComponent(parsed.pathname.split("/").pop() ?? "");
+    } catch {
+      return "";
+    }
+  })();
+  const candidate = (fromDisposition || fromUrl || `document_${crypto.randomUUID()}`).trim();
+  const withoutQuery = candidate.split(/[?#]/, 1)[0] || `document_${crypto.randomUUID()}`;
+  if (withoutQuery.toLowerCase().endsWith(".pdf")) {
+    return withoutQuery;
+  }
+  if ((contentType ?? "").toLowerCase().includes("application/pdf")) {
+    return `${withoutQuery}.pdf`;
+  }
+  return withoutQuery;
+}
+
+function isImportedPdf(filename: string, contentType: string | null): boolean {
+  const normalizedContentType = (contentType ?? "").toLowerCase();
+  return filename.toLowerCase().endsWith(".pdf") || normalizedContentType.includes("application/pdf");
+}
+
+function buildDocumentImportErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === "TypeError") {
+      return "Browser URL import was blocked by CORS or the remote server rejected the request headers. Download the PDF locally and upload it instead.";
+    }
+    return error.message;
+  }
+  return "Browser URL import failed.";
+}
+
 export function WorkspaceBrowserPanel({
   activeWorkspaceId,
   artifacts,
@@ -210,6 +287,7 @@ export function WorkspaceBrowserPanel({
   emptyUploadsMessage,
   files,
   selectedItem,
+  showFiles = true,
 }: {
   activeWorkspaceId: string | null;
   artifacts: WorkspaceCreatedItemSummary[];
@@ -221,12 +299,13 @@ export function WorkspaceBrowserPanel({
   emptyUploadsMessage?: string;
   files: WorkspaceUploadItemSummary[];
   selectedItem: PreviewSelection;
+  showFiles?: boolean;
 }) {
   const [filterQuery, setFilterQuery] = useState("");
   const normalizedQuery = filterQuery.trim().toLowerCase();
   const filteredFiles = useMemo(
     () =>
-      files.filter((file) => {
+      (showFiles ? files : []).filter((file) => {
         if (!normalizedQuery) {
           return true;
         }
@@ -241,7 +320,7 @@ export function WorkspaceBrowserPanel({
           .toLowerCase();
         return haystack.includes(normalizedQuery);
       }),
-    [files, normalizedQuery],
+    [files, normalizedQuery, showFiles],
   );
   const filteredArtifacts = useMemo(
     () =>
@@ -263,7 +342,7 @@ export function WorkspaceBrowserPanel({
     [artifacts, normalizedQuery],
   );
   const selectedWorkspaceId = activeWorkspaceId ?? workspaces[0]?.id ?? "";
-  const fileCount = files.length;
+  const fileCount = showFiles ? files.length : 0;
   const artifactCount = artifacts.length;
   const filteredItems = useMemo(
     () =>
@@ -321,7 +400,7 @@ export function WorkspaceBrowserPanel({
 
       <InventoryToolbar>
         <InventorySummary data-testid="workspace-inventory-summary">
-          <span>Stuff</span>
+          <span>{showFiles ? "Stuff" : "Artifacts"}</span>
           <InventoryTabCount>{fileCount + artifactCount}</InventoryTabCount>
         </InventorySummary>
       </InventoryToolbar>
@@ -469,7 +548,7 @@ export function DocumentBrowserPanel({
             onClick={() => uploadInputRef.current?.click()}
             type="button"
           >
-            Upload documents
+            Attach for agent access
           </UploadActionButton>
           <OverviewActionButton onClick={() => void onRefresh()} type="button">
             Refresh
@@ -487,7 +566,7 @@ export function DocumentBrowserPanel({
       </FilterPanel>
 
       <DocumentImportPanel>
-        <DocumentImportTitle>Import PDF URL</DocumentImportTitle>
+        <DocumentImportTitle>Import PDF For Agent Access</DocumentImportTitle>
         <DocumentImportInput
           onChange={(event) => setImportUrl(event.target.value)}
           placeholder="https://example.com/private.pdf"
@@ -550,10 +629,12 @@ export function DocumentBrowserPanel({
               const filteredHeaders = headers.filter(
                 (header) => header.name.trim() && header.value.trim(),
               );
-              void onImportUrl(importUrl.trim(), filteredHeaders).then(() => {
-                setImportUrl("");
-                setHeaders([{ name: "", value: "" }]);
-              });
+              void onImportUrl(importUrl.trim(), filteredHeaders)
+                .then(() => {
+                  setImportUrl("");
+                  setHeaders([{ name: "", value: "" }]);
+                })
+                .catch(() => undefined);
             }}
             type="button"
           >
@@ -561,14 +642,14 @@ export function DocumentBrowserPanel({
           </UploadActionButton>
         </OverviewActionRow>
         <MetaText>
-          Per-import headers stay in this form and are only sent to the secure document import endpoint.
+          Headers stay in this form and are sent directly from this browser. If the site blocks CORS or custom headers, import will fail here.
         </MetaText>
       </DocumentImportPanel>
 
       <TreePanel>
         {!activeThreadId ? (
           <EmptyTreeState>
-            Upload a PDF or import one by URL to create the first document thread.
+            Use normal chat attachments for transient context, or attach/import a PDF here for agent access.
           </EmptyTreeState>
         ) : filteredFiles.length ? (
           filteredFiles.map((file) => (
@@ -652,7 +733,6 @@ export function WorkspaceAppPage({
     updateWorkspace,
     selectWorkspace,
     createWorkspace,
-    handleSelectFiles,
     removeWorkspaceFile,
     consumePendingComposerLaunch,
   } = useAgentShell();
@@ -707,6 +787,7 @@ export function WorkspaceAppPage({
     () => ({
       workspaceId: activeWorkspace?.workspace_id ?? "workspace-pending",
       workspaceName: activeWorkspace?.workspace_name ?? "Workspace",
+      activeThreadId: activeWorkspace?.active_chat_id ?? null,
       activeAgentId: rootAgentId,
       selectedFileId,
       selectedArtifactId,
@@ -724,6 +805,7 @@ export function WorkspaceAppPage({
       updateWorkspace,
     }),
     [
+      activeWorkspace?.active_chat_id,
       activeWorkspace?.workspace_id,
       activeWorkspace?.workspace_name,
       applyArtifactOperation,
@@ -784,6 +866,7 @@ export function WorkspaceAppPage({
       }
       if (
         current?.kind === "file" &&
+        appId !== "agriculture" &&
         workspaceFiles.some((file) => file.id === current.id)
       ) {
         return current;
@@ -796,10 +879,14 @@ export function WorkspaceAppPage({
       if (nextArtifactId) {
         return { kind: "artifact", id: nextArtifactId };
       }
+      if (appId === "agriculture") {
+        return null;
+      }
       const nextFileId = selectedFileId ?? workspaceFiles[0]?.id ?? null;
       return nextFileId ? { kind: "file", id: nextFileId } : null;
     });
   }, [
+    appId,
     currentReportArtifactId,
     selectedArtifactId,
     selectedFileId,
@@ -857,48 +944,6 @@ export function WorkspaceAppPage({
     [currentReportArtifactId, handlePaneChange, updateWorkspace, workspaceArtifacts],
   );
 
-  const handleWorkspaceUpload = useCallback(
-    async (
-      files: FileList | Iterable<File> | null | undefined,
-      options?: {
-        workspaceFileId?: string;
-        sourceItemId?: string | null;
-      },
-    ) => {
-      const nextFiles =
-        typeof FileList !== "undefined" && files instanceof FileList
-          ? Array.from(files)
-          : Array.from(files ?? []);
-      if (!nextFiles.length) {
-        return [];
-      }
-
-      const builtFiles =
-        nextFiles.length === 1 && options?.workspaceFileId
-          ? [
-              await buildWorkspaceFile(nextFiles[0]!, {
-                id: options.workspaceFileId,
-              }),
-            ]
-          : await handleSelectFiles(nextFiles);
-
-      if (nextFiles.length === 1 && options?.workspaceFileId && builtFiles[0]) {
-        await registerFile(builtFiles[0], {
-          sourceItemId: options.sourceItemId ?? null,
-        });
-      }
-      const firstFileId = builtFiles[0]?.id ?? null;
-      setSelectedPreviewItem(firstFileId ? { kind: "file", id: firstFileId } : null);
-      if (firstFileId) {
-        await updateWorkspace({
-          selected_item_id: firstFileId,
-        });
-      }
-      return builtFiles;
-    },
-    [handleSelectFiles, registerFile, updateWorkspace],
-  );
-
   const agricultureEntitiesConfig = useMemo(() => {
     if (appId !== "agriculture") {
       return undefined;
@@ -939,10 +984,6 @@ export function WorkspaceAppPage({
         }
         const entityType = entityData.entity_type;
         if (entityType === "thread_image") {
-          const fileId = entityData.workspace_item_id || entityData.file_id;
-          if (fileId && workspaceFiles.some((file) => file.id === fileId)) {
-            handlePreviewSelection({ kind: "file", id: fileId });
-          }
           return;
         }
         const artifactId = entityData.artifact_id;
@@ -960,7 +1001,6 @@ export function WorkspaceAppPage({
     appId,
     handlePreviewSelection,
     workspaceArtifacts,
-    workspaceFiles,
   ]);
 
   const handleDocumentUpload = useCallback(
@@ -977,6 +1017,7 @@ export function WorkspaceAppPage({
       }
       let nextThreadId = activeWorkspace.active_chat_id ?? null;
       for (const file of nextFiles) {
+        const previewJson = await buildStoredFilePreviewFromFile(file);
         const response = await uploadStoredFile({
           file,
           workspaceId: activeWorkspace.workspace_id,
@@ -984,6 +1025,8 @@ export function WorkspaceAppPage({
           scope: "document_thread_file",
           threadId: nextThreadId,
           createAttachment: false,
+          sourceKind: "upload",
+          previewJson,
         });
         nextThreadId = response.thread_id ?? nextThreadId;
       }
@@ -1008,21 +1051,59 @@ export function WorkspaceAppPage({
       if (!activeWorkspace?.workspace_id || !url.trim()) {
         return;
       }
-      const response = await importDocumentFileFromUrl({
-        workspaceId: activeWorkspace.workspace_id,
-        threadId: activeWorkspace.active_chat_id ?? null,
-        url: url.trim(),
-        headers,
-      });
-      if (response.thread_id && response.thread_id !== (activeWorkspace.active_chat_id ?? null)) {
-        await updateWorkspace({
-          active_chat_id: response.thread_id,
+      try {
+        const fetchResponse = await fetch(url.trim(), {
+          headers: normalizeDocumentImportHeaders(headers),
         });
+        if (!fetchResponse.ok) {
+          throw new Error(
+            `The remote server returned ${fetchResponse.status} ${fetchResponse.statusText || "for this URL import"}.`,
+          );
+        }
+
+        const contentType = fetchResponse.headers.get("content-type");
+        const fileName = buildImportedPdfFilename(
+          url.trim(),
+          fetchResponse.headers.get("content-disposition"),
+          contentType,
+        );
+        if (!isImportedPdf(fileName, contentType)) {
+          throw new Error("Browser URL import only supports PDF files.");
+        }
+
+        const blob = await fetchResponse.blob();
+        const file = new File([blob], fileName, {
+          type: contentType || "application/pdf",
+        });
+        const previewJson = await buildStoredFilePreviewFromFile(file);
+        const response = await uploadStoredFile({
+          file,
+          workspaceId: activeWorkspace.workspace_id,
+          appId: activeWorkspace.app_id,
+          scope: "document_thread_file",
+          threadId: activeWorkspace.active_chat_id ?? null,
+          createAttachment: false,
+          sourceKind: "url_import",
+          previewJson,
+        });
+        if (response.thread_id && response.thread_id !== (activeWorkspace.active_chat_id ?? null)) {
+          await updateWorkspace({
+            active_chat_id: response.thread_id,
+          });
+        }
+        await refreshDocumentFileList();
+      } catch (error) {
+        publishToast({
+          title: "Import failed",
+          message: buildDocumentImportErrorMessage(error),
+          tone: "error",
+        });
+        throw error;
       }
-      await refreshDocumentFileList();
     },
     [
       activeWorkspace?.active_chat_id,
+      activeWorkspace?.app_id,
       activeWorkspace?.workspace_id,
       refreshDocumentFileList,
       updateWorkspace,
@@ -1038,6 +1119,47 @@ export function WorkspaceAppPage({
       await refreshDocumentFileList();
     },
     [activeWorkspace?.active_chat_id, refreshDocumentFileList],
+  );
+
+  const resolveAgricultureArtifactFile = useCallback(
+    async (fileId: string) => {
+      if (
+        appId !== "agriculture" ||
+        !activeWorkspace?.workspace_id ||
+        !activeWorkspace.active_chat_id
+      ) {
+        return null;
+      }
+
+      const response = await searchAgricultureEntities({
+        appId: activeWorkspace.app_id,
+        workspaceId: activeWorkspace.workspace_id,
+        threadId: activeWorkspace.active_chat_id,
+        query: "",
+      });
+      const imageEntity = response.entities.find(
+        (entity) =>
+          entity.data.entity_type === "thread_image" && entity.data.file_id === fileId,
+      );
+      if (!imageEntity) {
+        return null;
+      }
+
+      const blob = await fetchStoredFileBlob(fileId);
+      const builtFile = await buildWorkspaceFile(
+        new File([blob], imageEntity.title, {
+          type: imageEntity.data.mime_type || blob.type || "image/png",
+        }),
+        { id: fileId },
+      );
+      return builtFile.kind === "image" ? builtFile : null;
+    },
+    [
+      activeWorkspace?.active_chat_id,
+      activeWorkspace?.app_id,
+      activeWorkspace?.workspace_id,
+      appId,
+    ],
   );
 
   const handleDocumentFileOpen = useCallback(
@@ -1080,7 +1202,7 @@ export function WorkspaceAppPage({
         workspaces={workspaces}
       />
     ) : (
-        <WorkspaceBrowserPanel
+      <WorkspaceBrowserPanel
         activeWorkspaceId={activeWorkspaceId}
         artifacts={workspaceArtifacts}
         workspaces={workspaces}
@@ -1096,9 +1218,10 @@ export function WorkspaceAppPage({
         }}
         onSelectWorkspace={handleSelectWorkspace}
         onSelectItem={handlePreviewSelection}
-        emptyUploadsMessage="Add plant photos from the chat composer to populate this workspace."
+        emptyUploadsMessage="Model-created artifacts like farm records, reports, and charts appear here."
         files={workspaceFiles}
         selectedItem={selectedPreviewItem}
+        showFiles={false}
       />
     );
 
@@ -1108,6 +1231,7 @@ export function WorkspaceAppPage({
       artifacts={workspaceArtifacts}
       files={workspaceFiles}
       resolveLocalFile={resolveLocalFile}
+      resolveSupplementalLocalFile={resolveAgricultureArtifactFile}
       getArtifact={getArtifact}
       selectedItem={selectedPreviewItem}
     />
@@ -1117,7 +1241,7 @@ export function WorkspaceAppPage({
     <ChatKitPane
       agentBundle={agentBundle}
       enabled={hydrated}
-      files={localWorkspaceFiles}
+      files={appId === "agriculture" ? [] : localWorkspaceFiles}
       workspaceState={activeWorkspace ?? undefined}
       investigationBrief=""
       clientTools={clientTools}
@@ -1135,8 +1259,6 @@ export function WorkspaceAppPage({
       onRunEnd={appId === "documents" ? () => void refreshDocumentFileList() : undefined}
       attachmentConfig={agentDefinition.attachmentConfig}
       entitiesConfig={agricultureEntitiesConfig}
-      onAddAttachments={handleWorkspaceUpload}
-      onRemoveWorkspaceFile={removeWorkspaceFile}
       composerDraft={composerDraft}
       onComposerDraftApplied={(draftId) => {
         setComposerDraft((current) => (current?.id === draftId ? null : current));

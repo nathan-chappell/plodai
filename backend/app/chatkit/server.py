@@ -36,7 +36,7 @@ from chatkit.types import (
     WorkflowItem,
     WidgetItem,
 )
-from fastapi import Depends
+from fastapi import Depends, Request
 from openai import AsyncOpenAI
 from openai.types.conversations.conversation_item import ConversationItem
 from openai.types.responses import (
@@ -602,7 +602,7 @@ class ClientToolResultConverter(ThreadItemConverter):
 
 
 class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, public_base_url: str | None = None):
         self.settings = get_settings()
         self.db = db
         self.openai_client = AsyncOpenAI(
@@ -610,8 +610,12 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             max_retries=self.settings.openai_max_retries,
         )
         self._uploaded_file_ids: dict[str, str] = {}
-        store = DatabaseMemoryStore(db)
-        super().__init__(store=store)
+        store = DatabaseMemoryStore(
+            db,
+            public_base_url=public_base_url,
+            openai_client=self.openai_client,
+        )
+        super().__init__(store=store, attachment_store=store)
         self.converter = ClientToolResultConverter(
             self.openai_client,
             self._uploaded_file_ids,
@@ -1758,6 +1762,10 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
 
 
 async def build_chatkit_server(
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> ClientWorkspaceChatKitServer:
-    return ClientWorkspaceChatKitServer(db)
+    return ClientWorkspaceChatKitServer(
+        db,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )

@@ -18,6 +18,7 @@ import {
   formatByteSize,
   openWorkspaceFileInNewTab,
 } from "../lib/workspace-artifacts";
+import { BRAND_MARK_URL } from "../lib/brand";
 import { getReportSlideGridTemplate } from "../lib/report-slide-layout";
 import type { LocalPdfAttachment, LocalAttachment } from "../types/report";
 import type {
@@ -42,24 +43,6 @@ export type PreviewSelection =
   | { kind: "file"; id: string }
   | { kind: "artifact"; id: string }
   | null;
-
-const AGRICULTURE_WATERMARK_DATA_URL = `data:image/svg+xml,${encodeURIComponent(`
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360">
-    <defs>
-      <radialGradient id="wash" cx="50%" cy="44%" r="56%">
-        <stop offset="0%" stop-color="#9abca1" stop-opacity="0.16" />
-        <stop offset="100%" stop-color="#9abca1" stop-opacity="0" />
-      </radialGradient>
-    </defs>
-    <circle cx="180" cy="154" r="118" fill="url(#wash)" />
-    <ellipse cx="166" cy="134" rx="74" ry="58" fill="#789d80" fill-opacity="0.13" />
-    <ellipse cx="124" cy="154" rx="42" ry="36" fill="#8db094" fill-opacity="0.11" />
-    <ellipse cx="224" cy="148" rx="50" ry="42" fill="#89ab90" fill-opacity="0.10" />
-    <ellipse cx="208" cy="104" rx="32" ry="28" fill="#a0bfa6" fill-opacity="0.09" />
-    <path d="M174 176c2 18 1 42 1 66 0 12 8 20 20 20 12 0 20-8 20-20v-54c0-10-5-17-14-22-8-4-18-4-27 10z" fill="#7a6046" fill-opacity="0.18" />
-    <path d="M96 264c28-10 52-14 77-12 23 2 48 9 90 7" fill="none" stroke="#72997a" stroke-opacity="0.16" stroke-linecap="round" stroke-width="10" />
-  </svg>
-`)}`;
 
 function summarizeFileMeta(entry: WorkspaceUploadItemSummary): string {
   if (entry.kind === "csv" || entry.kind === "json") {
@@ -476,6 +459,7 @@ export function AgentPreviewPane({
   files,
   artifacts,
   resolveLocalFile,
+  resolveSupplementalLocalFile,
   getArtifact,
   selectedItem,
 }: {
@@ -483,6 +467,7 @@ export function AgentPreviewPane({
   files: WorkspaceUploadItemSummary[];
   artifacts: WorkspaceCreatedItemSummary[];
   resolveLocalFile: (fileId: string) => Promise<LocalAttachment | null>;
+  resolveSupplementalLocalFile?: (fileId: string) => Promise<LocalAttachment | null>;
   getArtifact: (artifactId: string) => Promise<WorkspaceCreatedItemDetail | null>;
   selectedItem: PreviewSelection;
 }) {
@@ -553,19 +538,36 @@ export function AgentPreviewPane({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const resolved = await Promise.all(
+      const workspaceResolved = await Promise.all(
         loadedArtifactFiles.map((file) => resolveLocalFile(file.id)),
       );
+      const resolvedFiles = workspaceResolved.filter(
+        (file): file is LocalAttachment => file !== null,
+      );
+      const resolvedFileIds = new Set(resolvedFiles.map((file) => file.id));
+      const supplementalIds = collectArtifactReferencedImageFileIds(selectedArtifact).filter(
+        (fileId) => !resolvedFileIds.has(fileId),
+      );
+      const supplementalResolved = resolveSupplementalLocalFile
+        ? await Promise.all(
+            supplementalIds.map((fileId) => resolveSupplementalLocalFile(fileId)),
+          )
+        : [];
       if (!cancelled) {
         setArtifactLocalFiles(
-          resolved.filter((file): file is LocalAttachment => file !== null),
+          [
+            ...resolvedFiles,
+            ...supplementalResolved.filter(
+              (file): file is LocalAttachment => file !== null,
+            ),
+          ],
         );
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [loadedArtifactFiles, resolveLocalFile]);
+  }, [loadedArtifactFiles, resolveLocalFile, resolveSupplementalLocalFile, selectedArtifact]);
 
   async function exportReportPdf() {
     if (!selectedArtifact || selectedArtifact.kind !== "report.v1") {
@@ -600,14 +602,14 @@ export function AgentPreviewPane({
   if (!selectedItem) {
     return (
       <PaneCard $appId={appId}>
-        {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+        {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
         {appId === "agriculture" ? (
           <AgricultureEmptyState data-testid="agriculture-preview-empty">
             <AgricultureEmptyCopy>
               <AgricultureEmptyTitle>Awaiting plant photos</AgricultureEmptyTitle>
               <MetaText>
-                Add plant photos from the chat composer, then select an upload or created item from
-                the workspace to preview it here.
+                Add plant photos in chat, then keep the side pane focused on saved farm records,
+                reports, and other model-created artifacts.
               </MetaText>
             </AgricultureEmptyCopy>
           </AgricultureEmptyState>
@@ -624,7 +626,7 @@ export function AgentPreviewPane({
 
     return (
       <PaneCard $appId={appId}>
-        {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+        {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
         <PaneHeader>
           <div>
             <PaneTitle>{selectedFileEntry.name}</PaneTitle>
@@ -656,7 +658,7 @@ export function AgentPreviewPane({
   if (selectedArtifactSummary) {
     return (
       <PaneCard $appId={appId}>
-        {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+        {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
         <PaneHeader>
           <div>
             <PaneTitle>{selectedArtifactSummary.title}</PaneTitle>
@@ -693,10 +695,29 @@ export function AgentPreviewPane({
 
   return (
     <PaneCard $appId={appId}>
-      {appId === "agriculture" ? <AgriculturePaneWatermark aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" /> : null}
+      {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
       <MetaText>Select an upload or created item from the workspace to preview it here.</MetaText>
     </PaneCard>
   );
+}
+
+function collectArtifactReferencedImageFileIds(
+  artifact: WorkspaceCreatedItemDetail | null,
+): string[] {
+  if (!artifact || artifact.kind !== "report.v1") {
+    return [];
+  }
+
+  const report = artifact.payload as WorkspaceReportV1;
+  const referencedFileIds = new Set<string>();
+  for (const slide of report.slides) {
+    for (const panel of slide.panels) {
+      if (panel.type === "image" && panel.file_id) {
+        referencedFileIds.add(panel.file_id);
+      }
+    }
+  }
+  return [...referencedFileIds];
 }
 
 const PaneCard = styled.section<{ $appId?: WorkspaceAppId }>`
@@ -720,17 +741,16 @@ const PaneCard = styled.section<{ $appId?: WorkspaceAppId }>`
   }
 `;
 
-const AgriculturePaneWatermark = styled.div`
+const AgriculturePaneWatermark = styled.img`
   position: absolute;
-  inset: 0;
+  right: 1.5rem;
+  bottom: 0.9rem;
+  width: min(26%, 180px);
+  height: auto;
   pointer-events: none;
   z-index: 0;
-  opacity: 1;
-  background-image: url("${AGRICULTURE_WATERMARK_DATA_URL}");
-  background-repeat: no-repeat;
-  background-position: right 2.6rem bottom 2rem;
-  background-size: min(46%, 360px);
-  filter: saturate(0.94);
+  opacity: 0.15;
+  filter: saturate(0.9);
 `;
 
 const PaneHeader = styled.div`
