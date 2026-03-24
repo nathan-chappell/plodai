@@ -6,8 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from backend.app.db.session import Base
 
 
-class StoredOpenAIFile(Base, kw_only=True):
-    __tablename__ = "stored_openai_files"
+class StoredFile(Base, kw_only=True):
+    __tablename__ = "stored_files"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[str] = mapped_column(Text, index=True)
@@ -18,7 +18,8 @@ class StoredOpenAIFile(Base, kw_only=True):
     scope: Mapped[str] = mapped_column(Text, index=True)
     source_kind: Mapped[str] = mapped_column(Text)
     parent_file_id: Mapped[str | None] = mapped_column(Text, index=True, default=None)
-    openai_file_id: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    storage_provider: Mapped[str] = mapped_column(Text, index=True)
+    storage_key: Mapped[str] = mapped_column(Text, unique=True, index=True)
     name: Mapped[str] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(Text, index=True)
     extension: Mapped[str] = mapped_column(Text, default="")
@@ -26,10 +27,6 @@ class StoredOpenAIFile(Base, kw_only=True):
     byte_size: Mapped[int | None] = mapped_column(Integer, default=None)
     status: Mapped[str] = mapped_column(Text, index=True, default="available")
     preview_json: Mapped[dict] = mapped_column(JSON, default_factory=dict)
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        default=None,
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         init=False,

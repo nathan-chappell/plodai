@@ -12,7 +12,7 @@ class StoredFileSchemaBase(BaseModel):
 StoredFileKind: TypeAlias = Literal["csv", "json", "pdf", "image", "other"]
 StoredFileScope: TypeAlias = Literal["chat_attachment", "document_thread_file"]
 StoredFileSourceKind: TypeAlias = Literal["upload", "url_import", "derived"]
-StoredFileStatus: TypeAlias = Literal["available", "deleted", "expired"]
+StoredFileStatus: TypeAlias = Literal["available", "deleted"]
 AttachmentInputKind: TypeAlias = Literal["file", "image"]
 DocumentLocatorKind: TypeAlias = Literal["text", "form_field"]
 DocumentLocatorReliability: TypeAlias = Literal["high", "medium", "low"]
@@ -57,7 +57,8 @@ StoredFilePreview: TypeAlias = (
 
 class StoredFileSummary(StoredFileSchemaBase):
     id: str
-    openai_file_id: str
+    storage_provider: str
+    storage_key: str
     scope: StoredFileScope
     source_kind: StoredFileSourceKind
     app_id: str | None = None
@@ -72,7 +73,6 @@ class StoredFileSummary(StoredFileSchemaBase):
     byte_size: int | None = Field(default=None, ge=0)
     status: StoredFileStatus
     preview: StoredFilePreview
-    expires_at: str | None = None
     created_at: str
     updated_at: str
 

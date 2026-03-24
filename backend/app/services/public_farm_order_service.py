@@ -5,16 +5,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.stored_file import StoredFile
 from backend.app.models.workspace import Workspace, WorkspaceItem
 from backend.app.schemas.workspace import FarmItemPayload, PublicFarmOrderResponse
 from backend.app.services.stored_file_service import StoredFileService
 
 
 class PublicFarmOrderService:
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        file_service: StoredFileService | None = None,
+    ):
         self.db = db
-        self.file_service = StoredFileService(db)
+        self.file_service = file_service or StoredFileService(db)
 
     async def get_public_order(
         self,
@@ -58,7 +63,7 @@ class PublicFarmOrderService:
 
         hero_image_preview_url: str | None = None
         if isinstance(order.hero_image_file_id, str) and order.hero_image_file_id.strip():
-            record = await self.db.get(StoredOpenAIFile, order.hero_image_file_id)
+            record = await self.db.get(StoredFile, order.hero_image_file_id)
             if record is not None and record.status != "deleted" and record.kind == "image":
                 hero_image_preview_url = self.file_service.build_public_preview_url(
                     record,

@@ -12,7 +12,7 @@ def import_models() -> tuple[type[Base], ...]:
     from backend.app.models.cost import CostEvent
     from backend.app.models.credit import UserCreditBalance
     from backend.app.models.credit_grant import CreditGrant
-    from backend.app.models.stored_file import StoredOpenAIFile
+    from backend.app.models.stored_file import StoredFile
     from backend.app.models.workspace import (
         Workspace,
         WorkspaceItem,
@@ -27,7 +27,7 @@ def import_models() -> tuple[type[Base], ...]:
         CostEvent,
         UserCreditBalance,
         CreditGrant,
-        StoredOpenAIFile,
+        StoredFile,
         Workspace,
         WorkspaceItem,
         WorkspaceItemRevision,

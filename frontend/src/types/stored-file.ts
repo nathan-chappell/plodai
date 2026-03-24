@@ -3,7 +3,7 @@ import type { WorkspaceAppId } from "./workspace";
 export type StoredFileKind = "csv" | "json" | "pdf" | "image" | "other";
 export type StoredFileScope = "chat_attachment" | "document_thread_file";
 export type StoredFileSourceKind = "upload" | "url_import" | "derived";
-export type StoredFileStatus = "available" | "deleted" | "expired";
+export type StoredFileStatus = "available" | "deleted";
 export type DocumentLocatorKind = "text" | "form_field";
 export type DocumentLocatorReliability = "high" | "medium" | "low";
 export type DocumentEditStrategy =
@@ -43,7 +43,8 @@ export type StoredFilePreview =
 
 export type StoredFileSummary = {
   id: string;
-  openai_file_id: string;
+  storage_provider: string;
+  storage_key: string;
   scope: StoredFileScope;
   source_kind: StoredFileSourceKind;
   app_id?: WorkspaceAppId | null;
@@ -58,7 +59,6 @@ export type StoredFileSummary = {
   byte_size?: number | null;
   status: StoredFileStatus;
   preview: StoredFilePreview;
-  expires_at?: string | null;
   created_at: string;
   updated_at: string;
 };

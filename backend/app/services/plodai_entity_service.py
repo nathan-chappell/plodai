@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
 from backend.app.models.chatkit import WorkspaceChat
-from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.stored_file import StoredFile
 from backend.app.models.workspace import Workspace, WorkspaceItem
 from backend.app.schemas.plodai_entities import (
     PlodaiComposerEntity,
@@ -17,9 +17,14 @@ from backend.app.services.stored_file_service import StoredFileService
 
 
 class PlodaiEntityService:
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        file_service: StoredFileService | None = None,
+    ):
         self.db = db
-        self.file_service = StoredFileService(db)
+        self.file_service = file_service or StoredFileService(db)
 
     async def search_entities(
         self,
@@ -78,16 +83,16 @@ class PlodaiEntityService:
         public_base_url: str | None,
     ) -> list[PlodaiComposerEntity]:
         result = await self.db.execute(
-            select(StoredOpenAIFile)
+            select(StoredFile)
             .where(
-                StoredOpenAIFile.user_id == user_id,
-                StoredOpenAIFile.workspace_id == workspace_id,
-                StoredOpenAIFile.thread_id == thread_id,
-                StoredOpenAIFile.scope == "chat_attachment",
-                StoredOpenAIFile.kind == "image",
-                StoredOpenAIFile.status != "deleted",
+                StoredFile.user_id == user_id,
+                StoredFile.workspace_id == workspace_id,
+                StoredFile.thread_id == thread_id,
+                StoredFile.scope == "chat_attachment",
+                StoredFile.kind == "image",
+                StoredFile.status != "deleted",
             )
-            .order_by(StoredOpenAIFile.created_at.desc())
+            .order_by(StoredFile.created_at.desc())
         )
         records = list(result.scalars().all())
         entities: list[PlodaiComposerEntity] = []
@@ -111,6 +116,7 @@ class PlodaiEntityService:
                     group="Thread images",
                     data={
                         "entity_type": "thread_image",
+                        "stored_file_id": record.id,
                         "file_id": record.id,
                         "workspace_item_id": record.id,
                         "thread_id": thread_id,

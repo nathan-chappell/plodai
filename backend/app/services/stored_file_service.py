@@ -16,7 +16,6 @@ from uuid import uuid4
 
 from chatkit.types import Attachment
 from fastapi import HTTPException, status
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,10 +30,10 @@ from backend.app.chatkit.metadata import (
     merge_chat_metadata,
     parse_chat_metadata,
 )
-from backend.app.core.config import Settings, get_settings, resolve_public_base_url
+from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.models.chatkit import WorkspaceChat, WorkspaceWorkspaceChatAttachment
-from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.stored_file import StoredFile
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.stored_file import (
     ChatAttachmentDeleteResponse,
@@ -53,13 +52,18 @@ from backend.app.schemas.stored_file import (
     StoredFileSourceKind,
     StoredFileSummary,
 )
+from backend.app.services.bucket_storage import (
+    DEFAULT_STORAGE_PROVIDER,
+    BucketStorageService,
+    RailwayBucketService,
+)
 
 logger = get_logger("services.stored_file")
 
 
 @dataclass(kw_only=True)
 class StoredUploadResult:
-    stored_file: StoredOpenAIFile
+    stored_file: StoredFile
     thread_id: str | None = None
 
 
@@ -68,15 +72,12 @@ class StoredFileService:
         self,
         db: AsyncSession,
         *,
-        openai_client: AsyncOpenAI | None = None,
         settings: Settings | None = None,
+        bucket_service: BucketStorageService | None = None,
     ):
         self.db = db
         self.settings = settings or get_settings()
-        self.openai_client = openai_client or AsyncOpenAI(
-            api_key=self.settings.OPENAI_API_KEY or None,
-            max_retries=self.settings.openai_max_retries,
-        )
+        self.bucket_service = bucket_service or RailwayBucketService(self.settings)
 
     async def create_chat_attachment_upload(
         self,
@@ -122,7 +123,7 @@ class StoredFileService:
                 detail="Unsupported source_kind.",
             )
 
-        stored_file = await self._upload_file_bytes(
+        stored_file = await self._store_file_bytes(
             user_id=user_id,
             app_id=workspace.app_id,
             workspace_id=workspace.id,
@@ -144,7 +145,12 @@ class StoredFileService:
                 scope=scope,
                 thread_id=ensured_thread_id,
             )
-            await DatabaseMemoryStore(self.db).save_attachment(
+            await DatabaseMemoryStore(
+                self.db,
+                settings=self.settings,
+                public_base_url=public_base_url,
+                bucket_service=self.bucket_service,
+            ).save_attachment(
                 canonical_attachment,
                 context=None,
             )
@@ -177,14 +183,14 @@ class StoredFileService:
     ) -> DocumentFileListResponse:
         await self._get_chat(thread_id=thread_id, user_id=user_id)
         result = await self.db.execute(
-            select(StoredOpenAIFile)
+            select(StoredFile)
             .where(
-                StoredOpenAIFile.user_id == user_id,
-                StoredOpenAIFile.thread_id == thread_id,
-                StoredOpenAIFile.scope == "document_thread_file",
-                StoredOpenAIFile.status != "deleted",
+                StoredFile.user_id == user_id,
+                StoredFile.thread_id == thread_id,
+                StoredFile.scope == "document_thread_file",
+                StoredFile.status != "deleted",
             )
-            .order_by(StoredOpenAIFile.created_at.desc())
+            .order_by(StoredFile.created_at.desc())
         )
         records = list(result.scalars().all())
         return DocumentFileListResponse(
@@ -218,9 +224,9 @@ class StoredFileService:
         attachment_id: str,
     ) -> ChatAttachmentDeleteResponse:
         result = await self.db.execute(
-            select(StoredOpenAIFile).where(
-                StoredOpenAIFile.user_id == user_id,
-                StoredOpenAIFile.attachment_id == attachment_id,
+            select(StoredFile).where(
+                StoredFile.user_id == user_id,
+                StoredFile.attachment_id == attachment_id,
             )
         )
         record = result.scalar_one_or_none()
@@ -251,8 +257,8 @@ class StoredFileService:
         *,
         user_id: str,
         file_id: str,
-    ) -> StoredOpenAIFile:
-        record = await self.db.get(StoredOpenAIFile, file_id)
+    ) -> StoredFile:
+        record = await self.db.get(StoredFile, file_id)
         if record is None or record.user_id != user_id or record.status == "deleted":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -266,7 +272,7 @@ class StoredFileService:
         user_id: str,
         thread_id: str,
         file_id: str,
-    ) -> StoredOpenAIFile:
+    ) -> StoredFile:
         record = await self.get_stored_file(user_id=user_id, file_id=file_id)
         if record.scope != "document_thread_file" or record.thread_id != thread_id:
             raise HTTPException(
@@ -275,11 +281,10 @@ class StoredFileService:
             )
         return record
 
-    async def load_file_bytes(self, record: StoredOpenAIFile) -> bytes:
-        binary_response = await self.openai_client.files.content(record.openai_file_id)
-        return await binary_response.aread()
+    async def load_file_bytes(self, record: StoredFile) -> bytes:
+        return await self.bucket_service.get_object_bytes(key=record.storage_key)
 
-    async def load_dataset_rows(self, record: StoredOpenAIFile) -> list[dict[str, object]]:
+    async def load_dataset_rows(self, record: StoredFile) -> list[dict[str, object]]:
         if record.kind not in {"csv", "json"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -294,13 +299,13 @@ class StoredFileService:
     async def create_document_revision(
         self,
         *,
-        parent_record: StoredOpenAIFile,
+        parent_record: StoredFile,
         file_name: str,
         file_bytes: bytes,
         mime_type: str | None = None,
         source_kind: StoredFileSourceKind = "derived",
-    ) -> StoredOpenAIFile:
-        return await self._upload_file_bytes(
+    ) -> StoredFile:
+        return await self._store_file_bytes(
             user_id=parent_record.user_id,
             app_id=parent_record.app_id,
             workspace_id=parent_record.workspace_id,
@@ -353,10 +358,11 @@ class StoredFileService:
         await self.db.commit()
         return new_chat.id
 
-    def serialize_stored_file(self, record: StoredOpenAIFile) -> StoredFileSummary:
+    def serialize_stored_file(self, record: StoredFile) -> StoredFileSummary:
         return StoredFileSummary(
             id=record.id,
-            openai_file_id=record.openai_file_id,
+            storage_provider=record.storage_provider,
+            storage_key=record.storage_key,
             scope=record.scope,  # type: ignore[arg-type]
             source_kind=record.source_kind,  # type: ignore[arg-type]
             app_id=record.app_id,
@@ -371,52 +377,106 @@ class StoredFileService:
             byte_size=record.byte_size,
             status=record.status,  # type: ignore[arg-type]
             preview=self._preview_from_json(record.preview_json),
-            expires_at=record.expires_at.isoformat() if record.expires_at else None,
             created_at=record.created_at.isoformat(),
             updated_at=record.updated_at.isoformat(),
         )
 
-    def serialize_document_file(self, record: StoredOpenAIFile) -> DocumentFileSummary:
+    def serialize_document_file(self, record: StoredFile) -> DocumentFileSummary:
         summary = self.serialize_stored_file(record)
         return DocumentFileSummary.model_validate(summary.model_dump())
 
     def build_public_preview_url(
         self,
-        record: StoredOpenAIFile,
+        record: StoredFile,
         *,
         public_base_url: str | None = None,
     ) -> str:
-        token = self._build_preview_token(record)
-        base_url = resolve_public_base_url(
-            public_base_url,
-            settings=self.settings,
+        del public_base_url
+        return self.bucket_service.build_presigned_download_url(
+            key=record.storage_key,
+            filename=record.name,
+            mime_type=record.mime_type,
+            inline=True,
         )
-        return f"{base_url}/api/stored-files/{record.id}/preview?token={token}"
+
+    def build_public_content_url(
+        self,
+        record: StoredFile,
+        *,
+        inline: bool = True,
+    ) -> str:
+        return self.bucket_service.build_presigned_download_url(
+            key=record.storage_key,
+            filename=record.name,
+            mime_type=record.mime_type,
+            inline=inline,
+        )
 
     async def get_preview_file(
         self,
         *,
         file_id: str,
         token: str,
-    ) -> StoredOpenAIFile:
-        record = await self.db.get(StoredOpenAIFile, file_id)
+    ) -> StoredFile:
+        record = await self.db.get(StoredFile, file_id)
         if record is None or record.status == "deleted" or record.kind != "image":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Stored file preview not found.",
             )
         self._assert_preview_token(record, token)
-        expires_at = record.expires_at
-        if expires_at and expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at and expires_at <= datetime.now(UTC):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Stored file preview has expired.",
-            )
         return record
 
-    async def _upload_file_bytes(
+    async def finalize_pending_attachment(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        app_id: str,
+        thread_id: str | None,
+        attachment_id: str,
+        scope: StoredFileScope,
+        file_name: str,
+        mime_type: str | None,
+        declared_size: int,
+        storage_key: str,
+    ) -> StoredFile:
+        workspace = await self._get_workspace(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            app_id=app_id,
+        )
+        self._validate_workspace_upload_constraints(
+            workspace=workspace,
+            file_name=file_name,
+            mime_type=mime_type,
+            byte_size=declared_size,
+            scope=scope,
+        )
+        metadata = await self.bucket_service.head_object(key=storage_key)
+        if metadata.content_length != declared_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Attachment upload size did not match the initialized file metadata.",
+            )
+        file_bytes = await self.bucket_service.get_object_bytes(key=storage_key)
+        return await self._create_stored_file_record(
+            user_id=user_id,
+            app_id=app_id,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            attachment_id=attachment_id,
+            scope=scope,
+            source_kind="upload",
+            parent_file_id=None,
+            file_name=file_name,
+            mime_type=mime_type,
+            file_bytes=file_bytes,
+            preview_json=None,
+            storage_key=storage_key,
+        )
+
+    async def _store_file_bytes(
         self,
         *,
         user_id: str,
@@ -431,47 +491,63 @@ class StoredFileService:
         mime_type: str | None,
         file_bytes: bytes,
         preview_json: dict[str, object] | None = None,
-    ) -> StoredOpenAIFile:
+    ) -> StoredFile:
         resolved_mime_type = mime_type or mimetypes.guess_type(file_name)[0]
+        byte_size = len(file_bytes)
+        self._validate_max_bytes(scope=scope, byte_size=byte_size)
+        storage_key = self.bucket_service.build_object_key(
+            scope=scope,
+            attachment_id=attachment_id,
+        )
+        await self.bucket_service.put_object_bytes(
+            key=storage_key,
+            file_bytes=file_bytes,
+            mime_type=resolved_mime_type,
+        )
+        return await self._create_stored_file_record(
+            user_id=user_id,
+            app_id=app_id,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            attachment_id=attachment_id,
+            scope=scope,
+            source_kind=source_kind,
+            parent_file_id=parent_file_id,
+            file_name=file_name,
+            mime_type=resolved_mime_type,
+            file_bytes=file_bytes,
+            preview_json=preview_json,
+            storage_key=storage_key,
+        )
+
+    async def _create_stored_file_record(
+        self,
+        *,
+        user_id: str,
+        app_id: str | None,
+        workspace_id: str | None,
+        thread_id: str | None,
+        attachment_id: str | None,
+        scope: StoredFileScope,
+        source_kind: StoredFileSourceKind,
+        parent_file_id: str | None,
+        file_name: str,
+        mime_type: str | None,
+        file_bytes: bytes,
+        preview_json: dict[str, object] | None,
+        storage_key: str,
+    ) -> StoredFile:
+        resolved_mime_type = mime_type or mimetypes.guess_type(file_name)[0]
+        byte_size = len(file_bytes)
         extension = _extension_for_name(file_name)
         kind = _kind_for_file(file_name=file_name, mime_type=resolved_mime_type)
-        byte_size = len(file_bytes)
-        max_bytes = (
-            self.settings.document_thread_max_bytes
-            if scope == "document_thread_file"
-            else self.settings.chat_attachment_max_model_bytes
-        )
-        if byte_size > max_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=(
-                    "The selected file is too large for this upload path."
-                    if scope == "chat_attachment"
-                    else "The selected document exceeds the document upload size limit."
-                ),
-            )
         preview = self._build_preview(
             kind=kind,
             mime_type=resolved_mime_type,
             file_bytes=file_bytes,
             preview_json=preview_json,
         )
-        uploaded_file = await self.openai_client.files.create(
-            file=(
-                file_name,
-                file_bytes,
-                resolved_mime_type or "application/octet-stream",
-            ),
-            purpose="user_data",
-            expires_after={
-                "anchor": "created_at",
-                "seconds": self.settings.stored_file_default_expiry_seconds,
-            },
-        )
-        expires_at = datetime.now(UTC) + timedelta(
-            seconds=self.settings.stored_file_default_expiry_seconds
-        )
-        record = StoredOpenAIFile(
+        record = StoredFile(
             id=f"file_{uuid4().hex}",
             user_id=user_id,
             app_id=app_id,
@@ -481,7 +557,8 @@ class StoredFileService:
             scope=scope,
             source_kind=source_kind,
             parent_file_id=parent_file_id,
-            openai_file_id=uploaded_file.id,
+            storage_provider=DEFAULT_STORAGE_PROVIDER,
+            storage_key=storage_key,
             name=file_name,
             kind=kind,
             extension=extension,
@@ -489,7 +566,6 @@ class StoredFileService:
             byte_size=byte_size,
             status="available",
             preview_json=preview.model_dump(),
-            expires_at=expires_at,
         )
         self.db.add(record)
         await self.db.commit()
@@ -511,12 +587,12 @@ class StoredFileService:
 
     async def _delete_file_record(
         self,
-        record: StoredOpenAIFile,
+        record: StoredFile,
         *,
         commit: bool = True,
     ) -> None:
         try:
-            await self.openai_client.files.delete(record.openai_file_id)
+            await self.bucket_service.delete_object(key=record.storage_key)
         except Exception:
             log_event(
                 logger,
@@ -625,6 +701,24 @@ class StoredFileService:
         file_bytes: bytes,
         scope: StoredFileScope,
     ) -> None:
+        self._validate_workspace_upload_constraints(
+            workspace=workspace,
+            file_name=file_name,
+            mime_type=mime_type,
+            byte_size=len(file_bytes),
+            scope=scope,
+        )
+
+    def _validate_workspace_upload_constraints(
+        self,
+        *,
+        workspace: Workspace,
+        file_name: str,
+        mime_type: str | None,
+        byte_size: int,
+        scope: StoredFileScope,
+    ) -> None:
+        self._validate_max_bytes(scope=scope, byte_size=byte_size)
         if workspace.app_id != "plodai" or scope != "chat_attachment":
             return
 
@@ -634,16 +728,37 @@ class StoredFileService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="PlodAI chat attachments must be image files.",
             )
-        if len(file_bytes) > self.settings.plodai_chat_attachment_max_bytes:
+        if byte_size > self.settings.plodai_chat_attachment_max_bytes:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail="PlodAI chat attachments must be 10 MB or smaller.",
             )
 
+    def _validate_max_bytes(
+        self,
+        *,
+        scope: StoredFileScope,
+        byte_size: int,
+    ) -> None:
+        max_bytes = (
+            self.settings.document_thread_max_bytes
+            if scope == "document_thread_file"
+            else self.settings.chat_attachment_max_model_bytes
+        )
+        if byte_size > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    "The selected file is too large for this upload path."
+                    if scope == "chat_attachment"
+                    else "The selected document exceeds the document upload size limit."
+                ),
+            )
+
     async def build_attachment_display_payload(
         self,
         *,
-        stored_file: StoredOpenAIFile,
+        stored_file: StoredFile,
         attachment_id: str,
         scope: StoredFileScope,
         thread_id: str | None,
@@ -669,10 +784,10 @@ class StoredFileService:
             preview_url=preview_url,
         )
 
-    def _build_preview_token(self, record: StoredOpenAIFile) -> str:
-        expires_at = record.expires_at or (
+    def _build_preview_token(self, record: StoredFile) -> str:
+        expires_at = (
             datetime.now(UTC)
-            + timedelta(seconds=self.settings.stored_file_default_expiry_seconds)
+            + timedelta(seconds=self.settings.storage_bucket_download_url_ttl_seconds)
         )
         expires_ts = int(expires_at.timestamp())
         payload = f"{record.id}:{record.user_id}:{expires_ts}"
@@ -684,7 +799,7 @@ class StoredFileService:
         encoded = urlsafe_b64encode(f"{expires_ts}:{signature}".encode("utf-8"))
         return encoded.decode("utf-8").rstrip("=")
 
-    def _assert_preview_token(self, record: StoredOpenAIFile, token: str) -> None:
+    def _assert_preview_token(self, record: StoredFile, token: str) -> None:
         padded_token = token + "=" * (-len(token) % 4)
         try:
             decoded = urlsafe_b64decode(padded_token.encode("utf-8")).decode("utf-8")

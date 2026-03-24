@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,35 @@ class Settings(BaseSettings):
     document_thread_max_bytes: int = 100 * 1024 * 1024
     document_preview_max_pages: int = 12
     PUBLIC_BASE_URL: str | None = None
+    storage_bucket_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("STORAGE_BUCKET_ENDPOINT", "ENDPOINT"),
+    )
+    storage_bucket_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("STORAGE_BUCKET_NAME", "BUCKET"),
+    )
+    storage_bucket_access_key_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("STORAGE_BUCKET_ACCESS_KEY_ID", "ACCESS_KEY_ID"),
+    )
+    storage_bucket_secret_access_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "STORAGE_BUCKET_SECRET_ACCESS_KEY",
+            "SECRET_ACCESS_KEY",
+        ),
+    )
+    storage_bucket_region: str = Field(
+        default="auto",
+        validation_alias=AliasChoices("STORAGE_BUCKET_REGION", "REGION"),
+    )
+    storage_bucket_url_style: str = Field(
+        default="virtual",
+        validation_alias=AliasChoices("STORAGE_BUCKET_URL_STYLE"),
+    )
+    storage_bucket_upload_url_ttl_seconds: int = 15 * 60
+    storage_bucket_download_url_ttl_seconds: int = 5 * 60
     clerk_authorized_parties: list[str] = []
     clerk_clock_skew_ms: int = 5000
     USE_COLORLOG: bool = False

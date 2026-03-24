@@ -5,9 +5,11 @@ description = "FastAPI backend for an agentic CSV reporting demo."
 requires-python = ">=3.14"
 dependencies = [
   "aiosqlite",
+  "boto3",
   "clerk-backend-api",
   "email-validator",
   "fastapi",
+  "httpx",
   "openai",
   "openai-agents",
   "openai-chatkit",
@@ -22,7 +24,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx",
   "pytest",
   "ruff"
 ]

@@ -1224,8 +1224,13 @@ export function WorkspaceAppPage({
         query: "",
       });
       const imageEntity = response.entities.find(
-        (entity) =>
-          entity.data.entity_type === "thread_image" && entity.data.file_id === fileId,
+        (entity) => {
+          if (entity.data.entity_type !== "thread_image") {
+            return false;
+          }
+          const storedFileId = entity.data.stored_file_id ?? entity.data.file_id;
+          return storedFileId === fileId;
+        },
       );
       if (!imageEntity) {
         return null;

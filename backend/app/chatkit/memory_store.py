@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
-from base64 import urlsafe_b64decode, urlsafe_b64encode
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import cast
 
 from fastapi import HTTPException, status
-from openai import AsyncOpenAI
 from pydantic import TypeAdapter
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +24,7 @@ from chatkit.types import (
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.chatkit.attachment_payloads import (
+    build_canonical_attachment,
     build_display_attachment,
     normalize_attachment_for_storage,
 )
@@ -44,24 +40,14 @@ from backend.app.models.chatkit import (
     WorkspaceWorkspaceChatAttachment,
     WorkspaceChatEntry,
 )
-from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.stored_file import StoredFile
 from backend.app.models.workspace import Workspace
+from backend.app.services.bucket_storage import BucketStorageService, RailwayBucketService
 
 
 THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
 ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
-UPLOAD_TOKEN_TTL_SECONDS = 15 * 60
 logger = get_logger("chatkit.memory_store")
-
-
-@dataclass(kw_only=True)
-class PendingAttachmentUpload:
-    attachment: Attachment
-    user_id: str
-    workspace_id: str
-    app_id: str
-    declared_size: int
-    is_completed: bool = False
 
 
 class DatabaseMemoryStore(
@@ -74,7 +60,7 @@ class DatabaseMemoryStore(
         *,
         settings: Settings | None = None,
         public_base_url: str | None = None,
-        openai_client: AsyncOpenAI | None = None,
+        bucket_service: BucketStorageService | None = None,
     ):
         self.db = db
         self.settings = settings or get_settings()
@@ -82,16 +68,7 @@ class DatabaseMemoryStore(
             public_base_url,
             settings=self.settings,
         )
-        self._openai_client = openai_client
-
-    @property
-    def openai_client(self) -> AsyncOpenAI:
-        if self._openai_client is None:
-            self._openai_client = AsyncOpenAI(
-                api_key=self.settings.OPENAI_API_KEY or None,
-                max_retries=self.settings.openai_max_retries,
-            )
-        return self._openai_client
+        self.bucket_service = bucket_service or RailwayBucketService(self.settings)
 
     async def create_attachment(
         self,
@@ -107,21 +84,23 @@ class DatabaseMemoryStore(
         )
 
         attachment_id = self.generate_attachment_id(input.mime_type, context)
-        token = self._build_upload_token(
+        storage_key = self.bucket_service.build_object_key(
+            scope="chat_attachment",
             attachment_id=attachment_id,
-            user_id=context.user_id,
         )
-        upload_url = (
-            f"{self.public_base_url}/api/chatkit/attachments/"
-            f"{attachment_id}/content?token={token}"
+        upload = self.bucket_service.build_presigned_upload(
+            key=storage_key,
+            mime_type=input.mime_type,
+            file_name=input.name,
         )
         return FileAttachment(
             id=attachment_id,
             name=input.name,
             mime_type=input.mime_type,
             upload_descriptor=AttachmentUploadDescriptor(
-                url=upload_url,
-                method="POST",
+                url=upload.url,
+                method="PUT",
+                headers=upload.headers,
             ),
             thread_id=None,
             metadata={
@@ -129,6 +108,8 @@ class DatabaseMemoryStore(
                 "workspace_id": workspace.id,
                 "app_id": workspace.app_id,
                 "declared_size": input.size,
+                "storage_provider": self.bucket_service.storage_provider,
+                "storage_key": storage_key,
                 "scope": "chat_attachment",
                 "attach_mode": "model_input",
                 "input_kind": (
@@ -239,7 +220,7 @@ class DatabaseMemoryStore(
             else None
         )
         if isinstance(stored_file_id, str) and stored_file_id.strip():
-            stored_file = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+            stored_file = await self.db.get(StoredFile, stored_file_id.strip())
             if stored_file is not None:
                 stored_file.attachment_id = canonical_attachment.id
                 if (
@@ -292,7 +273,7 @@ class DatabaseMemoryStore(
             else None
         )
         if isinstance(stored_file_id, str) and stored_file_id.strip():
-            stored_file = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+            stored_file = await self.db.get(StoredFile, stored_file_id.strip())
             if stored_file is not None:
                 stored_file.attachment_id = canonical_attachment.id
                 stored_file.thread_id = thread_id
@@ -302,9 +283,9 @@ class DatabaseMemoryStore(
         self, attachment_id: str, context: ReportAgentContext
     ) -> None:
         result = await self.db.execute(
-            select(StoredOpenAIFile).where(
-                StoredOpenAIFile.attachment_id == attachment_id,
-                StoredOpenAIFile.status != "deleted",
+            select(StoredFile).where(
+                StoredFile.attachment_id == attachment_id,
+                StoredFile.status != "deleted",
             )
         )
         stored_files = list(result.scalars().all())
@@ -321,7 +302,7 @@ class DatabaseMemoryStore(
                     if patch is not None:
                         chat.metadata_json = merge_chat_metadata(current_metadata, patch)
             try:
-                await self.openai_client.files.delete(stored_file.openai_file_id)
+                await self.bucket_service.delete_object(key=stored_file.storage_key)
             except Exception:
                 log_event(
                     logger,
@@ -341,30 +322,33 @@ class DatabaseMemoryStore(
             await self.db.delete(attachment)
         await self.db.commit()
 
-    async def resolve_pending_attachment_upload(
+    async def finalize_attachment(
         self,
+        attachment: Attachment,
         *,
-        attachment_id: str,
-        token: str,
-    ) -> PendingAttachmentUpload:
-        try:
-            attachment = await self.load_attachment(attachment_id, context=None)
-        except NotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attachment upload not found.",
-            ) from exc
+        thread_id: str | None,
+    ) -> Attachment:
         metadata = attachment.metadata if isinstance(attachment.metadata, dict) else None
         if metadata is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attachment upload not found.",
+            return normalize_attachment_for_storage(attachment)
+
+        stored_file_id = metadata.get("stored_file_id")
+        if isinstance(stored_file_id, str) and stored_file_id.strip():
+            return normalize_attachment_for_storage(
+                attachment.model_copy(update={"thread_id": thread_id})
+            )
+
+        if metadata.get("upload_state") != "pending":
+            return normalize_attachment_for_storage(
+                attachment.model_copy(update={"thread_id": thread_id})
             )
 
         user_id = metadata.get("user_id")
         workspace_id = metadata.get("workspace_id")
         app_id = metadata.get("app_id")
         declared_size = metadata.get("declared_size")
+        storage_key = metadata.get("storage_key")
+        scope = metadata.get("scope")
         if (
             not isinstance(user_id, str)
             or not user_id.strip()
@@ -374,25 +358,42 @@ class DatabaseMemoryStore(
             or not app_id.strip()
             or not isinstance(declared_size, int)
             or declared_size < 0
+            or not isinstance(storage_key, str)
+            or not storage_key.strip()
+            or scope != "chat_attachment"
         ):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attachment upload not found.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Attachment upload metadata was incomplete.",
             )
 
-        self._assert_upload_token(
-            attachment_id=attachment_id,
-            user_id=user_id.strip(),
-            token=token,
+        from backend.app.services.stored_file_service import StoredFileService
+
+        service = StoredFileService(
+            self.db,
+            settings=self.settings,
+            bucket_service=self.bucket_service,
         )
-        return PendingAttachmentUpload(
-            attachment=attachment,
+        stored_file = await service.finalize_pending_attachment(
             user_id=user_id.strip(),
             workspace_id=workspace_id.strip(),
             app_id=app_id.strip(),
+            thread_id=thread_id,
+            attachment_id=attachment.id,
+            scope="chat_attachment",
+            file_name=attachment.name,
+            mime_type=attachment.mime_type,
             declared_size=declared_size,
-            is_completed=attachment.upload_descriptor is None,
+            storage_key=storage_key.strip(),
         )
+        canonical_attachment = build_canonical_attachment(
+            stored_file=stored_file,
+            attachment_id=attachment.id,
+            scope="chat_attachment",
+            thread_id=thread_id,
+        )
+        await self.save_attachment(canonical_attachment, context=None)
+        return canonical_attachment
 
     async def load_threads(
         self,
@@ -573,72 +574,6 @@ class DatabaseMemoryStore(
                 detail="The selected file is too large for this upload path.",
             )
 
-    def _build_upload_token(
-        self,
-        *,
-        attachment_id: str,
-        user_id: str,
-    ) -> str:
-        expires_ts = int(
-            (
-                datetime.now(UTC)
-                + timedelta(seconds=UPLOAD_TOKEN_TTL_SECONDS)
-            ).timestamp()
-        )
-        payload = f"{attachment_id}:{user_id}:{expires_ts}"
-        signature = hmac.new(
-            self._upload_secret(),
-            payload.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        encoded = urlsafe_b64encode(f"{expires_ts}:{signature}".encode("utf-8"))
-        return encoded.decode("utf-8").rstrip("=")
-
-    def _assert_upload_token(
-        self,
-        *,
-        attachment_id: str,
-        user_id: str,
-        token: str,
-    ) -> None:
-        padded_token = token + "=" * (-len(token) % 4)
-        try:
-            decoded = urlsafe_b64decode(padded_token.encode("utf-8")).decode("utf-8")
-            expires_raw, signature = decoded.split(":", 1)
-            expires_ts = int(expires_raw)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attachment upload not found.",
-            ) from exc
-
-        if expires_ts <= int(datetime.now(UTC).timestamp()):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attachment upload has expired.",
-            )
-
-        payload = f"{attachment_id}:{user_id}:{expires_ts}"
-        expected_signature = hmac.new(
-            self._upload_secret(),
-            payload.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected_signature):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attachment upload not found.",
-            )
-
-    def _upload_secret(self) -> bytes:
-        secret = (
-            self.settings.CLERK_SECRET_KEY
-            or self.settings.CLERK_JWT_KEY
-            or self.settings.OPENAI_API_KEY
-            or "ai-portfolio-chatkit-attachment-secret"
-        )
-        return secret.encode("utf-8")
-
     def _to_thread_metadata(self, chat: WorkspaceChat) -> ThreadMetadata:
         return ThreadMetadata(
             id=chat.id,
@@ -674,55 +609,25 @@ class DatabaseMemoryStore(
         if not isinstance(stored_file_id, str) or not stored_file_id.strip():
             return attachment
 
-        record = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+        record = await self.db.get(StoredFile, stored_file_id.strip())
         if (
             record is None
             or record.status == "deleted"
             or record.kind != "image"
-            or not isinstance(record.openai_file_id, str)
-            or not record.openai_file_id.strip()
         ):
             return attachment
 
-        expires_at = record.expires_at
-        if expires_at is not None and expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at is not None and expires_at <= datetime.now(UTC):
-            return attachment
+        from backend.app.services.stored_file_service import StoredFileService
 
         return build_display_attachment(
             canonical_attachment=attachment,
             file_bytes=None,
-            preview_url=self._build_stored_file_preview_url(record),
+            preview_url=StoredFileService(
+                self.db,
+                settings=self.settings,
+                bucket_service=self.bucket_service,
+            ).build_public_preview_url(record),
         )
-
-    def _build_stored_file_preview_url(self, record: StoredOpenAIFile) -> str:
-        token = self._build_preview_token(record)
-        return f"{self.public_base_url}/api/stored-files/{record.id}/preview?token={token}"
-
-    def _build_preview_token(self, record: StoredOpenAIFile) -> str:
-        expires_at = record.expires_at or (
-            datetime.now(UTC)
-            + timedelta(seconds=self.settings.stored_file_default_expiry_seconds)
-        )
-        expires_ts = int(expires_at.timestamp())
-        payload = f"{record.id}:{record.user_id}:{expires_ts}"
-        signature = hmac.new(
-            self._preview_secret(),
-            payload.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        encoded = urlsafe_b64encode(f"{expires_ts}:{signature}".encode("utf-8"))
-        return encoded.decode("utf-8").rstrip("=")
-
-    def _preview_secret(self) -> bytes:
-        secret = (
-            self.settings.CLERK_SECRET_KEY
-            or self.settings.CLERK_JWT_KEY
-            or self.settings.OPENAI_API_KEY
-            or "ai-portfolio-stored-file-preview-secret"
-        )
-        return secret.encode("utf-8")
 
 
 def _kind_for_attachment_input(

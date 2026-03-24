@@ -1,9 +1,9 @@
+from __future__ import annotations
+
 import io
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from PIL import Image
 
 from backend.app.db.session import AsyncSessionLocal
 from backend.app.models.chatkit import WorkspaceChat
@@ -12,59 +12,68 @@ from backend.app.schemas.workspace import FarmItemPayload, WorkspaceItemCreateRe
 from backend.app.services.plodai_entity_service import PlodaiEntityService
 from backend.app.services.stored_file_service import StoredFileService
 from backend.app.services.workspace_service import WorkspaceService
-
-
-class _StubFilesClient:
-    async def create(self, **_: object) -> SimpleNamespace:
-        return SimpleNamespace(id=f"file_openai_stub_{uuid4().hex}")
-
-
-class _StubOpenAIClient:
-    def __init__(self) -> None:
-        self.files = _StubFilesClient()
+from backend.tests.fake_bucket_storage import FakeBucketStorage
 
 
 def _build_test_image_bytes() -> bytes:
+    from PIL import Image
+
     image = Image.new("RGB", (14, 10), color=(112, 160, 110))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
+async def _create_workspace_and_chat(
+    *,
+    db,
+    user_id: str,
+    workspace_id: str,
+    thread_id: str,
+) -> None:
+    db.add(
+        Workspace(
+            id=workspace_id,
+            user_id=user_id,
+            app_id="plodai",
+            name="North Orchard",
+            active_chat_id=thread_id,
+        )
+    )
+    db.add(
+        WorkspaceChat(
+            id=thread_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            title="PlodAI",
+            metadata_json={},
+            status_json={"type": "active"},
+            allowed_image_domains_json=None,
+            updated_sequence=1,
+        )
+    )
+    await db.commit()
+
+
 @pytest.mark.anyio
-async def test_plodai_entity_service_returns_thread_images_and_farm_entities(
+async def test_plodai_entity_service_returns_bucket_preview_urls_for_thread_images(
     initialized_db: None,
 ) -> None:
     user_id = f"user_entity_{uuid4().hex}"
     workspace_id = f"workspace_{uuid4().hex}"
     thread_id = f"thread_{uuid4().hex}"
     farm_item_id = f"farm-overview-{uuid4().hex}"
+    bucket = FakeBucketStorage()
 
     async with AsyncSessionLocal() as db:
-        db.add(
-            Workspace(
-                id=workspace_id,
-                user_id=user_id,
-                app_id="plodai",
-                name="North Orchard",
-                active_chat_id=thread_id,
-            )
+        await _create_workspace_and_chat(
+            db=db,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
         )
-        db.add(
-            WorkspaceChat(
-                id=thread_id,
-                user_id=user_id,
-                workspace_id=workspace_id,
-                title="PlodAI",
-                metadata_json={},
-                status_json={"type": "active"},
-                allowed_image_domains_json=None,
-                updated_sequence=1,
-            )
-        )
-        await db.commit()
 
-        stored_file_service = StoredFileService(db, openai_client=_StubOpenAIClient())
+        stored_file_service = StoredFileService(db, bucket_service=bucket)
         uploaded = await stored_file_service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
@@ -120,7 +129,10 @@ async def test_plodai_entity_service_returns_thread_images_and_farm_entities(
             ),
         )
 
-        response = await PlodaiEntityService(db).search_entities(
+        response = await PlodaiEntityService(
+            db,
+            file_service=stored_file_service,
+        ).search_entities(
             user_id=user_id,
             workspace_id=workspace_id,
             app_id="plodai",
@@ -133,11 +145,13 @@ async def test_plodai_entity_service_returns_thread_images_and_farm_entities(
             entity for entity in response.entities if entity.data.get("entity_type") == "thread_image"
         )
         assert image_entity.title == "orchard-canopy.png"
+        assert image_entity.data["stored_file_id"] == uploaded.stored_file.id
         assert image_entity.data["file_id"] == uploaded.stored_file.id
         assert image_entity.data["workspace_item_id"] == uploaded.stored_file.id
         assert image_entity.data["preview_url"].startswith(
-            f"http://localhost/api/stored-files/{uploaded.stored_file.id}/preview?token="
+            f"https://bucket.test/{uploaded.stored_file.storage_key}"
         )
+        assert "kind=get" in image_entity.data["preview_url"]
 
         crop_entity = next(
             entity for entity in response.entities if entity.data.get("entity_type") == "farm_crop"
@@ -153,51 +167,37 @@ async def test_plodai_entity_service_returns_thread_images_and_farm_entities(
 
 
 @pytest.mark.anyio
-async def test_plodai_entity_service_filters_to_current_thread(
+async def test_plodai_entity_service_filters_thread_images_to_current_thread(
     initialized_db: None,
 ) -> None:
     user_id = f"user_entity_{uuid4().hex}"
     workspace_id = f"workspace_{uuid4().hex}"
     active_thread_id = f"thread_{uuid4().hex}"
     other_thread_id = f"thread_{uuid4().hex}"
+    bucket = FakeBucketStorage()
 
     async with AsyncSessionLocal() as db:
-        db.add(
-            Workspace(
-                id=workspace_id,
-                user_id=user_id,
-                app_id="plodai",
-                name="North Orchard",
-                active_chat_id=active_thread_id,
-            )
+        await _create_workspace_and_chat(
+            db=db,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            thread_id=active_thread_id,
         )
-        db.add_all(
-            [
-                WorkspaceChat(
-                    id=active_thread_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    title="PlodAI",
-                    metadata_json={},
-                    status_json={"type": "active"},
-                    allowed_image_domains_json=None,
-                    updated_sequence=1,
-                ),
-                WorkspaceChat(
-                    id=other_thread_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    title="PlodAI",
-                    metadata_json={},
-                    status_json={"type": "active"},
-                    allowed_image_domains_json=None,
-                    updated_sequence=2,
-                ),
-            ]
+        db.add(
+            WorkspaceChat(
+                id=other_thread_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                title="PlodAI",
+                metadata_json={},
+                status_json={"type": "active"},
+                allowed_image_domains_json=None,
+                updated_sequence=2,
+            )
         )
         await db.commit()
 
-        stored_file_service = StoredFileService(db, openai_client=_StubOpenAIClient())
+        stored_file_service = StoredFileService(db, bucket_service=bucket)
         await stored_file_service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
@@ -223,7 +223,10 @@ async def test_plodai_entity_service_filters_to_current_thread(
             create_attachment=True,
         )
 
-        response = await PlodaiEntityService(db).search_entities(
+        response = await PlodaiEntityService(
+            db,
+            file_service=stored_file_service,
+        ).search_entities(
             user_id=user_id,
             workspace_id=workspace_id,
             app_id="plodai",
@@ -231,9 +234,6 @@ async def test_plodai_entity_service_filters_to_current_thread(
             query="",
         )
 
-        image_titles = [
-            entity.title
-            for entity in response.entities
-            if entity.data.get("entity_type") == "thread_image"
-        ]
-        assert image_titles == ["active-thread.png"]
+        titles = [entity.title for entity in response.entities if entity.data.get("entity_type") == "thread_image"]
+        assert "active-thread.png" in titles
+        assert "other-thread.png" not in titles

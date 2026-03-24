@@ -6,7 +6,7 @@ from typing import Any
 
 from chatkit.types import Attachment, FileAttachment, ImageAttachment
 
-from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.stored_file import StoredFile
 from backend.app.schemas.stored_file import (
     SerializedChatAttachment,
     SerializedFileChatAttachment,
@@ -19,12 +19,13 @@ THUMBNAIL_MAX_DIMENSION = 320
 
 def build_attachment_metadata(
     *,
-    stored_file: StoredOpenAIFile,
+    stored_file: StoredFile,
     scope: StoredFileScope,
 ) -> dict[str, object]:
     return {
         "stored_file_id": stored_file.id,
-        "openai_file_id": stored_file.openai_file_id,
+        "storage_provider": stored_file.storage_provider,
+        "storage_key": stored_file.storage_key,
         "attach_mode": (
             "document_tool_only" if scope == "document_thread_file" else "model_input"
         ),
@@ -36,7 +37,7 @@ def build_attachment_metadata(
 
 def build_canonical_attachment(
     *,
-    stored_file: StoredOpenAIFile,
+    stored_file: StoredFile,
     attachment_id: str,
     scope: StoredFileScope,
     thread_id: str | None,

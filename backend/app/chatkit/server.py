@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from base64 import b64decode
+from base64 import b64decode, b64encode
 from binascii import Error as BinasciiError
 from datetime import UTC, datetime
 import json
@@ -103,8 +103,10 @@ from backend.app.core.logging import (
     summarize_sequence_for_log,
 )
 from backend.app.db.session import get_db
-from backend.app.models.stored_file import StoredOpenAIFile
+from backend.app.models.stored_file import StoredFile
+from backend.app.services.bucket_storage import BucketStorageService, RailwayBucketService
 from backend.app.services.credit_service import CreditService
+from backend.app.services.stored_file_service import StoredFileService
 
 logger = get_logger("chatkit.server")
 
@@ -120,6 +122,20 @@ RATE_LIMIT_RETRY_PATTERN = re.compile(
     r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
     re.IGNORECASE,
 )
+
+
+def _base64_data_url(*, mime_type: str | None, file_bytes: bytes) -> str:
+    resolved_mime_type = (
+        mime_type.strip()
+        if isinstance(mime_type, str) and mime_type.strip()
+        else "application/octet-stream"
+    )
+    encoded = b64encode(file_bytes).decode("ascii")
+    return f"data:{resolved_mime_type};base64,{encoded}"
+
+
+def _base64_file_data(file_bytes: bytes) -> str:
+    return b64encode(file_bytes).decode("ascii")
 
 
 def _current_thread_metadata(thread: ThreadMetadata) -> dict[str, Any]:
@@ -265,10 +281,17 @@ class ClientToolResultConverter(ThreadItemConverter):
         openai_client: AsyncOpenAI,
         upload_cache: dict[str, str],
         db: AsyncSession,
+        bucket_service: BucketStorageService | None = None,
     ):
         self.openai_client = openai_client
         self.upload_cache = upload_cache
         self.db = db
+        self.bucket_service = bucket_service or RailwayBucketService(get_settings())
+        self.file_service = StoredFileService(
+            db,
+            settings=get_settings(),
+            bucket_service=self.bucket_service,
+        )
         self.current_thread: ThreadMetadata | None = None
         self.current_context: ReportAgentContext | None = None
         self.current_metadata: dict[str, Any] = {}
@@ -287,7 +310,6 @@ class ClientToolResultConverter(ThreadItemConverter):
         metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
         attach_mode = metadata.get("attach_mode")
         stored_file_id = metadata.get("stored_file_id")
-        openai_file_id = metadata.get("openai_file_id")
         input_kind = metadata.get("input_kind")
         if attach_mode == "document_tool_only":
             file_label = attachment.name.strip() if attachment.name.strip() else "document"
@@ -303,20 +325,31 @@ class ClientToolResultConverter(ThreadItemConverter):
                     f"{file_id_suffix}"
                 ),
             }
-        if not isinstance(openai_file_id, str) or not openai_file_id.strip():
+        if not isinstance(stored_file_id, str) or not stored_file_id.strip():
             return {
                 "type": "input_text",
                 "text": f"Attachment '{attachment.name}' is available but could not be attached as a model file.",
             }
+        record = await self.db.get(StoredFile, stored_file_id.strip())
+        if record is None or record.status == "deleted":
+            return {
+                "type": "input_text",
+                "text": f"Attachment '{attachment.name}' is unavailable and could not be attached as model input.",
+            }
+        file_bytes = await self.file_service.load_file_bytes(record)
         if input_kind == "image":
             return {
                 "type": "input_image",
-                "file_id": openai_file_id.strip(),
+                "image_url": _base64_data_url(
+                    mime_type=record.mime_type or attachment.mime_type,
+                    file_bytes=file_bytes,
+                ),
                 "detail": "high",
             }
         return {
             "type": "input_file",
-            "file_id": openai_file_id.strip(),
+            "file_data": _base64_file_data(file_bytes),
+            "filename": attachment.name,
         }
 
     async def user_message_to_input(
@@ -508,7 +541,19 @@ class ClientToolResultConverter(ThreadItemConverter):
                 {
                     "type": "input_text",
                     "text": (
-                        f"Tagged thread image '{ref['name']}' is unavailable because it expired or was removed. "
+                        f"Tagged thread image '{ref['name']}' is unavailable because it was removed. "
+                        "Ask the user to reattach it if visual inspection is still needed."
+                    ),
+                }
+            ]
+
+        if not isinstance(self.current_metadata.get("openai_conversation_id"), str):
+            return [
+                {
+                    "type": "input_text",
+                    "text": (
+                        f"Tagged thread image '{ref['name']}' came from earlier in this thread, "
+                        "but the live model conversation context is no longer available. "
                         "Ask the user to reattach it if visual inspection is still needed."
                     ),
                 }
@@ -519,26 +564,21 @@ class ClientToolResultConverter(ThreadItemConverter):
                 "type": "input_text",
                 "text": (
                     f"Tagged thread image '{ref['name']}' was explicitly referenced from earlier in this thread. "
-                    "Inspect it as part of the current request."
+                    "It is already part of this thread context, so use that prior visual context if it is relevant."
                 ),
-            },
-            {
-                "type": "input_image",
-                "file_id": record.openai_file_id,
-                "detail": "high",
-            },
+            }
         ]
 
     async def _load_thread_image_record(
         self,
         ref: PlodaiThreadImageRef,
-    ) -> StoredOpenAIFile | None:
+    ) -> StoredFile | None:
         context = self.current_context
         thread = self.current_thread
         if context is None or thread is None:
             return None
 
-        record = await self.db.get(StoredOpenAIFile, ref["stored_file_id"])
+        record = await self.db.get(StoredFile, ref["stored_file_id"])
         if record is None:
             return None
         if record.user_id != context.user_id:
@@ -548,14 +588,6 @@ class ClientToolResultConverter(ThreadItemConverter):
         if record.status == "deleted" or record.kind != "image":
             return None
         if record.attachment_id != ref["attachment_id"]:
-            return None
-        expires_at = record.expires_at
-        if expires_at is not None:
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=UTC)
-            if expires_at <= datetime.now(UTC):
-                return None
-        if not isinstance(record.openai_file_id, str) or not record.openai_file_id.strip():
             return None
         return record
 
@@ -788,24 +820,32 @@ class ClientToolResultConverter(ThreadItemConverter):
 
 
 class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
-    def __init__(self, db: AsyncSession, *, public_base_url: str | None = None):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        public_base_url: str | None = None,
+        bucket_service: BucketStorageService | None = None,
+    ):
         self.settings = get_settings()
         self.db = db
         self.openai_client = AsyncOpenAI(
             api_key=self.settings.OPENAI_API_KEY or None,
             max_retries=self.settings.openai_max_retries,
         )
+        self.bucket_service = bucket_service or RailwayBucketService(self.settings)
         self._uploaded_file_ids: dict[str, str] = {}
         store = DatabaseMemoryStore(
             db,
             public_base_url=public_base_url,
-            openai_client=self.openai_client,
+            bucket_service=self.bucket_service,
         )
         super().__init__(store=store, attachment_store=store)
         self.converter = ClientToolResultConverter(
             self.openai_client,
             self._uploaded_file_ids,
             db,
+            self.bucket_service,
         )
         self.logger = logger
 
@@ -871,6 +911,8 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         item: UserMessageItem,
         context: ReportAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
+        item = await self._finalize_new_item_attachments(item, thread_id=thread.id)
+
         for attachment in item.attachments:
             await self.store.bind_attachment_to_thread(
                 attachment_id=attachment.id,
@@ -898,6 +940,24 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             lambda: self.respond(thread, item, context),
         ):
             yield event
+
+    async def _finalize_new_item_attachments(
+        self,
+        item: UserMessageItem,
+        *,
+        thread_id: str,
+    ) -> UserMessageItem:
+        if not item.attachments:
+            return item
+        finalized_attachments: list[Attachment] = []
+        for attachment in item.attachments:
+            finalized_attachments.append(
+                await self.store.finalize_attachment(
+                    attachment,
+                    thread_id=thread_id,
+                )
+            )
+        return item.model_copy(update={"attachments": finalized_attachments})
 
     async def _load_display_attachments_for_item(
         self,
@@ -953,7 +1013,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
             ):
                 continue
 
-            record = await self.db.get(StoredOpenAIFile, stored_file_id.strip())
+            record = await self.db.get(StoredFile, stored_file_id.strip())
             width: int | None = None
             height: int | None = None
             if record is not None and record.preview_json.get("kind") == "image":

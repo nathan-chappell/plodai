@@ -68,7 +68,8 @@ function buildDocumentFileSummary(
 ): DocumentFileSummary {
   return {
     id: options.id,
-    openai_file_id: `openai-${options.id}`,
+    storage_provider: "railway_bucket",
+    storage_key: `document-thread-file/${options.id}`,
     scope: "document_thread_file",
     source_kind: "upload",
     app_id: "documents",
@@ -86,7 +87,6 @@ function buildDocumentFileSummary(
       kind: "pdf",
       page_count: options.pageCount,
     },
-    expires_at: null,
     created_at: "2026-03-24T00:00:00Z",
     updated_at: "2026-03-24T00:00:00Z",
   };

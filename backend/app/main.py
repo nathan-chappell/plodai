@@ -23,6 +23,7 @@ from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging, get_logger, log_event
 from backend.app.db.session import Base, engine
 from backend.app.models.registry import import_models
+from backend.app.services.bucket_storage import RailwayBucketService
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 PACKAGE_JSON = ROOT_DIR / "package.json"
@@ -51,7 +52,7 @@ def _should_reset_sqlite_schema(sync_conn) -> bool:
         "workspace_chat_entries",
         "workspace_chat_attachments",
         "workspace_chat_feedback",
-        "stored_openai_files",
+        "stored_files",
     }
     legacy_tables = {
         "workspace_files",
@@ -95,6 +96,38 @@ async def lifespan(_: FastAPI):
                 detail="detected legacy local schema and rebuilt the database",
             )
         await conn.run_sync(Base.metadata.create_all)
+
+    bucket_service = RailwayBucketService(settings)
+    if bucket_service.is_configured():
+        configured_bucket_name = getattr(
+            getattr(bucket_service, "settings", None),
+            "storage_bucket_name",
+            None,
+        )
+        try:
+            await bucket_service.ensure_cors(
+                allowed_origins=list(
+                    dict.fromkeys(
+                        [
+                            *settings.CORS_ORIGINS,
+                            *EXTRA_CHATKIT_CORS_ORIGINS,
+                        ]
+                    )
+                )
+            )
+            log_event(
+                logger,
+                logging.INFO,
+                "startup.storage_cors_configured",
+                bucket=configured_bucket_name,
+            )
+        except Exception:
+            log_event(
+                logger,
+                logging.WARNING,
+                "startup.storage_cors_failed",
+                bucket=configured_bucket_name,
+            )
 
     log_event(
         logger,
