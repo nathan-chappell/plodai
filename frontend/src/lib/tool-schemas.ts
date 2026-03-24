@@ -497,45 +497,30 @@ export const removeReportSlideToolSchema: JsonSchema = {
 const farmCropSchema: JsonSchema = {
   type: "object",
   properties: {
-    id: { type: "string" },
-    name: { type: "string" },
-    area: { type: "string" },
+    id: {
+      type: "string",
+      description: "Reuse the existing crop id when updating a saved crop.",
+    },
+    name: {
+      type: "string",
+      description: "Crop identity only to the level the evidence supports.",
+    },
+    area: {
+      type: "string",
+      description: "Short location, count, or amount summary.",
+    },
     expected_yield: {
+      description:
+        "Bottom-line estimate only. Store just the number, range, or short estimate with no explanation; move caveats to notes.",
       anyOf: [{ type: "string" }, { type: "null" }],
     },
     notes: {
+      description:
+        "Short durable notes only: the most actionable issue, confidence or assumption, and next step in 1-3 brief lines.",
       anyOf: [{ type: "string" }, { type: "null" }],
     },
   },
   required: ["id", "name", "area"],
-  additionalProperties: false,
-};
-
-const farmIssueSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    title: { type: "string" },
-    status: { enum: ["open", "watching", "resolved"] },
-    notes: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-  },
-  required: ["id", "title", "status"],
-  additionalProperties: false,
-};
-
-const farmProjectSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    title: { type: "string" },
-    status: { enum: ["planned", "active", "done"] },
-    notes: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-  },
-  required: ["id", "title", "status"],
   additionalProperties: false,
 };
 
@@ -608,27 +593,17 @@ export const saveFarmStateToolSchema: JsonSchema = {
       type: "array",
       items: farmCropSchema,
     },
-    issues: {
-      type: "array",
-      items: farmIssueSchema,
-    },
-    projects: {
-      type: "array",
-      items: farmProjectSchema,
-    },
     orders: {
       type: "array",
       items: farmOrderSchema,
     },
-    current_work: {
-      type: "array",
-      items: { type: "string" },
-    },
     notes: {
+      description:
+        "Short farm-level notes only. Keep the most useful durable context and next action in 1-2 concise sentences or bullets, not a full narrative.",
       anyOf: [{ type: "string" }, { type: "null" }],
     },
   },
-  required: ["farm_name", "crops", "issues", "projects", "current_work"],
+  required: ["farm_name", "crops"],
   additionalProperties: false,
 };
 

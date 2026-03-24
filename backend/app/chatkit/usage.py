@@ -18,6 +18,8 @@ class ThreadUsageTotals(TypedDict):
 PLATFORM_COST_MULTIPLIER = 2.0
 
 
+# Standard short-context per-1M-token pricing reference:
+# https://developers.openai.com/api/docs/pricing
 MODEL_PRICING: dict[str, ModelPricing] = {
     "gpt-4.1-mini": {
         "input_per_million": 0.40,
@@ -33,6 +35,21 @@ MODEL_PRICING: dict[str, ModelPricing] = {
         "input_per_million": 1.25,
         "cached_input_per_million": 0.125,
         "output_per_million": 10.00,
+    },
+    "gpt-5.4": {
+        "input_per_million": 2.50,
+        "cached_input_per_million": 0.25,
+        "output_per_million": 15.00,
+    },
+    "gpt-5.4-mini": {
+        "input_per_million": 0.75,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 4.50,
+    },
+    "gpt-5.4-nano": {
+        "input_per_million": 0.20,
+        "cached_input_per_million": 0.02,
+        "output_per_million": 1.25,
     },
 }
 

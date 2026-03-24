@@ -16,8 +16,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 const workspaces: WorkspaceListItem[] = [
   {
-    id: "workspace_agriculture",
-    app_id: "agriculture",
+    id: "workspace_plodai",
+    app_id: "plodai",
     name: "Orchard",
     active_chat_id: null,
     selected_item_id: null,
@@ -48,11 +48,11 @@ describe("workspace app browsers", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not render a direct upload button for the agriculture workspace browser", async () => {
+  it("does not render a direct upload button for the plodai workspace browser", async () => {
     await act(async () => {
       root.render(
         <WorkspaceBrowserPanel
-          activeWorkspaceId="workspace_agriculture"
+          activeWorkspaceId="workspace_plodai"
           artifacts={[]}
           workspaces={workspaces}
           onClear={() => undefined}
@@ -90,7 +90,7 @@ describe("workspace app browsers", () => {
       root.render(
         <DocumentBrowserPanel
           activeThreadId={null}
-          activeWorkspaceId="workspace_agriculture"
+          activeWorkspaceId="workspace_plodai"
           documentFiles={[]}
           onCreateWorkspace={() => undefined}
           onDeleteFile={async () => undefined}

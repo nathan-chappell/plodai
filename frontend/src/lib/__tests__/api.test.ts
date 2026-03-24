@@ -9,7 +9,7 @@ vi.mock("../../app/toasts", () => ({
 import {
   authenticatedFetch,
   getChatKitConfig,
-  searchAgricultureEntities,
+  searchPlodaiEntities,
   setChatKitMetadataGetter,
   setChatKitNativeFeedbackHandler,
 } from "../api";
@@ -114,7 +114,7 @@ describe("authenticatedFetch", () => {
     });
   });
 
-  it("posts agriculture entity searches with the expected request shape", async () => {
+  it("posts plodai entity searches with the expected request shape", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -128,17 +128,17 @@ describe("authenticatedFetch", () => {
       ),
     );
 
-    await searchAgricultureEntities({
-      appId: "agriculture",
+    await searchPlodaiEntities({
+      appId: "plodai",
       workspaceId: "workspace_123",
       threadId: "thread_123",
       query: "orchard",
     });
 
     const [requestUrl, requestInit] = fetchSpy.mock.calls[0] ?? [];
-    expect(requestUrl).toBe("/api/agriculture/entities/search");
+    expect(requestUrl).toBe("/api/plodai/entities/search");
     expect(JSON.parse(String(requestInit?.body))).toEqual({
-      app_id: "agriculture",
+      app_id: "plodai",
       workspace_id: "workspace_123",
       thread_id: "thread_123",
       query: "orchard",

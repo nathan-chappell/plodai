@@ -33,9 +33,9 @@ const FarmOrderPage = lazy(async () => {
   return { default: module.FarmOrderPage };
 });
 
-const AgricultureAgentPage = lazy(async () => {
+const PlodaiAgentPage = lazy(async () => {
   const module = await import("./agents/workspaceApp");
-  return { default: module.AgricultureWorkspacePage };
+  return { default: module.PlodaiWorkspacePage };
 });
 
 const DocumentAgentPage = lazy(async () => {
@@ -50,7 +50,7 @@ const AdminUsersPage = lazy(async () => {
 });
 
 const agentPages: Record<string, LazyExoticComponent<AgentPageComponent>> = {
-  "agriculture-agent": AgricultureAgentPage,
+  "plodai-agent": PlodaiAgentPage,
   "document-agent": DocumentAgentPage,
   "admin-users": AdminUsersPage,
 };
@@ -78,8 +78,8 @@ function resolveVisibleAgent(pathname: string, role: "admin" | "user") {
 }
 
 function workspaceAppIdForAgent(agentId: string | null): WorkspaceAppId | null {
-  if (agentId === "agriculture-agent") {
-    return "agriculture";
+  if (agentId === "plodai-agent") {
+    return "plodai";
   }
   if (agentId === "document-agent") {
     return "documents";

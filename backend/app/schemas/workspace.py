@@ -11,7 +11,7 @@ class WorkspaceSchemaBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-WorkspaceAppId: TypeAlias = Literal["agriculture", "documents"]
+WorkspaceAppId: TypeAlias = Literal["plodai", "documents"]
 WorkspaceUploadKind: TypeAlias = Literal["csv", "json", "pdf", "image", "other"]
 WorkspaceCreatedItemKind: TypeAlias = Literal[
     "report.v1", "chart.v1", "pdf_split.v1", "farm.v1"
@@ -184,20 +184,6 @@ class FarmCrop(WorkspaceSchemaBase):
     notes: str | None = None
 
 
-class FarmIssue(WorkspaceSchemaBase):
-    id: str
-    title: str
-    status: Literal["open", "watching", "resolved"]
-    notes: str | None = None
-
-
-class FarmProject(WorkspaceSchemaBase):
-    id: str
-    title: str
-    status: Literal["planned", "active", "done"]
-    notes: str | None = None
-
-
 class FarmOrderItem(WorkspaceSchemaBase):
     id: str
     label: str
@@ -224,10 +210,7 @@ class FarmItemPayload(WorkspaceSchemaBase):
     farm_name: str
     location: str | None = None
     crops: list[FarmCrop] = Field(default_factory=list)
-    issues: list[FarmIssue] = Field(default_factory=list)
-    projects: list[FarmProject] = Field(default_factory=list)
     orders: list[FarmOrder] = Field(default_factory=list)
-    current_work: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 
@@ -255,8 +238,6 @@ class PdfSplitItemSummaryData(WorkspaceSchemaBase):
 
 class FarmItemSummaryData(WorkspaceSchemaBase):
     crop_count: int = Field(default=0, ge=0)
-    issue_count: int = Field(default=0, ge=0)
-    project_count: int = Field(default=0, ge=0)
     order_count: int = Field(default=0, ge=0)
 
 
@@ -360,10 +341,7 @@ class FarmSetStateOperation(WorkspaceSchemaBase):
     farm_name: str
     location: str | None = None
     crops: list[FarmCrop] = Field(default_factory=list)
-    issues: list[FarmIssue] = Field(default_factory=list)
-    projects: list[FarmProject] = Field(default_factory=list)
     orders: list[FarmOrder] | None = None
-    current_work: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 

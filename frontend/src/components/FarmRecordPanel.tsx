@@ -1,7 +1,18 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import styled from "styled-components";
 
 import { MetaText } from "../app/styles";
+import {
+  WorkspaceModalBackdrop,
+  WorkspaceModalCard,
+  WorkspaceModalCloseButton,
+  WorkspaceModalHeader,
+  WorkspaceModalMeta,
+  WorkspaceModalTitle,
+  WorkspaceModalTitleBlock,
+} from "./styles";
 import type {
   FarmItemPayloadV1,
   FarmOrderStatusV1,
@@ -10,9 +21,6 @@ import type {
 export type FarmRecordFocusTarget =
   | { kind: "record" }
   | { kind: "crop"; itemId: string }
-  | { kind: "issue"; itemId: string }
-  | { kind: "project"; itemId: string }
-  | { kind: "current_work"; itemId: string }
   | { kind: "order"; itemId: string };
 
 export function FarmRecordPanel({
@@ -23,8 +31,6 @@ export function FarmRecordPanel({
   farmEditor = null,
   onDeleteCrop,
   onDeleteFarm,
-  onDismissIssue,
-  onDismissProject,
   onDeleteOrder,
   onEditFarm,
   onEditOrder,
@@ -40,8 +46,6 @@ export function FarmRecordPanel({
   farmEditor?: ReactNode;
   onDeleteCrop?: (cropId: string) => void;
   onDeleteFarm?: () => void;
-  onDismissIssue?: (issueId: string) => void;
-  onDismissProject?: (projectId: string) => void;
   onDeleteOrder?: (orderId: string) => void;
   onEditFarm?: () => void;
   onEditOrder?: (orderId: string) => void;
@@ -52,15 +56,12 @@ export function FarmRecordPanel({
 }) {
   const recordRef = useRef<HTMLElement | null>(null);
   const cropRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
-  const issueRefs = useRef<Record<string, HTMLElement | null>>({});
-  const projectRefs = useRef<Record<string, HTMLElement | null>>({});
-  const currentWorkRefs = useRef<Record<string, HTMLLIElement | null>>({});
   const orderRefs = useRef<Record<string, HTMLElement | null>>({});
-  const issueCarouselRef = useRef<HTMLDivElement | null>(null);
-  const projectCarouselRef = useRef<HTMLDivElement | null>(null);
-
-  const visibleIssues = farm.issues.filter((issue) => issue.status !== "resolved");
-  const visibleProjects = farm.projects.filter((project) => project.status !== "done");
+  const [activeCropNotes, setActiveCropNotes] = useState<{
+    cropId: string;
+    cropName: string;
+    notes: string;
+  } | null>(null);
   const orders = farm.orders ?? [];
 
   useEffect(() => {
@@ -71,12 +72,6 @@ export function FarmRecordPanel({
     let target = recordRef.current;
     if (focusTarget.kind === "crop") {
       target = cropRefs.current[focusTarget.itemId] ?? recordRef.current;
-    } else if (focusTarget.kind === "issue") {
-      target = issueRefs.current[focusTarget.itemId] ?? recordRef.current;
-    } else if (focusTarget.kind === "project") {
-      target = projectRefs.current[focusTarget.itemId] ?? recordRef.current;
-    } else if (focusTarget.kind === "current_work") {
-      target = currentWorkRefs.current[focusTarget.itemId] ?? recordRef.current;
     } else if (focusTarget.kind === "order") {
       target = orderRefs.current[focusTarget.itemId] ?? recordRef.current;
     }
@@ -86,6 +81,21 @@ export function FarmRecordPanel({
       behavior: "smooth",
     });
   }, [focusTarget]);
+
+  useEffect(() => {
+    if (!activeCropNotes || typeof window === "undefined") {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveCropNotes(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeCropNotes]);
 
   const recordHighlighted = highlightRecord || focusTarget?.kind === "record";
 
@@ -98,7 +108,7 @@ export function FarmRecordPanel({
     >
       <FarmHero>
         <FarmHeroHeader>
-          <div>
+          <FarmHeroMain>
             <FarmEyebrow>Farm</FarmEyebrow>
             {farmEditor ? (
               <FarmEditorWrap>{farmEditor}</FarmEditorWrap>
@@ -106,51 +116,49 @@ export function FarmRecordPanel({
               <>
                 <FarmTitleRow>
                   <FarmTitle>{farm.farm_name}</FarmTitle>
-                  <FarmTitleActions>
-                    {onEditFarm ? (
-                      <FarmActionButton
-                        data-testid="farm-edit-button"
-                        disabled={isMutating}
-                        onClick={onEditFarm}
-                        type="button"
-                      >
-                        Edit
-                      </FarmActionButton>
-                    ) : null}
-                    {onDeleteFarm ? (
-                      <FarmDangerButton
-                        data-testid="farm-delete-button"
-                        disabled={isMutating}
-                        onClick={onDeleteFarm}
-                        type="button"
-                      >
-                        Delete
-                      </FarmDangerButton>
-                    ) : null}
-                  </FarmTitleActions>
+                  {farm.location ? <FarmLocation>{farm.location}</FarmLocation> : null}
                 </FarmTitleRow>
-                {farm.location ? <MetaText>{farm.location}</MetaText> : null}
+                <FarmMetrics>
+                  <FarmMetric>
+                    <strong>{farm.crops.length}</strong>
+                    <span>Crops</span>
+                  </FarmMetric>
+                  <FarmMetric>
+                    <strong>{farm.notes?.trim() ? "Saved" : "Empty"}</strong>
+                    <span>Notes</span>
+                  </FarmMetric>
+                  <FarmMetric>
+                    <strong>{orders.length}</strong>
+                    <span>Orders</span>
+                  </FarmMetric>
+                </FarmMetrics>
               </>
             )}
-          </div>
-          <FarmMetrics>
-            <FarmMetric>
-              <strong>{farm.crops.length}</strong>
-              <span>Crops</span>
-            </FarmMetric>
-            <FarmMetric>
-              <strong>{visibleIssues.length}</strong>
-              <span>Issues</span>
-            </FarmMetric>
-            <FarmMetric>
-              <strong>{visibleProjects.length}</strong>
-              <span>Projects</span>
-            </FarmMetric>
-            <FarmMetric>
-              <strong>{orders.length}</strong>
-              <span>Orders</span>
-            </FarmMetric>
-          </FarmMetrics>
+          </FarmHeroMain>
+          {!farmEditor ? (
+            <FarmTitleActions>
+              {onEditFarm ? (
+                <FarmActionButton
+                  data-testid="farm-edit-button"
+                  disabled={isMutating}
+                  onClick={onEditFarm}
+                  type="button"
+                >
+                  Edit
+                </FarmActionButton>
+              ) : null}
+              {onDeleteFarm ? (
+                <FarmDangerButton
+                  data-testid="farm-delete-button"
+                  disabled={isMutating}
+                  onClick={onDeleteFarm}
+                  type="button"
+                >
+                  Delete
+                </FarmDangerButton>
+              ) : null}
+            </FarmTitleActions>
+          ) : null}
         </FarmHeroHeader>
       </FarmHero>
 
@@ -163,7 +171,7 @@ export function FarmRecordPanel({
                 <tr>
                   <th>What</th>
                   <th>Where / amount</th>
-                  <th>When / yield</th>
+                  <th>Yield</th>
                   <th>Notes</th>
                   <CropActionHeader aria-hidden="true" />
                 </tr>
@@ -172,6 +180,7 @@ export function FarmRecordPanel({
                 {farm.crops.map((crop) => {
                   const highlighted =
                     focusTarget?.kind === "crop" && focusTarget.itemId === crop.id;
+                  const cropNotes = crop.notes?.trim() || "";
                   return (
                     <CropTableRow
                       key={crop.id}
@@ -187,7 +196,30 @@ export function FarmRecordPanel({
                       </td>
                       <td>{crop.area}</td>
                       <td>{crop.expected_yield?.trim() || "-"}</td>
-                      <td>{crop.notes?.trim() || "-"}</td>
+                      <td>
+                        {cropNotes ? (
+                          <CropNotesCell>
+                            <CropNotesPreview data-testid={`farm-crop-notes-preview-${crop.id}`}>
+                              {cropNotes}
+                            </CropNotesPreview>
+                            <CropNotesButton
+                              data-testid={`farm-open-crop-notes-${crop.id}`}
+                              onClick={() =>
+                                setActiveCropNotes({
+                                  cropId: crop.id,
+                                  cropName: crop.name,
+                                  notes: cropNotes,
+                                })
+                              }
+                              type="button"
+                            >
+                              View
+                            </CropNotesButton>
+                          </CropNotesCell>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
                       <CropActionCell>
                         {onDeleteCrop ? (
                           <CropDeleteButton
@@ -209,166 +241,6 @@ export function FarmRecordPanel({
           </CropTableWrap>
         ) : (
           <MetaText>No crops tracked yet.</MetaText>
-        )}
-      </FarmSection>
-
-      <FarmCarouselGrid>
-        <FarmSection>
-          <FarmSectionHeaderRow>
-            <FarmSectionTitle>Issues</FarmSectionTitle>
-            {visibleIssues.length > 1 ? (
-              <CarouselControls>
-                <FarmActionButton
-                  onClick={() => scrollCarousel(issueCarouselRef, -1)}
-                  type="button"
-                >
-                  Prev
-                </FarmActionButton>
-                <FarmActionButton
-                  onClick={() => scrollCarousel(issueCarouselRef, 1)}
-                  type="button"
-                >
-                  Next
-                </FarmActionButton>
-              </CarouselControls>
-            ) : null}
-          </FarmSectionHeaderRow>
-          {visibleIssues.length ? (
-            <FarmCarousel ref={issueCarouselRef}>
-              {visibleIssues.map((issue) => {
-                const highlighted =
-                  focusTarget?.kind === "issue" && focusTarget.itemId === issue.id;
-                return (
-                  <FarmCarouselCard
-                    key={issue.id}
-                    ref={(node) => {
-                      issueRefs.current[issue.id] = node;
-                    }}
-                    $highlighted={highlighted}
-                    data-highlighted={highlighted ? "true" : undefined}
-                    data-testid={`farm-issue-${issue.id}`}
-                  >
-                    <FarmCardHeader>
-                      <div>
-                        <FarmCardTitle>{issue.title}</FarmCardTitle>
-                        <FarmStatusPill $tone={issue.status}>{issue.status}</FarmStatusPill>
-                      </div>
-                      {onDismissIssue ? (
-                        <FarmSecondaryButton
-                          data-testid={`farm-dismiss-issue-${issue.id}`}
-                          disabled={isMutating}
-                          onClick={() => onDismissIssue(issue.id)}
-                          type="button"
-                        >
-                          Dismiss
-                        </FarmSecondaryButton>
-                      ) : null}
-                    </FarmCardHeader>
-                    {issue.notes ? (
-                      <MetaText>{issue.notes}</MetaText>
-                    ) : (
-                      <MetaText>No notes saved for this issue.</MetaText>
-                    )}
-                  </FarmCarouselCard>
-                );
-              })}
-            </FarmCarousel>
-          ) : (
-            <MetaText>No active issues saved.</MetaText>
-          )}
-        </FarmSection>
-
-        <FarmSection>
-          <FarmSectionHeaderRow>
-            <FarmSectionTitle>Projects</FarmSectionTitle>
-            {visibleProjects.length > 1 ? (
-              <CarouselControls>
-                <FarmActionButton
-                  onClick={() => scrollCarousel(projectCarouselRef, -1)}
-                  type="button"
-                >
-                  Prev
-                </FarmActionButton>
-                <FarmActionButton
-                  onClick={() => scrollCarousel(projectCarouselRef, 1)}
-                  type="button"
-                >
-                  Next
-                </FarmActionButton>
-              </CarouselControls>
-            ) : null}
-          </FarmSectionHeaderRow>
-          {visibleProjects.length ? (
-            <FarmCarousel ref={projectCarouselRef}>
-              {visibleProjects.map((project) => {
-                const highlighted =
-                  focusTarget?.kind === "project" && focusTarget.itemId === project.id;
-                return (
-                  <FarmCarouselCard
-                    key={project.id}
-                    ref={(node) => {
-                      projectRefs.current[project.id] = node;
-                    }}
-                    $highlighted={highlighted}
-                    data-highlighted={highlighted ? "true" : undefined}
-                    data-testid={`farm-project-${project.id}`}
-                  >
-                    <FarmCardHeader>
-                      <div>
-                        <FarmCardTitle>{project.title}</FarmCardTitle>
-                        <FarmStatusPill $tone={project.status}>{project.status}</FarmStatusPill>
-                      </div>
-                      {onDismissProject ? (
-                        <FarmSecondaryButton
-                          data-testid={`farm-dismiss-project-${project.id}`}
-                          disabled={isMutating}
-                          onClick={() => onDismissProject(project.id)}
-                          type="button"
-                        >
-                          Dismiss
-                        </FarmSecondaryButton>
-                      ) : null}
-                    </FarmCardHeader>
-                    {project.notes ? (
-                      <MetaText>{project.notes}</MetaText>
-                    ) : (
-                      <MetaText>No notes saved for this project.</MetaText>
-                    )}
-                  </FarmCarouselCard>
-                );
-              })}
-            </FarmCarousel>
-          ) : (
-            <MetaText>No active projects tracked yet.</MetaText>
-          )}
-        </FarmSection>
-      </FarmCarouselGrid>
-
-      <FarmSection>
-        <FarmSectionTitle>Current work</FarmSectionTitle>
-        {farm.current_work.length ? (
-          <WorkList>
-            {farm.current_work.map((workItem, index) => {
-              const itemId = String(index);
-              const highlighted =
-                focusTarget?.kind === "current_work" && focusTarget.itemId === itemId;
-              return (
-                <WorkItem
-                  key={`${itemId}-${workItem}`}
-                  ref={(node) => {
-                    currentWorkRefs.current[itemId] = node;
-                  }}
-                  $highlighted={highlighted}
-                  data-highlighted={highlighted ? "true" : undefined}
-                  data-testid={`farm-current-work-${itemId}`}
-                >
-                  {workItem}
-                </WorkItem>
-              );
-            })}
-          </WorkList>
-        ) : (
-          <MetaText>No current work tracked yet.</MetaText>
         )}
       </FarmSection>
 
@@ -421,6 +293,7 @@ export function FarmRecordPanel({
                         ) : null}
                         {onDeleteOrder ? (
                           <FarmDangerButton
+                            data-testid={`farm-delete-order-${order.id}`}
                             disabled={isMutating}
                             onClick={() => onDeleteOrder(order.id)}
                             type="button"
@@ -466,28 +339,48 @@ export function FarmRecordPanel({
         </FarmSection>
       ) : null}
 
-      {farm.notes ? (
-        <FarmSection>
-          <FarmSectionTitle>Notes</FarmSectionTitle>
+      <FarmSection>
+        <FarmSectionTitle>Notes</FarmSectionTitle>
+        {farm.notes?.trim() ? (
           <MetaText>{farm.notes}</MetaText>
-        </FarmSection>
+        ) : (
+          <MetaText>
+            No notes saved yet. The PlodAI agent will keep durable observations here.
+          </MetaText>
+        )}
+      </FarmSection>
+
+      {activeCropNotes ? (
+        <WorkspaceModalBackdrop
+          data-testid="farm-crop-notes-modal-backdrop"
+          onClick={() => setActiveCropNotes(null)}
+        >
+          <CropNotesModalCard
+            data-testid="farm-crop-notes-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <WorkspaceModalHeader>
+              <WorkspaceModalTitleBlock>
+                <WorkspaceModalTitle>{activeCropNotes.cropName}</WorkspaceModalTitle>
+                <WorkspaceModalMeta>Full crop notes rendered as markdown.</WorkspaceModalMeta>
+              </WorkspaceModalTitleBlock>
+              <WorkspaceModalCloseButton
+                onClick={() => setActiveCropNotes(null)}
+                type="button"
+              >
+                Close
+              </WorkspaceModalCloseButton>
+            </WorkspaceModalHeader>
+            <CropNotesMarkdown data-testid="farm-crop-notes-markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {activeCropNotes.notes}
+              </ReactMarkdown>
+            </CropNotesMarkdown>
+          </CropNotesModalCard>
+        </WorkspaceModalBackdrop>
       ) : null}
     </FarmPreview>
   );
-}
-
-function scrollCarousel(
-  ref: RefObject<HTMLDivElement | null>,
-  direction: -1 | 1,
-): void {
-  const node = ref.current;
-  if (!node) {
-    return;
-  }
-  node.scrollBy({
-    left: direction * Math.max(node.clientWidth * 0.82, 220),
-    behavior: "smooth",
-  });
 }
 
 function formatOrderStatus(status: FarmOrderStatusV1): string {
@@ -547,16 +440,26 @@ const FarmPreview = styled.section<{ $highlighted: boolean }>`
 
 const FarmHero = styled.section`
   display: grid;
-  gap: 0.8rem;
-  padding: 0.95rem 1rem;
+  gap: 0.55rem;
+  padding: 0.8rem 0.88rem;
   border-radius: 1rem;
   background: linear-gradient(135deg, rgba(117, 158, 126, 0.13), rgba(255, 255, 255, 0.88));
   border: 1px solid rgba(101, 144, 115, 0.12);
 `;
 
 const FarmHeroHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+`;
+
+const FarmHeroMain = styled.div`
+  min-width: 0;
+  flex: 1 1 320px;
   display: grid;
-  gap: 0.9rem;
+  gap: 0.45rem;
 `;
 
 const FarmEyebrow = styled.div`
@@ -570,57 +473,59 @@ const FarmEyebrow = styled.div`
 const FarmTitleRow = styled.div`
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  align-items: baseline;
   gap: 0.55rem;
-  margin-top: 0.18rem;
+  margin-top: 0.04rem;
 `;
 
 const FarmTitleActions = styled.div`
   display: inline-flex;
   flex-wrap: wrap;
   gap: 0.42rem;
+  align-self: flex-start;
 `;
 
 const FarmTitle = styled.h4`
   margin: 0;
-  font-size: 1.22rem;
-  line-height: 1.08;
+  font-size: 1.08rem;
+  line-height: 1.05;
+`;
+
+const FarmLocation = styled.span`
+  font-size: 0.82rem;
+  line-height: 1.3;
+  color: var(--muted);
 `;
 
 const FarmEditorWrap = styled.div`
-  margin-top: 0.4rem;
+  margin-top: 0.22rem;
 `;
 
 const FarmMetrics = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
-  gap: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
 `;
 
 const FarmMetric = styled.div`
-  display: grid;
-  gap: 0.16rem;
-  padding: 0.68rem 0.72rem;
-  border-radius: 0.92rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  min-height: 1.9rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid rgba(31, 41, 55, 0.08);
 
   strong {
-    font-size: 1.05rem;
+    font-size: 0.82rem;
     line-height: 1;
   }
 
   span {
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     color: var(--muted);
   }
-`;
-
-const FarmCarouselGrid = styled.div`
-  display: grid;
-  gap: 0.9rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 `;
 
 const FarmSection = styled.section`
@@ -630,13 +535,6 @@ const FarmSection = styled.section`
   border-radius: 0.95rem;
   border: 1px solid rgba(31, 41, 55, 0.08);
   background: rgba(255, 255, 255, 0.78);
-`;
-
-const FarmSectionHeaderRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
 `;
 
 const FarmSectionTitle = styled.h5`
@@ -698,6 +596,35 @@ const CropName = styled.div`
   color: var(--ink);
 `;
 
+const CropNotesCell = styled.div`
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+`;
+
+const CropNotesPreview = styled.div`
+  max-height: 8.75rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--ink) 92%, var(--muted) 8%);
+  scrollbar-gutter: stable;
+`;
+
+const CropNotesButton = styled.button`
+  width: fit-content;
+  border: 1px solid rgba(31, 41, 55, 0.14);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.32rem 0.62rem;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
 const CropDeleteButton = styled.button`
   width: 1.85rem;
   height: 1.85rem;
@@ -718,40 +645,6 @@ const CropDeleteButton = styled.button`
     cursor: default;
     opacity: 0.58;
   }
-`;
-
-const CarouselControls = styled.div`
-  display: inline-flex;
-  gap: 0.4rem;
-`;
-
-const FarmCarousel = styled.div`
-  display: flex;
-  gap: 0.75rem;
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-  padding-bottom: 0.2rem;
-`;
-
-const FarmCarouselCard = styled.article<{ $highlighted: boolean }>`
-  min-width: min(280px, 88%);
-  max-width: 100%;
-  display: grid;
-  gap: 0.6rem;
-  padding: 0.9rem 0.92rem;
-  border-radius: 0.9rem;
-  border: 1px solid
-    ${({ $highlighted }) =>
-      $highlighted
-        ? "rgba(101, 144, 115, 0.32)"
-        : "rgba(31, 41, 55, 0.08)"};
-  background: ${({ $highlighted }) =>
-    $highlighted
-      ? "rgba(220, 245, 224, 0.96)"
-      : "color-mix(in srgb, rgba(117, 158, 126, 0.08) 45%, white 55%)"};
-  box-shadow: ${({ $highlighted }) =>
-    $highlighted ? "0 0 0 3px rgba(117, 158, 126, 0.12)" : "none"};
-  scroll-snap-align: start;
 `;
 
 const FarmCardHeader = styled.div`
@@ -818,27 +711,6 @@ const FarmDangerButton = styled(FarmActionButton)`
   border-color: rgba(186, 92, 78, 0.24);
   background: rgba(255, 244, 242, 0.92);
   color: #8b3e32;
-`;
-
-const WorkList = styled.ul`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-`;
-
-const WorkItem = styled.li<{ $highlighted: boolean }>`
-  padding: 0.48rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid
-    ${({ $highlighted }) =>
-      $highlighted ? "rgba(101, 144, 115, 0.34)" : "rgba(31, 41, 55, 0.1)"};
-  background: ${({ $highlighted }) =>
-    $highlighted ? "rgba(220, 245, 224, 0.96)" : "rgba(255, 255, 255, 0.8)"};
-  font-size: 0.8rem;
-  color: var(--ink);
 `;
 
 const OrderList = styled.div`
@@ -933,4 +805,43 @@ const OrderLink = styled.a`
   text-decoration: none;
   font-size: 0.76rem;
   font-weight: 700;
+`;
+
+const CropNotesModalCard = styled(WorkspaceModalCard)`
+  width: min(720px, 100%);
+  display: grid;
+  gap: 0.85rem;
+`;
+
+const CropNotesMarkdown = styled.div`
+  min-height: 0;
+  max-height: min(68vh, 620px);
+  overflow: auto;
+  padding-right: 0.2rem;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--ink);
+
+  p,
+  ul,
+  ol {
+    margin: 0 0 0.75rem;
+  }
+
+  ul,
+  ol {
+    padding-left: 1.3rem;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+  }
+
+  pre {
+    overflow: auto;
+    padding: 0.75rem;
+    border-radius: 0.8rem;
+    background: rgba(17, 24, 39, 0.06);
+  }
 `;

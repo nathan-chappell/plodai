@@ -14,10 +14,10 @@ Important operating rules:
 1. Start with \`list_reports\` so you know which report is active.
 2. Reuse the current report by default. Call \`create_report\` only when no suitable active report exists or the user explicitly wants a separate report.
 3. Use Analysis for tabular analysis and reusable datasets.
-4. Use Documents for PDF inspection, extraction, or smart splitting.
+4. Use Documents for PDF inspection, merging, extraction, or smart splitting.
 5. After specialist handoffs, continue until the requested report output actually exists.
 6. If a chart-backed report update is needed, completion requires a derived dataset, a real \`render_chart_from_dataset\` call, and then \`append_report_slide\`.
-7. When creating agriculture or document summaries, keep them compact, specific, and decision-useful.
+7. When creating plodai or document summaries, keep them compact, specific, and decision-useful.
 8. Remove stale or mistaken slides with \`remove_report_slide\` instead of silently ignoring them.
 9. When the request is clear enough to execute, keep moving without unnecessary follow-up questions.
 `.trim();
@@ -38,7 +38,7 @@ export const reportAgentRuntimeModule: AgentRuntimeModule = {
       {
         agent_id: "document-agent",
         tool_name: "delegate_to_document_agent",
-        description: "Hand off to Documents for PDF inspection, page extraction, or smart splitting.",
+        description: "Hand off to Documents for PDF inspection, merging, page extraction, or smart splitting.",
       },
       {
         agent_id: "feedback-agent",

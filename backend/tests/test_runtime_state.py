@@ -29,7 +29,7 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
                 "version": "v4",
                 "workspace_id": "workspace-tour",
                 "workspace_name": "Tour Workspace",
-                "app_id": "agriculture",
+                "app_id": "plodai",
                 "selected_item_id": "file_csv",
                 "items": [
                     {
@@ -96,7 +96,7 @@ def test_resolve_thread_runtime_state_hydrates_context_from_workspace_state() ->
 
     assert runtime_state.metadata["workspace_state"]["workspace_id"] == "workspace-tour"
     assert runtime_state.metadata["workspace_state"]["workspace_name"] == "Tour Workspace"
-    assert runtime_state.metadata["workspace_state"]["app_id"] == "agriculture"
+    assert runtime_state.metadata["workspace_state"]["app_id"] == "plodai"
     assert context.report_id == "thread_123"
     assert context.workspace_id == "workspace-tour"
     assert context.workspace_name == "Tour Workspace"

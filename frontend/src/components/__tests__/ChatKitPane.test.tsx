@@ -130,7 +130,7 @@ vi.mock("../../lib/dev-logging", () => ({
 import { ChatKitHarness, ChatKitPane, buildChatKitRequestMetadata } from "../ChatKitPane";
 import type { AgentBundle, AgentClientTool } from "../../agents/types";
 import {
-  agricultureAgentDefinition,
+  plodaiAgentDefinition,
   analysisAgentDefinition,
   documentAgentDefinition,
 } from "../../agents/definitions";
@@ -160,11 +160,11 @@ function setScrollMetrics(
 }
 
 const agentBundle: AgentBundle = {
-  root_agent_id: "agriculture-agent",
+  root_agent_id: "plodai-agent",
   agents: [
     {
-      agent_id: "agriculture-agent",
-      agent_name: "Agriculture",
+      agent_id: "plodai-agent",
+      agent_name: "PlodAI",
       instructions: "Inspect files.",
       client_tools: [],
       delegation_targets: [],
@@ -187,14 +187,14 @@ const files: LocalAttachment[] = [
 
 const workspaceState: WorkspaceState = {
   version: "v4",
-  workspace_id: "workspace-agriculture",
-  workspace_name: "Agriculture workspace",
-  app_id: "agriculture",
+  workspace_id: "workspace-plodai",
+  workspace_name: "PlodAI workspace",
+  app_id: "plodai",
   items: [
     {
       origin: "upload",
       id: "file_image",
-      workspace_id: "workspace-agriculture",
+      workspace_id: "workspace-plodai",
       name: "orchard.jpeg",
       kind: "image",
       extension: "jpeg",
@@ -328,8 +328,8 @@ describe("ChatKitPane", () => {
 
   it("does not auto-send a message just from mounting the pane", async () => {
     await renderPane("", {
-      greeting: agricultureAgentDefinition.chatkitLead,
-      composerPlaceholder: agricultureAgentDefinition.chatkitPlaceholder,
+      greeting: plodaiAgentDefinition.chatkitLead,
+      composerPlaceholder: plodaiAgentDefinition.chatkitPlaceholder,
     });
 
     expect(latestChatKitApi?.sendUserMessage).not.toHaveBeenCalled();
@@ -357,7 +357,7 @@ describe("ChatKitPane", () => {
   });
 
   it("accepts compact lead text for the visible app surfaces", async () => {
-    for (const agent of [agricultureAgentDefinition, documentAgentDefinition, analysisAgentDefinition]) {
+    for (const agent of [plodaiAgentDefinition, documentAgentDefinition, analysisAgentDefinition]) {
       await renderPane("", {
         greeting: agent.chatkitLead,
         composerPlaceholder: agent.chatkitPlaceholder,
@@ -371,9 +371,9 @@ describe("ChatKitPane", () => {
     }
   });
 
-  it("configures agriculture composer attachments as image-only with a 10 MB cap", async () => {
+  it("configures plodai composer attachments as image-only with a 10 MB cap", async () => {
     await renderPane("", {
-      attachmentConfig: agricultureAgentDefinition.attachmentConfig,
+      attachmentConfig: plodaiAgentDefinition.attachmentConfig,
     });
 
     const composer = latestChatKitOptions?.composer as
@@ -396,7 +396,7 @@ describe("ChatKitPane", () => {
     });
   });
 
-  it("passes agriculture entity handlers through to ChatKit", async () => {
+  it("passes plodai entity handlers through to ChatKit", async () => {
     const onTagSearch = vi.fn(async () => []);
     const onClick = vi.fn();
     const onRequestPreview = vi.fn(async () => ({ preview: null }));

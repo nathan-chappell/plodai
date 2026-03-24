@@ -88,7 +88,7 @@ export class WorkspaceRepository {
     }
     return this.apiClient.createWorkspace({
       app_id: appId,
-      name: appId === "agriculture" ? "Farm" : "Documents",
+      name: appId === "plodai" ? "Farm" : "Documents",
     });
   }
 

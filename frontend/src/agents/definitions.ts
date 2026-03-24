@@ -112,9 +112,9 @@ export const documentAgentDefinition: AgentDefinition = {
   navLabel: "Documents",
   title: "Documents",
   eyebrow: "App",
-  description: "PDF inspection, extraction, and smart document splits.",
-  chatkitLead: "Use Documents to inspect PDFs, extract pages, or split a packet into useful sections.",
-  chatkitPlaceholder: "Ask to inspect a PDF, extract a page range, or perform a smart split",
+  description: "PDF inspection, merge, extraction, and smart document splits.",
+  chatkitLead: "Use Documents to inspect PDFs, merge packets, extract pages, or split a packet into useful sections.",
+  chatkitPlaceholder: "Ask to inspect a PDF, merge PDFs, extract a page range, or perform a smart split",
   tabs: [],
   showInSidebar: true,
   showInComposer: false,
@@ -122,7 +122,7 @@ export const documentAgentDefinition: AgentDefinition = {
   composerLabel: "Documents",
   composerShortLabel: "Docs",
   composerIcon: "document",
-  composerPlaceholder: "Inspect a PDF, extract pages, or create a smart document split.",
+  composerPlaceholder: "Inspect a PDF, merge PDFs, extract pages, or create a smart document split.",
   previewPriority: 40,
   attachmentConfig: {
     enabled: true,
@@ -132,21 +132,21 @@ export const documentAgentDefinition: AgentDefinition = {
   },
 };
 
-export const agricultureAgentDefinition: AgentDefinition = {
-  id: "agriculture-agent",
-  path: "/agriculture",
-  navLabel: "Agriculture",
-  title: "Agriculture",
+export const plodaiAgentDefinition: AgentDefinition = {
+  id: "plodai-agent",
+  path: "/plodai",
+  navLabel: "PlodAI",
+  title: "PlodAI",
   eyebrow: "App",
   description: "Assess crop photos, estimate visible extent, flag issues, and suggest season-aware next steps.",
-  chatkitLead: "Use Agriculture to inspect crop photos, estimate what is visible, and suggest season-aware next steps.",
-  chatkitPlaceholder: "Ask the agriculture agent to identify the crop, estimate amount, flag issues, and explain seasonal needs",
+  chatkitLead: "Use PlodAI to inspect crop photos, estimate what is visible, and suggest season-aware next steps.",
+  chatkitPlaceholder: "Ask PlodAI to identify the crop, estimate amount, flag issues, and explain seasonal needs",
   tabs: [],
   showInSidebar: true,
   showInComposer: false,
   composerOrder: 50,
-  composerLabel: "Agriculture",
-  composerShortLabel: "Agri",
+  composerLabel: "PlodAI",
+  composerShortLabel: "PlodAI",
   composerIcon: "cube",
   composerPlaceholder: "Identify the crop, estimate visible amount, flag issues, and suggest season-aware next steps.",
   previewPriority: 50,
@@ -199,12 +199,12 @@ export const runtimeAgentDefinitions: AgentDefinition[] = [
   analysisAgentDefinition,
   chartAgentDefinition,
   documentAgentDefinition,
-  agricultureAgentDefinition,
+  plodaiAgentDefinition,
   feedbackAgentDefinition,
 ];
 
 export const surfaceDefinitions: AgentDefinition[] = [
-  agricultureAgentDefinition,
+  plodaiAgentDefinition,
   documentAgentDefinition,
 ];
 

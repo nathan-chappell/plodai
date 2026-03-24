@@ -11,6 +11,7 @@ import {
   fillDocumentFormInPdfBytes,
   inspectDocumentPdfBytes,
   inspectPdfBytes,
+  mergePdfBytes,
   replaceDocumentTextInPdfBytes,
   smartSplitPdfBytes,
   uint8ArrayToBase64,
@@ -35,6 +36,29 @@ async function buildTextPdf(text: string): Promise<Uint8Array> {
     font,
   });
   return document.save();
+}
+
+async function buildTextPdfPages(texts: string[]): Promise<Uint8Array> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  for (const text of texts) {
+    const page = document.addPage([400, 400]);
+    page.drawText(text, {
+      x: 48,
+      y: 320,
+      size: 14,
+      font,
+    });
+  }
+  return document.save();
+}
+
+async function buildSizedPdfPages(pageSizes: Array<[number, number]>): Promise<Uint8Array> {
+  const document = await PDFDocument.create();
+  for (const pageSize of pageSizes) {
+    document.addPage(pageSize);
+  }
+  return await document.save();
 }
 
 async function buildDocumentFormPdf(): Promise<Uint8Array> {
@@ -249,6 +273,147 @@ describe("pdf helpers", () => {
     const loaded = await PDFDocument.load(appended.pdfBytes);
     expect(loaded.getPageCount()).toBeGreaterThan(1);
     expect(appended.warning).toBeUndefined();
+  });
+
+  it("merges whole PDFs in the provided order", async () => {
+    const first = await buildSizedPdfPages([[420, 420]]);
+    const second = await buildSizedPdfPages([[520, 520]]);
+
+    const merged = await mergePdfBytes([
+      {
+        fileId: "file-1",
+        pdfBytes: first,
+      },
+      {
+        fileId: "file-2",
+        pdfBytes: second,
+      },
+    ]);
+
+    expect(merged.pageCount).toBe(2);
+    expect(merged.sourceRanges).toEqual([
+      { file_id: "file-1", start_page: 1, end_page: 1, page_count: 1 },
+      { file_id: "file-2", start_page: 1, end_page: 1, page_count: 1 },
+    ]);
+
+    const loaded = await PDFDocument.load(merged.pdfBytes);
+    expect(loaded.getPages().map((page) => page.getSize())).toEqual([
+      { width: 420, height: 420 },
+      { width: 520, height: 520 },
+    ]);
+  });
+
+  it("merges mixed page ranges and returns normalized source ranges", async () => {
+    const first = await buildSizedPdfPages([
+      [410, 410],
+      [420, 420],
+      [430, 430],
+    ]);
+    const second = await buildSizedPdfPages([
+      [510, 510],
+      [520, 520],
+    ]);
+
+    const merged = await mergePdfBytes([
+      {
+        fileId: "file-1",
+        pdfBytes: first,
+        startPage: 2,
+        endPage: 3,
+      },
+      {
+        fileId: "file-2",
+        pdfBytes: second,
+      },
+    ]);
+
+    expect(merged.pageCount).toBe(4);
+    expect(merged.sourceRanges).toEqual([
+      { file_id: "file-1", start_page: 2, end_page: 3, page_count: 2 },
+      { file_id: "file-2", start_page: 1, end_page: 2, page_count: 2 },
+    ]);
+
+    const loaded = await PDFDocument.load(merged.pdfBytes);
+    expect(loaded.getPages().map((page) => page.getSize())).toEqual([
+      { width: 420, height: 420 },
+      { width: 430, height: 430 },
+      { width: 510, height: 510 },
+      { width: 520, height: 520 },
+    ]);
+  });
+
+  it("allows repeated source PDFs without deduping them", async () => {
+    const source = await buildTextPdf("Reusable packet");
+
+    const merged = await mergePdfBytes([
+      {
+        fileId: "file-1",
+        pdfBytes: source,
+      },
+      {
+        fileId: "file-1",
+        pdfBytes: source,
+      },
+    ]);
+
+    expect(merged.pageCount).toBe(2);
+    expect(merged.sourceRanges).toEqual([
+      { file_id: "file-1", start_page: 1, end_page: 1, page_count: 1 },
+      { file_id: "file-1", start_page: 1, end_page: 1, page_count: 1 },
+    ]);
+  });
+
+  it("rejects invalid merge ranges", async () => {
+    const source = await buildTextPdfPages(["Alpha", "Bravo"]);
+
+    await expect(
+      mergePdfBytes([
+        {
+          fileId: "file-1",
+          pdfBytes: source,
+          startPage: 2,
+        },
+        {
+          fileId: "file-2",
+          pdfBytes: source,
+        },
+      ]),
+    ).rejects.toThrow("must include both startPage and endPage");
+
+    await expect(
+      mergePdfBytes([
+        {
+          fileId: "file-1",
+          pdfBytes: source,
+        },
+        {
+          fileId: "file-2",
+          pdfBytes: source,
+          startPage: 1,
+          endPage: 3,
+        },
+      ]),
+    ).rejects.toThrow("exceed the PDF page count");
+  });
+
+  it("keeps original source PDFs reusable after merge", async () => {
+    const first = await buildTextPdfPages(["Alpha", "Bravo"]);
+    const second = await buildTextPdf("Charlie");
+
+    const merged = await mergePdfBytes([
+      {
+        fileId: "file-1",
+        pdfBytes: first,
+      },
+      {
+        fileId: "file-2",
+        pdfBytes: second,
+      },
+    ]);
+
+    expect(merged.pageCount).toBe(3);
+    await expect(inspectPdfBytes(first)).resolves.toMatchObject({ pageCount: 2 });
+    await expect(inspectPdfBytes(second)).resolves.toMatchObject({ pageCount: 1 });
   });
 
   it("prefers section boundaries when the PDF clearly exposes them", () => {

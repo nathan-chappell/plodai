@@ -286,6 +286,17 @@ export type AppendDocumentAppendixFromDatasetToolArgs = {
   render_as?: "table" | "chart";
 };
 
+export type MergeDocumentSourceInput = {
+  file_id: string;
+  start_page?: number;
+  end_page?: number;
+};
+
+export type MergeDocumentFilesToolArgs = {
+  sources: MergeDocumentSourceInput[];
+  output_name?: string;
+};
+
 export type SmartSplitDocumentToolArgs = {
   file_id: string;
   goal?: string;
@@ -354,20 +365,6 @@ export type FarmCropDraft = {
   notes?: string | null;
 };
 
-export type FarmIssueDraft = {
-  id: string;
-  title: string;
-  status: "open" | "watching" | "resolved";
-  notes?: string | null;
-};
-
-export type FarmProjectDraft = {
-  id: string;
-  title: string;
-  status: "planned" | "active" | "done";
-  notes?: string | null;
-};
-
 export type FarmOrderItemDraft = {
   id: string;
   label: string;
@@ -393,10 +390,7 @@ export type SaveFarmStateToolArgs = {
   farm_name: string;
   location?: string | null;
   crops: FarmCropDraft[];
-  issues: FarmIssueDraft[];
-  projects: FarmProjectDraft[];
   orders?: FarmOrderDraft[];
-  current_work: string[];
   notes?: string | null;
 };
 
@@ -415,6 +409,7 @@ export type ClientToolArgsMap = {
   replace_document_text: ReplaceDocumentTextToolArgs;
   fill_document_form: FillDocumentFormToolArgs;
   append_document_appendix_from_dataset: AppendDocumentAppendixFromDatasetToolArgs;
+  merge_document_files: MergeDocumentFilesToolArgs;
   smart_split_document: SmartSplitDocumentToolArgs;
   delete_document_file: DeleteDocumentFileToolArgs;
   list_reports: ListReportsToolArgs;

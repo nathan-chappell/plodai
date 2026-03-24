@@ -71,7 +71,7 @@ const AGENT_THEME_OVERRIDES: Record<string, Partial<PlatformThemeValues>> = {
     "--sidebar-muted": "rgba(245, 243, 255, 0.72)",
     "--shadow": "0 20px 60px rgba(109, 40, 217, 0.1)",
   },
-  "agriculture-agent": {
+  "plodai-agent": {
     "--bg-top": "#edf6ee",
     "--bg-bottom": "#e1eddf",
     "--bg-glow-left": "rgba(22, 163, 74, 0.14)",

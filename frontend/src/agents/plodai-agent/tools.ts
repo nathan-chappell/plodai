@@ -12,11 +12,11 @@ import type {
   FunctionToolDefinition,
 } from "../types";
 
-export function buildAgricultureAgentFarmToolCatalog(): FunctionToolDefinition[] {
+export function buildPlodaiAgentFarmToolCatalog(): FunctionToolDefinition[] {
   return [
     buildToolDefinition(
       "get_farm_state",
-      "Read the saved farm record for this workspace. Treat it as durable notes before adding new crop findings, issues, seasonal work, or orders.",
+      "Read the saved farm record for this workspace. Treat it as durable notes before adding new crop findings, observations, seasonal guidance, or orders.",
       getFarmStateToolSchema,
       {
         label: "Get Farm State",
@@ -24,7 +24,7 @@ export function buildAgricultureAgentFarmToolCatalog(): FunctionToolDefinition[]
     ),
     buildToolDefinition(
       "save_farm_state",
-      "Create or update the saved farm record for this workspace after merging new findings into the existing farm state. Use this as durable note-taking for important crop facts, issues, seasonal work, uncertainty, and orders.",
+      "Create or update the saved farm record for this workspace after merging new findings into the existing farm state. Use this as durable note-taking for important crop facts, observations, uncertainty, and orders. Keep expected_yield to the estimate only, and keep notes terse, actionable, and durable.",
       saveFarmStateToolSchema,
       {
         label: "Save Farm State",
@@ -35,10 +35,10 @@ export function buildAgricultureAgentFarmToolCatalog(): FunctionToolDefinition[]
   ];
 }
 
-export function createAgricultureAgentFarmTools(
+export function createPlodaiAgentFarmTools(
   workspace: AgentRuntimeContext,
 ): AgentClientTool[] {
-  return buildAgricultureAgentFarmToolCatalog().map((definition) =>
+  return buildPlodaiAgentFarmToolCatalog().map((definition) =>
     createBrokeredAgentTool(
       workspace,
       definition,

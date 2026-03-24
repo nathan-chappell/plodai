@@ -221,11 +221,11 @@ def test_feedback_agent_gets_feedback_tools_without_validator_tooling() -> None:
 
 def test_non_feedback_agents_stop_after_each_client_tool() -> None:
     agent_bundle = {
-        "root_agent_id": "agriculture-agent",
+        "root_agent_id": "plodai-agent",
         "agents": [
             {
-                "agent_id": "agriculture-agent",
-                "agent_name": "Agriculture",
+                "agent_id": "plodai-agent",
+                "agent_name": "PlodAI",
                 "instructions": "Assess crop photos and save farm context when asked.",
                 "client_tools": [
                     {
@@ -248,20 +248,8 @@ def test_non_feedback_agents_stop_after_each_client_tool() -> None:
                             "properties": {
                                 "farm_name": {"type": "string"},
                                 "crops": {"type": "array", "items": {"type": "object"}},
-                                "issues": {"type": "array", "items": {"type": "object"}},
-                                "projects": {"type": "array", "items": {"type": "object"}},
-                                "current_work": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                },
                             },
-                            "required": [
-                                "farm_name",
-                                "crops",
-                                "issues",
-                                "projects",
-                                "current_work",
-                            ],
+                            "required": ["farm_name", "crops"],
                             "additionalProperties": False,
                         },
                         "strict": True,
@@ -286,20 +274,20 @@ def test_non_feedback_agents_stop_after_each_client_tool() -> None:
     )
 
     assert set(
-        agents["agriculture-agent"].tool_use_behavior["stop_at_tool_names"]
+        agents["plodai-agent"].tool_use_behavior["stop_at_tool_names"]
     ) == {
         "get_farm_state",
         "save_farm_state",
     }
 
 
-def test_agriculture_agent_gets_hosted_web_search_tool() -> None:
+def test_plodai_agent_gets_hosted_web_search_tool() -> None:
     agent_bundle = {
-        "root_agent_id": "agriculture-agent",
+        "root_agent_id": "plodai-agent",
         "agents": [
             {
-                "agent_id": "agriculture-agent",
-                "agent_name": "Agriculture",
+                "agent_id": "plodai-agent",
+                "agent_name": "PlodAI",
                 "instructions": "Inspect plant images and use trusted web search when needed.",
                 "client_tools": [],
                 "delegation_targets": [],
@@ -320,9 +308,9 @@ def test_agriculture_agent_gets_hosted_web_search_tool() -> None:
         model=None,
     )
 
-    agriculture_tool_names = [tool.name for tool in agents["agriculture-agent"].tools]
+    plodai_tool_names = [tool.name for tool in agents["plodai-agent"].tools]
 
-    assert "web_search" in agriculture_tool_names
+    assert "web_search" in plodai_tool_names
 
 
 async def _capture_widget(

@@ -10,10 +10,10 @@ import type { AgentRuntimeContext } from "../../agents/types";
 
 function createWorkspaceContext(): AgentRuntimeContext {
   return {
-    workspaceId: "workspace-agriculture",
-    workspaceName: "Agriculture workspace",
+    workspaceId: "workspace-plodai",
+    workspaceName: "PlodAI workspace",
     activeThreadId: null,
-    activeAgentId: "agriculture-agent",
+    activeAgentId: "plodai-agent",
     selectedFileId: null,
     selectedArtifactId: null,
     currentReportArtifactId: null,
@@ -44,9 +44,9 @@ function agentIdsFor(rootAgentId: string): string[] {
 }
 
 describe("agent registry", () => {
-  it("builds the agriculture dependency graph without a default router agent", () => {
-    expect(agentIdsFor("agriculture-agent")).toEqual([
-      "agriculture-agent",
+  it("builds the plodai dependency graph without a default router agent", () => {
+    expect(agentIdsFor("plodai-agent")).toEqual([
+      "plodai-agent",
       "analysis-agent",
       "chart-agent",
       "feedback-agent",
@@ -62,15 +62,15 @@ describe("agent registry", () => {
   });
 
   it("exposes only the live app modules by their updated routes", () => {
-    expect(getAgentModule("agriculture-agent")?.definition.path).toBe("/agriculture");
+    expect(getAgentModule("plodai-agent")?.definition.path).toBe("/plodai");
     expect(getAgentModule("document-agent")?.definition.path).toBe("/documents");
     expect(getAgentModule("missing-agent")).toBeNull();
   });
 
-  it("binds unique client tools across the agriculture bundle", () => {
+  it("binds unique client tools across the plodai bundle", () => {
     const workspace = createWorkspaceContext();
     const toolNames = bindClientToolsForAgentBundle(
-      buildAgentBundleForRoot("agriculture-agent", workspace),
+      buildAgentBundleForRoot("plodai-agent", workspace),
       workspace,
     ).map((tool) => tool.name);
 
@@ -93,15 +93,19 @@ describe("agent registry", () => {
     expect(toolNames).toHaveLength(new Set(toolNames).size);
   });
 
-  it("uses attachment-first agriculture instructions without the removed image tools", () => {
+  it("uses attachment-first plodai instructions without the removed image tools", () => {
     const workspace = createWorkspaceContext();
-    const instructions = getAgentModule("agriculture-agent")?.buildAgentSpec(workspace).instructions;
+    const agentSpec = getAgentModule("plodai-agent")?.buildAgentSpec(workspace);
+    const instructions = agentSpec?.instructions;
 
+    expect(agentSpec?.agent_name).toBe("PlodAI");
+    expect(instructions).toContain("You are PlodAI.");
     expect(instructions).toContain("Treat images attached to the user's message as primary evidence.");
     expect(instructions).toContain("Treat the saved farm record as your durable notes for this workspace.");
     expect(instructions).toContain("When you learn any new or important durable fact, call `get_farm_state`");
     expect(instructions).toContain("Save by default after useful assessments.");
     expect(instructions).toContain("Save partial but grounded findings too.");
+    expect(instructions).toContain("put visible problems, seasonal work, plans, and nuance into `notes` for now.");
     expect(instructions).toContain("seasonal needs as of");
     expect(instructions).toContain("Do not ask for permission first.");
     expect(instructions).toContain("Briefly tell the user that the farm record was updated.");
@@ -123,6 +127,7 @@ describe("agent registry", () => {
       "replace_document_text",
       "fill_document_form",
       "append_document_appendix_from_dataset",
+      "merge_document_files",
       "smart_split_document",
       "delete_document_file",
     ]));

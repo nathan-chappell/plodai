@@ -24,7 +24,7 @@ class PublicFarmOrderService:
         public_base_url: str | None = None,
     ) -> PublicFarmOrderResponse:
         workspace = await self.db.get(Workspace, workspace_id)
-        if workspace is None or workspace.app_id != "agriculture":
+        if workspace is None or workspace.app_id != "plodai":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Farm order not found.",

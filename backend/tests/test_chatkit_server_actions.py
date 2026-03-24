@@ -46,8 +46,8 @@ def test_update_chat_metadata_action_merges_patch_and_updates_title() -> None:
             "workspace_state": {
                 "version": "v4",
                 "workspace_id": "workspace_123",
-                "workspace_name": "Agriculture workspace",
-                "app_id": "agriculture",
+                "workspace_name": "PlodAI workspace",
+                "app_id": "plodai",
                 "items": [],
             }
         },
@@ -64,8 +64,8 @@ def test_update_chat_metadata_action_merges_patch_and_updates_title() -> None:
                         "workspace_state": {
                             "version": "v4",
                             "workspace_id": "workspace_123",
-                            "workspace_name": "Agriculture workspace",
-                            "app_id": "agriculture",
+                            "workspace_name": "PlodAI workspace",
+                            "app_id": "plodai",
                             "selected_item_id": "file_1",
                             "items": [],
                         },

@@ -782,10 +782,7 @@ export async function executeLocalTool<Name extends ClientToolName>(
             farm_name: toolArgs.farm_name,
             location: toolArgs.location ?? null,
             crops: toolArgs.crops,
-            issues: toolArgs.issues,
-            projects: toolArgs.projects,
             orders: toolArgs.orders ?? [],
-            current_work: toolArgs.current_work,
             notes: toolArgs.notes ?? null,
           } satisfies FarmItemPayloadV1,
         });
@@ -803,10 +800,7 @@ export async function executeLocalTool<Name extends ClientToolName>(
             farm_name: toolArgs.farm_name,
             location: toolArgs.location ?? null,
             crops: toolArgs.crops,
-            issues: toolArgs.issues,
-            projects: toolArgs.projects,
             orders: toolArgs.orders ?? existingFarm?.orders ?? [],
-            current_work: toolArgs.current_work,
             notes: toolArgs.notes ?? null,
           },
         });

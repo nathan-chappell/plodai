@@ -5,6 +5,7 @@ import {
   base64ToUint8Array,
   fillDocumentFormInPdfBytes,
   inspectDocumentPdfBytes,
+  mergePdfBytes,
   replaceDocumentTextInPdfBytes,
   smartSplitPdfBytes,
 } from "../../lib/pdf";
@@ -21,6 +22,8 @@ import type {
   FillDocumentFormToolArgs,
   InspectDocumentFileToolArgs,
   ListDocumentFilesToolArgs,
+  MergeDocumentFilesToolArgs,
+  MergeDocumentSourceInput,
   ReplaceDocumentTextToolArgs,
   SmartSplitDocumentToolArgs,
   SmartSplitEntry,
@@ -30,6 +33,7 @@ import type {
   DocumentEditResult,
   DocumentFileSummary,
   DocumentInspectionResult,
+  DocumentMergeResult,
   DocumentSmartSplitResult,
   DocumentSplitEntry,
   StoredFilePreview,
@@ -66,6 +70,17 @@ const documentFieldValueSchema: JsonSchema = {
     value: { type: "string" },
   },
   required: ["locator_id", "value"],
+  additionalProperties: false,
+};
+
+const documentMergeSourceSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    file_id: documentFileIdSchema,
+    start_page: { type: "integer", minimum: 1 },
+    end_page: { type: "integer", minimum: 1 },
+  },
+  required: ["file_id"],
   additionalProperties: false,
 };
 
@@ -155,6 +170,28 @@ export function buildDocumentAgentClientToolCatalog(
         label: "Append Dataset Appendix",
         prominent_args: ["file_id", "dataset_file_id"],
         arg_labels: { file_id: "file", dataset_file_id: "dataset" },
+      },
+    ),
+    buildToolDefinition(
+      "merge_document_files",
+      "Merge two or more stored PDFs, optionally using page ranges, into a new derived PDF in the current document thread.",
+      {
+        type: "object",
+        properties: {
+          sources: {
+            type: "array",
+            minItems: 2,
+            items: documentMergeSourceSchema,
+          },
+          output_name: { type: "string" },
+        },
+        required: ["sources"],
+        additionalProperties: false,
+      },
+      {
+        label: "Merge Document Files",
+        prominent_args: ["output_name"],
+        arg_labels: { output_name: "name" },
       },
     ),
     buildToolDefinition(
@@ -339,6 +376,72 @@ export function createDocumentAgentClientTools(
           message: `Appended a ${args.render_as ?? "table"} appendix generated from ${datasetFile.name}.`,
           warning: appendix.warning ?? null,
           unresolved_locator_ids: [],
+        };
+      },
+    ),
+    bindDocumentTool<MergeDocumentFilesToolArgs, DocumentMergeResult>(
+      catalog,
+      "merge_document_files",
+      async (args) => {
+        const sourceInputs = normalizeMergeSourceInputs(args.sources);
+        const files = await listCurrentDocumentFiles(workspace);
+        const filesById = new Map(files.map((file) => [file.id, file] as const));
+        const bytesByFileId = new Map<string, Promise<Uint8Array>>();
+
+        const mergeSources = await Promise.all(
+          sourceInputs.map(async (source) => {
+            const file = filesById.get(source.file_id);
+            if (!file) {
+              throw new Error(`Unknown document thread file: ${source.file_id}`);
+            }
+            ensurePdfFile(file);
+            let bytesPromise = bytesByFileId.get(file.id);
+            if (!bytesPromise) {
+              bytesPromise = loadStoredFileBytes(file.id);
+              bytesByFileId.set(file.id, bytesPromise);
+            }
+            return {
+              file,
+              fileId: file.id,
+              pdfBytes: await bytesPromise,
+              startPage: source.start_page,
+              endPage: source.end_page,
+            };
+          }),
+        );
+
+        const merged = await mergePdfBytes(
+          mergeSources.map((source) => ({
+            fileId: source.fileId,
+            pdfBytes: source.pdfBytes,
+            startPage: source.startPage,
+            endPage: source.endPage,
+          })),
+        );
+        const firstSource = mergeSources[0];
+        const mergedFilename = buildMergedFilename(
+          firstSource.file.name,
+          mergeSources.length,
+          args.output_name,
+        );
+        const derivedFile = await uploadDerivedDocumentFile(workspace, {
+          file: buildDerivedBinaryFile(
+            mergedFilename,
+            merged.pdfBytes,
+            "application/pdf",
+          ),
+          parentFileId: firstSource.file.id,
+          previewJson: {
+            kind: "pdf",
+            page_count: merged.pageCount,
+          },
+        });
+
+        return {
+          file: derivedFile,
+          source_file_ids: mergeSources.map((source) => source.file.id),
+          source_ranges: merged.sourceRanges,
+          message: `Merged ${mergeSources.length} PDF selection${mergeSources.length === 1 ? "" : "s"} into ${derivedFile.name}.`,
         };
       },
     ),
@@ -561,6 +664,20 @@ function buildDerivedFilename(
   return extension ? `${baseName}__${suffix}.${extension}` : `${baseName}__${suffix}`;
 }
 
+function buildMergedFilename(
+  filename: string,
+  sourceCount: number,
+  outputName?: string,
+): string {
+  const trimmedOutputName = outputName?.trim() ?? "";
+  if (!trimmedOutputName) {
+    return buildDerivedFilename(filename, `merged_${sourceCount}_files`);
+  }
+  return /\.pdf$/i.test(trimmedOutputName)
+    ? trimmedOutputName
+    : `${trimmedOutputName}.pdf`;
+}
+
 function buildDerivedBinaryFile(
   filename: string,
   bytes: Uint8Array,
@@ -586,4 +703,30 @@ function buildUnresolvedWarning(
     return null;
   }
   return `Left ${unresolvedLocatorIds.length} locator${unresolvedLocatorIds.length === 1 ? "" : "s"} unresolved.`;
+}
+
+function normalizeMergeSourceInputs(
+  sources: MergeDocumentSourceInput[],
+): MergeDocumentSourceInput[] {
+  if (sources.length < 2) {
+    throw new Error("Select at least two PDF sources to merge.");
+  }
+
+  return sources.map((source, index) => {
+    const fileId = source.file_id.trim();
+    if (!fileId) {
+      throw new Error(`Source ${index + 1} is missing a file_id.`);
+    }
+    const hasStartPage = source.start_page != null;
+    const hasEndPage = source.end_page != null;
+    if (hasStartPage !== hasEndPage) {
+      throw new Error(
+        `Source ${index + 1} (${fileId}) must include both start_page and end_page or neither.`,
+      );
+    }
+    return {
+      ...source,
+      file_id: fileId,
+    };
+  });
 }

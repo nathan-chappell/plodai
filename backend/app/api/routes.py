@@ -23,9 +23,9 @@ from backend.app.schemas.credits import (
     AdminUserListResponse,
     AdminUserSummary,
 )
-from backend.app.schemas.agriculture_entities import (
-    AgricultureEntitySearchRequest,
-    AgricultureEntitySearchResponse,
+from backend.app.schemas.plodai_entities import (
+    PlodaiEntitySearchRequest,
+    PlodaiEntitySearchResponse,
 )
 from backend.app.services.clerk_admin_service import (
     list_users,
@@ -39,7 +39,7 @@ from backend.app.schemas.stored_file import (
     DeleteDocumentFileResponse,
     DocumentFileListResponse,
 )
-from backend.app.services.agriculture_entity_service import AgricultureEntityService
+from backend.app.services.plodai_entity_service import PlodaiEntityService
 from backend.app.services.stored_file_service import StoredFileService
 from backend.app.schemas.workspace import (
     PublicFarmOrderResponse,
@@ -612,16 +612,16 @@ async def get_stored_file_preview(
 
 
 @router.post(
-    "/agriculture/entities/search",
-    response_model=AgricultureEntitySearchResponse,
+    "/plodai/entities/search",
+    response_model=PlodaiEntitySearchResponse,
 )
-async def search_agriculture_entities(
+async def search_plodai_entities(
     request: Request,
-    payload: AgricultureEntitySearchRequest,
+    payload: PlodaiEntitySearchRequest,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AgricultureEntityService(db).search_entities(
+    return await PlodaiEntityService(db).search_entities(
         user_id=user.id,
         workspace_id=payload.workspace_id,
         app_id=payload.app_id,

@@ -75,7 +75,7 @@ function summarizeArtifactMeta(artifact: WorkspaceCreatedItemSummary): string {
       : `${artifact.summary.entry_count} split entries`;
   }
   if (artifact.kind === "farm.v1" && "crop_count" in artifact.summary) {
-    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues · ${artifact.summary.project_count} projects · ${artifact.summary.order_count ?? 0} orders`;
+    return `${artifact.summary.crop_count} crops · ${artifact.summary.order_count ?? 0} orders`;
   }
   return artifact.kind;
 }

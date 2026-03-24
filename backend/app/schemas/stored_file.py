@@ -171,6 +171,20 @@ class DocumentEditResult(StoredFileSchemaBase):
     unresolved_locator_ids: list[str] = Field(default_factory=list)
 
 
+class DocumentMergeSourceRange(StoredFileSchemaBase):
+    file_id: str
+    start_page: int = Field(ge=1)
+    end_page: int = Field(ge=1)
+    page_count: int = Field(ge=1)
+
+
+class DocumentMergeResult(StoredFileSchemaBase):
+    file: DocumentFileSummary
+    source_file_ids: list[str] = Field(min_length=1)
+    source_ranges: list[DocumentMergeSourceRange] = Field(min_length=1)
+    message: str
+
+
 class DocumentSplitEntry(StoredFileSchemaBase):
     file: DocumentFileSummary
     title: str

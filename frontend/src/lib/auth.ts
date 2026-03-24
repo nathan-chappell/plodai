@@ -1,5 +1,5 @@
 export const SIGN_IN_PATH = "/sign-in";
-export const DEFAULT_AUTHENTICATED_PATH = "/agriculture";
+export const DEFAULT_AUTHENTICATED_PATH = "/plodai";
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 if (!clerkPublishableKey) {

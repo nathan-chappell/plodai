@@ -85,7 +85,7 @@ The biggest missing pieces are fuller dataset-tool verification, smoother end-to
 
 ## App routes
 
-- `/agriculture` is the Agriculture app.
+- `/plodai` is the PlodAI app.
 - `/documents` is the Documents app.
 - `/admin` includes the admin-only credit tools plus repo-backed test cases that create a normal workspace, load fixture files, and prefill the composer without auto-sending.
 

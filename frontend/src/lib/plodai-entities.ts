@@ -1,27 +1,24 @@
 import type { Entity, Widgets } from "@openai/chatkit";
 
-import type { AgricultureComposerEntity, AgricultureEntityType } from "../types/chat-entities";
+import type { PlodaiComposerEntity, PlodaiEntityType } from "../types/chat-entities";
 
-function getEntityType(entity: Entity): AgricultureEntityType | null {
+function getEntityType(entity: Entity): PlodaiEntityType | null {
   const entityType = entity.data?.entity_type;
   return entityType === "thread_image" ||
     entityType === "farm_crop" ||
-    entityType === "farm_issue" ||
-    entityType === "farm_project" ||
-    entityType === "farm_current_work" ||
     entityType === "farm_order"
     ? entityType
     : null;
 }
 
-export function isAgricultureComposerEntity(entity: Entity): entity is AgricultureComposerEntity {
+export function isPlodaiComposerEntity(entity: Entity): entity is PlodaiComposerEntity {
   return getEntityType(entity) !== null;
 }
 
-export function buildAgricultureEntityPreview(
+export function buildPlodaiEntityPreview(
   entity: Entity,
 ): { preview: Widgets.BasicRoot | null } {
-  if (!isAgricultureComposerEntity(entity)) {
+  if (!isPlodaiComposerEntity(entity)) {
     return { preview: null };
   }
 
@@ -73,23 +70,13 @@ export function buildAgricultureEntityPreview(
   const badgeLabel =
     entityType === "farm_crop"
       ? "Farm crop"
-      : entityType === "farm_issue"
-        ? "Farm issue"
-        : entityType === "farm_project"
-          ? "Farm project"
-          : entityType === "farm_order"
-            ? "Farm order"
-            : "Current work";
+      : "Farm order";
   const summary =
     entityType === "farm_crop"
       ? [entity.data.area, entity.data.expected_yield && `Expected yield: ${entity.data.expected_yield}`]
           .filter(Boolean)
           .join(" | ")
-      : entityType === "farm_issue" || entityType === "farm_project"
-        ? entity.data.status || entity.data.farm_name || ""
-        : entityType === "farm_order"
-          ? [entity.data.status, entity.data.price_label].filter(Boolean).join(" | ")
-        : entity.data.farm_name || "";
+      : [entity.data.status, entity.data.price_label].filter(Boolean).join(" | ");
   const notes = entityType === "farm_order" ? entity.data.summary || entity.data.notes || "" : entity.data.notes || "";
 
   return {

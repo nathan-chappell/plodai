@@ -1,4 +1,4 @@
-import agricultureAgentModule from "./agriculture-agent";
+import plodaiAgentModule from "./plodai-agent";
 import analysisAgentModule from "./analysis-agent";
 import chartAgentModule from "./chart-agent";
 import documentAgentModule from "./document-agent";
@@ -17,7 +17,7 @@ export const agentModules: AgentModule[] = [
   analysisAgentModule,
   chartAgentModule,
   documentAgentModule,
-  agricultureAgentModule,
+  plodaiAgentModule,
   feedbackAgentModule,
 ];
 

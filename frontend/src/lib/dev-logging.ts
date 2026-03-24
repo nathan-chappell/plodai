@@ -113,9 +113,11 @@ function summarizeClientToolArgs(args: unknown): Record<string, unknown> {
     chartPlanId: typeof args.chart_plan_id === "string" ? args.chart_plan_id : undefined,
     includeSamples: typeof args.includeSamples === "boolean" ? args.includeSamples : undefined,
     filename: typeof args.filename === "string" ? args.filename : undefined,
+    outputName: typeof args.output_name === "string" ? args.output_name : undefined,
     maxPages: typeof args.max_pages === "number" ? args.max_pages : undefined,
     startPage: typeof args.start_page === "number" ? args.start_page : undefined,
     endPage: typeof args.end_page === "number" ? args.end_page : undefined,
+    sourcesCount: Array.isArray(args.sources) ? args.sources.length : undefined,
     queryPlan: summarizeQueryPlan(args.query_plan),
     chartPlan: summarizeChartPlan(args.chart_plan),
   });
@@ -131,6 +133,8 @@ function summarizeClientToolResult(result: unknown): Record<string, unknown> {
   const createdFile = result.created_file;
   const chart = result.chart;
   const fileInput = result.file_input;
+  const sourceFileIds = result.source_file_ids;
+  const sourceRanges = result.source_ranges;
   return compactRecord({
     resultKeys: summarizeKeys(result),
     rowCount:
@@ -148,6 +152,8 @@ function summarizeClientToolResult(result: unknown): Record<string, unknown> {
     createdFileKind: isRecord(createdFile) && typeof createdFile.kind === "string" ? createdFile.kind : undefined,
     chartType: isRecord(chart) && typeof chart.type === "string" ? chart.type : undefined,
     hasFileInput: isRecord(fileInput) ? true : undefined,
+    sourceFileCount: Array.isArray(sourceFileIds) ? sourceFileIds.length : undefined,
+    sourceRangeCount: Array.isArray(sourceRanges) ? sourceRanges.length : undefined,
   });
 }
 

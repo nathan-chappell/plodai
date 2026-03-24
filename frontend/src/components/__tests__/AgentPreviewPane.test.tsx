@@ -243,11 +243,10 @@ describe("AgentPreviewPane", () => {
     expect(container.textContent).not.toContain("report.append_slide");
   });
 
-  it("shows the agriculture-specific empty preview treatment when nothing is selected", async () => {
+  it("shows the generic empty preview treatment when nothing is selected", async () => {
     await act(async () => {
       root.render(
         <AgentPreviewPane
-          appId="agriculture"
           files={[]}
           artifacts={[]}
           resolveLocalFile={async () => null}
@@ -257,22 +256,15 @@ describe("AgentPreviewPane", () => {
       );
     });
 
-    expect(
-      container.querySelector("[data-testid='agriculture-preview-empty']"),
-    ).not.toBeNull();
-    expect(
-      container.querySelector("[data-testid='agriculture-preview-watermark']"),
-    ).not.toBeNull();
-    expect(container.textContent).toContain("Awaiting plant photos");
-    expect(container.textContent).toContain("Add plant photos in chat");
-    expect(container.textContent).toContain("saved farm records, reports, and other model-created artifacts");
+    expect(container.textContent).toContain(
+      "Select an upload or created item from the workspace to preview it here.",
+    );
   });
 
-  it("does not render the agriculture watermark for document previews", async () => {
+  it("shows the same generic empty state for document previews", async () => {
     await act(async () => {
       root.render(
         <AgentPreviewPane
-          appId="documents"
           files={[]}
           artifacts={[]}
           resolveLocalFile={async () => null}
@@ -282,19 +274,18 @@ describe("AgentPreviewPane", () => {
       );
     });
 
-    expect(
-      container.querySelector("[data-testid='agriculture-preview-watermark']"),
-    ).toBeNull();
+    expect(container.textContent).toContain(
+      "Select an upload or created item from the workspace to preview it here.",
+    );
   });
 
-  it("shows agriculture images as chat-linked references instead of inline previews", async () => {
+  it("shows image uploads with a direct preview", async () => {
     const imageSummary = buildImageSummary();
     const localImage = buildLocalImage();
 
     await act(async () => {
       root.render(
         <AgentPreviewPane
-          appId="agriculture"
           files={[imageSummary]}
           artifacts={[]}
           resolveLocalFile={async () => localImage}
@@ -305,15 +296,8 @@ describe("AgentPreviewPane", () => {
       await Promise.resolve();
     });
 
-    expect(
-      container.querySelector("[data-testid='agriculture-preview-watermark']"),
-    ).not.toBeNull();
-    expect(
-      container.querySelector("[data-testid='agriculture-image-reference']"),
-    ).not.toBeNull();
-    expect(container.textContent).toContain("Visible in chat");
+    expect(container.querySelector("img[alt='orchard.jpeg']")).not.toBeNull();
     expect(container.textContent).toContain("1536 x 2048");
-    expect(container.querySelector("img[alt='orchard.jpeg']")).toBeNull();
   });
 
   it("renders the farm artifact preview with tracked sections", async () => {
@@ -326,12 +310,11 @@ describe("AgentPreviewPane", () => {
       title: "North Orchard",
       current_revision: 3,
       created_by_user_id: "user_123",
-      created_by_agent_id: "agriculture-agent",
-      last_edited_by_agent_id: "agriculture-agent",
+      created_by_agent_id: "plodai-agent",
+      last_edited_by_agent_id: "plodai-agent",
       summary: {
         crop_count: 2,
-        issue_count: 1,
-        project_count: 1,
+        order_count: 0,
       },
       latest_op: "farm.set_state",
       created_at: "2026-03-23T09:00:00.000Z",
@@ -341,16 +324,15 @@ describe("AgentPreviewPane", () => {
         farm_name: "North Orchard",
         location: "Block A",
         crops: [
-          { id: "crop_1", name: "Honeycrisp apples", area: "12 acres", expected_yield: "480 bins" },
+          {
+            id: "crop_1",
+            name: "Honeycrisp apples",
+            area: "12 acres",
+            expected_yield: "480 bins",
+            notes: "Keep an eye on the **lower canopy**.\n\n- Monitor weekly",
+          },
           { id: "crop_2", name: "Cherries", area: "4 acres" },
         ],
-        issues: [
-          { id: "issue_1", title: "Leaf curl in row 3", status: "watching", notes: "Monitor after spray." },
-        ],
-        projects: [
-          { id: "project_1", title: "Irrigation refresh", status: "active" },
-        ],
-        current_work: ["Scout block A", "Confirm irrigation timing"],
         notes: "Keep an eye on the lower canopy.",
       },
     };
@@ -358,7 +340,6 @@ describe("AgentPreviewPane", () => {
     await act(async () => {
       root.render(
         <AgentPreviewPane
-          appId="agriculture"
           files={[]}
           artifacts={[farmArtifact as WorkspaceCreatedItemSummary]}
           resolveLocalFile={async () => null}
@@ -370,16 +351,29 @@ describe("AgentPreviewPane", () => {
     });
 
     expect(container.querySelector("[data-testid='farm-preview']")).not.toBeNull();
-    expect(
-      container.querySelector("[data-testid='agriculture-preview-watermark']"),
-    ).not.toBeNull();
     expect(container.textContent).toContain("North Orchard");
     expect(container.textContent).toContain("Honeycrisp apples");
-    expect(container.textContent).toContain("Leaf curl in row 3");
-    expect(container.textContent).toContain("Irrigation refresh");
+    expect(container.textContent).toContain("Keep an eye on the lower canopy.");
+
+    const openNotesButton = container.querySelector(
+      "[data-testid='farm-open-crop-notes-crop_1']",
+    ) as HTMLButtonElement | null;
+
+    expect(openNotesButton).not.toBeNull();
+
+    await act(async () => {
+      openNotesButton?.click();
+    });
+
+    expect(
+      container.querySelector("[data-testid='farm-crop-notes-modal']"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector("[data-testid='farm-crop-notes-markdown']")?.textContent,
+    ).toContain("Monitor weekly");
   });
 
-  it("resolves report image panels from supplemental agriculture files", async () => {
+  it("resolves report image panels from supplemental plodai files", async () => {
     const report = buildImagePanelReport();
     const artifact: WorkspaceCreatedItemDetail = {
       origin: "created",
@@ -390,8 +384,8 @@ describe("AgentPreviewPane", () => {
       title: report.title,
       current_revision: 1,
       created_by_user_id: "user_123",
-      created_by_agent_id: "agriculture-agent",
-      last_edited_by_agent_id: "agriculture-agent",
+      created_by_agent_id: "plodai-agent",
+      last_edited_by_agent_id: "plodai-agent",
       summary: {
         slide_count: report.slides.length,
       },
@@ -404,7 +398,7 @@ describe("AgentPreviewPane", () => {
     await act(async () => {
       root.render(
         <AgentPreviewPane
-          appId="agriculture"
+          appId="plodai"
           files={[]}
           artifacts={[artifact as WorkspaceCreatedItemSummary]}
           resolveLocalFile={async () => null}

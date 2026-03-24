@@ -74,17 +74,17 @@ from backend.app.chatkit.feedback_types import (
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
-    AgricultureThreadImageRef,
+    PlodaiThreadImageRef,
     AgentPlan,
     AgentPlanExecutionHint,
     PendingFeedbackSession,
     PlanExecution,
     ChatMetadataPatch,
     active_plan_execution,
-    build_agriculture_image_ref_patch,
+    build_plodai_image_ref_patch,
     merge_chat_metadata,
     parse_chat_metadata,
-    resolve_agriculture_thread_image_ref,
+    resolve_plodai_thread_image_ref,
 )
 from backend.app.chatkit.runtime_state import (
     resolve_thread_runtime_state,
@@ -114,10 +114,10 @@ from backend.app.services.credit_service import CreditService
 logger = get_logger("chatkit.server")
 
 MODEL_ALIASES = {
-    "default": "gpt-5.1",
-    "lightweight": "gpt-4.1-mini",
-    "balanced": "gpt-4.1",
-    "powerful": "gpt-5.1",
+    "default": "gpt-5.4-mini",
+    "lightweight": "gpt-4.1-nano",
+    "balanced": "gpt-5.4-mini",
+    "powerful": "gpt-5.4",
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
 MAX_AGENT_TURNS = 30
@@ -593,7 +593,7 @@ class ClientToolResultConverter(ThreadItemConverter):
         *,
         current_attachment_file_ids: set[str],
     ) -> list[ResponseInputContentParam]:
-        if not self._is_agriculture_thread():
+        if not self._is_plodai_thread():
             return [
                 {
                     "type": "input_text",
@@ -611,9 +611,6 @@ class ClientToolResultConverter(ThreadItemConverter):
             )
         if entity_type in {
             "farm_crop",
-            "farm_issue",
-            "farm_project",
-            "farm_current_work",
             "farm_order",
         }:
             return self._farm_tag_to_message_contents(
@@ -627,11 +624,11 @@ class ClientToolResultConverter(ThreadItemConverter):
             }
         ]
 
-    def _is_agriculture_thread(self) -> bool:
+    def _is_plodai_thread(self) -> bool:
         workspace_state = self.current_metadata.get("workspace_state")
         return (
             isinstance(workspace_state, dict)
-            and workspace_state.get("app_id") == "agriculture"
+            and workspace_state.get("app_id") == "plodai"
             and self.current_context is not None
             and self.current_thread is not None
         )
@@ -658,7 +655,7 @@ class ClientToolResultConverter(ThreadItemConverter):
                 }
             ]
 
-        ref = resolve_agriculture_thread_image_ref(
+        ref = resolve_plodai_thread_image_ref(
             self.current_metadata,
             stored_file_id=stored_file_id,
             attachment_id=attachment_id.strip()
@@ -697,7 +694,7 @@ class ClientToolResultConverter(ThreadItemConverter):
 
     async def _load_thread_image_record(
         self,
-        ref: AgricultureThreadImageRef,
+        ref: PlodaiThreadImageRef,
     ) -> StoredOpenAIFile | None:
         context = self.current_context
         thread = self.current_thread
@@ -769,17 +766,6 @@ class ClientToolResultConverter(ThreadItemConverter):
                 parts.append(f"Expected yield: {expected_yield.strip()}.")
             if isinstance(notes, str) and notes.strip():
                 parts.append(f"Notes: {notes.strip()}.")
-        elif entity_type in {"farm_issue", "farm_project"}:
-            status = tag_data.get("status")
-            notes = tag_data.get("notes")
-            if isinstance(status, str) and status.strip():
-                parts.append(f"Status: {status.strip()}.")
-            if isinstance(notes, str) and notes.strip():
-                parts.append(f"Notes: {notes.strip()}.")
-        elif entity_type == "farm_current_work":
-            notes = tag_data.get("notes")
-            if isinstance(notes, str) and notes.strip():
-                parts.append(f"Farm notes: {notes.strip()}.")
         elif entity_type == "farm_order":
             status = tag_data.get("status")
             price_label = tag_data.get("price_label")
@@ -1054,7 +1040,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
                 thread_id=thread.id,
             )
 
-        await self._sync_agriculture_thread_image_refs(
+        await self._sync_plodai_thread_image_refs(
             thread=thread,
             context=context,
             attachments=item.attachments,
@@ -1070,7 +1056,7 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         ):
             yield event
 
-    async def _sync_agriculture_thread_image_refs(
+    async def _sync_plodai_thread_image_refs(
         self,
         *,
         thread: ThreadMetadata,
@@ -1078,11 +1064,11 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         attachments: list[Attachment],
     ) -> None:
         workspace_state = parse_chat_metadata(thread.metadata).get("workspace_state")
-        if not isinstance(workspace_state, dict) or workspace_state.get("app_id") != "agriculture":
+        if not isinstance(workspace_state, dict) or workspace_state.get("app_id") != "plodai":
             return
 
-        refs = await self._build_agriculture_thread_image_refs_from_attachments(attachments)
-        patch = build_agriculture_image_ref_patch(
+        refs = await self._build_plodai_thread_image_refs_from_attachments(attachments)
+        patch = build_plodai_image_ref_patch(
             parse_chat_metadata(thread.metadata),
             refs,
         )
@@ -1092,11 +1078,11 @@ class ClientWorkspaceChatKitServer(ChatKitServer[ReportAgentContext]):
         self._apply_metadata_patch(thread, context, patch)
         await self.store.save_thread(thread, context=context)
 
-    async def _build_agriculture_thread_image_refs_from_attachments(
+    async def _build_plodai_thread_image_refs_from_attachments(
         self,
         attachments: list[Attachment],
-    ) -> list[AgricultureThreadImageRef]:
-        refs: list[AgricultureThreadImageRef] = []
+    ) -> list[PlodaiThreadImageRef]:
+        refs: list[PlodaiThreadImageRef] = []
         for attachment in attachments:
             metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
             stored_file_id = metadata.get("stored_file_id")

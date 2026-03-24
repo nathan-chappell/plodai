@@ -5,7 +5,7 @@ import type {
   AgentRuntimeModule,
   AgentRuntimeContext,
 } from "./types";
-import { agricultureAgentRuntimeModule } from "./agriculture-agent/runtime";
+import { plodaiAgentRuntimeModule } from "./plodai-agent/runtime";
 import { analysisAgentRuntimeModule } from "./analysis-agent/runtime";
 import { chartAgentRuntimeModule } from "./chart-agent/runtime";
 import { documentAgentRuntimeModule } from "./document-agent/runtime";
@@ -17,7 +17,7 @@ const runtimeAgentModules: AgentRuntimeModule[] = [
   analysisAgentRuntimeModule,
   chartAgentRuntimeModule,
   documentAgentRuntimeModule,
-  agricultureAgentRuntimeModule,
+  plodaiAgentRuntimeModule,
   feedbackAgentRuntimeModule,
 ];
 

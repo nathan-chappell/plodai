@@ -8,15 +8,15 @@ from fastapi import HTTPException, status
 from backend.app.models.chatkit import WorkspaceChat
 from backend.app.models.stored_file import StoredOpenAIFile
 from backend.app.models.workspace import Workspace, WorkspaceItem
-from backend.app.schemas.agriculture_entities import (
-    AgricultureComposerEntity,
-    AgricultureEntitySearchResponse,
+from backend.app.schemas.plodai_entities import (
+    PlodaiComposerEntity,
+    PlodaiEntitySearchResponse,
 )
 from backend.app.schemas.workspace import FarmItemPayload
 from backend.app.services.stored_file_service import StoredFileService
 
 
-class AgricultureEntityService:
+class PlodaiEntityService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.file_service = StoredFileService(db)
@@ -30,15 +30,15 @@ class AgricultureEntityService:
         thread_id: str,
         query: str,
         public_base_url: str | None = None,
-    ) -> AgricultureEntitySearchResponse:
-        if app_id != "agriculture":
+    ) -> PlodaiEntitySearchResponse:
+        if app_id != "plodai":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Agriculture entities are only available for the agriculture app.",
+                detail="PlodAI entities are only available for the PlodAI app.",
             )
 
         workspace = await self.db.get(Workspace, workspace_id)
-        if workspace is None or workspace.user_id != user_id or workspace.app_id != "agriculture":
+        if workspace is None or workspace.user_id != user_id or workspace.app_id != "plodai":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workspace not found.",
@@ -66,7 +66,7 @@ class AgricultureEntityService:
                 normalized_query=normalized_query,
             ),
         ]
-        return AgricultureEntitySearchResponse(entities=entities[:24])
+        return PlodaiEntitySearchResponse(entities=entities[:24])
 
     async def _search_thread_images(
         self,
@@ -76,7 +76,7 @@ class AgricultureEntityService:
         thread_id: str,
         normalized_query: str,
         public_base_url: str | None,
-    ) -> list[AgricultureComposerEntity]:
+    ) -> list[PlodaiComposerEntity]:
         result = await self.db.execute(
             select(StoredOpenAIFile)
             .where(
@@ -90,7 +90,7 @@ class AgricultureEntityService:
             .order_by(StoredOpenAIFile.created_at.desc())
         )
         records = list(result.scalars().all())
-        entities: list[AgricultureComposerEntity] = []
+        entities: list[PlodaiComposerEntity] = []
         for record in records:
             width = ""
             height = ""
@@ -103,7 +103,7 @@ class AgricultureEntityService:
             if normalized_query and normalized_query not in haystack:
                 continue
             entities.append(
-                AgricultureComposerEntity(
+                PlodaiComposerEntity(
                     id=f"thread-image:{record.id}",
                     title=record.name,
                     icon="images",
@@ -133,7 +133,7 @@ class AgricultureEntityService:
         user_id: str,
         workspace_id: str,
         normalized_query: str,
-    ) -> list[AgricultureComposerEntity]:
+    ) -> list[PlodaiComposerEntity]:
         result = await self.db.execute(
             select(WorkspaceItem)
             .options(selectinload(WorkspaceItem.revisions))
@@ -151,7 +151,7 @@ class AgricultureEntityService:
             return []
 
         farm_payload = FarmItemPayload.model_validate(farm_item.revisions[-1].payload_json)
-        entities: list[AgricultureComposerEntity] = []
+        entities: list[PlodaiComposerEntity] = []
 
         for crop in farm_payload.crops:
             if not _matches_query(
@@ -164,7 +164,7 @@ class AgricultureEntityService:
             ):
                 continue
             entities.append(
-                AgricultureComposerEntity(
+                PlodaiComposerEntity(
                     id=f"farm-crop:{farm_item.id}:{crop.id}",
                     title=crop.name,
                     icon="notebook",
@@ -178,60 +178,6 @@ class AgricultureEntityService:
                         "area": crop.area,
                         "expected_yield": crop.expected_yield or "",
                         "notes": crop.notes or "",
-                    },
-                )
-            )
-
-        for issue in farm_payload.issues:
-            if not _matches_query(
-                normalized_query,
-                issue.title,
-                issue.status,
-                issue.notes,
-                farm_payload.farm_name,
-            ):
-                continue
-            entities.append(
-                AgricultureComposerEntity(
-                    id=f"farm-issue:{farm_item.id}:{issue.id}",
-                    title=issue.title,
-                    icon="bug",
-                    interactive=True,
-                    group="Farm issues",
-                    data={
-                        "entity_type": "farm_issue",
-                        "artifact_id": farm_item.id,
-                        "farm_name": farm_payload.farm_name,
-                        "item_id": issue.id,
-                        "status": issue.status,
-                        "notes": issue.notes or "",
-                    },
-                )
-            )
-
-        for project in farm_payload.projects:
-            if not _matches_query(
-                normalized_query,
-                project.title,
-                project.status,
-                project.notes,
-                farm_payload.farm_name,
-            ):
-                continue
-            entities.append(
-                AgricultureComposerEntity(
-                    id=f"farm-project:{farm_item.id}:{project.id}",
-                    title=project.title,
-                    icon="bolt",
-                    interactive=True,
-                    group="Farm projects",
-                    data={
-                        "entity_type": "farm_project",
-                        "artifact_id": farm_item.id,
-                        "farm_name": farm_payload.farm_name,
-                        "item_id": project.id,
-                        "status": project.status,
-                        "notes": project.notes or "",
                     },
                 )
             )
@@ -259,7 +205,7 @@ class AgricultureEntityService:
             ):
                 continue
             entities.append(
-                AgricultureComposerEntity(
+                PlodaiComposerEntity(
                     id=f"farm-order:{farm_item.id}:{order.id}",
                     title=order.title,
                     icon="cart",
@@ -275,26 +221,6 @@ class AgricultureEntityService:
                         "summary": order.summary or "",
                         "notes": order.notes or "",
                         "order_url": order.order_url or "",
-                    },
-                )
-            )
-
-        for index, work_item in enumerate(farm_payload.current_work):
-            if not _matches_query(normalized_query, work_item, farm_payload.farm_name):
-                continue
-            entities.append(
-                AgricultureComposerEntity(
-                    id=f"farm-current-work:{farm_item.id}:{index}",
-                    title=work_item,
-                    icon="check-circle",
-                    interactive=True,
-                    group="Current work",
-                    data={
-                        "entity_type": "farm_current_work",
-                        "artifact_id": farm_item.id,
-                        "farm_name": farm_payload.farm_name,
-                        "item_id": str(index),
-                        "notes": farm_payload.notes or "",
                     },
                 )
             )

@@ -5,6 +5,7 @@ import type {
   DocumentFieldValue,
   DocumentLocator,
   DocumentLocatorBox,
+  DocumentMergeSourceRange,
   DocumentPageSummary,
 } from "../types/stored-file";
 
@@ -68,6 +69,19 @@ export type FillDocumentFormResult = {
 export type AppendDocumentAppendixResult = {
   pdfBytes: Uint8Array;
   warning?: string;
+};
+
+export type MergePdfSource = {
+  fileId: string;
+  pdfBytes: Uint8Array;
+  startPage?: number;
+  endPage?: number;
+};
+
+export type MergePdfBytesResult = {
+  pdfBytes: Uint8Array;
+  pageCount: number;
+  sourceRanges: DocumentMergeSourceRange[];
 };
 
 export type PdfPageRange = {
@@ -426,6 +440,59 @@ export async function appendDatasetAppendixToPdfBytes(
   return {
     pdfBytes: await source.save(),
     warning,
+  };
+}
+
+export async function mergePdfBytes(
+  sources: MergePdfSource[],
+): Promise<MergePdfBytesResult> {
+  if (sources.length < 2) {
+    throw new Error("Select at least two PDF sources to merge.");
+  }
+
+  const { PDFDocument } = await loadPdfLib();
+  const merged = await PDFDocument.create();
+  const sourceRanges: DocumentMergeSourceRange[] = [];
+
+  for (let index = 0; index < sources.length; index += 1) {
+    const source = sources[index];
+    const hasStart = source.startPage != null;
+    const hasEnd = source.endPage != null;
+    if (hasStart !== hasEnd) {
+      throw new Error(
+        `Source ${index + 1} (${source.fileId}) must include both startPage and endPage or neither.`,
+      );
+    }
+
+    const document = await PDFDocument.load(clonePdfBytes(source.pdfBytes));
+    const totalPages = document.getPageCount();
+    const normalizedRange =
+      hasStart && hasEnd
+        ? normalizePageRange(source.startPage ?? 1, source.endPage ?? 1, totalPages)
+        : {
+            startPage: 1,
+            endPage: totalPages,
+          };
+    const sourcePageIndexes = Array.from(
+      { length: normalizedRange.endPage - normalizedRange.startPage + 1 },
+      (_, pageIndex) => normalizedRange.startPage - 1 + pageIndex,
+    );
+    const copiedPages = await merged.copyPages(document, sourcePageIndexes);
+    for (const page of copiedPages) {
+      merged.addPage(page);
+    }
+    sourceRanges.push({
+      file_id: source.fileId,
+      start_page: normalizedRange.startPage,
+      end_page: normalizedRange.endPage,
+      page_count: copiedPages.length,
+    });
+  }
+
+  return {
+    pdfBytes: await merged.save(),
+    pageCount: merged.getPageCount(),
+    sourceRanges,
   };
 }
 

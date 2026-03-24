@@ -27,7 +27,7 @@ from backend.app.chatkit.attachment_payloads import (
 )
 from backend.app.chatkit.memory_store import DatabaseMemoryStore
 from backend.app.chatkit.metadata import (
-    build_remove_agriculture_image_ref_patch,
+    build_remove_plodai_image_ref_patch,
     merge_chat_metadata,
     parse_chat_metadata,
 )
@@ -229,7 +229,7 @@ class StoredFileService:
             chat = await self.db.get(WorkspaceChat, record.thread_id.strip())
             if chat is not None and chat.user_id == user_id and isinstance(chat.metadata_json, dict):
                 current_metadata = parse_chat_metadata(chat.metadata_json)
-                patch = build_remove_agriculture_image_ref_patch(
+                patch = build_remove_plodai_image_ref_patch(
                     current_metadata,
                     stored_file_id=record.id,
                     attachment_id=attachment_id,
@@ -622,19 +622,19 @@ class StoredFileService:
         file_bytes: bytes,
         scope: StoredFileScope,
     ) -> None:
-        if workspace.app_id != "agriculture" or scope != "chat_attachment":
+        if workspace.app_id != "plodai" or scope != "chat_attachment":
             return
 
         kind = _kind_for_file(file_name=file_name, mime_type=mime_type)
         if kind != "image":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Agriculture chat attachments must be image files.",
+                detail="PlodAI chat attachments must be image files.",
             )
-        if len(file_bytes) > self.settings.agriculture_chat_attachment_max_bytes:
+        if len(file_bytes) > self.settings.plodai_chat_attachment_max_bytes:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail="Agriculture chat attachments must be 10 MB or smaller.",
+                detail="PlodAI chat attachments must be 10 MB or smaller.",
             )
 
     async def build_attachment_display_payload(

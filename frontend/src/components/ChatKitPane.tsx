@@ -188,6 +188,7 @@ function toolIcon(tool: ClientToolName): "cube" | "analytics" | "chart" | "docum
     case "replace_document_text":
     case "fill_document_form":
     case "append_document_appendix_from_dataset":
+    case "merge_document_files":
     case "smart_split_document":
     case "delete_document_file":
       return "document";

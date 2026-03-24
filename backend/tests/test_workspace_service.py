@@ -25,7 +25,7 @@ def test_workspace_schemas_forbid_unknown_fields() -> None:
         WorkspaceCreateRequest.model_validate(
             {
                 "name": "Workspace",
-                "app_id": "agriculture",
+                "app_id": "plodai",
                 "active_agent_id": "analysis-agent",
             }
         )
@@ -124,7 +124,7 @@ async def test_workspace_service_tracks_farm_items(
         service = WorkspaceService(db)
         workspace = await service.create_workspace(
             user_id=user_id,
-            app_id="agriculture",
+            app_id="plodai",
             name="Farm workspace",
         )
         item_id = f"farm-overview-{uuid.uuid4().hex}"
@@ -135,7 +135,7 @@ async def test_workspace_service_tracks_farm_items(
             request=WorkspaceItemCreateRequest(
                 id=item_id,
                 kind="farm.v1",
-                created_by_agent_id="agriculture-agent",
+                created_by_agent_id="plodai-agent",
                 payload=FarmItemPayload(
                     version="v1",
                     farm_name="North Orchard",
@@ -148,10 +148,7 @@ async def test_workspace_service_tracks_farm_items(
                             "expected_yield": "480 bins",
                         }
                     ],
-                    issues=[],
-                    projects=[],
                     orders=[],
-                    current_work=["Scout lower rows"],
                     notes="Initial setup.",
                 ),
             ),
@@ -166,7 +163,7 @@ async def test_workspace_service_tracks_farm_items(
             item_id=detail.id,
             request=WorkspaceItemOperationRequest(
                 base_revision=1,
-                created_by_agent_id="agriculture-agent",
+                created_by_agent_id="plodai-agent",
                 operation=FarmSetStateOperation(
                     op="farm.set_state",
                     farm_name="North Orchard",
@@ -184,20 +181,6 @@ async def test_workspace_service_tracks_farm_items(
                             "area": "4 acres",
                         },
                     ],
-                    issues=[
-                        {
-                            "id": "issue_1",
-                            "title": "Leaf curl in row 3",
-                            "status": "watching",
-                        }
-                    ],
-                    projects=[
-                        {
-                            "id": "project_1",
-                            "title": "Irrigation refresh",
-                            "status": "active",
-                        }
-                    ],
                     orders=[
                         {
                             "id": "order_1",
@@ -214,7 +197,6 @@ async def test_workspace_service_tracks_farm_items(
                             ],
                         }
                     ],
-                    current_work=["Scout lower rows", "Check irrigation pressure"],
                     notes="Expanded farm record.",
                 ),
             ),
@@ -222,8 +204,6 @@ async def test_workspace_service_tracks_farm_items(
 
         assert updated.current_revision == 2
         assert updated.summary.crop_count == 2
-        assert updated.summary.issue_count == 1
-        assert updated.summary.project_count == 1
         assert updated.summary.order_count == 1
 
 
@@ -237,7 +217,7 @@ async def test_workspace_service_deletes_created_items(
         service = WorkspaceService(db)
         workspace = await service.create_workspace(
             user_id=user_id,
-            app_id="agriculture",
+            app_id="plodai",
             name="Farm workspace",
         )
         item_id = f"farm-overview-{uuid.uuid4().hex}"
@@ -248,16 +228,13 @@ async def test_workspace_service_deletes_created_items(
             request=WorkspaceItemCreateRequest(
                 id=item_id,
                 kind="farm.v1",
-                created_by_agent_id="agriculture-agent",
+                created_by_agent_id="plodai-agent",
                 payload=FarmItemPayload(
                     version="v1",
                     farm_name="North Orchard",
                     location="Block A",
                     crops=[],
-                    issues=[],
-                    projects=[],
                     orders=[],
-                    current_work=[],
                     notes=None,
                 ),
             ),
@@ -266,7 +243,7 @@ async def test_workspace_service_deletes_created_items(
         await service.update_workspace(
             user_id=user_id,
             workspace_id=workspace.workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             update=WorkspaceUpdateRequest(
                 selected_item_id=detail.id,
             ),
@@ -283,7 +260,7 @@ async def test_workspace_service_deletes_created_items(
         state = await service.get_workspace_state(
             user_id=user_id,
             workspace_id=workspace.workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
         )
 
         assert state.items == []

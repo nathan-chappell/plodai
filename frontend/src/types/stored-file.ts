@@ -157,6 +157,20 @@ export type DocumentEditResult = {
   unresolved_locator_ids: string[];
 };
 
+export type DocumentMergeSourceRange = {
+  file_id: string;
+  start_page: number;
+  end_page: number;
+  page_count: number;
+};
+
+export type DocumentMergeResult = {
+  file: DocumentFileSummary;
+  source_file_ids: string[];
+  source_ranges: DocumentMergeSourceRange[];
+  message: string;
+};
+
 export type DocumentSplitEntry = {
   file: DocumentFileSummary;
   title: string;

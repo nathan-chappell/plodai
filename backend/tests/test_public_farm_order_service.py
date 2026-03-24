@@ -19,7 +19,7 @@ async def test_public_farm_order_service_returns_live_order(
         workspace_service = WorkspaceService(db)
         workspace = await workspace_service.create_workspace(
             user_id=user_id,
-            app_id="agriculture",
+            app_id="plodai",
             name="North Orchard",
         )
 
@@ -29,14 +29,12 @@ async def test_public_farm_order_service_returns_live_order(
             request=WorkspaceItemCreateRequest(
                 id=f"farm-overview-{uuid.uuid4().hex}",
                 kind="farm.v1",
-                created_by_agent_id="agriculture-agent",
+                created_by_agent_id="plodai-agent",
                 payload=FarmItemPayload(
                     version="v1",
                     farm_name="North Orchard",
                     location="Block A",
                     crops=[],
-                    issues=[],
-                    projects=[],
                     orders=[
                         {
                             "id": "order_live",
@@ -58,7 +56,6 @@ async def test_public_farm_order_service_returns_live_order(
                             "items": [],
                         },
                     ],
-                    current_work=[],
                     notes=None,
                 ),
             ),

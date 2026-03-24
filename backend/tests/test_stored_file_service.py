@@ -105,8 +105,8 @@ async def _create_pending_attachment(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -145,8 +145,8 @@ async def test_memory_store_create_attachment_returns_two_phase_upload_descripto
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -191,7 +191,7 @@ async def test_chatkit_server_uses_database_memory_store_for_attachments(
 
 
 @pytest.mark.anyio
-async def test_agriculture_chat_attachment_accepts_images(
+async def test_plodai_chat_attachment_accepts_images(
     initialized_db: None,
 ) -> None:
     user_id = f"user_stored_file_{uuid4().hex}"
@@ -202,8 +202,8 @@ async def test_agriculture_chat_attachment_accepts_images(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -216,7 +216,7 @@ async def test_agriculture_chat_attachment_accepts_images(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="orchard.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -227,7 +227,7 @@ async def test_agriculture_chat_attachment_accepts_images(
         )
 
         assert response.stored_file.kind == "image"
-        assert response.stored_file.app_id == "agriculture"
+        assert response.stored_file.app_id == "plodai"
         assert response.stored_file.preview.kind == "image"
         assert response.stored_file.preview.width == 12
         assert response.stored_file.preview.height == 8
@@ -235,7 +235,7 @@ async def test_agriculture_chat_attachment_accepts_images(
 
 
 @pytest.mark.anyio
-async def test_agriculture_chat_attachment_rejects_non_images(
+async def test_plodai_chat_attachment_rejects_non_images(
     initialized_db: None,
 ) -> None:
     user_id = f"user_stored_file_{uuid4().hex}"
@@ -246,8 +246,8 @@ async def test_agriculture_chat_attachment_rejects_non_images(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -262,7 +262,7 @@ async def test_agriculture_chat_attachment_rejects_non_images(
             await service.create_chat_attachment_upload(
                 user_id=user_id,
                 workspace_id=workspace_id,
-                app_id="agriculture",
+                app_id="plodai",
                 file_name="notes.csv",
                 mime_type="text/csv",
                 file_bytes=b"region,revenue\nWest,10\n",
@@ -273,11 +273,11 @@ async def test_agriculture_chat_attachment_rejects_non_images(
             )
 
         assert exc_info.value.status_code == 400
-        assert exc_info.value.detail == "Agriculture chat attachments must be image files."
+        assert exc_info.value.detail == "PlodAI chat attachments must be image files."
 
 
 @pytest.mark.anyio
-async def test_agriculture_chat_attachment_rejects_oversized_images(
+async def test_plodai_chat_attachment_rejects_oversized_images(
     initialized_db: None,
 ) -> None:
     user_id = f"user_stored_file_{uuid4().hex}"
@@ -288,8 +288,8 @@ async def test_agriculture_chat_attachment_rejects_oversized_images(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -304,7 +304,7 @@ async def test_agriculture_chat_attachment_rejects_oversized_images(
             await service.create_chat_attachment_upload(
                 user_id=user_id,
                 workspace_id=workspace_id,
-                app_id="agriculture",
+                app_id="plodai",
                 file_name="large-orchard.jpeg",
                 mime_type="image/jpeg",
                 file_bytes=_build_test_image_bytes() + b"x" * ((10 * 1024 * 1024) + 1),
@@ -315,11 +315,11 @@ async def test_agriculture_chat_attachment_rejects_oversized_images(
             )
 
         assert exc_info.value.status_code == 413
-        assert exc_info.value.detail == "Agriculture chat attachments must be 10 MB or smaller."
+        assert exc_info.value.detail == "PlodAI chat attachments must be 10 MB or smaller."
 
 
 @pytest.mark.anyio
-async def test_agriculture_chat_attachment_returns_chatkit_image_shape(
+async def test_plodai_chat_attachment_returns_chatkit_image_shape(
     initialized_db: None,
 ) -> None:
     user_id = f"user_stored_file_{uuid4().hex}"
@@ -330,8 +330,8 @@ async def test_agriculture_chat_attachment_returns_chatkit_image_shape(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -344,7 +344,7 @@ async def test_agriculture_chat_attachment_returns_chatkit_image_shape(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="orchard.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -399,8 +399,8 @@ async def test_stored_file_upload_uses_24h_openai_expiry(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -413,7 +413,7 @@ async def test_stored_file_upload_uses_24h_openai_expiry(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="orchard.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -451,8 +451,8 @@ async def test_pending_attachment_links_to_thread_when_chatkit_saves_it(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
                 active_chat_id=thread_id,
             )
         )
@@ -461,7 +461,7 @@ async def test_pending_attachment_links_to_thread_when_chatkit_saves_it(
                 id=thread_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                title="Agriculture",
+                title="PlodAI",
                 metadata_json={},
                 status_json={"type": "active"},
                 allowed_image_domains_json=None,
@@ -478,7 +478,7 @@ async def test_pending_attachment_links_to_thread_when_chatkit_saves_it(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="orchard.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -515,10 +515,10 @@ async def test_pending_attachment_links_to_thread_when_chatkit_saves_it(
 
 
 @pytest.mark.anyio
-async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
+async def test_server_syncs_plodai_thread_image_refs_after_first_message(
     initialized_db: None,
 ) -> None:
-    user_id = f"user_agriculture_refs_{uuid4().hex}"
+    user_id = f"user_plodai_refs_{uuid4().hex}"
     workspace_id = f"workspace_{uuid4().hex}"
     thread_id = f"thread_{uuid4().hex}"
 
@@ -527,8 +527,8 @@ async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
                 active_chat_id=thread_id,
             )
         )
@@ -537,13 +537,13 @@ async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
                 id=thread_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                title="Agriculture",
+                title="PlodAI",
                 metadata_json={
                     "workspace_state": {
                         "version": "v4",
                         "workspace_id": workspace_id,
-                        "workspace_name": "Agriculture workspace",
-                        "app_id": "agriculture",
+                        "workspace_name": "PlodAI workspace",
+                        "app_id": "plodai",
                         "active_chat_id": thread_id,
                         "items": [],
                     }
@@ -563,7 +563,7 @@ async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="orchard.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -588,14 +588,14 @@ async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
         )
         thread = ThreadMetadata(
             id=thread_id,
-            title="Agriculture",
+            title="PlodAI",
             created_at=datetime.now(UTC),
             metadata={
                 "workspace_state": {
                     "version": "v4",
                     "workspace_id": workspace_id,
-                    "workspace_name": "Agriculture workspace",
-                    "app_id": "agriculture",
+                    "workspace_name": "PlodAI workspace",
+                    "app_id": "plodai",
                     "active_chat_id": thread_id,
                     "items": [],
                 }
@@ -607,10 +607,10 @@ async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
             user_email=None,
             db=db,
             workspace_id=workspace_id,
-            workspace_name="Agriculture workspace",
+            workspace_name="PlodAI workspace",
         )
 
-        await server._sync_agriculture_thread_image_refs(
+        await server._sync_plodai_thread_image_refs(
             thread=thread,
             context=context,
             attachments=[attachment_with_thread],
@@ -618,7 +618,7 @@ async def test_server_syncs_agriculture_thread_image_refs_after_first_message(
 
         refreshed_chat = await db.get(WorkspaceChat, thread_id)
         assert refreshed_chat is not None
-        assert refreshed_chat.metadata_json["agriculture_state"] == {
+        assert refreshed_chat.metadata_json["plodai_state"] == {
             "thread_image_refs": [
                 {
                     "stored_file_id": response.stored_file.id,
@@ -645,8 +645,8 @@ async def test_converter_rehydrates_only_tagged_thread_images_as_input_image(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
                 active_chat_id=thread_id,
             )
         )
@@ -655,7 +655,7 @@ async def test_converter_rehydrates_only_tagged_thread_images_as_input_image(
                 id=thread_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                title="Agriculture",
+                title="PlodAI",
                 metadata_json={},
                 status_json={"type": "active"},
                 allowed_image_domains_json=None,
@@ -672,7 +672,7 @@ async def test_converter_rehydrates_only_tagged_thread_images_as_input_image(
         tagged = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="tagged.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -684,7 +684,7 @@ async def test_converter_rehydrates_only_tagged_thread_images_as_input_image(
         untagged = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="untagged.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -705,18 +705,18 @@ async def test_converter_rehydrates_only_tagged_thread_images_as_input_image(
 
         thread = ThreadMetadata(
             id=thread_id,
-            title="Agriculture",
+            title="PlodAI",
             created_at=datetime.now(UTC),
             metadata={
                 "workspace_state": {
                     "version": "v4",
                     "workspace_id": workspace_id,
-                    "workspace_name": "Agriculture workspace",
-                    "app_id": "agriculture",
+                    "workspace_name": "PlodAI workspace",
+                    "app_id": "plodai",
                     "active_chat_id": thread_id,
                     "items": [],
                 },
-                "agriculture_state": {
+                "plodai_state": {
                     "thread_image_refs": [
                         {
                             "stored_file_id": tagged.stored_file.id,
@@ -744,7 +744,7 @@ async def test_converter_rehydrates_only_tagged_thread_images_as_input_image(
             user_email=None,
             db=db,
             workspace_id=workspace_id,
-            workspace_name="Agriculture workspace",
+            workspace_name="PlodAI workspace",
         )
 
         server = ClientWorkspaceChatKitServer(
@@ -810,8 +810,8 @@ async def test_converter_reports_unavailable_text_for_expired_tagged_thread_imag
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
                 active_chat_id=thread_id,
             )
         )
@@ -820,7 +820,7 @@ async def test_converter_reports_unavailable_text_for_expired_tagged_thread_imag
                 id=thread_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                title="Agriculture",
+                title="PlodAI",
                 metadata_json={},
                 status_json={"type": "active"},
                 allowed_image_domains_json=None,
@@ -837,7 +837,7 @@ async def test_converter_reports_unavailable_text_for_expired_tagged_thread_imag
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="expired.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -859,18 +859,18 @@ async def test_converter_reports_unavailable_text_for_expired_tagged_thread_imag
 
         thread = ThreadMetadata(
             id=thread_id,
-            title="Agriculture",
+            title="PlodAI",
             created_at=datetime.now(UTC),
             metadata={
                 "workspace_state": {
                     "version": "v4",
                     "workspace_id": workspace_id,
-                    "workspace_name": "Agriculture workspace",
-                    "app_id": "agriculture",
+                    "workspace_name": "PlodAI workspace",
+                    "app_id": "plodai",
                     "active_chat_id": thread_id,
                     "items": [],
                 },
-                "agriculture_state": {
+                "plodai_state": {
                     "thread_image_refs": [
                         {
                             "stored_file_id": response.stored_file.id,
@@ -890,7 +890,7 @@ async def test_converter_reports_unavailable_text_for_expired_tagged_thread_imag
             user_email=None,
             db=db,
             workspace_id=workspace_id,
-            workspace_name="Agriculture workspace",
+            workspace_name="PlodAI workspace",
         )
 
         server = ClientWorkspaceChatKitServer(
@@ -945,8 +945,8 @@ async def test_memory_store_delete_attachment_removes_thread_image_ref(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
                 active_chat_id=thread_id,
             )
         )
@@ -955,7 +955,7 @@ async def test_memory_store_delete_attachment_removes_thread_image_ref(
                 id=thread_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                title="Agriculture",
+                title="PlodAI",
                 metadata_json={},
                 status_json={"type": "active"},
                 allowed_image_domains_json=None,
@@ -972,7 +972,7 @@ async def test_memory_store_delete_attachment_removes_thread_image_ref(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="delete-me.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -992,12 +992,12 @@ async def test_memory_store_delete_attachment_removes_thread_image_ref(
             "workspace_state": {
                 "version": "v4",
                 "workspace_id": workspace_id,
-                "workspace_name": "Agriculture workspace",
-                "app_id": "agriculture",
+                "workspace_name": "PlodAI workspace",
+                "app_id": "plodai",
                 "active_chat_id": thread_id,
                 "items": [],
             },
-            "agriculture_state": {
+            "plodai_state": {
                 "thread_image_refs": [
                     {
                         "stored_file_id": response.stored_file.id,
@@ -1021,7 +1021,7 @@ async def test_memory_store_delete_attachment_removes_thread_image_ref(
         refreshed_chat = await db.get(WorkspaceChat, thread_id)
         refreshed_record = await db.get(StoredOpenAIFile, response.stored_file.id)
         assert refreshed_chat is not None
-        assert "agriculture_state" not in refreshed_chat.metadata_json
+        assert "plodai_state" not in refreshed_chat.metadata_json
         assert refreshed_record is not None
         assert refreshed_record.status == "deleted"
 
@@ -1039,8 +1039,8 @@ async def test_thread_item_storage_keeps_canonical_attachment_and_load_hydrates_
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
                 active_chat_id=thread_id,
             )
         )
@@ -1049,7 +1049,7 @@ async def test_thread_item_storage_keeps_canonical_attachment_and_load_hydrates_
                 id=thread_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                title="Agriculture",
+                title="PlodAI",
                 metadata_json={},
                 status_json={"type": "active"},
                 allowed_image_domains_json=None,
@@ -1066,7 +1066,7 @@ async def test_thread_item_storage_keeps_canonical_attachment_and_load_hydrates_
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="thread-item.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),
@@ -1106,7 +1106,7 @@ async def test_thread_item_storage_keeps_canonical_attachment_and_load_hydrates_
             user_email=None,
             db=db,
             workspace_id=workspace_id,
-            workspace_name="Agriculture workspace",
+            workspace_name="PlodAI workspace",
         )
 
         await store.add_thread_item(thread_id, message, context)
@@ -1136,8 +1136,8 @@ async def test_public_preview_token_resolves_image_without_user_auth(
             Workspace(
                 id=workspace_id,
                 user_id=user_id,
-                app_id="agriculture",
-                name="Agriculture workspace",
+                app_id="plodai",
+                name="PlodAI workspace",
             )
         )
         await db.commit()
@@ -1150,7 +1150,7 @@ async def test_public_preview_token_resolves_image_without_user_auth(
         response = await service.create_chat_attachment_upload(
             user_id=user_id,
             workspace_id=workspace_id,
-            app_id="agriculture",
+            app_id="plodai",
             file_name="orchard.png",
             mime_type="image/png",
             file_bytes=_build_test_image_bytes(),

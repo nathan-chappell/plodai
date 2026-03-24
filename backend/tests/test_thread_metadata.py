@@ -17,12 +17,12 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
                 "follow_on_tool_hints": ["run_aggregate_query"],
             },
             "chart_cache": {"chart-1": "data:image/png;base64,abc", 2: "bad"},
-            "surface_key": "/agriculture",
+            "surface_key": "/plodai",
             "workspace_state": {
                 "version": "v4",
                 "workspace_id": "workspace-default",
                 "workspace_name": "Workspace",
-                "app_id": "agriculture",
+                "app_id": "plodai",
                 "selected_item_id": "file-1",
                 "current_report_item_id": "report-1",
                 "items": [
@@ -65,7 +65,7 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
                 ],
                 "ignored": True,
             },
-            "agriculture_state": {
+            "plodai_state": {
                 "thread_image_refs": [
                     {
                         "stored_file_id": "file_image_1",
@@ -118,8 +118,8 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
         "follow_on_tool_hints": ["run_aggregate_query"],
     }
     assert metadata["chart_cache"] == {"chart-1": "data:image/png;base64,abc"}
-    assert metadata["surface_key"] == "/agriculture"
-    assert metadata["agriculture_state"] == {
+    assert metadata["surface_key"] == "/plodai"
+    assert metadata["plodai_state"] == {
         "thread_image_refs": [
             {
                 "stored_file_id": "file_image_1",
@@ -156,7 +156,7 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
     assert workspace_state["version"] == "v4"
     assert workspace_state["workspace_id"] == "workspace-default"
     assert workspace_state["workspace_name"] == "Workspace"
-    assert workspace_state["app_id"] == "agriculture"
+    assert workspace_state["app_id"] == "plodai"
     assert workspace_state["selected_item_id"] == "file-1"
     assert workspace_state["current_report_item_id"] == "report-1"
 
@@ -188,14 +188,14 @@ def test_merge_chat_metadata_allows_patch_and_removal() -> None:
         {
             "title": "Initial",
             "investigation_brief": "Look for margin pressure.",
-            "surface_key": "/agriculture",
+            "surface_key": "/plodai",
             "openai_conversation_id": "conv_123",
             "origin": "interactive",
         },
         {
             "title": "Updated",
             "investigation_brief": "Compare east and west performance.",
-            "surface_key": "/agriculture",
+            "surface_key": "/plodai",
             "workspace_state": {
                 "version": "v4",
                 "workspace_id": "workspace-default",
@@ -223,7 +223,7 @@ def test_merge_chat_metadata_allows_patch_and_removal() -> None:
                     }
                 ],
             },
-            "agriculture_state": {
+            "plodai_state": {
                 "thread_image_refs": [
                     {
                         "stored_file_id": "file_image_2",
@@ -254,10 +254,10 @@ def test_merge_chat_metadata_allows_patch_and_removal() -> None:
 
     assert merged["title"] == "Updated"
     assert merged["investigation_brief"] == "Compare east and west performance."
-    assert merged["surface_key"] == "/agriculture"
+    assert merged["surface_key"] == "/plodai"
     assert merged["openai_conversation_id"] == "conv_123"
     assert merged["openai_previous_response_id"] == "resp_789"
-    assert merged["agriculture_state"] == {
+    assert merged["plodai_state"] == {
         "thread_image_refs": [
             {
                 "stored_file_id": "file_image_2",
@@ -315,11 +315,11 @@ def test_parse_chat_metadata_keeps_generic_tool_display_metadata() -> None:
     metadata = parse_chat_metadata(
         {
             "agent_bundle": {
-                "root_agent_id": "agriculture-agent",
+                "root_agent_id": "plodai-agent",
                 "agents": [
                     {
-                        "agent_id": "agriculture-agent",
-                        "agent_name": "Agriculture",
+                        "agent_id": "plodai-agent",
+                        "agent_name": "PlodAI",
                         "instructions": "Assess crop photos and maintain farm context.",
                         "client_tools": [
                             {

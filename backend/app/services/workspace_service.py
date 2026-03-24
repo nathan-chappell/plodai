@@ -663,8 +663,6 @@ class WorkspaceService:
                 payload=farm_payload,
                 summary=FarmItemSummaryData(
                     crop_count=len(farm_payload.crops),
-                    issue_count=len(farm_payload.issues),
-                    project_count=len(farm_payload.projects),
                     order_count=len(farm_payload.orders),
                 ),
             )
@@ -820,14 +818,11 @@ class WorkspaceService:
                     "farm_name": operation.farm_name,
                     "location": operation.location,
                     "crops": operation.crops,
-                    "issues": operation.issues,
-                    "projects": operation.projects,
                     "orders": (
                         operation.orders
                         if operation.orders is not None
                         else farm_payload.orders
                     ),
-                    "current_work": operation.current_work,
                     "notes": operation.notes,
                 }
             )

@@ -694,7 +694,7 @@ def _build_hosted_tools(
 ) -> list[Tool]:
     tools: list[Tool] = []
 
-    if agent_id == "agriculture-agent":
+    if agent_id == "plodai-agent":
         tools.append(
             WebSearchTool(
                 search_context_size="medium",

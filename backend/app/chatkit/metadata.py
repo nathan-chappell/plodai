@@ -21,7 +21,7 @@ ALLOWED_AGENT_IDS = frozenset(
         "analysis-agent",
         "chart-agent",
         "document-agent",
-        "agriculture-agent",
+        "plodai-agent",
         "feedback-agent",
     }
 )
@@ -124,8 +124,6 @@ class WorkspaceCreatedItemSummaryData(TypedDict, total=False):
     archive_file_id: str
     index_file_id: str
     crop_count: int
-    issue_count: int
-    project_count: int
     order_count: int
 
 
@@ -168,14 +166,14 @@ class WorkspaceState(TypedDict):
     version: Literal["v4"]
     workspace_id: str
     workspace_name: str
-    app_id: Literal["agriculture", "documents"]
+    app_id: Literal["plodai", "documents"]
     active_chat_id: NotRequired[str | None]
     selected_item_id: NotRequired[str | None]
     current_report_item_id: NotRequired[str | None]
     items: list[WorkspaceItemSummary]
 
 
-class AgricultureThreadImageRef(TypedDict):
+class PlodaiThreadImageRef(TypedDict):
     stored_file_id: str
     attachment_id: str
     name: str
@@ -184,8 +182,8 @@ class AgricultureThreadImageRef(TypedDict):
     height: int | None
 
 
-class AgricultureState(TypedDict):
-    thread_image_refs: list[AgricultureThreadImageRef]
+class PlodaiState(TypedDict):
+    thread_image_refs: list[PlodaiThreadImageRef]
 
 
 class PendingFeedbackSession(TypedDict):
@@ -210,7 +208,7 @@ class ChatMetadataPatch(TypedDict, total=False):
     usage: ThreadUsageTotals
     agent_bundle: AgentBundle
     workspace_state: WorkspaceState
-    agriculture_state: AgricultureState
+    plodai_state: PlodaiState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
@@ -228,7 +226,7 @@ class AppChatMetadata(TypedDict, total=False):
     usage: ThreadUsageTotals
     agent_bundle: AgentBundle
     workspace_state: WorkspaceState
-    agriculture_state: AgricultureState
+    plodai_state: PlodaiState
     origin: FeedbackOrigin
     feedback_session: PendingFeedbackSession
 
@@ -751,8 +749,6 @@ class WorkspaceCreatedItemSummaryDataModel(_MetadataModel):
     archive_file_id: str | None = None
     index_file_id: str | None = None
     crop_count: int | None = None
-    issue_count: int | None = None
-    project_count: int | None = None
     order_count: int | None = None
 
     @field_validator(
@@ -771,8 +767,6 @@ class WorkspaceCreatedItemSummaryDataModel(_MetadataModel):
         "slide_count",
         "entry_count",
         "crop_count",
-        "issue_count",
-        "project_count",
         "order_count",
         mode="before",
     )
@@ -899,7 +893,7 @@ class WorkspaceStateModel(_MetadataModel):
     version: Literal["v4"]
     workspace_id: str
     workspace_name: str
-    app_id: Literal["agriculture", "documents"]
+    app_id: Literal["plodai", "documents"]
     active_chat_id: str | None = None
     selected_item_id: str | None = None
     current_report_item_id: str | None = None
@@ -907,11 +901,11 @@ class WorkspaceStateModel(_MetadataModel):
 
     @field_validator("app_id", mode="before")
     @classmethod
-    def _app_id(cls, value: object) -> Literal["agriculture", "documents"]:
+    def _app_id(cls, value: object) -> Literal["plodai", "documents"]:
         text = _strip_string(value)
-        if text not in {"agriculture", "documents"}:
-            raise ValueError("expected app_id to be 'agriculture' or 'documents'")
-        return cast(Literal["agriculture", "documents"], text)
+        if text not in {"plodai", "documents"}:
+            raise ValueError("expected app_id to be 'plodai' or 'documents'")
+        return cast(Literal["plodai", "documents"], text)
 
     @field_validator(
         "workspace_id",
@@ -946,7 +940,7 @@ class WorkspaceStateModel(_MetadataModel):
         )
 
 
-class AgricultureThreadImageRefModel(_MetadataModel):
+class PlodaiThreadImageRefModel(_MetadataModel):
     stored_file_id: str
     attachment_id: str
     name: str
@@ -980,22 +974,22 @@ class AgricultureThreadImageRefModel(_MetadataModel):
         return value
 
 
-class AgricultureStateModel(_MetadataModel):
-    thread_image_refs: list[AgricultureThreadImageRefModel] = Field(default_factory=list)
+class PlodaiStateModel(_MetadataModel):
+    thread_image_refs: list[PlodaiThreadImageRefModel] = Field(default_factory=list)
 
     @field_validator("thread_image_refs", mode="before")
     @classmethod
     def _thread_image_refs(
         cls,
         value: object,
-    ) -> list[AgricultureThreadImageRefModel]:
+    ) -> list[PlodaiThreadImageRefModel]:
         if value is None:
             return []
         if not isinstance(value, list):
             raise ValueError("expected a list")
-        validated: list[AgricultureThreadImageRefModel] = []
+        validated: list[PlodaiThreadImageRefModel] = []
         for raw_item in value:
-            validated.append(AgricultureThreadImageRefModel.model_validate(raw_item))
+            validated.append(PlodaiThreadImageRefModel.model_validate(raw_item))
         return validated
 
 
@@ -1063,7 +1057,7 @@ class AppChatMetadataModel(_MetadataModel):
     usage: ThreadUsageTotalsModel | None = None
     agent_bundle: AgentBundleModel | None = None
     workspace_state: WorkspaceStateModel | None = None
-    agriculture_state: AgricultureStateModel | None = None
+    plodai_state: PlodaiStateModel | None = None
     origin: FeedbackOrigin | None = None
     feedback_session: PendingFeedbackSessionModel | None = None
 
@@ -1125,11 +1119,11 @@ class AppChatMetadataModel(_MetadataModel):
         validated = _validated_model_or_none(WorkspaceStateModel, value)
         return cast(WorkspaceStateModel | None, validated)
 
-    @field_validator("agriculture_state", mode="before")
+    @field_validator("plodai_state", mode="before")
     @classmethod
-    def _agriculture_state(cls, value: object) -> AgricultureStateModel | None:
-        validated = _validated_model_or_none(AgricultureStateModel, value)
-        return cast(AgricultureStateModel | None, validated)
+    def _plodai_state(cls, value: object) -> PlodaiStateModel | None:
+        validated = _validated_model_or_none(PlodaiStateModel, value)
+        return cast(PlodaiStateModel | None, validated)
 
     @field_validator("feedback_session", mode="before")
     @classmethod
@@ -1165,23 +1159,23 @@ def merge_chat_metadata(
     return merged
 
 
-def list_agriculture_thread_image_refs(
+def list_plodai_thread_image_refs(
     metadata: object | None,
-) -> list[AgricultureThreadImageRef]:
+) -> list[PlodaiThreadImageRef]:
     parsed = parse_chat_metadata(metadata)
-    agriculture_state = parsed.get("agriculture_state")
-    if agriculture_state is None:
+    plodai_state = parsed.get("plodai_state")
+    if plodai_state is None:
         return []
-    return list(agriculture_state.get("thread_image_refs", []))
+    return list(plodai_state.get("thread_image_refs", []))
 
 
-def resolve_agriculture_thread_image_ref(
+def resolve_plodai_thread_image_ref(
     metadata: object | None,
     *,
     stored_file_id: str | None = None,
     attachment_id: str | None = None,
-) -> AgricultureThreadImageRef | None:
-    for ref in list_agriculture_thread_image_refs(metadata):
+) -> PlodaiThreadImageRef | None:
+    for ref in list_plodai_thread_image_refs(metadata):
         if stored_file_id and ref.get("stored_file_id") == stored_file_id:
             return ref
         if attachment_id and ref.get("attachment_id") == attachment_id:
@@ -1189,16 +1183,16 @@ def resolve_agriculture_thread_image_ref(
     return None
 
 
-def build_agriculture_image_ref_patch(
+def build_plodai_image_ref_patch(
     current_metadata: AppChatMetadata,
-    refs: list[AgricultureThreadImageRef],
+    refs: list[PlodaiThreadImageRef],
 ) -> ChatMetadataPatch | None:
     if not refs:
         return None
 
-    merged_by_file_id: dict[str, AgricultureThreadImageRef] = {
+    merged_by_file_id: dict[str, PlodaiThreadImageRef] = {
         ref["stored_file_id"]: ref
-        for ref in list_agriculture_thread_image_refs(current_metadata)
+        for ref in list_plodai_thread_image_refs(current_metadata)
     }
     changed = False
     for ref in refs:
@@ -1210,13 +1204,13 @@ def build_agriculture_image_ref_patch(
     if not changed:
         return None
     return {
-        "agriculture_state": {
+        "plodai_state": {
             "thread_image_refs": list(merged_by_file_id.values()),
         }
     }
 
 
-def build_remove_agriculture_image_ref_patch(
+def build_remove_plodai_image_ref_patch(
     current_metadata: AppChatMetadata,
     *,
     stored_file_id: str | None = None,
@@ -1225,7 +1219,7 @@ def build_remove_agriculture_image_ref_patch(
     if stored_file_id is None and attachment_id is None:
         return None
 
-    existing_refs = list_agriculture_thread_image_refs(current_metadata)
+    existing_refs = list_plodai_thread_image_refs(current_metadata)
     remaining_refs = [
         ref
         for ref in existing_refs
@@ -1237,9 +1231,9 @@ def build_remove_agriculture_image_ref_patch(
     if len(remaining_refs) == len(existing_refs):
         return None
     if not remaining_refs:
-        return {"agriculture_state": None}
+        return {"plodai_state": None}
     return {
-        "agriculture_state": {
+        "plodai_state": {
             "thread_image_refs": remaining_refs,
         }
     }

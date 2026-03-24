@@ -17,14 +17,14 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 const agents: AgentDefinition[] = [
   {
-    id: "agriculture-agent",
-    path: "/agriculture",
-    navLabel: "Agriculture",
-    title: "Agriculture",
+    id: "plodai-agent",
+    path: "/plodai",
+    navLabel: "PlodAI",
+    title: "PlodAI",
     eyebrow: "App",
     description: "Assess crop photos, estimate visible extent, and suggest season-aware next steps.",
     chatkitLead: "Inspect crop photos, estimate what is visible, and flag likely issues.",
-    chatkitPlaceholder: "Ask the agriculture app to identify the crop and explain seasonal needs",
+    chatkitPlaceholder: "Ask PlodAI to identify the crop and explain seasonal needs",
     tabs: [],
     attachmentConfig: {
       enabled: true,
@@ -70,7 +70,7 @@ describe("PlatformShell", () => {
       root.render(
         <PlatformShell
           agents={agents}
-          activeAgentId="agriculture-agent"
+          activeAgentId="plodai-agent"
           themeAgentId="document-agent"
           onSelectAgent={() => {}}
         >
@@ -79,7 +79,7 @@ describe("PlatformShell", () => {
       );
     });
 
-    expect(container.textContent).toContain("Agriculture");
+    expect(container.textContent).toContain("PlodAI");
     expect(container.textContent).not.toContain("AI Portfolio");
     expect(container.textContent).not.toContain("Workspace");
     expect(container.querySelector("[data-testid='shell-logo']")).not.toBeNull();

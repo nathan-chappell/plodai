@@ -13,7 +13,7 @@ import { publishToast } from "../app/toasts";
 import { MetaText } from "../app/styles";
 import { useAppState } from "../app/context";
 import { useAgentShell } from "../app/workspace";
-import { AgricultureFarmPane } from "../components/AgricultureFarmPane";
+import { PlodaiFarmPane } from "../components/PlodaiFarmPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { AgentPreviewPane, type PreviewSelection } from "../components/AgentPreviewPane";
 import { AuthPanel } from "../components/AuthPanel";
@@ -22,10 +22,10 @@ import {
   deleteDocumentFile,
   fetchStoredFileBlob,
   listDocumentFiles,
-  searchAgricultureEntities,
+  searchPlodaiEntities,
   uploadStoredFile,
 } from "../lib/api";
-import { buildAgricultureEntityPreview } from "../lib/agriculture-entities";
+import { buildPlodaiEntityPreview } from "../lib/plodai-entities";
 import {
   buildStoredFilePreviewFromFile,
   buildWorkspaceFile,
@@ -35,7 +35,7 @@ import {
   buildAgentBundleForRoot,
 } from "./runtime-registry";
 import {
-  agricultureAgentDefinition,
+  plodaiAgentDefinition,
   documentAgentDefinition,
 } from "./definitions";
 import { AgentPage } from "./styles";
@@ -70,7 +70,7 @@ const DOCUMENT_STARTER_PROMPTS = [
   },
 ] as const;
 
-const AGRICULTURE_STARTER_PROMPTS = [
+const PLODAI_STARTER_PROMPTS = [
   {
     label: "Identify crop",
     prompt: "Inspect the current crop photos, identify what crop is shown as specifically as the images support, and summarize the strongest visible evidence.",
@@ -95,7 +95,7 @@ const DOCUMENT_WORKSPACE_PANES = [
   { id: "account", label: "Account" },
 ] as const;
 
-const AGRICULTURE_WORKSPACE_PANES = [
+const PLODAI_WORKSPACE_PANES = [
   { id: "farm", label: "Farm" },
   { id: "orders", label: "Orders" },
   { id: "chat", label: "Chat" },
@@ -106,7 +106,7 @@ const MOBILE_LAYOUT_BREAKPOINT = 980;
 
 type WorkspacePaneId =
   | (typeof DOCUMENT_WORKSPACE_PANES)[number]["id"]
-  | (typeof AGRICULTURE_WORKSPACE_PANES)[number]["id"];
+  | (typeof PLODAI_WORKSPACE_PANES)[number]["id"];
 
 function isWorkspacePaneId(value: string | null | undefined): value is WorkspacePaneId {
   return value === "browser" ||
@@ -118,13 +118,13 @@ function isWorkspacePaneId(value: string | null | undefined): value is Workspace
 }
 
 function workspacePanesForApp(appId: WorkspaceAppId): readonly { id: WorkspacePaneId; label: string }[] {
-  return appId === "agriculture"
-    ? AGRICULTURE_WORKSPACE_PANES
+  return appId === "plodai"
+    ? PLODAI_WORKSPACE_PANES
     : DOCUMENT_WORKSPACE_PANES;
 }
 
 function defaultPaneIdForApp(appId: WorkspaceAppId): WorkspacePaneId {
-  return appId === "agriculture" ? "chat" : "browser";
+  return appId === "plodai" ? "chat" : "browser";
 }
 
 function normalizeWorkspacePaneId(
@@ -132,7 +132,7 @@ function normalizeWorkspacePaneId(
   appId: WorkspaceAppId,
 ): WorkspacePaneId {
   if (value === "overview") {
-    return appId === "agriculture" ? "farm" : "browser";
+    return appId === "plodai" ? "farm" : "browser";
   }
   const validPaneIds = new Set(workspacePanesForApp(appId).map((pane) => pane.id));
   return isWorkspacePaneId(value) && validPaneIds.has(value)
@@ -220,7 +220,7 @@ function summarizeBrowserArtifact(artifact: WorkspaceCreatedItemSummary): string
     return `${artifact.summary.entry_count} entries`;
   }
   if (artifact.kind === "farm.v1" && "crop_count" in artifact.summary) {
-    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues · ${artifact.summary.order_count ?? 0} orders`;
+    return `${artifact.summary.crop_count} crops · ${artifact.summary.order_count ?? 0} orders`;
   }
   return artifact.kind;
 }
@@ -229,21 +229,12 @@ function sortArtifactsByUpdatedAt<T extends { updated_at: string }>(artifacts: T
   return [...artifacts].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
 }
 
-function buildAgricultureFocusTarget(
+function buildPlodaiFocusTarget(
   entityType: string | undefined,
   itemId: string | undefined,
 ): FarmRecordFocusTarget {
   if (entityType === "farm_crop" && itemId) {
     return { kind: "crop", itemId };
-  }
-  if (entityType === "farm_issue" && itemId) {
-    return { kind: "issue", itemId };
-  }
-  if (entityType === "farm_project" && itemId) {
-    return { kind: "project", itemId };
-  }
-  if (entityType === "farm_current_work" && itemId) {
-    return { kind: "current_work", itemId };
   }
   if (entityType === "farm_order" && itemId) {
     return { kind: "order", itemId };
@@ -254,7 +245,7 @@ function buildAgricultureFocusTarget(
 function getStarterPromptsForApp(appId: WorkspaceAppId) {
   return appId === "documents"
     ? DOCUMENT_STARTER_PROMPTS
-    : AGRICULTURE_STARTER_PROMPTS;
+    : PLODAI_STARTER_PROMPTS;
 }
 
 function normalizeDocumentImportHeaders(
@@ -756,7 +747,7 @@ type ComposerDraft = NonNullable<ComponentProps<typeof ChatKitPane>["composerDra
 type WorkspaceAppPageProps = {
   appId: WorkspaceAppId;
   agentDefinition: AgentDefinition;
-  rootAgentId: "agriculture-agent" | "document-agent";
+  rootAgentId: "plodai-agent" | "document-agent";
 };
 
 export function WorkspaceAppPage({
@@ -793,9 +784,9 @@ export function WorkspaceAppPage({
     consumePendingComposerLaunch,
   } = useAgentShell();
   const [selectedPreviewItem, setSelectedPreviewItem] = useState<PreviewSelection>(null);
-  const [agricultureFocusTarget, setAgricultureFocusTarget] =
+  const [plodaiFocusTarget, setPlodaiFocusTarget] =
     useState<FarmRecordFocusTarget | null>(null);
-  const [activeAgricultureDesktopSectionId, setActiveAgricultureDesktopSectionId] = useState<
+  const [activePlodaiDesktopSectionId, setActivePlodaiDesktopSectionId] = useState<
     "farm" | "orders"
   >("farm");
   const [composerDraft, setComposerDraft] = useState<ComposerDraft | null>(null);
@@ -962,8 +953,8 @@ export function WorkspaceAppPage({
   ]);
 
   useEffect(() => {
-    if (appId === "agriculture") {
-      setAgricultureFocusTarget(null);
+    if (appId === "plodai") {
+      setPlodaiFocusTarget(null);
     }
   }, [activeWorkspaceId, appId]);
 
@@ -978,13 +969,13 @@ export function WorkspaceAppPage({
     handlePaneChange("chat");
   }, [handlePaneChange]);
 
-  const setActiveAgricultureSection = useCallback(
+  const setActivePlodaiSection = useCallback(
     (sectionId: "farm" | "orders") => {
       if (isMobileLayout) {
         handlePaneChange(sectionId);
         return;
       }
-      setActiveAgricultureDesktopSectionId(sectionId);
+      setActivePlodaiDesktopSectionId(sectionId);
     },
     [handlePaneChange, isMobileLayout],
   );
@@ -1028,8 +1019,8 @@ export function WorkspaceAppPage({
     [currentReportArtifactId, handlePaneChange, updateWorkspace, workspaceArtifacts],
   );
 
-  const agricultureEntitiesConfig = useMemo(() => {
-    if (appId !== "agriculture") {
+  const plodaiEntitiesConfig = useMemo(() => {
+    if (appId !== "plodai") {
       return undefined;
     }
 
@@ -1041,7 +1032,7 @@ export function WorkspaceAppPage({
           return [];
         }
         try {
-          const response = await searchAgricultureEntities({
+          const response = await searchPlodaiEntities({
             appId: activeWorkspace.app_id,
             workspaceId: activeWorkspace.workspace_id,
             threadId: activeWorkspace.active_chat_id,
@@ -1073,19 +1064,19 @@ export function WorkspaceAppPage({
         const artifactId = entityData.artifact_id;
         if (artifactId && workspaceArtifacts.some((artifact) => artifact.id === artifactId)) {
           const artifact = workspaceArtifacts.find((item) => item.id === artifactId) ?? null;
-          setAgricultureFocusTarget(
-            buildAgricultureFocusTarget(entityType, entityData.item_id),
+          setPlodaiFocusTarget(
+            buildPlodaiFocusTarget(entityType, entityData.item_id),
           );
           void updateWorkspace({
             selected_item_id: artifactId,
             current_report_item_id:
               artifact?.kind === "report.v1" ? artifactId : currentReportArtifactId,
           });
-          setActiveAgricultureSection(entityType === "farm_order" ? "orders" : "farm");
+          setActivePlodaiSection(entityType === "farm_order" ? "orders" : "farm");
         }
       },
       onRequestPreview: async (entity: Entity) =>
-        buildAgricultureEntityPreview(entity),
+        buildPlodaiEntityPreview(entity),
     } as const;
   }, [
     activeWorkspace?.active_chat_id,
@@ -1093,7 +1084,7 @@ export function WorkspaceAppPage({
     activeWorkspace?.workspace_id,
     appId,
     currentReportArtifactId,
-    setActiveAgricultureSection,
+    setActivePlodaiSection,
     updateWorkspace,
     workspaceArtifacts,
   ]);
@@ -1216,17 +1207,17 @@ export function WorkspaceAppPage({
     [activeWorkspace?.active_chat_id, refreshDocumentFileList],
   );
 
-  const resolveAgricultureArtifactFile = useCallback(
+  const resolvePlodaiArtifactFile = useCallback(
     async (fileId: string) => {
       if (
-        appId !== "agriculture" ||
+        appId !== "plodai" ||
         !activeWorkspace?.workspace_id ||
         !activeWorkspace.active_chat_id
       ) {
         return null;
       }
 
-      const response = await searchAgricultureEntities({
+      const response = await searchPlodaiEntities({
         appId: activeWorkspace.app_id,
         workspaceId: activeWorkspace.workspace_id,
         threadId: activeWorkspace.active_chat_id,
@@ -1282,7 +1273,7 @@ export function WorkspaceAppPage({
       )[0] ?? null,
     [workspaceArtifacts],
   );
-  const selectedAgricultureArtifactId = useMemo(() => {
+  const selectedPlodaiArtifactId = useMemo(() => {
     const availableIds = new Set(workspaceArtifacts.map((artifact) => artifact.id));
     if (selectedArtifactId && availableIds.has(selectedArtifactId)) {
       return selectedArtifactId;
@@ -1315,39 +1306,39 @@ export function WorkspaceAppPage({
     />
   );
 
-  const renderAgriculturePane = (sectionId: "farm" | "orders", showSectionTabs: boolean) => (
-    <AgricultureFarmPane
+  const renderPlodaiPane = (sectionId: "farm" | "orders", showSectionTabs: boolean) => (
+    <PlodaiFarmPane
       activeSectionId={sectionId}
       activeWorkspaceId={activeWorkspaceId}
       applyArtifactOperation={applyArtifactOperation}
       deleteArtifact={deleteArtifact}
       farmArtifactSummary={latestFarmArtifact}
-      focusTarget={agricultureFocusTarget}
+      focusTarget={plodaiFocusTarget}
       getArtifact={getArtifact}
       onCreateWorkspace={() => {
         void createWorkspace();
       }}
-      onSelectSection={setActiveAgricultureSection}
+      onSelectSection={setActivePlodaiSection}
       onSelectWorkspace={handleSelectWorkspace}
-      selectedArtifactId={selectedAgricultureArtifactId}
+      selectedArtifactId={selectedPlodaiArtifactId}
       showSectionTabs={showSectionTabs}
       workspaces={workspaces}
     />
   );
 
-  const agricultureSectionId = isMobileLayout
+  const plodaiSectionId = isMobileLayout
     ? activePaneId === "orders"
       ? "orders"
       : "farm"
-    : activeAgricultureDesktopSectionId;
-  const agricultureFarmPane = renderAgriculturePane(agricultureSectionId, !isMobileLayout);
+    : activePlodaiDesktopSectionId;
+  const plodaiFarmPane = renderPlodaiPane(plodaiSectionId, !isMobileLayout);
 
   const documentOutputsPane = (
     <AgentPreviewPane
       artifacts={workspaceArtifacts}
       files={workspaceFiles}
       resolveLocalFile={resolveLocalFile}
-      resolveSupplementalLocalFile={resolveAgricultureArtifactFile}
+      resolveSupplementalLocalFile={resolvePlodaiArtifactFile}
       getArtifact={getArtifact}
       selectedItem={selectedPreviewItem}
     />
@@ -1357,7 +1348,7 @@ export function WorkspaceAppPage({
     <ChatKitPane
       agentBundle={agentBundle}
       enabled={hydrated}
-      files={appId === "agriculture" ? [] : localWorkspaceFiles}
+      files={appId === "plodai" ? [] : localWorkspaceFiles}
       workspaceState={activeWorkspace ?? undefined}
       investigationBrief=""
       clientTools={clientTools}
@@ -1374,7 +1365,7 @@ export function WorkspaceAppPage({
       onRunStart={handleRunStart}
       onRunEnd={appId === "documents" ? () => void refreshDocumentFileList() : undefined}
       attachmentConfig={agentDefinition.attachmentConfig}
-      entitiesConfig={agricultureEntitiesConfig}
+      entitiesConfig={plodaiEntitiesConfig}
       composerDraft={composerDraft}
       onComposerDraftApplied={(draftId) => {
         setComposerDraft((current) => (current?.id === draftId ? null : current));
@@ -1384,7 +1375,7 @@ export function WorkspaceAppPage({
 
   const accountPane = <AccountPane />;
 
-  if (appId === "agriculture") {
+  if (appId === "plodai") {
     return (
       <WorkspaceAgentPage>
         {isMobileLayout ? (
@@ -1406,10 +1397,10 @@ export function WorkspaceAppPage({
 
             <MobilePaneStack>
               <MobilePane data-testid="workspace-pane-farm" hidden={activePaneId !== "farm"}>
-                {renderAgriculturePane("farm", false)}
+                {renderPlodaiPane("farm", false)}
               </MobilePane>
               <MobilePane data-testid="workspace-pane-orders" hidden={activePaneId !== "orders"}>
-                {renderAgriculturePane("orders", false)}
+                {renderPlodaiPane("orders", false)}
               </MobilePane>
               <MobilePane data-testid="workspace-pane-chat" hidden={activePaneId !== "chat"}>
                 {activePaneId === "chat" || hasMountedMobileChatPane ? chatPane : null}
@@ -1420,10 +1411,10 @@ export function WorkspaceAppPage({
             </MobilePaneStack>
           </>
         ) : (
-          <DesktopAgricultureLayout>
-            <DesktopFarmColumn>{agricultureFarmPane}</DesktopFarmColumn>
+          <DesktopPlodaiLayout>
+            <DesktopFarmColumn>{plodaiFarmPane}</DesktopFarmColumn>
             <DesktopChatColumn>{chatPane}</DesktopChatColumn>
-          </DesktopAgricultureLayout>
+          </DesktopPlodaiLayout>
         )}
       </WorkspaceAgentPage>
     );
@@ -1477,12 +1468,12 @@ export function WorkspaceAppPage({
   );
 }
 
-export function AgricultureWorkspacePage() {
+export function PlodaiWorkspacePage() {
   return (
     <WorkspaceAppPage
-      appId="agriculture"
-      agentDefinition={agricultureAgentDefinition}
-      rootAgentId="agriculture-agent"
+      appId="plodai"
+      agentDefinition={plodaiAgentDefinition}
+      rootAgentId="plodai-agent"
     />
   );
 }
@@ -1519,7 +1510,7 @@ const DesktopShellLayout = styled.section`
   }
 `;
 
-const DesktopAgricultureLayout = styled.section`
+const DesktopPlodaiLayout = styled.section`
   min-height: 0;
   height: 100%;
   display: grid;

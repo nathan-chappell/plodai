@@ -1,5 +1,5 @@
 import { publishPaymentRequiredToast } from "../app/toasts";
-import type { AgricultureEntitySearchResponse } from "../types/chat-entities";
+import type { PlodaiEntitySearchResponse } from "../types/chat-entities";
 import type {
   ChatAttachmentDeleteResponse,
   ChatAttachmentUploadResponse,
@@ -173,13 +173,13 @@ export async function deleteStoredChatAttachment(
   });
 }
 
-export async function searchAgricultureEntities(params: {
+export async function searchPlodaiEntities(params: {
   appId: WorkspaceAppId;
   workspaceId: string;
   threadId: string;
   query: string;
-}): Promise<AgricultureEntitySearchResponse> {
-  return apiRequest<AgricultureEntitySearchResponse>("/agriculture/entities/search", {
+}): Promise<PlodaiEntitySearchResponse> {
+  return apiRequest<PlodaiEntitySearchResponse>("/plodai/entities/search", {
     method: "POST",
     body: JSON.stringify({
       app_id: params.appId,

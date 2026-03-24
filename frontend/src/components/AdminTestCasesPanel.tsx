@@ -17,7 +17,7 @@ import {
 } from "./styles";
 
 function routeForApp(appId: AdminTestCase["app_id"]): string {
-  return appId === "agriculture" ? "/agriculture" : "/documents";
+  return appId === "plodai" ? "/plodai" : "/documents";
 }
 
 export function AdminTestCasesPanel() {

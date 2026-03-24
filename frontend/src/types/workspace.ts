@@ -2,7 +2,7 @@ import type { ClientChartSpec } from "./analysis";
 import type { LocalAttachment, LocalAttachmentKind } from "./report";
 import type { ReportSlideV1, WorkspaceReportV1 } from "./workspace-contract";
 
-export type WorkspaceAppId = "agriculture" | "documents";
+export type WorkspaceAppId = "plodai" | "documents";
 export type WorkspaceCreatedItemKind =
   | "report.v1"
   | "chart.v1"
@@ -89,20 +89,6 @@ export type FarmCropV1 = {
   notes?: string | null;
 };
 
-export type FarmIssueV1 = {
-  id: string;
-  title: string;
-  status: "open" | "watching" | "resolved";
-  notes?: string | null;
-};
-
-export type FarmProjectV1 = {
-  id: string;
-  title: string;
-  status: "planned" | "active" | "done";
-  notes?: string | null;
-};
-
 export type FarmOrderItemV1 = {
   id: string;
   label: string;
@@ -131,10 +117,7 @@ export type FarmItemPayloadV1 = {
   farm_name: string;
   location?: string | null;
   crops: FarmCropV1[];
-  issues: FarmIssueV1[];
-  projects: FarmProjectV1[];
   orders?: FarmOrderV1[];
-  current_work: string[];
   notes?: string | null;
 };
 
@@ -163,8 +146,6 @@ export type PdfSplitItemSummaryData = {
 
 export type FarmItemSummaryData = {
   crop_count: number;
-  issue_count: number;
-  project_count: number;
   order_count?: number;
 };
 
@@ -324,10 +305,7 @@ export type FarmSetStateOperation = {
   farm_name: string;
   location?: string | null;
   crops: FarmCropV1[];
-  issues: FarmIssueV1[];
-  projects: FarmProjectV1[];
   orders?: FarmOrderV1[] | null;
-  current_work: string[];
   notes?: string | null;
 };
 

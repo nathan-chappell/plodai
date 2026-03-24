@@ -34,7 +34,7 @@ type OrderDraftState = {
   items: OrderItemDraftState[];
 };
 
-type AgriculturePaneSectionId = "farm" | "orders";
+type PlodaiPaneSectionId = "farm" | "orders";
 
 function createOrderItemDraft(partial: Partial<OrderItemDraftState> = {}): OrderItemDraftState {
   return {
@@ -118,7 +118,7 @@ function buildOrderDraft(order: FarmOrderV1): OrderDraftState {
   };
 }
 
-export function AgricultureFarmPane({
+export function PlodaiFarmPane({
   activeWorkspaceId,
   activeSectionId,
   applyArtifactOperation,
@@ -134,7 +134,7 @@ export function AgricultureFarmPane({
   workspaces,
 }: {
   activeWorkspaceId: string | null;
-  activeSectionId: AgriculturePaneSectionId;
+  activeSectionId: PlodaiPaneSectionId;
   applyArtifactOperation: (
     artifactId: string,
     payload: ApplyWorkspaceItemOperationPayload,
@@ -144,7 +144,7 @@ export function AgricultureFarmPane({
   focusTarget: FarmRecordFocusTarget | null;
   getArtifact: (artifactId: string) => Promise<WorkspaceCreatedItemDetail | null>;
   onCreateWorkspace: () => void;
-  onSelectSection?: (sectionId: AgriculturePaneSectionId) => void;
+  onSelectSection?: (sectionId: PlodaiPaneSectionId) => void;
   onSelectWorkspace: (workspaceId: string) => void;
   selectedArtifactId: string | null;
   showSectionTabs?: boolean;
@@ -233,10 +233,7 @@ export function AgricultureFarmPane({
           farm_name: nextFarm.farm_name,
           location: nextFarm.location ?? null,
           crops: nextFarm.crops,
-          issues: nextFarm.issues,
-          projects: nextFarm.projects,
           orders: nextFarm.orders ?? [],
-          current_work: nextFarm.current_work,
           notes: nextFarm.notes ?? null,
         },
       });
@@ -267,32 +264,16 @@ export function AgricultureFarmPane({
     });
   }
 
-  async function handleDismissIssue(issueId: string) {
-    if (!currentFarm) {
-      return;
-    }
-    await persistFarm({
-      ...currentFarm,
-      issues: currentFarm.issues.map((issue) =>
-        issue.id === issueId ? { ...issue, status: "resolved" } : issue,
-      ),
-    });
-  }
-
-  async function handleDismissProject(projectId: string) {
-    if (!currentFarm) {
-      return;
-    }
-    await persistFarm({
-      ...currentFarm,
-      projects: currentFarm.projects.map((project) =>
-        project.id === projectId ? { ...project, status: "done" } : project,
-      ),
-    });
-  }
-
   async function handleDeleteCrop(cropId: string) {
     if (!currentFarm) {
+      return;
+    }
+    const crop = currentFarm.crops.find((candidate) => candidate.id === cropId);
+    if (
+      !confirmFarmDestructiveAction(
+        `Delete ${crop?.name || "this crop"} from ${currentFarm.farm_name}?`,
+      )
+    ) {
       return;
     }
     await persistFarm({
@@ -320,6 +301,14 @@ export function AgricultureFarmPane({
 
   async function handleDeleteOrder(orderId: string) {
     if (!currentFarm) {
+      return;
+    }
+    const order = (currentFarm.orders ?? []).find((candidate) => candidate.id === orderId);
+    if (
+      !confirmFarmDestructiveAction(
+        `Remove ${order?.title || "this order"} from ${currentFarm.farm_name}?`,
+      )
+    ) {
       return;
     }
     await persistFarm({
@@ -402,10 +391,7 @@ export function AgricultureFarmPane({
     if (!farmArtifact || farmArtifact.kind !== "farm.v1") {
       return;
     }
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(`Delete ${farmArtifact.title || "this farm"} and clear this record?`)
-    ) {
+    if (!confirmFarmDestructiveAction(`Delete ${farmArtifact.title || "this farm"} and clear this record?`)) {
       return;
     }
     setIsMutatingFarm(true);
@@ -429,61 +415,60 @@ export function AgricultureFarmPane({
   const isOrdersSection = activeSectionId === "orders";
 
   return (
-    <FarmPaneCard data-testid="agriculture-farm-pane">
+    <FarmPaneCard data-testid="plodai-farm-pane">
       <FarmPaneHeader>
-        <FarmPaneHeaderTop>
+        <FarmPaneHeaderRow>
           <HeaderLabel>Farm</HeaderLabel>
+          <WorkspaceSelect
+            aria-label="Select farm"
+            data-testid="plodai-workspace-selector"
+            onChange={(event) => {
+              const nextWorkspaceId = event.target.value.trim();
+              if (nextWorkspaceId) {
+                onSelectWorkspace(nextWorkspaceId);
+              }
+            }}
+            value={selectedWorkspaceId}
+          >
+            {workspaces.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>
+                {formatFarmWorkspaceLabel(workspace)}
+              </option>
+            ))}
+          </WorkspaceSelect>
+          {showSectionTabs ? (
+            <PaneSectionTabs data-testid="plodai-pane-tabs">
+              <PaneSectionTabButton
+                $active={!isOrdersSection}
+                aria-pressed={!isOrdersSection}
+                onClick={() => onSelectSection?.("farm")}
+                type="button"
+              >
+                Farm
+              </PaneSectionTabButton>
+              <PaneSectionTabButton
+                $active={isOrdersSection}
+                aria-pressed={isOrdersSection}
+                onClick={() => onSelectSection?.("orders")}
+                type="button"
+              >
+                Orders
+                <PaneSectionCount>{orderCount}</PaneSectionCount>
+              </PaneSectionTabButton>
+            </PaneSectionTabs>
+          ) : null}
           <PaneHeaderActions>
             <HeaderButton onClick={onCreateWorkspace} type="button">
               New farm
             </HeaderButton>
           </PaneHeaderActions>
-        </FarmPaneHeaderTop>
-        <WorkspaceSelect
-          aria-label="Select farm"
-          data-testid="agriculture-workspace-selector"
-          onChange={(event) => {
-            const nextWorkspaceId = event.target.value.trim();
-            if (nextWorkspaceId) {
-              onSelectWorkspace(nextWorkspaceId);
-            }
-          }}
-          value={selectedWorkspaceId}
-        >
-          {workspaces.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {formatFarmWorkspaceLabel(workspace)}
-            </option>
-          ))}
-        </WorkspaceSelect>
+        </FarmPaneHeaderRow>
       </FarmPaneHeader>
 
-      {showSectionTabs ? (
-        <PaneSectionTabs data-testid="agriculture-pane-tabs">
-          <PaneSectionTabButton
-            $active={!isOrdersSection}
-            aria-pressed={!isOrdersSection}
-            onClick={() => onSelectSection?.("farm")}
-            type="button"
-          >
-            Farm
-          </PaneSectionTabButton>
-          <PaneSectionTabButton
-            $active={isOrdersSection}
-            aria-pressed={isOrdersSection}
-            onClick={() => onSelectSection?.("orders")}
-            type="button"
-          >
-            Orders
-            <PaneSectionCount>{orderCount}</PaneSectionCount>
-          </PaneSectionTabButton>
-        </PaneSectionTabs>
-      ) : null}
-
-      <FarmPaneSection data-testid="agriculture-farm-record-section">
+      <FarmPaneSection data-testid="plodai-farm-record-section">
         {farmArtifact?.kind === "farm.v1" ? (
           isOrdersSection ? (
-            <OrderStudioCard data-testid="agriculture-order-studio">
+            <OrderStudioCard data-testid="plodai-order-studio">
               <OrderStudioHeader>
                 <div>
                   <OrderStudioEyebrow>Order studio</OrderStudioEyebrow>
@@ -811,6 +796,7 @@ export function AgricultureFarmPane({
                               </FarmEditorGhostButton>
                             ) : null}
                             <FarmEditorGhostButton
+                              data-testid={`farm-delete-order-${order.id}`}
                               disabled={isMutatingFarm}
                               onClick={() => {
                                 void handleDeleteOrder(order.id);
@@ -831,7 +817,7 @@ export function AgricultureFarmPane({
             </OrderStudioCard>
           ) : (
             <FarmRecordPanel
-              dataTestId="agriculture-farm-record"
+              dataTestId="plodai-farm-record"
               farm={currentFarm ?? (farmArtifact.payload as FarmItemPayloadV1)}
               farmEditor={
                 isEditingFarm ? (
@@ -890,18 +876,12 @@ export function AgricultureFarmPane({
               onDeleteFarm={() => {
                 void handleDeleteFarm();
               }}
-              onDismissIssue={(issueId) => {
-                void handleDismissIssue(issueId);
-              }}
-              onDismissProject={(projectId) => {
-                void handleDismissProject(projectId);
-              }}
               onEditFarm={openFarmEditor}
               showOrdersSection={false}
             />
           )
         ) : (
-          <EmptyFarmState data-testid="agriculture-farm-empty">
+          <EmptyFarmState data-testid="plodai-farm-empty">
             <EmptyFarmTitle>No farm record saved yet</EmptyFarmTitle>
             <MetaText>
               Add crop photos in chat and the agent will assess them and keep this farm record
@@ -916,10 +896,17 @@ export function AgricultureFarmPane({
 
 function formatFarmWorkspaceLabel(workspace: WorkspaceListItem): string {
   const trimmedName = workspace.name.trim();
-  if (!trimmedName || trimmedName === "Workspace" || trimmedName === "Agriculture workspace") {
+  if (!trimmedName || trimmedName === "Workspace" || trimmedName === "PlodAI workspace") {
     return "Farm";
   }
   return trimmedName;
+}
+
+function confirmFarmDestructiveAction(message: string): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  return window.confirm(message);
 }
 
 function formatOrderStatus(status: FarmOrderStatusV1): string {
@@ -964,18 +951,17 @@ const FarmPaneCard = styled.section`
 
 const FarmPaneHeader = styled.div`
   flex: 0 0 auto;
-  display: grid;
+`;
+
+const FarmPaneHeaderRow = styled.div`
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.55rem;
 `;
 
-const FarmPaneHeaderTop = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-`;
-
 const HeaderLabel = styled.div`
+  flex: 0 0 auto;
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -984,7 +970,9 @@ const HeaderLabel = styled.div`
 `;
 
 const WorkspaceSelect = styled.select`
-  width: 100%;
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 180px;
   max-width: 100%;
   border-radius: 14px;
   border: 1px solid rgba(31, 41, 55, 0.12);
@@ -998,6 +986,7 @@ const WorkspaceSelect = styled.select`
 const PaneHeaderActions = styled.div`
   display: flex;
   gap: 0.45rem;
+  margin-left: auto;
 `;
 
 const HeaderButton = styled.button`
@@ -1025,6 +1014,8 @@ const FarmPaneSection = styled.section`
 
 const PaneSectionTabs = styled.div`
   display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 0.45rem;
 `;
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  agricultureAgentDefinition,
+  plodaiAgentDefinition,
   analysisAgentDefinition,
   chartAgentDefinition,
   documentAgentDefinition,
@@ -12,7 +12,7 @@ import {
 describe("agent definitions", () => {
   it("provide compact ChatKit copy for the live and helper agents", () => {
     for (const agent of [
-      agricultureAgentDefinition,
+      plodaiAgentDefinition,
       documentAgentDefinition,
       reportAgentDefinition,
       analysisAgentDefinition,
@@ -23,15 +23,17 @@ describe("agent definitions", () => {
     }
   });
 
-  it("surfaces Agriculture and Documents as the only first-class apps", () => {
+  it("surfaces PlodAI and Documents as the only first-class apps", () => {
     expect(surfaceDefinitions.map((agent) => agent.id)).toEqual([
-      "agriculture-agent",
+      "plodai-agent",
       "document-agent",
     ]);
-    expect(agricultureAgentDefinition.path).toBe("/agriculture");
+    expect(plodaiAgentDefinition.path).toBe("/plodai");
     expect(documentAgentDefinition.path).toBe("/documents");
-    expect(agricultureAgentDefinition.attachmentConfig.maxSize).toBe(10 * 1024 * 1024);
-    expect(agricultureAgentDefinition.description.toLowerCase()).toContain("crop");
-    expect(agricultureAgentDefinition.chatkitPlaceholder.toLowerCase()).toContain("seasonal");
+    expect(plodaiAgentDefinition.title).toBe("PlodAI");
+    expect(plodaiAgentDefinition.navLabel).toBe("PlodAI");
+    expect(plodaiAgentDefinition.attachmentConfig.maxSize).toBe(10 * 1024 * 1024);
+    expect(plodaiAgentDefinition.description.toLowerCase()).toContain("crop");
+    expect(plodaiAgentDefinition.chatkitPlaceholder.toLowerCase()).toContain("seasonal");
   });
 });

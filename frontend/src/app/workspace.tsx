@@ -27,7 +27,7 @@ import type {
 } from "../types/workspace";
 
 const DEFAULT_WORKSPACE_NAME_BY_APP: Record<WorkspaceAppId, string> = {
-  agriculture: "Farm",
+  plodai: "Farm",
   documents: "Documents",
 };
 

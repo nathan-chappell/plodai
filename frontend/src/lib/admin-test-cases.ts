@@ -18,8 +18,8 @@ export type AdminTestCase = {
 
 const ADMIN_TEST_CASES: readonly AdminTestCase[] = [
   {
-    id: "agriculture-orchard-photos",
-    app_id: "agriculture",
+    id: "plodai-orchard-photos",
+    app_id: "plodai",
     title: "Crop photo assessment",
     summary:
       "Loads a small crop-photo set and a prompt for crop identification, rough quantity, visible issues, and season-aware guidance.",
