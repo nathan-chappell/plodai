@@ -103,6 +103,29 @@ export type FarmProjectV1 = {
   notes?: string | null;
 };
 
+export type FarmOrderItemV1 = {
+  id: string;
+  label: string;
+  quantity?: string | null;
+  crop_id?: string | null;
+  notes?: string | null;
+};
+
+export type FarmOrderStatusV1 = "draft" | "live" | "sold_out";
+
+export type FarmOrderV1 = {
+  id: string;
+  title: string;
+  status: FarmOrderStatusV1;
+  summary?: string | null;
+  price_label?: string | null;
+  order_url?: string | null;
+  items: FarmOrderItemV1[];
+  hero_image_file_id?: string | null;
+  hero_image_alt_text?: string | null;
+  notes?: string | null;
+};
+
 export type FarmItemPayloadV1 = {
   version: "v1";
   farm_name: string;
@@ -110,6 +133,7 @@ export type FarmItemPayloadV1 = {
   crops: FarmCropV1[];
   issues: FarmIssueV1[];
   projects: FarmProjectV1[];
+  orders?: FarmOrderV1[];
   current_work: string[];
   notes?: string | null;
 };
@@ -141,6 +165,7 @@ export type FarmItemSummaryData = {
   crop_count: number;
   issue_count: number;
   project_count: number;
+  order_count?: number;
 };
 
 export type WorkspaceCreatedItemSummaryData =
@@ -301,8 +326,17 @@ export type FarmSetStateOperation = {
   crops: FarmCropV1[];
   issues: FarmIssueV1[];
   projects: FarmProjectV1[];
+  orders?: FarmOrderV1[] | null;
   current_work: string[];
   notes?: string | null;
+};
+
+export type PublicFarmOrderResponse = {
+  workspace_id: string;
+  farm_name: string;
+  location?: string | null;
+  order: FarmOrderV1;
+  hero_image_preview_url?: string | null;
 };
 
 export type WorkspaceItemOperation =
@@ -322,6 +356,12 @@ export type ApplyWorkspaceItemOperationPayload = {
 };
 
 export type DeleteWorkspaceUploadResponse = {
+  workspace_id: string;
+  item_id: string;
+  deleted: boolean;
+};
+
+export type DeleteWorkspaceItemResponse = {
   workspace_id: string;
   item_id: string;
   deleted: boolean;

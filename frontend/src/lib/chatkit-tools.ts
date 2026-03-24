@@ -270,9 +270,10 @@ export async function executeClientTool<Name extends ClientToolName>(
     }
     case "save_farm_state": {
       const args = toolCall.arguments as SaveFarmStateToolArgs;
+      const artifactId = `farm-${crypto.randomUUID()}`;
       return {
         payload: {
-          artifact_id: "farm-overview",
+          artifact_id: artifactId,
           artifact_kind: "farm.v1",
           revision: 1,
           farm: {
@@ -282,6 +283,7 @@ export async function executeClientTool<Name extends ClientToolName>(
             crops: args.crops,
             issues: args.issues,
             projects: args.projects,
+            orders: args.orders ?? [],
             current_work: args.current_work,
             notes: args.notes ?? null,
           },

@@ -31,5 +31,7 @@ describe("agent definitions", () => {
     expect(agricultureAgentDefinition.path).toBe("/agriculture");
     expect(documentAgentDefinition.path).toBe("/documents");
     expect(agricultureAgentDefinition.attachmentConfig.maxSize).toBe(10 * 1024 * 1024);
+    expect(agricultureAgentDefinition.description.toLowerCase()).toContain("crop");
+    expect(agricultureAgentDefinition.chatkitPlaceholder.toLowerCase()).toContain("seasonal");
   });
 });

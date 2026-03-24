@@ -92,6 +92,12 @@ class WorkspaceUploadDeleteResponse(WorkspaceSchemaBase):
     deleted: bool
 
 
+class WorkspaceItemDeleteResponse(WorkspaceSchemaBase):
+    workspace_id: str
+    item_id: str
+    deleted: bool
+
+
 class ReportNarrativePanel(WorkspaceSchemaBase):
     id: str
     type: Literal["narrative"]
@@ -192,6 +198,27 @@ class FarmProject(WorkspaceSchemaBase):
     notes: str | None = None
 
 
+class FarmOrderItem(WorkspaceSchemaBase):
+    id: str
+    label: str
+    quantity: str | None = None
+    crop_id: str | None = None
+    notes: str | None = None
+
+
+class FarmOrder(WorkspaceSchemaBase):
+    id: str
+    title: str
+    status: Literal["draft", "live", "sold_out"] = "draft"
+    summary: str | None = None
+    price_label: str | None = None
+    order_url: str | None = None
+    items: list[FarmOrderItem] = Field(default_factory=list)
+    hero_image_file_id: str | None = None
+    hero_image_alt_text: str | None = None
+    notes: str | None = None
+
+
 class FarmItemPayload(WorkspaceSchemaBase):
     version: Literal["v1"]
     farm_name: str
@@ -199,6 +226,7 @@ class FarmItemPayload(WorkspaceSchemaBase):
     crops: list[FarmCrop] = Field(default_factory=list)
     issues: list[FarmIssue] = Field(default_factory=list)
     projects: list[FarmProject] = Field(default_factory=list)
+    orders: list[FarmOrder] = Field(default_factory=list)
     current_work: list[str] = Field(default_factory=list)
     notes: str | None = None
 
@@ -226,9 +254,10 @@ class PdfSplitItemSummaryData(WorkspaceSchemaBase):
 
 
 class FarmItemSummaryData(WorkspaceSchemaBase):
-    crop_count: int = Field(ge=0)
-    issue_count: int = Field(ge=0)
-    project_count: int = Field(ge=0)
+    crop_count: int = Field(default=0, ge=0)
+    issue_count: int = Field(default=0, ge=0)
+    project_count: int = Field(default=0, ge=0)
+    order_count: int = Field(default=0, ge=0)
 
 
 WorkspaceCreatedItemSummaryData: TypeAlias = (
@@ -333,8 +362,17 @@ class FarmSetStateOperation(WorkspaceSchemaBase):
     crops: list[FarmCrop] = Field(default_factory=list)
     issues: list[FarmIssue] = Field(default_factory=list)
     projects: list[FarmProject] = Field(default_factory=list)
+    orders: list[FarmOrder] | None = None
     current_work: list[str] = Field(default_factory=list)
     notes: str | None = None
+
+
+class PublicFarmOrderResponse(WorkspaceSchemaBase):
+    workspace_id: str
+    farm_name: str
+    location: str | None = None
+    order: FarmOrder
+    hero_image_preview_url: str | None = None
 
 
 WorkspaceItemOperation: TypeAlias = (

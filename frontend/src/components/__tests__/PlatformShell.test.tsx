@@ -22,9 +22,9 @@ const agents: AgentDefinition[] = [
     navLabel: "Agriculture",
     title: "Agriculture",
     eyebrow: "App",
-    description: "Inspect plant photos and draft practical next steps.",
-    chatkitLead: "Inspect plant photos and summarize visible evidence.",
-    chatkitPlaceholder: "Ask the agriculture app to inspect plant photos",
+    description: "Assess crop photos, estimate visible extent, and suggest season-aware next steps.",
+    chatkitLead: "Inspect crop photos, estimate what is visible, and flag likely issues.",
+    chatkitPlaceholder: "Ask the agriculture app to identify the crop and explain seasonal needs",
     tabs: [],
     attachmentConfig: {
       enabled: true,

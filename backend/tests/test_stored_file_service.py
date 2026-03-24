@@ -70,6 +70,14 @@ def _build_test_image_bytes() -> bytes:
     return buffer.getvalue()
 
 
+def _assert_signed_preview_url(value: str) -> None:
+    parsed = urlparse(value)
+    assert parsed.scheme in {"http", "https"}
+    assert parsed.netloc
+    assert parsed.path.startswith("/api/stored-files/file_")
+    assert "token" in parse_qs(parsed.query)
+
+
 def _flatten_message_contents(
     input_items: list[dict[str, object]],
 ) -> list[dict[str, object]]:
@@ -352,7 +360,7 @@ async def test_agriculture_chat_attachment_returns_chatkit_image_shape(
         assert response.attachment.name == "orchard.png"
         assert response.attachment.mime_type == "image/png"
         assert isinstance(response.attachment.preview_url, str)
-        assert response.attachment.preview_url.startswith("data:image/")
+        _assert_signed_preview_url(str(response.attachment.preview_url))
 
         record = await db.get(StoredOpenAIFile, response.stored_file.id)
         assert record is not None
@@ -375,7 +383,7 @@ async def test_agriculture_chat_attachment_returns_chatkit_image_shape(
             hydrate_preview=True,
         )
         assert isinstance(hydrated_attachment, ImageAttachment)
-        assert str(hydrated_attachment.preview_url).startswith("data:image/")
+        _assert_signed_preview_url(str(hydrated_attachment.preview_url))
 
 
 @pytest.mark.anyio
@@ -1112,7 +1120,7 @@ async def test_thread_item_storage_keeps_canonical_attachment_and_load_hydrates_
         loaded_item = await store.load_item(thread_id, message.id, context)
         loaded_attachment = loaded_item.attachments[0]
         assert isinstance(loaded_attachment, ImageAttachment)
-        assert str(loaded_attachment.preview_url).startswith("data:image/")
+        _assert_signed_preview_url(str(loaded_attachment.preview_url))
         assert loaded_attachment.metadata["stored_file_id"] == response.stored_file.id
 
 
@@ -1342,7 +1350,7 @@ def test_two_phase_chatkit_attachment_upload_endpoint_finalizes_attachment(
     payload = response.json()
     assert payload["id"] == attachment_id
     assert payload["type"] == "image"
-    assert payload["preview_url"].startswith("data:image/")
+    _assert_signed_preview_url(str(payload["preview_url"]))
     assert "upload_descriptor" not in payload
 
     async def _verify_finalized_attachment() -> None:
@@ -1375,7 +1383,7 @@ def test_two_phase_chatkit_attachment_upload_endpoint_finalizes_attachment(
                 hydrate_preview=True,
             )
             assert isinstance(hydrated_attachment, ImageAttachment)
-            assert str(hydrated_attachment.preview_url).startswith("data:image/")
+            _assert_signed_preview_url(str(hydrated_attachment.preview_url))
 
     asyncio.run(_verify_finalized_attachment())
 
@@ -1410,7 +1418,7 @@ def test_two_phase_chatkit_attachment_upload_endpoint_accepts_multipart_uploads(
     payload = response.json()
     assert payload["id"] == attachment_id
     assert payload["type"] == "image"
-    assert payload["preview_url"].startswith("data:image/")
+    _assert_signed_preview_url(str(payload["preview_url"]))
     assert "upload_descriptor" not in payload
 
 

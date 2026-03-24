@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 from uuid import uuid4
 
-from chatkit.types import Attachment, FileAttachment
+from chatkit.types import Attachment
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI
 from sqlalchemy import select
@@ -47,8 +47,6 @@ from backend.app.schemas.stored_file import (
     ImageStoredFilePreview,
     PdfStoredFilePreview,
     SerializedChatAttachment,
-    SerializedFileChatAttachment,
-    SerializedImageChatAttachment,
     StoredFileKind,
     StoredFilePreview,
     StoredFileScope,
@@ -150,9 +148,18 @@ class StoredFileService:
                 canonical_attachment,
                 context=None,
             )
+            preview_url = (
+                self.build_public_preview_url(
+                    stored_file,
+                    public_base_url=public_base_url,
+                )
+                if stored_file.kind == "image"
+                else None
+            )
             display_attachment = build_display_attachment(
                 canonical_attachment=canonical_attachment,
-                file_bytes=file_bytes if stored_file.kind == "image" else None,
+                file_bytes=None,
+                preview_url=preview_url,
             )
             serialized_attachment = serialize_attachment(display_attachment)
 
@@ -637,6 +644,7 @@ class StoredFileService:
         attachment_id: str,
         scope: StoredFileScope,
         thread_id: str | None,
+        public_base_url: str | None = None,
     ) -> Attachment:
         canonical_attachment = build_canonical_attachment(
             stored_file=stored_file,
@@ -644,10 +652,18 @@ class StoredFileService:
             scope=scope,
             thread_id=thread_id,
         )
-        file_bytes = await self.load_file_bytes(stored_file) if stored_file.kind == "image" else None
+        preview_url = (
+            self.build_public_preview_url(
+                stored_file,
+                public_base_url=public_base_url,
+            )
+            if stored_file.kind == "image"
+            else None
+        )
         return build_display_attachment(
             canonical_attachment=canonical_attachment,
-            file_bytes=file_bytes,
+            file_bytes=None,
+            preview_url=preview_url,
         )
 
     def _build_preview_token(self, record: StoredOpenAIFile) -> str:

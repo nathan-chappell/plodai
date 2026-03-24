@@ -20,11 +20,11 @@ const ADMIN_TEST_CASES: readonly AdminTestCase[] = [
   {
     id: "agriculture-orchard-photos",
     app_id: "agriculture",
-    title: "Orchard photo triage",
+    title: "Crop photo assessment",
     summary:
-      "Loads a small orchard photo set and a prompt for visible-evidence triage with practical next steps.",
+      "Loads a small crop-photo set and a prompt for crop identification, rough quantity, visible issues, and season-aware guidance.",
     prompt:
-      "Inspect the loaded orchard photos, summarize the visible evidence, explain the most likely issues and uncertainty, and suggest practical next steps for the grower.",
+      "Inspect the loaded crop photos, identify the crop as specifically as the images support, estimate the visible amount or extent, flag likely issues with uncertainty, and explain what the crop likely needs at this point in the season.",
     model: "balanced",
     files: [
       {

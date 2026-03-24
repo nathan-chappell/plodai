@@ -8,6 +8,7 @@ const navigateSpy = vi.fn();
 
 vi.mock("../../lib/router", () => ({
   navigate: (path: string) => navigateSpy(path),
+  isFarmOrderPath: (path: string) => path.startsWith("/farm-orders/"),
 }));
 
 import { useAppRouteGuards } from "../hooks";
@@ -64,6 +65,11 @@ describe("useAppRouteGuards", () => {
 
   it("keeps /writing public for signed-out users", async () => {
     await renderRouteGuard({ pathname: "/writing" });
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps public farm order links open for signed-out users", async () => {
+    await renderRouteGuard({ pathname: "/farm-orders/workspace_1/order_1" });
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 

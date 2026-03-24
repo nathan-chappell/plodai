@@ -539,6 +539,58 @@ const farmProjectSchema: JsonSchema = {
   additionalProperties: false,
 };
 
+const farmOrderItemSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    label: { type: "string" },
+    quantity: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    crop_id: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    notes: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["id", "label"],
+  additionalProperties: false,
+};
+
+const farmOrderSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    status: { enum: ["draft", "live", "sold_out"] },
+    summary: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    price_label: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    order_url: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    items: {
+      type: "array",
+      items: farmOrderItemSchema,
+    },
+    hero_image_file_id: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    hero_image_alt_text: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+    notes: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    },
+  },
+  required: ["id", "title", "status", "items"],
+  additionalProperties: false,
+};
+
 export const getFarmStateToolSchema: JsonSchema = {
   type: "object",
   properties: {},
@@ -563,6 +615,10 @@ export const saveFarmStateToolSchema: JsonSchema = {
     projects: {
       type: "array",
       items: farmProjectSchema,
+    },
+    orders: {
+      type: "array",
+      items: farmOrderSchema,
     },
     current_work: {
       type: "array",

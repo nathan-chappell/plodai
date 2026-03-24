@@ -113,6 +113,23 @@ async def test_agriculture_entity_service_returns_thread_images_and_farm_entitie
                             "status": "active",
                         }
                     ],
+                    orders=[
+                        {
+                            "id": "order_1",
+                            "title": "Sataras mix",
+                            "status": "live",
+                            "price_label": "9 EUR",
+                            "summary": "2 kg onions, 2 kg peppers, 2 kg tomatoes.",
+                            "order_url": "https://farm.example/orders/sataras-mix",
+                            "items": [
+                                {
+                                    "id": "order_item_1",
+                                    "label": "Onions",
+                                    "quantity": "2 kg",
+                                }
+                            ],
+                        }
+                    ],
                     current_work=["Scout lower rows"],
                     notes="Keep an eye on the west edge.",
                 ),
@@ -153,6 +170,12 @@ async def test_agriculture_entity_service_returns_thread_images_and_farm_entitie
             entity for entity in response.entities if entity.data.get("entity_type") == "farm_project"
         )
         assert project_entity.title == "Irrigation refresh"
+
+        order_entity = next(
+            entity for entity in response.entities if entity.data.get("entity_type") == "farm_order"
+        )
+        assert order_entity.title == "Sataras mix"
+        assert order_entity.data["price_label"] == "9 EUR"
 
         work_entity = next(
             entity for entity in response.entities if entity.data.get("entity_type") == "farm_current_work"

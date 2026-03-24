@@ -67,24 +67,28 @@ def build_display_attachment(
     *,
     canonical_attachment: Attachment,
     file_bytes: bytes | None,
+    preview_url: str | None = None,
 ) -> Attachment:
     metadata = (
         canonical_attachment.metadata
         if isinstance(canonical_attachment.metadata, dict)
         else {}
     )
-    if metadata.get("input_kind") != "image" or file_bytes is None:
+    if metadata.get("input_kind") != "image":
         return canonical_attachment
 
-    preview_url = build_image_thumbnail_data_url(file_bytes=file_bytes)
-    if not isinstance(preview_url, str) or not preview_url:
+    resolved_preview_url = preview_url
+    if (not isinstance(resolved_preview_url, str) or not resolved_preview_url) and file_bytes is not None:
+        resolved_preview_url = build_image_thumbnail_data_url(file_bytes=file_bytes)
+
+    if not isinstance(resolved_preview_url, str) or not resolved_preview_url:
         return canonical_attachment
 
     return ImageAttachment(
         id=canonical_attachment.id,
         name=canonical_attachment.name,
         mime_type=canonical_attachment.mime_type,
-        preview_url=preview_url,
+        preview_url=resolved_preview_url,
         upload_descriptor=canonical_attachment.upload_descriptor,
         thread_id=canonical_attachment.thread_id,
         metadata=metadata,

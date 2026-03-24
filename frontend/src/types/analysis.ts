@@ -368,12 +368,34 @@ export type FarmProjectDraft = {
   notes?: string | null;
 };
 
+export type FarmOrderItemDraft = {
+  id: string;
+  label: string;
+  quantity?: string | null;
+  crop_id?: string | null;
+  notes?: string | null;
+};
+
+export type FarmOrderDraft = {
+  id: string;
+  title: string;
+  status: "draft" | "live" | "sold_out";
+  summary?: string | null;
+  price_label?: string | null;
+  order_url?: string | null;
+  items: FarmOrderItemDraft[];
+  hero_image_file_id?: string | null;
+  hero_image_alt_text?: string | null;
+  notes?: string | null;
+};
+
 export type SaveFarmStateToolArgs = {
   farm_name: string;
   location?: string | null;
   crops: FarmCropDraft[];
   issues: FarmIssueDraft[];
   projects: FarmProjectDraft[];
+  orders?: FarmOrderDraft[];
   current_work: string[];
   notes?: string | null;
 };

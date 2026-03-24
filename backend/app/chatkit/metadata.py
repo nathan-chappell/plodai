@@ -126,6 +126,7 @@ class WorkspaceCreatedItemSummaryData(TypedDict, total=False):
     crop_count: int
     issue_count: int
     project_count: int
+    order_count: int
 
 
 class WorkspaceItemSummary(TypedDict, total=False):
@@ -752,6 +753,7 @@ class WorkspaceCreatedItemSummaryDataModel(_MetadataModel):
     crop_count: int | None = None
     issue_count: int | None = None
     project_count: int | None = None
+    order_count: int | None = None
 
     @field_validator(
         "source_file_id",
@@ -771,6 +773,7 @@ class WorkspaceCreatedItemSummaryDataModel(_MetadataModel):
         "crop_count",
         "issue_count",
         "project_count",
+        "order_count",
         mode="before",
     )
     @classmethod

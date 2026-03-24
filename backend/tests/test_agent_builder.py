@@ -226,12 +226,12 @@ def test_non_feedback_agents_stop_after_each_client_tool() -> None:
             {
                 "agent_id": "agriculture-agent",
                 "agent_name": "Agriculture",
-                "instructions": "Inspect uploaded plant photos.",
+                "instructions": "Assess crop photos and save farm context when asked.",
                 "client_tools": [
                     {
                         "type": "function",
-                        "name": "list_image_files",
-                        "description": "List uploaded image files.",
+                        "name": "get_farm_state",
+                        "description": "Read the saved farm record for this workspace.",
                         "parameters": {
                             "type": "object",
                             "properties": {},
@@ -241,14 +241,27 @@ def test_non_feedback_agents_stop_after_each_client_tool() -> None:
                     },
                     {
                         "type": "function",
-                        "name": "inspect_image_file",
-                        "description": "Inspect one uploaded image.",
+                        "name": "save_farm_state",
+                        "description": "Create or replace the saved farm record for this workspace.",
                         "parameters": {
                             "type": "object",
                             "properties": {
-                                "file_id": {"type": "string"},
+                                "farm_name": {"type": "string"},
+                                "crops": {"type": "array", "items": {"type": "object"}},
+                                "issues": {"type": "array", "items": {"type": "object"}},
+                                "projects": {"type": "array", "items": {"type": "object"}},
+                                "current_work": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
                             },
-                            "required": ["file_id"],
+                            "required": [
+                                "farm_name",
+                                "crops",
+                                "issues",
+                                "projects",
+                                "current_work",
+                            ],
                             "additionalProperties": False,
                         },
                         "strict": True,
@@ -275,8 +288,8 @@ def test_non_feedback_agents_stop_after_each_client_tool() -> None:
     assert set(
         agents["agriculture-agent"].tool_use_behavior["stop_at_tool_names"]
     ) == {
-        "list_image_files",
-        "inspect_image_file",
+        "get_farm_state",
+        "save_farm_state",
     }
 
 

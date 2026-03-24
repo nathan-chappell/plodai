@@ -236,6 +236,49 @@ class AgricultureEntityService:
                 )
             )
 
+        for order in farm_payload.orders:
+            order_item_terms: list[str | None] = []
+            for order_item in order.items:
+                order_item_terms.extend(
+                    [
+                        order_item.label,
+                        order_item.quantity,
+                        order_item.notes,
+                    ]
+                )
+            if not _matches_query(
+                normalized_query,
+                order.title,
+                order.status,
+                order.summary,
+                order.price_label,
+                order.notes,
+                order.order_url,
+                farm_payload.farm_name,
+                *order_item_terms,
+            ):
+                continue
+            entities.append(
+                AgricultureComposerEntity(
+                    id=f"farm-order:{farm_item.id}:{order.id}",
+                    title=order.title,
+                    icon="cart",
+                    interactive=True,
+                    group="Farm orders",
+                    data={
+                        "entity_type": "farm_order",
+                        "artifact_id": farm_item.id,
+                        "farm_name": farm_payload.farm_name,
+                        "item_id": order.id,
+                        "status": order.status,
+                        "price_label": order.price_label or "",
+                        "summary": order.summary or "",
+                        "notes": order.notes or "",
+                        "order_url": order.order_url or "",
+                    },
+                )
+            )
+
         for index, work_item in enumerate(farm_payload.current_work):
             if not _matches_query(normalized_query, work_item, farm_payload.farm_name):
                 continue

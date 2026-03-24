@@ -278,6 +278,10 @@ function currentFarmArtifact(
   );
 }
 
+function createFarmArtifactId(): string {
+  return `farm-${crypto.randomUUID()}`;
+}
+
 async function getReportArtifactDetail(
   workspace: AgentRuntimeContext,
   reportId: string,
@@ -770,7 +774,7 @@ export async function executeLocalTool<Name extends ClientToolName>(
 
       if (!existing) {
         detail = await workspace.createArtifact({
-          id: "farm-overview",
+          id: createFarmArtifactId(),
           kind: "farm.v1",
           created_by_agent_id: currentAgentId(workspace),
           payload: {
@@ -780,11 +784,17 @@ export async function executeLocalTool<Name extends ClientToolName>(
             crops: toolArgs.crops,
             issues: toolArgs.issues,
             projects: toolArgs.projects,
+            orders: toolArgs.orders ?? [],
             current_work: toolArgs.current_work,
             notes: toolArgs.notes ?? null,
           } satisfies FarmItemPayloadV1,
         });
       } else {
+        const existingDetail = await workspace.getArtifact(existing.id);
+        const existingFarm =
+          existingDetail && existingDetail.kind === "farm.v1"
+            ? (existingDetail.payload as FarmItemPayloadV1)
+            : null;
         detail = await workspace.applyArtifactOperation(existing.id, {
           base_revision: existing.current_revision,
           created_by_agent_id: currentAgentId(workspace),
@@ -795,6 +805,7 @@ export async function executeLocalTool<Name extends ClientToolName>(
             crops: toolArgs.crops,
             issues: toolArgs.issues,
             projects: toolArgs.projects,
+            orders: toolArgs.orders ?? existingFarm?.orders ?? [],
             current_work: toolArgs.current_work,
             notes: toolArgs.notes ?? null,
           },

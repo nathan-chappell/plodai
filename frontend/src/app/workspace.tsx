@@ -27,8 +27,8 @@ import type {
 } from "../types/workspace";
 
 const DEFAULT_WORKSPACE_NAME_BY_APP: Record<WorkspaceAppId, string> = {
-  agriculture: "Agriculture workspace",
-  documents: "Documents workspace",
+  agriculture: "Farm",
+  documents: "Documents",
 };
 
 type CreateWorkspaceOptions = {
@@ -74,6 +74,7 @@ type AgentShellContextValue = {
   createArtifact: (
     payload: WorkspaceItemCreatePayload,
   ) => Promise<WorkspaceCreatedItemDetail>;
+  deleteArtifact: (artifactId: string) => Promise<void>;
   applyArtifactOperation: (
     artifactId: string,
     payload: ApplyWorkspaceItemOperationPayload,
@@ -408,6 +409,17 @@ export function WorkspaceProvider({
     [activeWorkspace?.workspace_id, refreshWorkspace, repository],
   );
 
+  const deleteArtifact = useCallback(
+    async (artifactId: string) => {
+      if (!activeWorkspace?.workspace_id) {
+        throw new Error("No active workspace is available.");
+      }
+      await repository.deleteItem(activeWorkspace.workspace_id, artifactId);
+      await refreshWorkspace();
+    },
+    [activeWorkspace?.workspace_id, refreshWorkspace, repository],
+  );
+
   const queuePendingComposerLaunch = useCallback(
     (launch: PendingComposerLaunch | null) => {
       setPendingComposerLaunch(launch);
@@ -457,6 +469,7 @@ export function WorkspaceProvider({
       getArtifact,
       listArtifactRevisions,
       createArtifact,
+      deleteArtifact,
       applyArtifactOperation,
       updateWorkspace,
       selectWorkspace,
@@ -474,6 +487,7 @@ export function WorkspaceProvider({
       createArtifact,
       createWorkspace,
       currentUserId,
+      deleteArtifact,
       getArtifact,
       getFile,
       handleSelectFiles,

@@ -98,11 +98,18 @@ describe("agent registry", () => {
     const instructions = getAgentModule("agriculture-agent")?.buildAgentSpec(workspace).instructions;
 
     expect(instructions).toContain("Treat images attached to the user's message as primary evidence.");
-    expect(instructions).toContain("Tagged thread images can bring older photos from this thread back into scope.");
-    expect(instructions).toContain("prefer one compact narrative-first slide");
+    expect(instructions).toContain("Treat the saved farm record as your durable notes for this workspace.");
+    expect(instructions).toContain("When you learn any new or important durable fact, call `get_farm_state`");
+    expect(instructions).toContain("Save by default after useful assessments.");
+    expect(instructions).toContain("Save partial but grounded findings too.");
+    expect(instructions).toContain("seasonal needs as of");
+    expect(instructions).toContain("Do not ask for permission first.");
+    expect(instructions).toContain("Briefly tell the user that the farm record was updated.");
+    expect(instructions).toContain("Only create or revise a saved report when the user asks for a reusable deliverable.");
     expect(instructions).not.toContain("list_image_files");
     expect(instructions).not.toContain("inspect_image_file");
-    expect(instructions).not.toContain("image first and the narrative guidance second");
+    expect(instructions).not.toContain("allowed domains configured for this agent");
+    expect(instructions).not.toContain("orchard history");
   });
 
   it("lists unique tool names declared across the document bundle", () => {

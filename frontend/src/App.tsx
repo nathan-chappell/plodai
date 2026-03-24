@@ -15,7 +15,7 @@ import {
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
 import { allAgentDefinitions } from "./agents/definitions";
-import { navigate, usePathname } from "./lib/router";
+import { isFarmOrderPath, navigate, usePathname } from "./lib/router";
 import { isWritingPath } from "./lib/writing";
 import type { WorkspaceAppId } from "./types/workspace";
 
@@ -26,6 +26,11 @@ type AgentPageComponent = ComponentType<AgentPageProps>;
 const WritingPage = lazy(async () => {
   const module = await import("./components/WritingPage");
   return { default: module.WritingPage };
+});
+
+const FarmOrderPage = lazy(async () => {
+  const module = await import("./components/FarmOrderPage");
+  return { default: module.FarmOrderPage };
 });
 
 const AgricultureAgentPage = lazy(async () => {
@@ -118,6 +123,7 @@ export function App() {
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const { dismissToast, toasts } = useToastState();
   const viewingWriting = isWritingPath(pathname);
+  const viewingPublicFarmOrder = isFarmOrderPath(pathname);
 
   useAppRouteGuards({
     authError,
@@ -126,11 +132,11 @@ export function App() {
     hydrating,
   });
 
-  if (viewingWriting) {
+  if (viewingWriting || viewingPublicFarmOrder) {
     return (
       <>
-        <Suspense fallback={<RouteLoadingState label="writing" />}>
-          <WritingPage />
+        <Suspense fallback={<RouteLoadingState label={viewingWriting ? "writing" : "farm order"} />}>
+          {viewingWriting ? <WritingPage /> : <FarmOrderPage />}
         </Suspense>
         <ToastViewport>
           {toasts.map((toast) => (

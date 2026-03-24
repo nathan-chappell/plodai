@@ -40,6 +40,7 @@ from backend.app.schemas.workspace import (
     WorkspaceCreatedItemSummary,
     WorkspaceCreatedItemSummaryData,
     WorkspaceItemCreateRequest,
+    WorkspaceItemDeleteResponse,
     WorkspaceItemDetail,
     WorkspaceItemOperation,
     WorkspaceItemOperationRequest,
@@ -214,6 +215,7 @@ class WorkspaceService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workspace upload not found.",
             )
+        workspace.items.remove(item)
         await self.db.delete(item)
         if workspace.selected_item_id == item_id:
             workspace.selected_item_id = None
@@ -277,6 +279,33 @@ class WorkspaceService:
             user_id=user_id,
             workspace_id=workspace_id,
             item_id=request.id,
+        )
+
+    async def delete_item(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        item_id: str,
+    ) -> WorkspaceItemDeleteResponse:
+        workspace = await self._get_workspace(user_id=user_id, workspace_id=workspace_id)
+        item = next((candidate for candidate in workspace.items if candidate.id == item_id), None)
+        if item is None or item.item_origin != "created":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workspace item not found.",
+            )
+        workspace.items.remove(item)
+        await self.db.delete(item)
+        if workspace.selected_item_id == item_id:
+            workspace.selected_item_id = None
+        if workspace.current_report_item_id == item_id:
+            workspace.current_report_item_id = None
+        await self.db.commit()
+        return WorkspaceItemDeleteResponse(
+            workspace_id=workspace_id,
+            item_id=item_id,
+            deleted=True,
         )
 
     async def get_item_detail(
@@ -636,6 +665,7 @@ class WorkspaceService:
                     crop_count=len(farm_payload.crops),
                     issue_count=len(farm_payload.issues),
                     project_count=len(farm_payload.projects),
+                    order_count=len(farm_payload.orders),
                 ),
             )
         pdf_payload = PdfSplitItemPayload.model_validate(payload)
@@ -792,6 +822,11 @@ class WorkspaceService:
                     "crops": operation.crops,
                     "issues": operation.issues,
                     "projects": operation.projects,
+                    "orders": (
+                        operation.orders
+                        if operation.orders is not None
+                        else farm_payload.orders
+                    ),
                     "current_work": operation.current_work,
                     "notes": operation.notes,
                 }

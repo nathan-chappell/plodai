@@ -57,7 +57,7 @@ from openai.types.responses.response_input_item_param import (
     Message,
     ResponseInputItemParam,
 )
-from pydantic import BaseModel, TypeAdapter, field_validator
+from pydantic import BaseModel, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import assert_never
 
@@ -614,6 +614,7 @@ class ClientToolResultConverter(ThreadItemConverter):
             "farm_issue",
             "farm_project",
             "farm_current_work",
+            "farm_order",
         }:
             return self._farm_tag_to_message_contents(
                 tag,
@@ -779,6 +780,22 @@ class ClientToolResultConverter(ThreadItemConverter):
             notes = tag_data.get("notes")
             if isinstance(notes, str) and notes.strip():
                 parts.append(f"Farm notes: {notes.strip()}.")
+        elif entity_type == "farm_order":
+            status = tag_data.get("status")
+            price_label = tag_data.get("price_label")
+            summary = tag_data.get("summary")
+            order_url = tag_data.get("order_url")
+            notes = tag_data.get("notes")
+            if isinstance(status, str) and status.strip():
+                parts.append(f"Status: {status.strip()}.")
+            if isinstance(price_label, str) and price_label.strip():
+                parts.append(f"Price: {price_label.strip()}.")
+            if isinstance(summary, str) and summary.strip():
+                parts.append(f"Summary: {summary.strip()}.")
+            if isinstance(notes, str) and notes.strip():
+                parts.append(f"Notes: {notes.strip()}.")
+            if isinstance(order_url, str) and order_url.strip():
+                parts.append(f"Order link: {order_url.strip()}.")
 
         return [
             {

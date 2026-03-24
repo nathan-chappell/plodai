@@ -687,24 +687,39 @@ class DatabaseMemoryStore(
         if expires_at is not None and expires_at <= datetime.now(UTC):
             return attachment
 
-        try:
-            binary_response = await self.openai_client.files.content(record.openai_file_id)
-            file_bytes = await binary_response.aread()
-        except Exception:
-            log_event(
-                logger,
-                logging.WARNING,
-                "attachment.preview_hydrate_failed",
-                summary=summarize_pairs_for_log(
-                    (("attachment", attachment.id), ("stored_file", record.id))
-                ),
-            )
-            return attachment
-
         return build_display_attachment(
             canonical_attachment=attachment,
-            file_bytes=file_bytes,
+            file_bytes=None,
+            preview_url=self._build_stored_file_preview_url(record),
         )
+
+    def _build_stored_file_preview_url(self, record: StoredOpenAIFile) -> str:
+        token = self._build_preview_token(record)
+        return f"{self.public_base_url}/api/stored-files/{record.id}/preview?token={token}"
+
+    def _build_preview_token(self, record: StoredOpenAIFile) -> str:
+        expires_at = record.expires_at or (
+            datetime.now(UTC)
+            + timedelta(seconds=self.settings.stored_file_default_expiry_seconds)
+        )
+        expires_ts = int(expires_at.timestamp())
+        payload = f"{record.id}:{record.user_id}:{expires_ts}"
+        signature = hmac.new(
+            self._preview_secret(),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        encoded = urlsafe_b64encode(f"{expires_ts}:{signature}".encode("utf-8"))
+        return encoded.decode("utf-8").rstrip("=")
+
+    def _preview_secret(self) -> bytes:
+        secret = (
+            self.settings.CLERK_SECRET_KEY
+            or self.settings.CLERK_JWT_KEY
+            or self.settings.OPENAI_API_KEY
+            or "ai-portfolio-stored-file-preview-secret"
+        )
+        return secret.encode("utf-8")
 
 
 def _kind_for_attachment_input(

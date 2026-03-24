@@ -13,9 +13,11 @@ import { publishToast } from "../app/toasts";
 import { MetaText } from "../app/styles";
 import { useAppState } from "../app/context";
 import { useAgentShell } from "../app/workspace";
+import { AgricultureFarmPane } from "../components/AgricultureFarmPane";
 import { ChatKitPane } from "../components/ChatKitPane";
 import { AgentPreviewPane, type PreviewSelection } from "../components/AgentPreviewPane";
 import { AuthPanel } from "../components/AuthPanel";
+import type { FarmRecordFocusTarget } from "../components/FarmRecordPanel";
 import {
   deleteDocumentFile,
   fetchStoredFileBlob,
@@ -70,45 +72,72 @@ const DOCUMENT_STARTER_PROMPTS = [
 
 const AGRICULTURE_STARTER_PROMPTS = [
   {
-    label: "Inspect plant photos",
-    prompt: "Inspect the current plant photos and summarize what is visibly happening.",
+    label: "Identify crop",
+    prompt: "Inspect the current crop photos, identify what crop is shown as specifically as the images support, and summarize the strongest visible evidence.",
     icon: "document" as const,
   },
   {
-    label: "Find likely issues",
-    prompt: "List the most likely issues suggested by the photos and explain the visible evidence.",
+    label: "Estimate amount",
+    prompt: "Estimate the visible amount, extent, or affected area shown in the current crop photos, label the estimate as rough, and explain what limits confidence.",
     icon: "analytics" as const,
   },
   {
-    label: "Suggest next steps",
-    prompt: "Suggest practical next steps based on the current plant photos.",
+    label: "Seasonal needs",
+    prompt: "Based on the current crop photos and today's date, explain any likely issues, what the crop likely needs this season, and the most practical next steps.",
     icon: "bolt" as const,
   },
 ] as const;
 
-const WORKSPACE_PANES = [
+const DOCUMENT_WORKSPACE_PANES = [
   { id: "browser", label: "Browser" },
   { id: "chat", label: "Chat" },
   { id: "outputs", label: "Preview" },
   { id: "account", label: "Account" },
 ] as const;
 
-const DEFAULT_PANE_ID = "browser";
+const AGRICULTURE_WORKSPACE_PANES = [
+  { id: "farm", label: "Farm" },
+  { id: "orders", label: "Orders" },
+  { id: "chat", label: "Chat" },
+  { id: "account", label: "Account" },
+] as const;
+
 const MOBILE_LAYOUT_BREAKPOINT = 980;
 
-type WorkspacePaneId = (typeof WORKSPACE_PANES)[number]["id"];
+type WorkspacePaneId =
+  | (typeof DOCUMENT_WORKSPACE_PANES)[number]["id"]
+  | (typeof AGRICULTURE_WORKSPACE_PANES)[number]["id"];
 
 function isWorkspacePaneId(value: string | null | undefined): value is WorkspacePaneId {
-  return WORKSPACE_PANES.some((pane) => pane.id === value);
+  return value === "browser" ||
+    value === "chat" ||
+    value === "outputs" ||
+    value === "account" ||
+    value === "farm" ||
+    value === "orders";
+}
+
+function workspacePanesForApp(appId: WorkspaceAppId): readonly { id: WorkspacePaneId; label: string }[] {
+  return appId === "agriculture"
+    ? AGRICULTURE_WORKSPACE_PANES
+    : DOCUMENT_WORKSPACE_PANES;
+}
+
+function defaultPaneIdForApp(appId: WorkspaceAppId): WorkspacePaneId {
+  return appId === "agriculture" ? "chat" : "browser";
 }
 
 function normalizeWorkspacePaneId(
   value: string | null | undefined,
+  appId: WorkspaceAppId,
 ): WorkspacePaneId {
   if (value === "overview") {
-    return "browser";
+    return appId === "agriculture" ? "farm" : "browser";
   }
-  return isWorkspacePaneId(value) ? value : DEFAULT_PANE_ID;
+  const validPaneIds = new Set(workspacePanesForApp(appId).map((pane) => pane.id));
+  return isWorkspacePaneId(value) && validPaneIds.has(value)
+    ? value
+    : defaultPaneIdForApp(appId);
 }
 
 function buildFileTypeLabel(file: WorkspaceUploadItemSummary): string {
@@ -191,9 +220,35 @@ function summarizeBrowserArtifact(artifact: WorkspaceCreatedItemSummary): string
     return `${artifact.summary.entry_count} entries`;
   }
   if (artifact.kind === "farm.v1" && "crop_count" in artifact.summary) {
-    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues`;
+    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues · ${artifact.summary.order_count ?? 0} orders`;
   }
   return artifact.kind;
+}
+
+function sortArtifactsByUpdatedAt<T extends { updated_at: string }>(artifacts: T[]): T[] {
+  return [...artifacts].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+}
+
+function buildAgricultureFocusTarget(
+  entityType: string | undefined,
+  itemId: string | undefined,
+): FarmRecordFocusTarget {
+  if (entityType === "farm_crop" && itemId) {
+    return { kind: "crop", itemId };
+  }
+  if (entityType === "farm_issue" && itemId) {
+    return { kind: "issue", itemId };
+  }
+  if (entityType === "farm_project" && itemId) {
+    return { kind: "project", itemId };
+  }
+  if (entityType === "farm_current_work" && itemId) {
+    return { kind: "current_work", itemId };
+  }
+  if (entityType === "farm_order" && itemId) {
+    return { kind: "order", itemId };
+  }
+  return { kind: "record" };
 }
 
 function getStarterPromptsForApp(appId: WorkspaceAppId) {
@@ -729,6 +784,7 @@ export function WorkspaceAppPage({
     getArtifact,
     listArtifactRevisions,
     createArtifact,
+    deleteArtifact,
     applyArtifactOperation,
     updateWorkspace,
     selectWorkspace,
@@ -737,8 +793,15 @@ export function WorkspaceAppPage({
     consumePendingComposerLaunch,
   } = useAgentShell();
   const [selectedPreviewItem, setSelectedPreviewItem] = useState<PreviewSelection>(null);
+  const [agricultureFocusTarget, setAgricultureFocusTarget] =
+    useState<FarmRecordFocusTarget | null>(null);
+  const [activeAgricultureDesktopSectionId, setActiveAgricultureDesktopSectionId] = useState<
+    "farm" | "orders"
+  >("farm");
   const [composerDraft, setComposerDraft] = useState<ComposerDraft | null>(null);
-  const [activePaneId, setActivePaneId] = useState<WorkspacePaneId>(DEFAULT_PANE_ID);
+  const [activePaneId, setActivePaneId] = useState<WorkspacePaneId>(
+    () => defaultPaneIdForApp(appId),
+  );
   const [localWorkspaceFiles, setLocalAttachments] = useState<LocalAttachment[]>([]);
   const [documentFiles, setDocumentFiles] = useState<DocumentFileSummary[]>([]);
   const [hasMountedMobileChatPane, setHasMountedMobileChatPane] = useState(
@@ -836,6 +899,10 @@ export function WorkspaceAppPage({
   );
 
   useEffect(() => {
+    setActivePaneId((current) => normalizeWorkspacePaneId(current, appId));
+  }, [appId]);
+
+  useEffect(() => {
     if (!isMobileLayout || activePaneId === "chat") {
       setHasMountedMobileChatPane(true);
     }
@@ -857,6 +924,10 @@ export function WorkspaceAppPage({
   }, [activeWorkspaceId, appId, consumePendingComposerLaunch, currentAppId]);
 
   useEffect(() => {
+    if (appId !== "documents") {
+      setSelectedPreviewItem(null);
+      return;
+    }
     setSelectedPreviewItem((current) => {
       if (
         current?.kind === "artifact" &&
@@ -866,7 +937,6 @@ export function WorkspaceAppPage({
       }
       if (
         current?.kind === "file" &&
-        appId !== "agriculture" &&
         workspaceFiles.some((file) => file.id === current.id)
       ) {
         return current;
@@ -878,9 +948,6 @@ export function WorkspaceAppPage({
         null;
       if (nextArtifactId) {
         return { kind: "artifact", id: nextArtifactId };
-      }
-      if (appId === "agriculture") {
-        return null;
       }
       const nextFileId = selectedFileId ?? workspaceFiles[0]?.id ?? null;
       return nextFileId ? { kind: "file", id: nextFileId } : null;
@@ -894,6 +961,12 @@ export function WorkspaceAppPage({
     workspaceFiles,
   ]);
 
+  useEffect(() => {
+    if (appId === "agriculture") {
+      setAgricultureFocusTarget(null);
+    }
+  }, [activeWorkspaceId, appId]);
+
   const handlePaneChange = useCallback(
     (paneId: WorkspacePaneId) => {
       setActivePaneId(paneId);
@@ -904,6 +977,17 @@ export function WorkspaceAppPage({
   const handleRunStart = useCallback(() => {
     handlePaneChange("chat");
   }, [handlePaneChange]);
+
+  const setActiveAgricultureSection = useCallback(
+    (sectionId: "farm" | "orders") => {
+      if (isMobileLayout) {
+        handlePaneChange(sectionId);
+        return;
+      }
+      setActiveAgricultureDesktopSectionId(sectionId);
+    },
+    [handlePaneChange, isMobileLayout],
+  );
 
   const handleSelectWorkspace = useCallback(
     async (workspaceId: string) => {
@@ -924,7 +1008,7 @@ export function WorkspaceAppPage({
     [activeWorkspace?.active_chat_id, updateWorkspace],
   );
 
-  const handlePreviewSelection = useCallback(
+  const handleDocumentPreviewSelection = useCallback(
     (selection: PreviewSelection) => {
       setSelectedPreviewItem(selection);
       if (selection?.kind === "artifact") {
@@ -988,7 +1072,16 @@ export function WorkspaceAppPage({
         }
         const artifactId = entityData.artifact_id;
         if (artifactId && workspaceArtifacts.some((artifact) => artifact.id === artifactId)) {
-          handlePreviewSelection({ kind: "artifact", id: artifactId });
+          const artifact = workspaceArtifacts.find((item) => item.id === artifactId) ?? null;
+          setAgricultureFocusTarget(
+            buildAgricultureFocusTarget(entityType, entityData.item_id),
+          );
+          void updateWorkspace({
+            selected_item_id: artifactId,
+            current_report_item_id:
+              artifact?.kind === "report.v1" ? artifactId : currentReportArtifactId,
+          });
+          setActiveAgricultureSection(entityType === "farm_order" ? "orders" : "farm");
         }
       },
       onRequestPreview: async (entity: Entity) =>
@@ -999,7 +1092,9 @@ export function WorkspaceAppPage({
     activeWorkspace?.app_id,
     activeWorkspace?.workspace_id,
     appId,
-    handlePreviewSelection,
+    currentReportArtifactId,
+    setActiveAgricultureSection,
+    updateWorkspace,
     workspaceArtifacts,
   ]);
 
@@ -1180,54 +1275,75 @@ export function WorkspaceAppPage({
     [],
   );
 
+  const latestFarmArtifact = useMemo(
+    () =>
+      sortArtifactsByUpdatedAt(
+        workspaceArtifacts.filter((artifact) => artifact.kind === "farm.v1"),
+      )[0] ?? null,
+    [workspaceArtifacts],
+  );
+  const selectedAgricultureArtifactId = useMemo(() => {
+    const availableIds = new Set(workspaceArtifacts.map((artifact) => artifact.id));
+    if (selectedArtifactId && availableIds.has(selectedArtifactId)) {
+      return selectedArtifactId;
+    }
+    if (currentReportArtifactId && availableIds.has(currentReportArtifactId)) {
+      return currentReportArtifactId;
+    }
+    return null;
+  }, [currentReportArtifactId, selectedArtifactId, workspaceArtifacts]);
+
   if (!user) {
     return null;
   }
 
-  const browserPane =
-    appId === "documents" ? (
-      <DocumentBrowserPanel
-        activeThreadId={activeWorkspace?.active_chat_id ?? null}
-        activeWorkspaceId={activeWorkspaceId}
-        documentFiles={documentFiles}
-        onCreateWorkspace={() => {
-          void createWorkspace();
-        }}
-        onDeleteFile={handleDocumentDelete}
-        onImportUrl={handleDocumentImport}
-        onOpenFile={handleDocumentFileOpen}
-        onRefresh={refreshDocumentFileList}
-        onSelectWorkspace={handleSelectWorkspace}
-        onUploadFiles={handleDocumentUpload}
-        workspaces={workspaces}
-      />
-    ) : (
-      <WorkspaceBrowserPanel
-        activeWorkspaceId={activeWorkspaceId}
-        artifacts={workspaceArtifacts}
-        workspaces={workspaces}
-        onClear={() => {
-          setSelectedPreviewItem(null);
-          void updateWorkspace({
-            selected_item_id: null,
-            current_report_item_id: null,
-          });
-        }}
-        onCreateWorkspace={() => {
-          void createWorkspace();
-        }}
-        onSelectWorkspace={handleSelectWorkspace}
-        onSelectItem={handlePreviewSelection}
-        emptyUploadsMessage="Model-created artifacts like farm records, reports, and charts appear here."
-        files={workspaceFiles}
-        selectedItem={selectedPreviewItem}
-        showFiles={false}
-      />
-    );
+  const documentBrowserPane = (
+    <DocumentBrowserPanel
+      activeThreadId={activeWorkspace?.active_chat_id ?? null}
+      activeWorkspaceId={activeWorkspaceId}
+      documentFiles={documentFiles}
+      onCreateWorkspace={() => {
+        void createWorkspace();
+      }}
+      onDeleteFile={handleDocumentDelete}
+      onImportUrl={handleDocumentImport}
+      onOpenFile={handleDocumentFileOpen}
+      onRefresh={refreshDocumentFileList}
+      onSelectWorkspace={handleSelectWorkspace}
+      onUploadFiles={handleDocumentUpload}
+      workspaces={workspaces}
+    />
+  );
 
-  const outputsPane = (
+  const renderAgriculturePane = (sectionId: "farm" | "orders", showSectionTabs: boolean) => (
+    <AgricultureFarmPane
+      activeSectionId={sectionId}
+      activeWorkspaceId={activeWorkspaceId}
+      applyArtifactOperation={applyArtifactOperation}
+      deleteArtifact={deleteArtifact}
+      farmArtifactSummary={latestFarmArtifact}
+      focusTarget={agricultureFocusTarget}
+      getArtifact={getArtifact}
+      onCreateWorkspace={() => {
+        void createWorkspace();
+      }}
+      onSelectSection={setActiveAgricultureSection}
+      onSelectWorkspace={handleSelectWorkspace}
+      selectedArtifactId={selectedAgricultureArtifactId}
+      showSectionTabs={showSectionTabs}
+      workspaces={workspaces}
+    />
+  );
+
+  const agricultureSectionId = isMobileLayout
+    ? activePaneId === "orders"
+      ? "orders"
+      : "farm"
+    : activeAgricultureDesktopSectionId;
+  const agricultureFarmPane = renderAgriculturePane(agricultureSectionId, !isMobileLayout);
+
+  const documentOutputsPane = (
     <AgentPreviewPane
-      appId={appId}
       artifacts={workspaceArtifacts}
       files={workspaceFiles}
       resolveLocalFile={resolveLocalFile}
@@ -1268,12 +1384,57 @@ export function WorkspaceAppPage({
 
   const accountPane = <AccountPane />;
 
+  if (appId === "agriculture") {
+    return (
+      <WorkspaceAgentPage>
+        {isMobileLayout ? (
+          <>
+            <MobilePaneTabs data-testid="workspace-mobile-tabs">
+              {workspacePanesForApp(appId).map((pane) => (
+                <MobilePaneTabButton
+                  key={pane.id}
+                  $active={pane.id === activePaneId}
+                  aria-pressed={pane.id === activePaneId}
+                  data-testid={`workspace-mobile-tab-${pane.id}`}
+                  onClick={() => handlePaneChange(pane.id)}
+                  type="button"
+                >
+                  {pane.label}
+                </MobilePaneTabButton>
+              ))}
+            </MobilePaneTabs>
+
+            <MobilePaneStack>
+              <MobilePane data-testid="workspace-pane-farm" hidden={activePaneId !== "farm"}>
+                {renderAgriculturePane("farm", false)}
+              </MobilePane>
+              <MobilePane data-testid="workspace-pane-orders" hidden={activePaneId !== "orders"}>
+                {renderAgriculturePane("orders", false)}
+              </MobilePane>
+              <MobilePane data-testid="workspace-pane-chat" hidden={activePaneId !== "chat"}>
+                {activePaneId === "chat" || hasMountedMobileChatPane ? chatPane : null}
+              </MobilePane>
+              <MobilePane data-testid="workspace-pane-account" hidden={activePaneId !== "account"}>
+                {accountPane}
+              </MobilePane>
+            </MobilePaneStack>
+          </>
+        ) : (
+          <DesktopAgricultureLayout>
+            <DesktopFarmColumn>{agricultureFarmPane}</DesktopFarmColumn>
+            <DesktopChatColumn>{chatPane}</DesktopChatColumn>
+          </DesktopAgricultureLayout>
+        )}
+      </WorkspaceAgentPage>
+    );
+  }
+
   return (
     <WorkspaceAgentPage>
       {isMobileLayout ? (
         <>
           <MobilePaneTabs data-testid="workspace-mobile-tabs">
-            {WORKSPACE_PANES.map((pane) => (
+            {workspacePanesForApp(appId).map((pane) => (
               <MobilePaneTabButton
                 key={pane.id}
                 $active={pane.id === activePaneId}
@@ -1289,13 +1450,13 @@ export function WorkspaceAppPage({
 
           <MobilePaneStack>
             <MobilePane data-testid="workspace-pane-browser" hidden={activePaneId !== "browser"}>
-              {browserPane}
+              {documentBrowserPane}
             </MobilePane>
             <MobilePane data-testid="workspace-pane-chat" hidden={activePaneId !== "chat"}>
               {activePaneId === "chat" || hasMountedMobileChatPane ? chatPane : null}
             </MobilePane>
             <MobilePane data-testid="workspace-pane-outputs" hidden={activePaneId !== "outputs"}>
-              {outputsPane}
+              {documentOutputsPane}
             </MobilePane>
             <MobilePane data-testid="workspace-pane-account" hidden={activePaneId !== "account"}>
               {accountPane}
@@ -1304,10 +1465,10 @@ export function WorkspaceAppPage({
         </>
       ) : (
         <DesktopShellLayout>
-          <DesktopOverviewColumn>{browserPane}</DesktopOverviewColumn>
+          <DesktopOverviewColumn>{documentBrowserPane}</DesktopOverviewColumn>
 
           <DesktopMainStage>
-            <DesktopOutputsColumn>{outputsPane}</DesktopOutputsColumn>
+            <DesktopOutputsColumn>{documentOutputsPane}</DesktopOutputsColumn>
             <DesktopChatColumn>{chatPane}</DesktopChatColumn>
           </DesktopMainStage>
         </DesktopShellLayout>
@@ -1358,6 +1519,26 @@ const DesktopShellLayout = styled.section`
   }
 `;
 
+const DesktopAgricultureLayout = styled.section`
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.96fr) minmax(320px, 0.92fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "farm chat";
+  gap: 0.72rem;
+  align-items: stretch;
+
+  @media (max-width: 1320px) {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      "farm"
+      "chat";
+    height: auto;
+  }
+`;
+
 const DesktopOverviewColumn = styled.div`
   min-width: 0;
   min-height: 0;
@@ -1369,6 +1550,15 @@ const DesktopOverviewColumn = styled.div`
   @media (max-width: 1320px) {
     position: static;
   }
+`;
+
+const DesktopFarmColumn = styled.div`
+  grid-area: farm;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 `;
 
 const DesktopMainStage = styled.section`

@@ -18,14 +18,13 @@ import {
   formatByteSize,
   openWorkspaceFileInNewTab,
 } from "../lib/workspace-artifacts";
-import { BRAND_MARK_URL } from "../lib/brand";
 import { getReportSlideGridTemplate } from "../lib/report-slide-layout";
+import { FarmRecordPanel } from "./FarmRecordPanel";
 import type { LocalPdfAttachment, LocalAttachment } from "../types/report";
 import type {
   ChartItemPayloadV1,
   FarmItemPayloadV1,
   PdfSplitItemPayloadV1,
-  WorkspaceAppId,
   WorkspaceCreatedItemDetail,
   WorkspaceCreatedItemSummary,
   WorkspaceUploadItemSummary,
@@ -76,7 +75,7 @@ function summarizeArtifactMeta(artifact: WorkspaceCreatedItemSummary): string {
       : `${artifact.summary.entry_count} split entries`;
   }
   if (artifact.kind === "farm.v1" && "crop_count" in artifact.summary) {
-    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues · ${artifact.summary.project_count} projects`;
+    return `${artifact.summary.crop_count} crops · ${artifact.summary.issue_count} issues · ${artifact.summary.project_count} projects · ${artifact.summary.order_count ?? 0} orders`;
   }
   return artifact.kind;
 }
@@ -294,39 +293,6 @@ function renderLocalFilePreview(
   return <MetaText>Preview unavailable in shell. Open or download this file to inspect it directly.</MetaText>;
 }
 
-function renderAgricultureImageReference(
-  entry: WorkspaceUploadItemSummary,
-  file: LocalAttachment | null,
-) {
-  if (!file) {
-    return (
-      <MissingPayloadCard>
-        <strong>{entry.name}</strong>
-        <MetaText>Local payload unavailable in this browser.</MetaText>
-        <MetaText>{summarizeFileMeta(entry)}</MetaText>
-      </MissingPayloadCard>
-    );
-  }
-
-  return (
-    <AgricultureImageReference data-testid="agriculture-image-reference">
-      <AgricultureImageReferenceCard>
-        <AgricultureImageReferenceEyebrow>Photo reference</AgricultureImageReferenceEyebrow>
-        <AgricultureImageReferenceTitle>Visible in chat</AgricultureImageReferenceTitle>
-        <MetaText>
-          This image stays attached to the conversation so the agent can inspect it there and you
-          can tag it from the composer with <strong>@</strong>.
-        </MetaText>
-        <AgricultureImageReferenceMeta>
-          <span>{summarizeFileMeta(entry)}</span>
-          {entry.byte_size ? <span>{formatByteSize(entry.byte_size)}</span> : null}
-          {entry.mime_type ? <span>{entry.mime_type}</span> : null}
-        </AgricultureImageReferenceMeta>
-      </AgricultureImageReferenceCard>
-    </AgricultureImageReference>
-  );
-}
-
 function renderArtifactPreview(
   artifact: WorkspaceCreatedItemDetail,
   files: LocalAttachment[],
@@ -345,106 +311,7 @@ function renderArtifactPreview(
     );
   }
   if (artifact.kind === "farm.v1") {
-    const farm = artifact.payload as FarmItemPayloadV1;
-    return (
-      <FarmPreview data-testid="farm-preview">
-        <FarmHero>
-          <div>
-            <FarmEyebrow>Farm record</FarmEyebrow>
-            <FarmTitle>{farm.farm_name}</FarmTitle>
-            {farm.location ? <MetaText>{farm.location}</MetaText> : null}
-          </div>
-          <FarmMetrics>
-            <FarmMetric>
-              <strong>{farm.crops.length}</strong>
-              <span>Crops</span>
-            </FarmMetric>
-            <FarmMetric>
-              <strong>{farm.issues.length}</strong>
-              <span>Issues</span>
-            </FarmMetric>
-            <FarmMetric>
-              <strong>{farm.projects.length}</strong>
-              <span>Projects</span>
-            </FarmMetric>
-          </FarmMetrics>
-        </FarmHero>
-
-        <FarmSection>
-          <FarmSectionTitle>Crops</FarmSectionTitle>
-          {farm.crops.length ? (
-            <FarmList>
-              {farm.crops.map((crop) => (
-                <FarmListItem key={crop.id}>
-                  <strong>{crop.name}</strong>
-                  <span>{crop.area}</span>
-                  {crop.expected_yield ? <span>Expected yield: {crop.expected_yield}</span> : null}
-                  {crop.notes ? <MetaText>{crop.notes}</MetaText> : null}
-                </FarmListItem>
-              ))}
-            </FarmList>
-          ) : (
-            <MetaText>No crops tracked yet.</MetaText>
-          )}
-        </FarmSection>
-
-        <FarmSectionGrid>
-          <FarmSection>
-            <FarmSectionTitle>Issues</FarmSectionTitle>
-            {farm.issues.length ? (
-              <FarmList>
-                {farm.issues.map((issue) => (
-                  <FarmListItem key={issue.id}>
-                    <strong>{issue.title}</strong>
-                    <FarmStatusPill $tone={issue.status}>{issue.status}</FarmStatusPill>
-                    {issue.notes ? <MetaText>{issue.notes}</MetaText> : null}
-                  </FarmListItem>
-                ))}
-              </FarmList>
-            ) : (
-              <MetaText>No active issues saved.</MetaText>
-            )}
-          </FarmSection>
-
-          <FarmSection>
-            <FarmSectionTitle>Projects</FarmSectionTitle>
-            {farm.projects.length ? (
-              <FarmList>
-                {farm.projects.map((project) => (
-                  <FarmListItem key={project.id}>
-                    <strong>{project.title}</strong>
-                    <FarmStatusPill $tone={project.status}>{project.status}</FarmStatusPill>
-                    {project.notes ? <MetaText>{project.notes}</MetaText> : null}
-                  </FarmListItem>
-                ))}
-              </FarmList>
-            ) : (
-              <MetaText>No projects tracked yet.</MetaText>
-            )}
-          </FarmSection>
-        </FarmSectionGrid>
-
-        <FarmSection>
-          <FarmSectionTitle>Current work</FarmSectionTitle>
-          {farm.current_work.length ? (
-            <FarmChecklist>
-              {farm.current_work.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </FarmChecklist>
-          ) : (
-            <MetaText>No current work logged yet.</MetaText>
-          )}
-        </FarmSection>
-
-        {farm.notes ? (
-          <FarmSection>
-            <FarmSectionTitle>Notes</FarmSectionTitle>
-            <MetaText>{farm.notes}</MetaText>
-          </FarmSection>
-        ) : null}
-      </FarmPreview>
-    );
+    return <FarmRecordPanel dataTestId="farm-preview" farm={artifact.payload as FarmItemPayloadV1} />;
   }
   const pdfSplit = artifact.payload as PdfSplitItemPayloadV1;
   return (
@@ -455,7 +322,6 @@ function renderArtifactPreview(
 }
 
 export function AgentPreviewPane({
-  appId,
   files,
   artifacts,
   resolveLocalFile,
@@ -463,7 +329,6 @@ export function AgentPreviewPane({
   getArtifact,
   selectedItem,
 }: {
-  appId?: WorkspaceAppId;
   files: WorkspaceUploadItemSummary[];
   artifacts: WorkspaceCreatedItemSummary[];
   resolveLocalFile: (fileId: string) => Promise<LocalAttachment | null>;
@@ -601,32 +466,15 @@ export function AgentPreviewPane({
 
   if (!selectedItem) {
     return (
-      <PaneCard $appId={appId}>
-        {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
-        {appId === "agriculture" ? (
-          <AgricultureEmptyState data-testid="agriculture-preview-empty">
-            <AgricultureEmptyCopy>
-              <AgricultureEmptyTitle>Awaiting plant photos</AgricultureEmptyTitle>
-              <MetaText>
-                Add plant photos in chat, then keep the side pane focused on saved farm records,
-                reports, and other model-created artifacts.
-              </MetaText>
-            </AgricultureEmptyCopy>
-          </AgricultureEmptyState>
-        ) : (
-          <MetaText>Select an upload or created item from the workspace to preview it here.</MetaText>
-        )}
+      <PaneCard>
+        <MetaText>Select an upload or created item from the workspace to preview it here.</MetaText>
       </PaneCard>
     );
   }
 
   if (selectedFileEntry) {
-    const showAgricultureImageReference =
-      appId === "agriculture" && selectedFileEntry.kind === "image";
-
     return (
-      <PaneCard $appId={appId}>
-        {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
+      <PaneCard>
         <PaneHeader>
           <div>
             <PaneTitle>{selectedFileEntry.name}</PaneTitle>
@@ -648,17 +496,14 @@ export function AgentPreviewPane({
             </PaneActionRow>
           ) : null}
         </PaneHeader>
-        {showAgricultureImageReference
-          ? renderAgricultureImageReference(selectedFileEntry, selectedFile)
-          : renderLocalFilePreview(selectedFileEntry, selectedFile)}
+        {renderLocalFilePreview(selectedFileEntry, selectedFile)}
       </PaneCard>
     );
   }
 
   if (selectedArtifactSummary) {
     return (
-      <PaneCard $appId={appId}>
-        {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
+      <PaneCard>
         <PaneHeader>
           <div>
             <PaneTitle>{selectedArtifactSummary.title}</PaneTitle>
@@ -694,8 +539,7 @@ export function AgentPreviewPane({
   }
 
   return (
-    <PaneCard $appId={appId}>
-      {appId === "agriculture" ? <AgriculturePaneWatermark alt="" aria-hidden="true" data-testid="agriculture-preview-watermark" data-watermark="true" src={BRAND_MARK_URL} /> : null}
+    <PaneCard>
       <MetaText>Select an upload or created item from the workspace to preview it here.</MetaText>
     </PaneCard>
   );
@@ -720,8 +564,7 @@ function collectArtifactReferencedImageFileIds(
   return [...referencedFileIds];
 }
 
-const PaneCard = styled.section<{ $appId?: WorkspaceAppId }>`
-  position: relative;
+const PaneCard = styled.section`
   display: grid;
   gap: 0.8rem;
   min-height: 0;
@@ -730,27 +573,9 @@ const PaneCard = styled.section<{ $appId?: WorkspaceAppId }>`
   padding: 0.92rem;
   border-radius: var(--radius-xl);
   border: 1px solid rgba(31, 41, 55, 0.12);
-  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(249, 244, 238, 0.9)),
     var(--panel);
-
-  > :not([data-watermark="true"]) {
-    position: relative;
-    z-index: 1;
-  }
-`;
-
-const AgriculturePaneWatermark = styled.img`
-  position: absolute;
-  right: 1.5rem;
-  bottom: 0.9rem;
-  width: min(26%, 180px);
-  height: auto;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.15;
-  filter: saturate(0.9);
 `;
 
 const PaneHeader = styled.div`
@@ -765,220 +590,6 @@ const PaneTitle = styled.h3`
   line-height: 1.12;
 `;
 
-const FarmPreview = styled.div`
-  display: grid;
-  gap: 0.9rem;
-`;
-
-const FarmHero = styled.section`
-  display: grid;
-  gap: 0.8rem;
-  padding: 0.95rem 1rem;
-  border-radius: 1rem;
-  background: linear-gradient(135deg, rgba(117, 158, 126, 0.13), rgba(255, 255, 255, 0.88));
-  border: 1px solid rgba(101, 144, 115, 0.12);
-`;
-
-const FarmEyebrow = styled.div`
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent-deep) 74%, var(--ink) 26%);
-`;
-
-const FarmTitle = styled.h4`
-  margin: 0.18rem 0 0;
-  font-size: 1.22rem;
-  line-height: 1.08;
-`;
-
-const FarmMetrics = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
-  gap: 0.6rem;
-`;
-
-const FarmMetric = styled.div`
-  display: grid;
-  gap: 0.16rem;
-  padding: 0.68rem 0.72rem;
-  border-radius: 0.92rem;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(31, 41, 55, 0.08);
-
-  strong {
-    font-size: 1.05rem;
-    line-height: 1;
-  }
-
-  span {
-    font-size: 0.74rem;
-    color: var(--muted);
-  }
-`;
-
-const FarmSectionGrid = styled.div`
-  display: grid;
-  gap: 0.9rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-`;
-
-const FarmSection = styled.section`
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.9rem 0.95rem;
-  border-radius: 0.95rem;
-  border: 1px solid rgba(31, 41, 55, 0.08);
-  background: rgba(255, 255, 255, 0.78);
-`;
-
-const FarmSectionTitle = styled.h5`
-  margin: 0;
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-`;
-
-const FarmList = styled.div`
-  display: grid;
-  gap: 0.55rem;
-`;
-
-const FarmListItem = styled.div`
-  display: grid;
-  gap: 0.18rem;
-  padding: 0.75rem 0.82rem;
-  border-radius: 0.88rem;
-  background: color-mix(in srgb, rgba(117, 158, 126, 0.08) 45%, white 55%);
-  border: 1px solid rgba(101, 144, 115, 0.08);
-
-  strong {
-    font-size: 0.92rem;
-    line-height: 1.15;
-  }
-
-  span {
-    font-size: 0.78rem;
-    color: var(--muted);
-  }
-`;
-
-const FarmStatusPill = styled.span<{ $tone: string }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  padding: 0.18rem 0.45rem;
-  border-radius: 999px;
-  background: ${({ $tone }) =>
-    $tone === "resolved" || $tone === "done"
-      ? "rgba(121, 160, 106, 0.16)"
-      : $tone === "active"
-        ? "rgba(178, 128, 55, 0.14)"
-        : "rgba(92, 122, 153, 0.14)"};
-  color: ${({ $tone }) =>
-    $tone === "resolved" || $tone === "done"
-      ? "#35533d"
-      : $tone === "active"
-        ? "#6f4b1d"
-        : "#34546d"};
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: capitalize;
-`;
-
-const FarmChecklist = styled.ul`
-  margin: 0;
-  padding-left: 1rem;
-  display: grid;
-  gap: 0.35rem;
-
-  li {
-    color: var(--ink);
-  }
-`;
-
-const AgricultureEmptyState = styled.div`
-  position: relative;
-  display: grid;
-  place-items: center;
-  gap: 0.75rem;
-  min-height: 100%;
-  padding: 1.5rem 1rem;
-  text-align: center;
-`;
-
-const AgricultureEmptyCopy = styled.div`
-  display: grid;
-  gap: 0.45rem;
-  max-width: 28rem;
-  padding: 1rem 1.2rem;
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.52);
-  backdrop-filter: blur(2px);
-`;
-
-const AgricultureEmptyTitle = styled.h3`
-  margin: 0;
-  font-size: 1.02rem;
-  color: color-mix(in srgb, var(--accent-deep) 78%, var(--ink) 22%);
-`;
-
-const AgricultureImageReference = styled.div`
-  display: grid;
-  place-items: center;
-  min-height: min(58vh, 34rem);
-  padding: 1.25rem 0.5rem 0.75rem;
-`;
-
-const AgricultureImageReferenceCard = styled.div`
-  display: grid;
-  gap: 0.52rem;
-  width: min(100%, 28rem);
-  padding: 1.15rem 1.2rem;
-  border-radius: 1.2rem;
-  border: 1px solid rgba(101, 144, 115, 0.16);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(245, 250, 245, 0.62));
-  box-shadow: 0 18px 44px rgba(54, 82, 58, 0.06);
-  backdrop-filter: blur(3px);
-`;
-
-const AgricultureImageReferenceEyebrow = styled.div`
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent-deep) 74%, var(--ink) 26%);
-`;
-
-const AgricultureImageReferenceTitle = styled.h4`
-  margin: 0;
-  font-size: 1.28rem;
-  line-height: 1.08;
-  color: var(--ink);
-`;
-
-const AgricultureImageReferenceMeta = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.42rem;
-  margin-top: 0.2rem;
-
-  span {
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.9rem;
-    padding: 0.28rem 0.62rem;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.7);
-    border: 1px solid rgba(31, 41, 55, 0.08);
-    color: color-mix(in srgb, var(--accent-deep) 56%, var(--ink) 44%);
-    font-size: 0.74rem;
-    font-weight: 700;
-  }
-`;
 
 const PaneActionRow = styled.div`
   display: inline-flex;

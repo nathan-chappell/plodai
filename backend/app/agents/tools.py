@@ -227,15 +227,15 @@ def _log_client_tool_schema(
         dedupe=True,
         size=f"{summary.schema_chars} chars",
     )
-    if summary.schema_chars > 4500:
-        log_event(
-            logger,
-            logging.WARNING,
-            "tool.schema_near_limit",
-            rendered=rendered_lines,
-            dedupe=True,
-            size=f"{summary.schema_chars} chars",
-        )
+    # if summary.schema_chars > 4500:
+    #     log_event(
+    #         logger,
+    #         logging.WARNING,
+    #         "tool.schema_near_limit",
+    #         rendered=rendered_lines,
+    #         dedupe=True,
+    #         size=f"{summary.schema_chars} chars",
+    #     )
 
 
 def _log_tool_start(

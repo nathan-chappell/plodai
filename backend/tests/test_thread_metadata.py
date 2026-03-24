@@ -320,28 +320,28 @@ def test_parse_chat_metadata_keeps_generic_tool_display_metadata() -> None:
                     {
                         "agent_id": "agriculture-agent",
                         "agent_name": "Agriculture",
-                        "instructions": "Inspect plant images.",
+                        "instructions": "Assess crop photos and maintain farm context.",
                         "client_tools": [
                             {
                                 "type": "function",
-                                "name": "inspect_image_file",
-                                "description": "Inspect an uploaded image.",
+                                "name": "save_farm_state",
+                                "description": "Create or replace the saved farm record for this workspace.",
                                 "parameters": {
                                     "type": "object",
                                     "properties": {
-                                        "file_id": {"type": "string"},
-                                        "max_dimension": {"type": "integer"},
+                                        "farm_name": {"type": "string"},
+                                        "location": {"type": "string"},
                                     },
-                                    "required": ["file_id"],
+                                    "required": ["farm_name"],
                                     "additionalProperties": False,
                                 },
                                 "strict": True,
                                 "display": {
-                                    "label": "Inspect image",
-                                    "prominent_args": ["file_id", "max_dimension"],
+                                    "label": "Save Farm State",
+                                    "prominent_args": ["farm_name", "location"],
                                     "arg_labels": {
-                                        "file_id": "file",
-                                        "max_dimension": "size",
+                                        "farm_name": "farm",
+                                        "location": "location",
                                     },
                                 },
                             }
@@ -354,10 +354,10 @@ def test_parse_chat_metadata_keeps_generic_tool_display_metadata() -> None:
     )
 
     assert metadata["agent_bundle"]["agents"][0]["client_tools"][0]["display"] == {
-        "label": "Inspect image",
-        "prominent_args": ["file_id", "max_dimension"],
+        "label": "Save Farm State",
+        "prominent_args": ["farm_name", "location"],
         "arg_labels": {
-            "file_id": "file",
-            "max_dimension": "size",
+            "farm_name": "farm",
+            "location": "location",
         },
     }

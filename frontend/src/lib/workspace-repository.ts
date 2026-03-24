@@ -88,7 +88,7 @@ export class WorkspaceRepository {
     }
     return this.apiClient.createWorkspace({
       app_id: appId,
-      name: "Workspace",
+      name: appId === "agriculture" ? "Farm" : "Documents",
     });
   }
 
@@ -174,6 +174,10 @@ export class WorkspaceRepository {
     itemId: string,
   ): Promise<WorkspaceCreatedItemDetail> {
     return this.apiClient.getItem(workspaceId, itemId);
+  }
+
+  async deleteItem(workspaceId: string, itemId: string): Promise<void> {
+    await this.apiClient.deleteItem(workspaceId, itemId);
   }
 
   async listItemRevisions(

@@ -8,7 +8,7 @@ import type {
   StoredFilePreview,
   StoredFileSourceKind,
 } from "../types/stored-file";
-import type { WorkspaceAppId } from "../types/workspace";
+import type { PublicFarmOrderResponse, WorkspaceAppId } from "../types/workspace";
 
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_URL = import.meta.env.VITE_CHATKIT_URL ?? deriveChatKitUrl(API_BASE_URL);
@@ -103,6 +103,25 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return (await response.json()) as T;
 }
 
+export async function publicApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers ?? {});
+
+  if (!headers.has("Content-Type") && init?.body) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+
+  if (!response.ok) {
+    throw await buildApiError(response);
+  }
+
+  return (await response.json()) as T;
+}
+
 export async function uploadStoredFile(params: {
   file: File;
   workspaceId: string;
@@ -169,6 +188,15 @@ export async function searchAgricultureEntities(params: {
       query: params.query,
     }),
   });
+}
+
+export async function fetchPublicFarmOrder(
+  workspaceId: string,
+  orderId: string,
+): Promise<PublicFarmOrderResponse> {
+  return publicApiRequest<PublicFarmOrderResponse>(
+    `/public/farm-orders/${encodeURIComponent(workspaceId)}/${encodeURIComponent(orderId)}`,
+  );
 }
 
 export async function listDocumentFiles(threadId: string): Promise<DocumentFileListResponse> {

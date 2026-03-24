@@ -42,10 +42,12 @@ from backend.app.schemas.stored_file import (
 from backend.app.services.agriculture_entity_service import AgricultureEntityService
 from backend.app.services.stored_file_service import StoredFileService
 from backend.app.schemas.workspace import (
+    PublicFarmOrderResponse,
     WorkspaceCreatedItemDetail,
     WorkspaceCreateRequest,
     WorkspaceAppId,
     WorkspaceItemCreateRequest,
+    WorkspaceItemDeleteResponse,
     WorkspaceItemDetail,
     WorkspaceItemOperationRequest,
     WorkspaceItemRevisionEntry,
@@ -56,6 +58,7 @@ from backend.app.schemas.workspace import (
     WorkspaceUploadDeleteResponse,
     WorkspaceUploadItemSummary,
 )
+from backend.app.services.public_farm_order_service import PublicFarmOrderService
 from backend.app.services.workspace_service import (
     WorkspaceRevisionConflictError,
     WorkspaceService,
@@ -207,6 +210,23 @@ async def get_workspace(
     )
 
 
+@router.get(
+    "/public/farm-orders/{workspace_id}/{order_id}",
+    response_model=PublicFarmOrderResponse,
+)
+async def get_public_farm_order(
+    workspace_id: str,
+    order_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await PublicFarmOrderService(db).get_public_order(
+        workspace_id=workspace_id,
+        order_id=order_id,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+
+
 @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceState)
 async def patch_workspace(
     workspace_id: str,
@@ -285,6 +305,23 @@ async def get_workspace_item(
     db: AsyncSession = Depends(get_db),
 ):
     return await WorkspaceService(db).get_item_detail(
+        user_id=user.id,
+        workspace_id=workspace_id,
+        item_id=item_id,
+    )
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/items/{item_id}",
+    response_model=WorkspaceItemDeleteResponse,
+)
+async def delete_workspace_item(
+    workspace_id: str,
+    item_id: str,
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await WorkspaceService(db).delete_item(
         user_id=user.id,
         workspace_id=workspace_id,
         item_id=item_id,
@@ -389,7 +426,10 @@ async def complete_chatkit_attachment_upload(
     token: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
 ):
-    store = DatabaseMemoryStore(db)
+    store = DatabaseMemoryStore(
+        db,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
     try:
         pending_upload = await store.resolve_pending_attachment_upload(
             attachment_id=attachment_id,

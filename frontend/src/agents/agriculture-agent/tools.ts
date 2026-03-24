@@ -16,7 +16,7 @@ export function buildAgricultureAgentFarmToolCatalog(): FunctionToolDefinition[]
   return [
     buildToolDefinition(
       "get_farm_state",
-      "Read the saved farm record with crops, issues, projects, and current work for this workspace.",
+      "Read the saved farm record for this workspace. Treat it as durable notes before adding new crop findings, issues, seasonal work, or orders.",
       getFarmStateToolSchema,
       {
         label: "Get Farm State",
@@ -24,7 +24,7 @@ export function buildAgricultureAgentFarmToolCatalog(): FunctionToolDefinition[]
     ),
     buildToolDefinition(
       "save_farm_state",
-      "Create or replace the saved farm record for this workspace after merging any updates the user asked for.",
+      "Create or update the saved farm record for this workspace after merging new findings into the existing farm state. Use this as durable note-taking for important crop facts, issues, seasonal work, uncertainty, and orders.",
       saveFarmStateToolSchema,
       {
         label: "Save Farm State",

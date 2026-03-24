@@ -1,6 +1,7 @@
 import { apiRequest } from "./api";
 import type {
   ApplyWorkspaceItemOperationPayload,
+  DeleteWorkspaceItemResponse,
   DeleteWorkspaceUploadResponse,
   WorkspaceCreatedItemDetail,
   WorkspaceAppId,
@@ -78,6 +79,15 @@ export class WorkspaceApiClient {
     itemId: string,
   ): Promise<WorkspaceCreatedItemDetail> {
     return apiRequest<WorkspaceCreatedItemDetail>(`/workspaces/${workspaceId}/items/${itemId}`);
+  }
+
+  deleteItem(
+    workspaceId: string,
+    itemId: string,
+  ): Promise<DeleteWorkspaceItemResponse> {
+    return apiRequest<DeleteWorkspaceItemResponse>(`/workspaces/${workspaceId}/items/${itemId}`, {
+      method: "DELETE",
+    });
   }
 
   listItemRevisions(

@@ -12,6 +12,7 @@ from backend.app.schemas.workspace import (
     WorkspaceItemCreateRequest,
     WorkspaceItemOperationRequest,
     WorkspaceReportPayload,
+    WorkspaceUpdateRequest,
 )
 from backend.app.services.workspace_service import (
     WorkspaceRevisionConflictError,
@@ -126,12 +127,13 @@ async def test_workspace_service_tracks_farm_items(
             app_id="agriculture",
             name="Farm workspace",
         )
+        item_id = f"farm-overview-{uuid.uuid4().hex}"
 
         detail = await service.create_item(
             user_id=user_id,
             workspace_id=workspace.workspace_id,
             request=WorkspaceItemCreateRequest(
-                id="farm-overview",
+                id=item_id,
                 kind="farm.v1",
                 created_by_agent_id="agriculture-agent",
                 payload=FarmItemPayload(
@@ -148,6 +150,7 @@ async def test_workspace_service_tracks_farm_items(
                     ],
                     issues=[],
                     projects=[],
+                    orders=[],
                     current_work=["Scout lower rows"],
                     notes="Initial setup.",
                 ),
@@ -195,6 +198,22 @@ async def test_workspace_service_tracks_farm_items(
                             "status": "active",
                         }
                     ],
+                    orders=[
+                        {
+                            "id": "order_1",
+                            "title": "Sataras mix",
+                            "status": "live",
+                            "price_label": "9 EUR",
+                            "items": [
+                                {
+                                    "id": "order_item_1",
+                                    "label": "Onions",
+                                    "quantity": "2 kg",
+                                    "crop_id": "crop_1",
+                                }
+                            ],
+                        }
+                    ],
                     current_work=["Scout lower rows", "Check irrigation pressure"],
                     notes="Expanded farm record.",
                 ),
@@ -205,3 +224,67 @@ async def test_workspace_service_tracks_farm_items(
         assert updated.summary.crop_count == 2
         assert updated.summary.issue_count == 1
         assert updated.summary.project_count == 1
+        assert updated.summary.order_count == 1
+
+
+@pytest.mark.anyio
+async def test_workspace_service_deletes_created_items(
+    initialized_db: None,
+) -> None:
+    user_id = f"user_workspace_delete_{uuid.uuid4().hex}"
+
+    async with AsyncSessionLocal() as db:
+        service = WorkspaceService(db)
+        workspace = await service.create_workspace(
+            user_id=user_id,
+            app_id="agriculture",
+            name="Farm workspace",
+        )
+        item_id = f"farm-overview-{uuid.uuid4().hex}"
+
+        detail = await service.create_item(
+            user_id=user_id,
+            workspace_id=workspace.workspace_id,
+            request=WorkspaceItemCreateRequest(
+                id=item_id,
+                kind="farm.v1",
+                created_by_agent_id="agriculture-agent",
+                payload=FarmItemPayload(
+                    version="v1",
+                    farm_name="North Orchard",
+                    location="Block A",
+                    crops=[],
+                    issues=[],
+                    projects=[],
+                    orders=[],
+                    current_work=[],
+                    notes=None,
+                ),
+            ),
+        )
+
+        await service.update_workspace(
+            user_id=user_id,
+            workspace_id=workspace.workspace_id,
+            app_id="agriculture",
+            update=WorkspaceUpdateRequest(
+                selected_item_id=detail.id,
+            ),
+        )
+
+        deleted = await service.delete_item(
+            user_id=user_id,
+            workspace_id=workspace.workspace_id,
+            item_id=detail.id,
+        )
+
+        assert deleted.deleted is True
+
+        state = await service.get_workspace_state(
+            user_id=user_id,
+            workspace_id=workspace.workspace_id,
+            app_id="agriculture",
+        )
+
+        assert state.items == []
+        assert state.selected_item_id is None

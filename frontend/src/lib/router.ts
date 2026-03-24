@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+const FARM_ORDER_PATH_PREFIX = "/farm-orders/";
+
 function currentPathname(): string {
   if (typeof window === "undefined") {
     return "/";
@@ -32,4 +34,30 @@ export function navigate(pathname: string) {
   }
   window.history.pushState({}, "", pathname);
   window.dispatchEvent(new Event("app:navigate"));
+}
+
+export function isFarmOrderPath(pathname: string): boolean {
+  return pathname.startsWith(FARM_ORDER_PATH_PREFIX);
+}
+
+export function parseFarmOrderPath(
+  pathname: string,
+): { workspaceId: string; orderId: string } | null {
+  if (!isFarmOrderPath(pathname)) {
+    return null;
+  }
+  const [, workspaceId = "", orderId = ""] = pathname
+    .slice(FARM_ORDER_PATH_PREFIX.length)
+    .split("/");
+  if (!workspaceId || !orderId) {
+    return null;
+  }
+  return {
+    workspaceId: decodeURIComponent(workspaceId),
+    orderId: decodeURIComponent(orderId),
+  };
+}
+
+export function buildFarmOrderPath(workspaceId: string, orderId: string): string {
+  return `${FARM_ORDER_PATH_PREFIX}${encodeURIComponent(workspaceId)}/${encodeURIComponent(orderId)}`;
 }

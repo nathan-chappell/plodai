@@ -8,7 +8,8 @@ function getEntityType(entity: Entity): AgricultureEntityType | null {
     entityType === "farm_crop" ||
     entityType === "farm_issue" ||
     entityType === "farm_project" ||
-    entityType === "farm_current_work"
+    entityType === "farm_current_work" ||
+    entityType === "farm_order"
     ? entityType
     : null;
 }
@@ -76,7 +77,9 @@ export function buildAgricultureEntityPreview(
         ? "Farm issue"
         : entityType === "farm_project"
           ? "Farm project"
-          : "Current work";
+          : entityType === "farm_order"
+            ? "Farm order"
+            : "Current work";
   const summary =
     entityType === "farm_crop"
       ? [entity.data.area, entity.data.expected_yield && `Expected yield: ${entity.data.expected_yield}`]
@@ -84,8 +87,10 @@ export function buildAgricultureEntityPreview(
           .join(" | ")
       : entityType === "farm_issue" || entityType === "farm_project"
         ? entity.data.status || entity.data.farm_name || ""
+        : entityType === "farm_order"
+          ? [entity.data.status, entity.data.price_label].filter(Boolean).join(" | ")
         : entity.data.farm_name || "";
-  const notes = entity.data.notes || "";
+  const notes = entityType === "farm_order" ? entity.data.summary || entity.data.notes || "" : entity.data.notes || "";
 
   return {
     preview: {

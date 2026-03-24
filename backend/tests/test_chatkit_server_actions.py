@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from datetime import datetime
 from types import SimpleNamespace
 
 from chatkit.types import ProgressUpdateEvent, ThreadItemRemovedEvent

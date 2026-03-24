@@ -37,4 +37,5 @@ AgricultureEntityType = Literal[
     "farm_issue",
     "farm_project",
     "farm_current_work",
+    "farm_order",
 ]
