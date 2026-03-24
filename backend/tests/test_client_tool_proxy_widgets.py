@@ -246,6 +246,5 @@ def test_document_agent_uses_client_proxy_tools_without_server_pdf_hosting() -> 
 
     assert [tool.name for tool in tools] == [
         "name_current_thread",
-        "make_plan",
         "inspect_document_file",
     ]

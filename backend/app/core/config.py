@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     chat_attachment_max_model_bytes: int = 32 * 1024 * 1024
     document_thread_max_bytes: int = 100 * 1024 * 1024
     document_preview_max_pages: int = 12
+    PUBLIC_BASE_URL: str | None = None
     clerk_authorized_parties: list[str] = []
     clerk_clock_skew_ms: int = 5000
     USE_COLORLOG: bool = False
@@ -40,3 +41,23 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def resolve_public_base_url(
+    fallback_base_url: str | None = None,
+    *,
+    settings: Settings | None = None,
+) -> str:
+    resolved_settings = settings or get_settings()
+    configured_base_url = (
+        resolved_settings.PUBLIC_BASE_URL.strip()
+        if isinstance(resolved_settings.PUBLIC_BASE_URL, str)
+        else ""
+    )
+    if configured_base_url:
+        return configured_base_url.rstrip("/")
+
+    if isinstance(fallback_base_url, str) and fallback_base_url.strip():
+        return fallback_base_url.rstrip("/")
+
+    return "http://localhost"

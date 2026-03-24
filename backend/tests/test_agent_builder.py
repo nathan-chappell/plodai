@@ -94,8 +94,12 @@ def test_build_agent_graph_compiles_tools_per_agent() -> None:
     chart_tool_names = [tool.name for tool in agents["chart-agent"].tools]
 
     assert "create_report" in report_tool_names
+    assert "name_current_thread" in report_tool_names
+    assert "make_plan" not in report_tool_names
     assert "render_chart_from_dataset" not in report_tool_names
     assert "render_chart_from_dataset" in chart_tool_names
+    assert "name_current_thread" in chart_tool_names
+    assert "make_plan" not in chart_tool_names
     assert "create_report" not in chart_tool_names
     assert [handoff.tool_name for handoff in agents["report-agent"].handoffs] == [
         "delegate_to_chart_agent"
@@ -321,12 +325,15 @@ async def _capture_widget(
     widget_calls.append((widget, copy_text))
 
 
-def test_build_agent_instructions_includes_current_investigation_brief() -> None:
+def test_build_agent_instructions_includes_current_naming_context() -> None:
     context = ReportAgentContext(
         report_id="report_123",
         user_id="user_123",
         user_email=None,
         db=None,
+        workspace_name="North Orchard Workspace",
+        thread_title="New chat",
+        assistant_turn_count=1,
         thread_metadata={
             "investigation_brief": "Compare west and east revenue.",
         },
@@ -338,6 +345,11 @@ def test_build_agent_instructions_includes_current_investigation_brief() -> None
     )
 
     assert "Inspect the available datasets." in rendered
+    assert "call `name_current_thread`" in rendered
+    assert "second assistant turn" in rendered
+    assert "Workspace name: North Orchard Workspace" in rendered
+    assert "Current thread title: unnamed (default untitled state)" in rendered
+    assert "Completed assistant turns before this response: 1" in rendered
     assert "Current investigation brief from the user:" in rendered
     assert "Compare west and east revenue." in rendered
 

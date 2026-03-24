@@ -113,4 +113,122 @@ describe("client tool runtime", () => {
     expect((createdPayload?.payload as FarmItemPayloadV1).farm_name).toBe("North Orchard");
     expect(result.payload.artifact_id).toBe("farm-persisted-farm-id");
   });
+
+  it("updates the existing farm artifact instead of creating a second one", async () => {
+    let createCalls = 0;
+    let appliedOperation: Parameters<AgentRuntimeContext["applyArtifactOperation"]>[1] | null = null;
+
+    const workspace = createWorkspaceContext({
+      artifacts: () => [
+        {
+          origin: "created",
+          id: "farm-existing",
+          workspace_id: "workspace-1",
+          kind: "farm.v1",
+          schema_version: "v1",
+          title: "North Orchard",
+          current_revision: 2,
+          created_by_user_id: "user-1",
+          created_by_agent_id: "plodai-agent",
+          last_edited_by_agent_id: "plodai-agent",
+          summary: {
+            crop_count: 1,
+            order_count: 0,
+          },
+          latest_op: "farm.set_state",
+          created_at: "2026-03-24T00:00:00Z",
+          updated_at: "2026-03-24T00:05:00Z",
+        },
+      ],
+      createArtifact: async () => {
+        createCalls += 1;
+        throw new Error("createArtifact should not be called for an existing farm");
+      },
+      getArtifact: async () => ({
+        origin: "created",
+        id: "farm-existing",
+        workspace_id: "workspace-1",
+        kind: "farm.v1",
+        schema_version: "v1",
+        title: "North Orchard",
+        current_revision: 2,
+        created_by_user_id: "user-1",
+        created_by_agent_id: "plodai-agent",
+        last_edited_by_agent_id: "plodai-agent",
+        summary: {
+          crop_count: 1,
+          order_count: 0,
+        },
+        latest_op: "farm.set_state",
+        created_at: "2026-03-24T00:00:00Z",
+        updated_at: "2026-03-24T00:05:00Z",
+        payload: {
+          version: "v1",
+          farm_name: "North Orchard",
+          location: "Block A",
+          crops: [],
+          orders: [],
+          notes: null,
+        } satisfies FarmItemPayloadV1,
+      }),
+      applyArtifactOperation: async (_artifactId, operation) => {
+        appliedOperation = operation;
+        return {
+          origin: "created",
+          id: "farm-existing",
+          workspace_id: "workspace-1",
+          kind: "farm.v1",
+          schema_version: "v1",
+          title: "North Orchard",
+          current_revision: 3,
+          created_by_user_id: "user-1",
+          created_by_agent_id: "plodai-agent",
+          last_edited_by_agent_id: "plodai-agent",
+          summary: {
+            crop_count: 1,
+            order_count: 0,
+          },
+          latest_op: "farm.set_state",
+          created_at: "2026-03-24T00:00:00Z",
+          updated_at: "2026-03-24T00:10:00Z",
+          payload: {
+            version: "v1",
+            farm_name: "North Orchard",
+            location: "Block A",
+            crops: [
+              {
+                id: "crop-1",
+                name: "Walnut",
+                area: "North field",
+                expected_yield: null,
+                notes: "Healthy canopy",
+              },
+            ],
+            orders: [],
+            notes: "Updated from another pass",
+          } satisfies FarmItemPayloadV1,
+        } satisfies WorkspaceCreatedItemDetail;
+      },
+    });
+
+    const result = await executeLocalTool(workspace, "save_farm_state", {
+      farm_name: "North Orchard",
+      location: "Block A",
+      crops: [
+        {
+          id: "crop-1",
+          name: "Walnut",
+          area: "North field",
+          expected_yield: null,
+          notes: "Healthy canopy",
+        },
+      ],
+      notes: "Updated from another pass",
+    });
+
+    expect(createCalls).toBe(0);
+    expect(appliedOperation?.operation.op).toBe("farm.set_state");
+    expect(appliedOperation?.operation.farm_name).toBe("North Orchard");
+    expect(result.payload.artifact_id).toBe("farm-existing");
+  });
 });

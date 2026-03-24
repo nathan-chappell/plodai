@@ -148,6 +148,7 @@ def resolve_thread_runtime_state(
 
     context.report_id = thread.id
     context.thread_metadata = metadata
+    context.thread_title = thread.title
     context.chart_cache = dict(metadata.get("chart_cache") or {})
     workspace_state = metadata.get("workspace_state")
     context.workspace_id = (

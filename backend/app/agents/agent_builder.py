@@ -1,13 +1,11 @@
 import logging
 from collections.abc import Mapping
-from datetime import datetime
 
 from agents import Agent, handoff
 from agents.tool import Tool
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 from agents.model_settings import ModelSettings
 from chatkit.agents import AgentContext as ChatKitAgentContext
-from chatkit.types import HiddenContextItem, ThreadItemDoneEvent
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.tools import (
@@ -19,11 +17,12 @@ from backend.app.agents.widgets import (
     build_handoff_trace_copy_text,
     build_handoff_trace_widget,
 )
-from backend.app.chatkit.metadata import AgentSpec, AgentBundle, active_plan_execution
+from backend.app.chatkit.metadata import AgentSpec, AgentBundle
 from backend.app.core.logging import get_logger, log_event
 
 COMPACTION_THRESHOLD_TOKENS = 200_000
 logger = get_logger("agents.agent_builder")
+UNTITLED_THREAD_TITLES = frozenset({"new chat"})
 
 BASE_AGENT_INSTRUCTIONS = """
 You are a client-configured agent operating over tools and context declared by the current workspace.
@@ -35,37 +34,48 @@ Important operating rules:
 4. If a required tool is not present in the registered tool catalog, say so plainly instead of inventing one.
 5. When the user's goal is clear enough to act on, continue decisively without asking for unnecessary confirmation.
 6. Ask clarifying questions only when missing information, permissions, or tool availability would materially change the result.
-7. When you call `make_plan`, include `execution_hints` when you can identify a concrete done condition, preferred tool, or preferred handoff for a step.
+7. If the current thread title is blank, missing, or still the default untitled title (for example `New chat`), call `name_current_thread` with a concise descriptive title no later than the end of your second assistant turn.
+8. Once the thread already has a descriptive title, keep it stable unless the user explicitly asks to rename it.
 """.strip()
+
+
+def _is_untitled_thread_title(value: object) -> bool:
+    if not isinstance(value, str):
+        return True
+    cleaned = value.strip()
+    if not cleaned:
+        return True
+    return cleaned.casefold() in UNTITLED_THREAD_TITLES
+
+
+def _current_thread_title(context: ReportAgentContext) -> str | None:
+    if isinstance(context.thread_title, str) and context.thread_title.strip():
+        return context.thread_title.strip()
+    raw_title = context.thread_metadata.get("title")
+    if isinstance(raw_title, str) and raw_title.strip():
+        return raw_title.strip()
+    return None
+
+
+def _workspace_name_for_prompt(context: ReportAgentContext) -> str:
+    if isinstance(context.workspace_name, str) and context.workspace_name.strip():
+        return context.workspace_name.strip()
+    return "unnamed workspace"
+
+
+def _thread_title_for_prompt(context: ReportAgentContext) -> str:
+    title = _current_thread_title(context)
+    if _is_untitled_thread_title(title):
+        return "unnamed (default untitled state)"
+    return title or "unnamed (default untitled state)"
 
 
 def _build_handoff_callback(
     *,
     source_agent_name: str,
     target_agent_name: str,
-    handoff_tool_name: str,
 ):
     async def _on_handoff(run_context) -> None:
-        request_context = getattr(run_context.context, "request_context", None)
-        thread_metadata = getattr(request_context, "thread_metadata", None)
-        if isinstance(thread_metadata, dict) and active_plan_execution(thread_metadata):
-            await run_context.context.stream(
-                ThreadItemDoneEvent(
-                    item=HiddenContextItem(
-                        id=run_context.context.generate_id("sdk_hidden_context"),
-                        thread_id=run_context.context.thread.id,
-                        created_at=datetime.now(),
-                        content={
-                            "kind": "plan_handoff",
-                            "source_agent_name": source_agent_name,
-                            "target_agent_name": target_agent_name,
-                            "handoff_tool_name": handoff_tool_name,
-                            "summary": f"{source_agent_name} -> {target_agent_name}",
-                        },
-                    )
-                )
-            )
-            return
         await run_context.context.stream_widget(
             build_handoff_trace_widget(
                 source_agent_name=source_agent_name,
@@ -86,6 +96,16 @@ def _build_agent_instructions(
     instructions: str,
 ) -> str:
     sections = [BASE_AGENT_INSTRUCTIONS, instructions.strip()]
+    sections.append(
+        "\n".join(
+            [
+                "Current naming context:",
+                f"- Workspace name: {_workspace_name_for_prompt(context)}",
+                f"- Current thread title: {_thread_title_for_prompt(context)}",
+                f"- Completed assistant turns before this response: {context.assistant_turn_count}",
+            ]
+        )
+    )
 
     investigation_brief = context.thread_metadata.get("investigation_brief")
     if investigation_brief:
@@ -134,9 +154,10 @@ def _build_model_settings(
     context: ReportAgentContext,
     *,
     agent_spec: AgentSpec,
+    model_settings_override: ModelSettings | None = None,
 ) -> ModelSettings:
     safety_identifier = context.user_id[:64]
-    return ModelSettings(
+    settings = ModelSettings(
         parallel_tool_calls=False,
         response_include=["web_search_call.action.sources"],
         metadata=_build_response_api_metadata(
@@ -153,6 +174,7 @@ def _build_model_settings(
             ],
         },
     )
+    return settings.resolve(model_settings_override)
 
 
 def _build_agent_graph(
@@ -160,6 +182,7 @@ def _build_agent_graph(
     *,
     agent_bundle: AgentBundle,
     model: str | None,
+    model_settings_override: ModelSettings | None = None,
 ) -> dict[str, Agent[ChatKitAgentContext[ReportAgentContext]]]:
     agents_by_agent_id: dict[
         str, Agent[ChatKitAgentContext[ReportAgentContext]]
@@ -228,6 +251,7 @@ def _build_agent_graph(
             model_settings=_build_model_settings(
                 context,
                 agent_spec=agent_spec,
+                model_settings_override=model_settings_override,
             ),
             handoffs=[],
             tool_use_behavior={"stop_at_tool_names": stop_at_tool_names},
@@ -245,7 +269,6 @@ def _build_agent_graph(
                     target_agent_name=agents_by_agent_id[
                         target["agent_id"]
                     ].name,
-                    handoff_tool_name=target["tool_name"],
                 ),
             )
             for target in agent_spec.get("delegation_targets", [])
@@ -266,6 +289,7 @@ def build_registered_agent(
     context: ReportAgentContext,
     *,
     model: str | None = None,
+    model_settings_override: ModelSettings | None = None,
 ) -> Agent[ChatKitAgentContext[ReportAgentContext]]:
     agent_bundle = context.agent_bundle
     if agent_bundle is None:
@@ -278,6 +302,7 @@ def build_registered_agent(
         context,
         agent_bundle=agent_bundle,
         model=model,
+        model_settings_override=model_settings_override,
     )
     root_agent = agents_by_agent_id.get(root_agent_id)
     if root_agent is None:

@@ -13,6 +13,7 @@ from backend.app.core.auth import (
     require_current_user,
 )
 from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
+from backend.app.core.config import resolve_public_base_url
 from backend.app.db.session import get_db
 from backend.app.schemas.auth import UserResponse
 from backend.app.schemas.credits import (
@@ -223,7 +224,7 @@ async def get_public_farm_order(
     return await PublicFarmOrderService(db).get_public_order(
         workspace_id=workspace_id,
         order_id=order_id,
-        public_base_url=str(request.base_url).rstrip("/"),
+        public_base_url=resolve_public_base_url(str(request.base_url)),
     )
 
 
@@ -415,7 +416,7 @@ async def upload_chatkit_attachment(
         source_kind=source_kind,  # type: ignore[arg-type]
         parent_file_id=parent_file_id,
         preview_json=parsed_preview_json,
-        public_base_url=str(request.base_url).rstrip("/"),
+        public_base_url=resolve_public_base_url(str(request.base_url)),
     )
 
 
@@ -428,7 +429,7 @@ async def complete_chatkit_attachment_upload(
 ):
     store = DatabaseMemoryStore(
         db,
-        public_base_url=str(request.base_url).rstrip("/"),
+        public_base_url=resolve_public_base_url(str(request.base_url)),
     )
     try:
         pending_upload = await store.resolve_pending_attachment_upload(
@@ -497,7 +498,7 @@ async def complete_chatkit_attachment_upload(
             scope="chat_attachment",
             thread_id=pending_upload.attachment.thread_id,
             create_attachment=True,
-            public_base_url=str(request.base_url).rstrip("/"),
+            public_base_url=resolve_public_base_url(str(request.base_url)),
         )
     except HTTPException as exc:
         log_event(
@@ -627,5 +628,5 @@ async def search_plodai_entities(
         app_id=payload.app_id,
         thread_id=payload.thread_id,
         query=payload.query,
-        public_base_url=str(request.base_url).rstrip("/"),
+        public_base_url=resolve_public_base_url(str(request.base_url)),
     )

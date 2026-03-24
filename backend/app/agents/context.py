@@ -22,6 +22,8 @@ class ReportAgentContext:
     db: AsyncSession
     workspace_id: str | None = None
     workspace_name: str | None = None
+    thread_title: str | None = None
+    assistant_turn_count: int = 0
     chart_cache: dict[str, str] = field(default_factory=dict)
     request_metadata: AppChatMetadata = field(default_factory=AppChatMetadata)
     thread_metadata: AppChatMetadata = field(default_factory=AppChatMetadata)

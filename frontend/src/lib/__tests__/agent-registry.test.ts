@@ -103,6 +103,15 @@ describe("agent registry", () => {
     expect(instructions).toContain("Treat images attached to the user's message as primary evidence.");
     expect(instructions).toContain("Treat the saved farm record as your durable notes for this workspace.");
     expect(instructions).toContain("When you learn any new or important durable fact, call `get_farm_state`");
+    expect(instructions).toContain("always provide a concrete `farm_name`");
+    expect(instructions).toContain("Farm naming order is:");
+    expect(instructions).toContain("keep it stable unless the user explicitly asks to rename it.");
+    expect(instructions).toContain("`savjetodavna.mps.hr`");
+    expect(instructions).toContain("`poljoprivreda.gov.hr`");
+    expect(instructions).toContain("`aphis.usda.gov`");
+    expect(instructions).toContain("`food.ec.europa.eu`");
+    expect(instructions).toContain("`eur-lex.europa.eu`");
+    expect(instructions).toContain("`hr.wikipedia.org` or `wikipedia.org`");
     expect(instructions).toContain("Save by default after useful assessments.");
     expect(instructions).toContain("Save partial but grounded findings too.");
     expect(instructions).toContain("put visible problems, seasonal work, plans, and nuance into `notes` for now.");
@@ -114,6 +123,17 @@ describe("agent registry", () => {
     expect(instructions).not.toContain("inspect_image_file");
     expect(instructions).not.toContain("allowed domains configured for this agent");
     expect(instructions).not.toContain("orchard history");
+  });
+
+  it("uses direct chart rendering instructions without make_plan", () => {
+    const workspace = createWorkspaceContext();
+    const agentSpec = getAgentModule("chart-agent")?.buildAgentSpec(workspace);
+    const instructions = agentSpec?.instructions;
+
+    expect(agentSpec?.agent_name).toBe("Charts");
+    expect(instructions).toContain("Start with `list_datasets`.");
+    expect(instructions).toContain("continue directly to `render_chart_from_dataset`");
+    expect(instructions).not.toContain("make_plan");
   });
 
   it("lists unique tool names declared across the document bundle", () => {

@@ -31,7 +31,7 @@ from backend.app.chatkit.metadata import (
     merge_chat_metadata,
     parse_chat_metadata,
 )
-from backend.app.core.config import Settings, get_settings
+from backend.app.core.config import Settings, get_settings, resolve_public_base_url
 from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.models.chatkit import WorkspaceChat, WorkspaceWorkspaceChatAttachment
 from backend.app.models.stored_file import StoredOpenAIFile
@@ -387,7 +387,10 @@ class StoredFileService:
         public_base_url: str | None = None,
     ) -> str:
         token = self._build_preview_token(record)
-        base_url = (public_base_url or "http://localhost").rstrip("/")
+        base_url = resolve_public_base_url(
+            public_base_url,
+            settings=self.settings,
+        )
         return f"{base_url}/api/stored-files/{record.id}/preview?token={token}"
 
     async def get_preview_file(

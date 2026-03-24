@@ -133,32 +133,6 @@ export type ClientChartSpec = {
   fill_area?: boolean;
 };
 
-export type AgentPlan = {
-  id: string;
-  focus: string;
-  planned_steps: string[];
-  success_criteria?: string[];
-  follow_on_tool_hints?: string[];
-  execution_hints?: AgentPlanExecutionHint[];
-  created_at?: string;
-};
-
-export type AgentPlanExecutionHint = {
-  done_when?: string;
-  preferred_tool_names?: string[];
-  preferred_handoff_tool_names?: string[];
-};
-
-export type PlanExecution = {
-  plan_id: string;
-  status: "active" | "completed" | "cancelled";
-  workflow_item_id: string;
-  current_step_index: number;
-  attempts_by_step: number[];
-  step_notes: Array<string | null>;
-  step_started_after_item_id?: string;
-};
-
 export type AgentDelegationTargetMetadata = {
   agent_id: string;
   tool_name: string;
@@ -195,9 +169,6 @@ export type FeedbackOrigin = "interactive" | "ui_integration_test";
 export type AppChatMetadata = {
   title?: string;
   investigation_brief?: string;
-  plan?: AgentPlan;
-  plan_execution?: PlanExecution;
-  chart_plan?: AgentPlan;
   chart_cache?: Record<string, string>;
   surface_key?: string;
   agent_bundle?: AgentBundleMetadata;

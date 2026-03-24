@@ -40,36 +40,6 @@ class JsonSchema(TypedDict, total=False):
     minimum: int | float
     maximum: int | float
 
-
-class AgentPlan(TypedDict):
-    id: str
-    focus: str
-    planned_steps: list[str]
-    success_criteria: NotRequired[list[str]]
-    follow_on_tool_hints: NotRequired[list[str]]
-    execution_hints: NotRequired[list["AgentPlanExecutionHint"]]
-    created_at: NotRequired[str]
-
-
-class AgentPlanExecutionHint(TypedDict, total=False):
-    done_when: str
-    preferred_tool_names: list[str]
-    preferred_handoff_tool_names: list[str]
-
-
-PlanExecutionStatus: TypeAlias = Literal["active", "completed", "cancelled"]
-
-
-class PlanExecution(TypedDict, total=False):
-    plan_id: str
-    status: PlanExecutionStatus
-    workflow_item_id: str
-    current_step_index: int
-    attempts_by_step: list[int]
-    step_notes: list[str | None]
-    step_started_after_item_id: str
-
-
 class ClientToolDefinition(TypedDict, total=False):
     type: Literal["function"]
     name: str
@@ -198,9 +168,6 @@ class PendingFeedbackSession(TypedDict):
 class ChatMetadataPatch(TypedDict, total=False):
     title: str
     investigation_brief: str
-    plan: AgentPlan
-    plan_execution: PlanExecution
-    chart_plan: AgentPlan
     chart_cache: dict[str, str]
     surface_key: str
     openai_conversation_id: str
@@ -216,9 +183,6 @@ class ChatMetadataPatch(TypedDict, total=False):
 class AppChatMetadata(TypedDict, total=False):
     title: str
     investigation_brief: str
-    plan: AgentPlan
-    plan_execution: PlanExecution
-    chart_plan: AgentPlan
     chart_cache: dict[str, str]
     surface_key: str
     openai_conversation_id: str
@@ -347,177 +311,6 @@ class ThreadUsageTotalsModel(_MetadataModel):
     @classmethod
     def _round_cost(cls, value: float) -> float:
         return round(value, 8)
-
-
-class AgentPlanModel(_MetadataModel):
-    id: str
-    focus: str
-    planned_steps: list[str]
-    success_criteria: list[str] | None = None
-    follow_on_tool_hints: list[str] | None = None
-    execution_hints: list["AgentPlanExecutionHintModel"] | None = None
-    created_at: str | None = None
-
-    @field_validator("id", "focus", mode="before")
-    @classmethod
-    def _required_string(cls, value: object) -> str:
-        text = _strip_string(value)
-        if text is None:
-            raise ValueError("expected a non-empty string")
-        return text
-
-    @field_validator("created_at", mode="before")
-    @classmethod
-    def _optional_string(cls, value: object) -> str | None:
-        return _strip_string(value)
-
-    @field_validator("planned_steps", mode="before")
-    @classmethod
-    def _planned_steps(cls, value: object) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        return [
-            item.strip() for item in value if isinstance(item, str) and item.strip()
-        ]
-
-    @field_validator("success_criteria", "follow_on_tool_hints", mode="before")
-    @classmethod
-    def _optional_string_list(cls, value: object) -> list[str] | None:
-        if not isinstance(value, list):
-            return None
-        cleaned = [
-            item.strip() for item in value if isinstance(item, str) and item.strip()
-        ]
-        return cleaned or None
-
-    @field_validator("execution_hints", mode="before")
-    @classmethod
-    def _execution_hints(
-        cls,
-        value: object,
-    ) -> list["AgentPlanExecutionHintModel"] | None:
-        if value is None:
-            return None
-        if not isinstance(value, list):
-            raise ValueError("execution_hints must be a list")
-        validated: list[AgentPlanExecutionHintModel] = []
-        for raw_item in value:
-            validated.append(AgentPlanExecutionHintModel.model_validate(raw_item))
-        return validated or None
-
-    @model_validator(mode="after")
-    def _require_planned_steps(self) -> "AgentPlanModel":
-        if not self.planned_steps:
-            raise ValueError("planned_steps must contain at least one step")
-        if self.execution_hints is not None and len(self.execution_hints) != len(
-            self.planned_steps
-        ):
-            raise ValueError(
-                "execution_hints must align one-to-one with planned_steps"
-            )
-        return self
-
-
-class AgentPlanExecutionHintModel(_StrictMetadataModel):
-    done_when: str | None = None
-    preferred_tool_names: list[str] | None = None
-    preferred_handoff_tool_names: list[str] | None = None
-
-    @field_validator("done_when", mode="before")
-    @classmethod
-    def _done_when(cls, value: object) -> str | None:
-        return _strip_string(value)
-
-    @field_validator(
-        "preferred_tool_names",
-        "preferred_handoff_tool_names",
-        mode="before",
-    )
-    @classmethod
-    def _string_list(cls, value: object) -> list[str] | None:
-        if value is None:
-            return None
-        if not isinstance(value, list):
-            raise ValueError("expected a list")
-        cleaned = [
-            item.strip() for item in value if isinstance(item, str) and item.strip()
-        ]
-        return cleaned or None
-
-    @model_validator(mode="after")
-    def _require_some_hint(self) -> "AgentPlanExecutionHintModel":
-        if (
-            self.done_when is None
-            and not self.preferred_tool_names
-            and not self.preferred_handoff_tool_names
-        ):
-            raise ValueError("execution hint must include at least one field")
-        return self
-
-
-class PlanExecutionStateModel(_StrictMetadataModel):
-    plan_id: str
-    status: PlanExecutionStatus
-    workflow_item_id: str
-    current_step_index: int
-    attempts_by_step: list[int]
-    step_notes: list[str | None]
-    step_started_after_item_id: str | None = None
-
-    @field_validator(
-        "plan_id",
-        "workflow_item_id",
-        "step_started_after_item_id",
-        mode="before",
-    )
-    @classmethod
-    def _optional_or_required_string(cls, value: object, info) -> str | None:
-        text = _strip_string(value)
-        if info.field_name == "step_started_after_item_id":
-            return text
-        if text is None:
-            raise ValueError("expected a non-empty string")
-        return text
-
-    @field_validator("current_step_index", mode="before")
-    @classmethod
-    def _current_step_index(cls, value: object) -> int:
-        if not isinstance(value, int):
-            raise ValueError("current_step_index must be an integer")
-        return value
-
-    @field_validator("attempts_by_step", mode="before")
-    @classmethod
-    def _attempts_by_step(cls, value: object) -> list[int]:
-        if not isinstance(value, list):
-            raise ValueError("attempts_by_step must be a list")
-        attempts: list[int] = []
-        for raw_value in value:
-            if not isinstance(raw_value, int):
-                raise ValueError("attempts_by_step must contain integers")
-            attempts.append(raw_value)
-        return attempts
-
-    @field_validator("step_notes", mode="before")
-    @classmethod
-    def _step_notes(cls, value: object) -> list[str | None]:
-        if not isinstance(value, list):
-            raise ValueError("step_notes must be a list")
-        notes: list[str | None] = []
-        for raw_value in value:
-            if raw_value is None:
-                notes.append(None)
-                continue
-            notes.append(_strip_string(raw_value))
-        return notes
-
-    @model_validator(mode="after")
-    def _validate_lengths(self) -> "PlanExecutionStateModel":
-        if self.current_step_index < 0:
-            raise ValueError("current_step_index must be >= 0")
-        if len(self.attempts_by_step) != len(self.step_notes):
-            raise ValueError("attempts_by_step and step_notes must align")
-        return self
 
 
 class ClientToolDefinitionModel(_MetadataModel):
@@ -1047,9 +840,6 @@ class PendingFeedbackSessionModel(_MetadataModel):
 class AppChatMetadataModel(_MetadataModel):
     title: str | None = None
     investigation_brief: str | None = None
-    plan: AgentPlanModel | None = None
-    plan_execution: PlanExecutionStateModel | None = None
-    chart_plan: AgentPlanModel | None = None
     chart_cache: dict[str, str] | None = None
     surface_key: str | None = None
     openai_conversation_id: str | None = None
@@ -1083,21 +873,6 @@ class AppChatMetadataModel(_MetadataModel):
             for key, cache_value in value.items()
             if isinstance(key, str) and isinstance(cache_value, str)
         }
-
-    @field_validator("plan", "chart_plan", mode="before")
-    @classmethod
-    def _agent_plan(cls, value: object) -> AgentPlanModel | None:
-        validated = _validated_model_or_none(AgentPlanModel, value)
-        return cast(AgentPlanModel | None, validated)
-
-    @field_validator("plan_execution", mode="before")
-    @classmethod
-    def _plan_execution(
-        cls,
-        value: object,
-    ) -> PlanExecutionStateModel | None:
-        validated = _validated_model_or_none(PlanExecutionStateModel, value)
-        return cast(PlanExecutionStateModel | None, validated)
 
     @field_validator("usage", mode="before")
     @classmethod
@@ -1237,20 +1012,3 @@ def build_remove_plodai_image_ref_patch(
             "thread_image_refs": remaining_refs,
         }
     }
-
-
-def active_plan_execution(
-    metadata: object | None,
-) -> PlanExecution | None:
-    if not isinstance(metadata, dict):
-        return None
-    execution = metadata.get("plan_execution")
-    if not isinstance(execution, dict):
-        return None
-    if execution.get("status") != "active":
-        return None
-    if not isinstance(execution.get("workflow_item_id"), str):
-        return None
-    if not isinstance(execution.get("plan_id"), str):
-        return None
-    return cast(PlanExecution, execution)

@@ -11,9 +11,6 @@ export function buildInitialChatMetadata(metadata: AppChatMetadata): AppChatMeta
   return {
     title: metadata.title,
     investigation_brief: metadata.investigation_brief,
-    plan: metadata.plan,
-    plan_execution: metadata.plan_execution,
-    chart_plan: metadata.chart_plan,
     chart_cache: metadata.chart_cache,
     surface_key: metadata.surface_key,
     agent_bundle: metadata.agent_bundle,

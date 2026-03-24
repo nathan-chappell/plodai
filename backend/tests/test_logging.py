@@ -555,7 +555,6 @@ def test_agent_compile_log_renders_human_readable_tool_block() -> None:
     assert "agent.compiled" in output
     assert "\n > Report(Charts):" in output
     assert "\n > - name_current_thread(title)" in output
-    assert "\n > - make_plan(" in output
     assert "\n > - create_report(title)" in output
 
 

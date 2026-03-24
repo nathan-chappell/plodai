@@ -37,7 +37,7 @@ from backend.app.chatkit.metadata import (
     merge_chat_metadata,
     parse_chat_metadata,
 )
-from backend.app.core.config import Settings, get_settings
+from backend.app.core.config import Settings, get_settings, resolve_public_base_url
 from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
 from backend.app.models.chatkit import (
     WorkspaceChat,
@@ -78,7 +78,10 @@ class DatabaseMemoryStore(
     ):
         self.db = db
         self.settings = settings or get_settings()
-        self.public_base_url = (public_base_url or "http://localhost").rstrip("/")
+        self.public_base_url = resolve_public_base_url(
+            public_base_url,
+            settings=self.settings,
+        )
         self._openai_client = openai_client
 
     @property

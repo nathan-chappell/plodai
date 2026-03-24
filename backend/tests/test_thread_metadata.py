@@ -11,10 +11,21 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
             "investigation_brief": "  Validate whether the west region is actually underperforming.  ",
             "plan": {
                 "id": "plan_123",
-                "focus": "Validate west region performance",
-                "planned_steps": ["List files", "Run grouped aggregates"],
-                "success_criteria": ["Explain the strongest variance"],
-                "follow_on_tool_hints": ["run_aggregate_query"],
+                "focus": "Legacy plan payload",
+                "planned_steps": ["Ignore me"],
+            },
+            "plan_execution": {
+                "plan_id": "plan_123",
+                "status": "active",
+                "workflow_item_id": "workflow_123",
+                "current_step_index": 0,
+                "attempts_by_step": [0],
+                "step_notes": [None],
+            },
+            "chart_plan": {
+                "id": "plan_chart_123",
+                "focus": "Legacy chart plan payload",
+                "planned_steps": ["Ignore me too"],
             },
             "chart_cache": {"chart-1": "data:image/png;base64,abc", 2: "bad"},
             "surface_key": "/plodai",
@@ -110,13 +121,9 @@ def test_parse_chat_metadata_filters_expected_fields() -> None:
         metadata["investigation_brief"]
         == "Validate whether the west region is actually underperforming."
     )
-    assert metadata["plan"] == {
-        "id": "plan_123",
-        "focus": "Validate west region performance",
-        "planned_steps": ["List files", "Run grouped aggregates"],
-        "success_criteria": ["Explain the strongest variance"],
-        "follow_on_tool_hints": ["run_aggregate_query"],
-    }
+    assert "plan" not in metadata
+    assert "plan_execution" not in metadata
+    assert "chart_plan" not in metadata
     assert metadata["chart_cache"] == {"chart-1": "data:image/png;base64,abc"}
     assert metadata["surface_key"] == "/plodai"
     assert metadata["plodai_state"] == {

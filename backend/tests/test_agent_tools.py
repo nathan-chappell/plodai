@@ -2,7 +2,6 @@ from backend.app.agents.widgets import (
     build_handoff_trace_copy_text,
     build_handoff_trace_widget,
     build_tool_trace_copy_text,
-    build_plan_widget,
     build_tool_trace_widget,
     build_workspace_context_copy_text,
     build_workspace_context_widget,
@@ -23,34 +22,6 @@ def collect_text_values(children: list[dict[str, object]]) -> list[str]:
                 )
             )
     return values
-
-
-def test_build_plan_widget_includes_plan_sections() -> None:
-    widget = build_plan_widget(
-        {
-            "id": "plan_123",
-            "focus": "Investigate west region revenue drop",
-            "planned_steps": [
-                "List attached files",
-                "Run grouped revenue totals by region and month",
-            ],
-            "success_criteria": ["Explain the strongest driver of the drop"],
-            "follow_on_tool_hints": ["run_aggregate_query", "render_chart_from_dataset"],
-        }
-    )
-
-    assert widget["type"] == "Card"
-    assert widget["status"] == {"text": "Plan captured", "icon": "check-circle"}
-    assert widget["children"][0]["type"] == "Col"
-    text_values = collect_text_values(widget["children"])
-    assert "Investigate west region revenue drop" in text_values
-    assert "1. List attached files" in text_values
-    assert "2. Run grouped revenue totals by region and month" in text_values
-    assert "Success criteria" in text_values
-    assert "- Explain the strongest driver of the drop" in text_values
-    assert "Suggested next tools" in text_values
-    assert "run_aggregate_query, render_chart_from_dataset" in text_values
-
 
 def test_build_tool_trace_widget_shows_compact_details_and_copy_text() -> None:
     widget = build_tool_trace_widget(

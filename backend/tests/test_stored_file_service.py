@@ -11,6 +11,7 @@ from chatkit.types import (
     FileAttachment,
     ImageAttachment,
     InferenceOptions,
+    ThreadItemDoneEvent,
     ThreadMetadata,
     UserMessageItem,
     UserMessageTagContent,
@@ -1125,6 +1126,114 @@ async def test_thread_item_storage_keeps_canonical_attachment_and_load_hydrates_
 
 
 @pytest.mark.anyio
+async def test_process_new_thread_item_streams_display_image_attachment_but_stores_canonical_payload(
+    initialized_db: None,
+) -> None:
+    user_id = f"user_streamed_thread_item_{uuid4().hex}"
+    workspace_id = f"workspace_{uuid4().hex}"
+    thread_id = f"thread_{uuid4().hex}"
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            Workspace(
+                id=workspace_id,
+                user_id=user_id,
+                app_id="plodai",
+                name="PlodAI workspace",
+                active_chat_id=thread_id,
+            )
+        )
+        db.add(
+            WorkspaceChat(
+                id=thread_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                title="PlodAI",
+                metadata_json={},
+                status_json={"type": "active"},
+                allowed_image_domains_json=None,
+                updated_sequence=1,
+            )
+        )
+        await db.commit()
+
+        service = StoredFileService(
+            db,
+            openai_client=_StubOpenAIClient(),
+            settings=get_settings(),
+        )
+        upload = await service.create_chat_attachment_upload(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            app_id="plodai",
+            file_name="streamed-preview.png",
+            mime_type="image/png",
+            file_bytes=_build_test_image_bytes(),
+            attachment_id="attachment_streamed_preview_1",
+            scope="chat_attachment",
+            thread_id=None,
+            create_attachment=True,
+            public_base_url="http://testserver",
+        )
+
+        store = DatabaseMemoryStore(
+            db,
+            public_base_url="http://testserver",
+            openai_client=service.openai_client,
+        )
+        canonical_attachment = await store.load_attachment(
+            "attachment_streamed_preview_1",
+            context=None,
+        )
+        assert isinstance(canonical_attachment, FileAttachment)
+
+        item = UserMessageItem(
+            id="msg_streamed_preview",
+            thread_id=thread_id,
+            created_at=datetime.now(UTC),
+            content=[UserMessageTextContent(text="Stream this image.")],
+            attachments=[canonical_attachment],
+            quoted_text=None,
+            inference_options=InferenceOptions(),
+        )
+        context = ReportAgentContext(
+            report_id=thread_id,
+            user_id=user_id,
+            user_email=None,
+            db=db,
+            workspace_id=workspace_id,
+            workspace_name="PlodAI workspace",
+        )
+
+        server = ClientWorkspaceChatKitServer(
+            db,
+            public_base_url="http://testserver",
+        )
+        stream = server._process_new_thread_item_respond(thread=ThreadMetadata(
+            id=thread_id,
+            title="PlodAI",
+            created_at=datetime.now(UTC),
+            status={"type": "active"},
+            metadata={},
+        ), item=item, context=context)
+        first_event = await stream.__anext__()
+        await stream.aclose()
+
+        assert isinstance(first_event, ThreadItemDoneEvent)
+        streamed_attachment = first_event.item.attachments[0]
+        assert isinstance(streamed_attachment, ImageAttachment)
+        _assert_signed_preview_url(str(streamed_attachment.preview_url))
+        assert streamed_attachment.thread_id == thread_id
+        assert streamed_attachment.metadata["stored_file_id"] == upload.stored_file.id
+
+        stored_entry = await db.get(WorkspaceChatEntry, item.id)
+        assert stored_entry is not None
+        stored_payload = stored_entry.payload
+        assert stored_payload["attachments"][0]["type"] == "file"
+        assert "preview_url" not in stored_payload["attachments"][0]
+
+
+@pytest.mark.anyio
 async def test_public_preview_token_resolves_image_without_user_auth(
     initialized_db: None,
 ) -> None:
@@ -1170,6 +1279,59 @@ async def test_public_preview_token_resolves_image_without_user_auth(
             token=token,
         )
         assert preview_record.id == response.stored_file.id
+
+
+@pytest.mark.anyio
+async def test_public_preview_url_prefers_configured_public_base_url(
+    initialized_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = f"user_preview_base_url_{uuid4().hex}"
+    workspace_id = f"workspace_{uuid4().hex}"
+
+    async with AsyncSessionLocal() as db:
+        db.add(
+            Workspace(
+                id=workspace_id,
+                user_id=user_id,
+                app_id="plodai",
+                name="PlodAI workspace",
+            )
+        )
+        await db.commit()
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "https://public.example/base/")
+
+        service = StoredFileService(
+            db,
+            openai_client=_StubOpenAIClient(),
+            settings=settings,
+        )
+        response = await service.create_chat_attachment_upload(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            app_id="plodai",
+            file_name="public-origin.png",
+            mime_type="image/png",
+            file_bytes=_build_test_image_bytes(),
+            attachment_id="attachment_public_origin_1",
+            scope="chat_attachment",
+            thread_id=None,
+            create_attachment=True,
+            public_base_url="http://internal-host",
+        )
+
+        record = await db.get(StoredOpenAIFile, response.stored_file.id)
+        assert record is not None
+        preview_url = service.build_public_preview_url(
+            record,
+            public_base_url="http://internal-host",
+        )
+
+        assert preview_url.startswith(
+            f"https://public.example/base/api/stored-files/{record.id}/preview?token="
+        )
 
 
 @pytest.mark.anyio
@@ -1386,6 +1548,71 @@ def test_two_phase_chatkit_attachment_upload_endpoint_finalizes_attachment(
             _assert_signed_preview_url(str(hydrated_attachment.preview_url))
 
     asyncio.run(_verify_finalized_attachment())
+
+
+def test_stored_file_preview_route_returns_image_bytes_with_chatkit_cors(
+    initialized_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = f"user_preview_route_{uuid4().hex}"
+    workspace_id = f"workspace_preview_route_{uuid4().hex}"
+    image_bytes = _build_test_image_bytes()
+    openai_client = _StubOpenAIClient()
+    monkeypatch.setattr(
+        "backend.app.services.stored_file_service.AsyncOpenAI",
+        lambda **_: openai_client,
+    )
+
+    async def _create_uploaded_file() -> str:
+        async with AsyncSessionLocal() as db:
+            db.add(
+                Workspace(
+                    id=workspace_id,
+                    user_id=user_id,
+                    app_id="plodai",
+                    name="PlodAI workspace",
+                )
+            )
+            await db.commit()
+
+            service = StoredFileService(
+                db,
+                openai_client=openai_client,
+                settings=get_settings(),
+            )
+            response = await service.create_chat_attachment_upload(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                app_id="plodai",
+                file_name="preview-route.png",
+                mime_type="image/png",
+                file_bytes=image_bytes,
+                attachment_id="attachment_preview_route_1",
+                scope="chat_attachment",
+                thread_id=None,
+                create_attachment=True,
+                public_base_url="http://testserver",
+            )
+            record = await db.get(StoredOpenAIFile, response.stored_file.id)
+            assert record is not None
+            return service.build_public_preview_url(
+                record,
+                public_base_url="http://testserver",
+            )
+
+    preview_url = asyncio.run(_create_uploaded_file())
+    parsed_preview_url = urlparse(preview_url)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"{parsed_preview_url.path}?{parsed_preview_url.query}",
+            headers={"Origin": "https://cdn.platform.openai.com"},
+        )
+
+    assert response.status_code == 200
+    assert response.content == image_bytes
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["access-control-allow-origin"] == "https://cdn.platform.openai.com"
 
 
 def test_two_phase_chatkit_attachment_upload_endpoint_accepts_multipart_uploads(

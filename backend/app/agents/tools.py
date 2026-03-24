@@ -1,7 +1,6 @@
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Any, Literal, Mapping, Sequence, cast
 from uuid import uuid4
@@ -10,8 +9,7 @@ from agents import FunctionTool, WebSearchTool, function_tool
 from agents.tool import Tool
 from agents.tool_context import ToolContext
 from chatkit.agents import AgentContext as ChatKitAgentContext, ClientToolCall
-from chatkit.types import CustomTask, ProgressUpdateEvent, Workflow
-from pydantic import BaseModel, ConfigDict, model_validator
+from chatkit.types import ProgressUpdateEvent
 
 from backend.app.agents.context import ReportAgentContext
 from backend.app.agents.widgets import (
@@ -25,11 +23,7 @@ from backend.app.agents.widgets import (
 )
 from backend.app.chatkit.feedback_types import WorkspaceChatFeedbackRecord, FeedbackOrigin
 from backend.app.chatkit.metadata import (
-    AgentPlan,
-    AgentPlanExecutionHint,
     PendingFeedbackSession,
-    PlanExecution,
-    active_plan_execution,
 )
 from backend.app.core.logging import (
     get_logger,
@@ -44,24 +38,6 @@ from backend.app.models.chatkit import WorkspaceChatFeedback
 
 logger = get_logger("agents.tools")
 ChatKitToolContext = ToolContext[ChatKitAgentContext[ReportAgentContext]]
-class PlanExecutionHintInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    done_when: str | None = None
-    preferred_tool_names: list[str] | None = None
-    preferred_handoff_tool_names: list[str] | None = None
-
-    @model_validator(mode="after")
-    def _require_at_least_one_field(self) -> "PlanExecutionHintInput":
-        if (
-            self.done_when is None
-            and not self.preferred_tool_names
-            and not self.preferred_handoff_tool_names
-        ):
-            raise ValueError(
-                "Each execution hint must include done_when, preferred_tool_names, or preferred_handoff_tool_names."
-            )
-        return self
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -491,86 +467,10 @@ async def _stream_tool_trace_widget(
     tool_name: str,
     invocation: str,
 ) -> None:
-    if active_plan_execution(ctx.context.request_context.thread_metadata):
-        return
     await ctx.context.stream_widget(
         build_tool_trace_widget(tool_name, invocation),
         copy_text=build_tool_trace_copy_text(tool_name, invocation),
     )
-
-
-def _normalize_execution_hint(
-    hint: PlanExecutionHintInput,
-) -> AgentPlanExecutionHint:
-    normalized: AgentPlanExecutionHint = {}
-    if isinstance(hint.done_when, str) and hint.done_when.strip():
-        normalized["done_when"] = hint.done_when.strip()
-    if hint.preferred_tool_names:
-        normalized["preferred_tool_names"] = [
-            tool_name.strip()
-            for tool_name in hint.preferred_tool_names
-            if isinstance(tool_name, str) and tool_name.strip()
-        ]
-    if hint.preferred_handoff_tool_names:
-        normalized["preferred_handoff_tool_names"] = [
-            tool_name.strip()
-            for tool_name in hint.preferred_handoff_tool_names
-            if isinstance(tool_name, str) and tool_name.strip()
-        ]
-    return normalized
-
-
-def _plan_task_content(
-    execution_hint: AgentPlanExecutionHint | None,
-    note: str | None = None,
-) -> str | None:
-    lines: list[str] = []
-    if execution_hint:
-        done_when = execution_hint.get("done_when")
-        if isinstance(done_when, str) and done_when.strip():
-            lines.append(f"Done when: {done_when.strip()}")
-        tool_names = execution_hint.get("preferred_tool_names")
-        if tool_names:
-            lines.append(f"Preferred tools: {', '.join(tool_names)}")
-        handoff_names = execution_hint.get("preferred_handoff_tool_names")
-        if handoff_names:
-            lines.append(f"Preferred handoffs: {', '.join(handoff_names)}")
-    if isinstance(note, str) and note.strip():
-        lines.append(f"Note: {note.strip()}")
-    return "\n".join(lines) if lines else None
-
-
-def _build_plan_workflow(
-    plan: AgentPlan,
-) -> Workflow:
-    execution_hints = cast(
-        list[AgentPlanExecutionHint] | None,
-        plan.get("execution_hints"),
-    )
-    tasks = [
-        CustomTask(
-            title=f"{index}. {step}",
-            content=_plan_task_content(
-                execution_hints[index - 1] if execution_hints else None
-            ),
-            status_indicator="loading" if index == 1 else "none",
-        )
-        for index, step in enumerate(plan["planned_steps"], start=1)
-    ]
-    return Workflow(type="custom", tasks=tasks)
-
-
-async def _latest_thread_item_id(ctx: ChatKitToolContext) -> str | None:
-    page = await ctx.context.store.load_thread_items(
-        ctx.context.thread.id,
-        after=None,
-        limit=1,
-        order="desc",
-        context=ctx.context.request_context,
-    )
-    if not page.data:
-        return None
-    return page.data[0].id
 
 
 async def _latest_assistant_item_ids(ctx: ChatKitToolContext) -> list[str]:
@@ -732,6 +632,7 @@ def build_agent_tools(
             title=summarize_for_log(cleaned_title, limit=96),
         )
         request_context.thread_metadata["title"] = cleaned_title
+        request_context.thread_title = cleaned_title
         ctx.context.thread.title = cleaned_title
         ctx.context.thread.metadata = dict(request_context.thread_metadata)
         await ctx.context.stream(
@@ -753,114 +654,7 @@ def build_agent_tools(
         )
         return result
 
-    @function_tool(name_override="make_plan")
-    async def make_plan_tool(
-        ctx: ChatKitToolContext,
-        focus: str,
-        planned_steps: list[str],
-        success_criteria: list[str] | None = None,
-        follow_on_tool_hints: list[str] | None = None,
-        execution_hints: list[PlanExecutionHintInput] | None = None,
-    ) -> dict[str, object]:
-        """Write down a concise plan, optionally add per-step execution hints, and continue executing it immediately with more tool calls."""
-        request_context = ctx.context.request_context
-        cleaned_focus = focus.strip()
-        cleaned_steps = [step.strip() for step in planned_steps if step.strip()]
-        cleaned_success_criteria = [
-            item.strip() for item in success_criteria or [] if item.strip()
-        ]
-        cleaned_follow_on_tool_hints = [
-            item.strip() for item in follow_on_tool_hints or [] if item.strip()
-        ]
-        cleaned_execution_hints = [
-            _normalize_execution_hint(hint) for hint in execution_hints or []
-        ]
-        if cleaned_execution_hints and len(cleaned_execution_hints) != len(cleaned_steps):
-            raise ValueError(
-                "execution_hints must align one-to-one with planned_steps."
-            )
-        _log_tool_start(
-            request_context,
-            "make_plan",
-            focus=summarize_for_log(cleaned_focus, limit=160),
-            plan=summarize_pairs_for_log(
-                (
-                    ("steps", len(cleaned_steps)),
-                    ("success", len(cleaned_success_criteria)),
-                    ("next", summarize_sequence_for_log(cleaned_follow_on_tool_hints)),
-                    ("hints", len(cleaned_execution_hints)),
-                )
-            ),
-        )
-        latest_item_id = await _latest_thread_item_id(ctx)
-        plan: AgentPlan = {
-            "id": f"plan_{uuid4().hex}",
-            "focus": cleaned_focus,
-            "planned_steps": cleaned_steps,
-            "created_at": datetime.now(UTC).isoformat(),
-        }
-        if cleaned_success_criteria:
-            plan["success_criteria"] = cleaned_success_criteria
-        if cleaned_follow_on_tool_hints:
-            plan["follow_on_tool_hints"] = cleaned_follow_on_tool_hints
-        if cleaned_execution_hints:
-            plan["execution_hints"] = cleaned_execution_hints
-        existing_execution = active_plan_execution(request_context.thread_metadata)
-        if (
-            existing_execution is not None
-            and ctx.context.workflow_item is not None
-            and ctx.context.workflow_item.id == existing_execution["workflow_item_id"]
-        ):
-            await ctx.context.end_workflow()
-        request_context.thread_metadata["plan"] = plan
-        if (
-            "render_chart_from_dataset" in cleaned_follow_on_tool_hints
-            or agent_id == "chart-agent"
-        ):
-            request_context.thread_metadata["chart_plan"] = plan
-        await ctx.context.start_workflow(_build_plan_workflow(plan))
-        workflow_item = ctx.context.workflow_item
-        if workflow_item is None:
-            raise RuntimeError("Plan workflow failed to initialize.")
-        plan_execution: PlanExecution = {
-            "plan_id": plan["id"],
-            "status": "active",
-            "workflow_item_id": workflow_item.id,
-            "current_step_index": 0,
-            "attempts_by_step": [0 for _ in cleaned_steps],
-            "step_notes": [None for _ in cleaned_steps],
-        }
-        if latest_item_id is not None:
-            plan_execution["step_started_after_item_id"] = latest_item_id
-        request_context.thread_metadata["plan_execution"] = plan_execution
-        ctx.context.thread.metadata = dict(request_context.thread_metadata)
-        await ctx.context.stream(
-            ProgressUpdateEvent(
-                text=(
-                    f"Plan saved with {len(cleaned_steps)} step(s). Execution workflow started; continue carrying out step 1 now."
-                )
-            )
-        )
-        _log_tool_end(
-            request_context,
-            "make_plan",
-            plan=summarize_pairs_for_log(
-                (
-                    ("id", plan["id"]),
-                    ("steps", len(cleaned_steps)),
-                    ("success", len(cleaned_success_criteria)),
-                    ("workflow", workflow_item.id),
-                )
-            ),
-        )
-        return {
-            "plan_id": plan["id"],
-            "plan": plan,
-            "plan_execution": plan_execution,
-            "report_id": request_context.report_id,
-        }
-
-    tools.extend([name_current_thread_tool, make_plan_tool])
+    tools.append(name_current_thread_tool)
     tools.extend(_build_hosted_tools(agent_id=agent_id, client_tools=client_tools))
     hosted_tool_names = {tool.name for tool in tools}
 
