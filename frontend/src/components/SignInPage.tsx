@@ -1,8 +1,6 @@
 import { Show, SignIn, SignInButton, SignUpButton, useClerk } from "@clerk/react";
 
 import { DEFAULT_AUTHENTICATED_PATH } from "../lib/auth";
-import { navigate } from "../lib/router";
-import { WRITING_INDEX_PATH } from "../lib/writing";
 import { MetaText } from "../app/styles";
 import {
   SignInErrorActions,
@@ -14,7 +12,6 @@ import {
   SignInFeatureList,
   SignInHero,
   SignInPageRoot,
-  SignInSecondaryActionButton,
   SignInShell,
   SignInSubhead,
   SignInTitle,
@@ -34,7 +31,7 @@ function ClerkSignInCard({
   if (hasClerkSession && authError) {
     return (
       <SignInErrorCard>
-        <h2>Authenticated, but workspace access failed</h2>
+        <h2>Authenticated, but farm access failed</h2>
         <MetaText>
           Clerk accepted the sign-in, but the backend could not open an app session for this account.
         </MetaText>
@@ -52,12 +49,12 @@ function ClerkSignInCard({
   }
 
   return (
-    <SignInCard>
-      <h2>Clerk sign in</h2>
-      <MetaText>
-        Use your Clerk-backed identity. App access still depends on the public metadata that the backend checks after
-        sign-in.
-      </MetaText>
+      <SignInCard>
+        <h2>Clerk sign in</h2>
+        <MetaText>
+          Use your Clerk-backed identity. PlodAI access still depends on the public metadata that the backend checks
+          after sign-in.
+        </MetaText>
       <Show when="signed-out">
         <SignInButtonRow>
           <SignInButton mode="modal">
@@ -86,22 +83,17 @@ export function SignInPage({
     <SignInPageRoot>
       <SignInShell>
         <SignInHero>
-          <SignInEyebrow>AI Portfolio</SignInEyebrow>
-          <SignInTitle>Sign in before opening the workspace</SignInTitle>
+          <SignInEyebrow>PlodAI</SignInEyebrow>
+          <SignInTitle>Sign in before opening your farms</SignInTitle>
           <SignInSubhead>
-            Keep authentication outside the app shell so the workspace can focus on tools, navigation, and
-            account state once a user is approved and signed in.
+            Clerk handles sign-in first, then the app opens directly into farm records, image review, and the PlodAI
+            chat once the backend approves the account.
           </SignInSubhead>
           <SignInFeatureList>
-            <li>Unauthenticated users land on a dedicated sign-in route instead of seeing a half-open app shell.</li>
-            <li>The authenticated app can assume a known session and keep the sidebar focused on workspace state.</li>
+            <li>Unauthenticated users land on a dedicated sign-in route instead of seeing a half-open farm app.</li>
+            <li>The authenticated app can assume a known session and focus on farms, images, and chat state.</li>
             <li>Clerk handles sign-in, while backend access still checks role and activation in public metadata.</li>
           </SignInFeatureList>
-          <SignInButtonRow>
-            <SignInSecondaryActionButton onClick={() => navigate(WRITING_INDEX_PATH)} type="button">
-              Browse writing
-            </SignInSecondaryActionButton>
-          </SignInButtonRow>
         </SignInHero>
         <ClerkSignInCard authError={authError} hasClerkSession={hasClerkSession} onRetryAuth={onRetryAuth} />
       </SignInShell>

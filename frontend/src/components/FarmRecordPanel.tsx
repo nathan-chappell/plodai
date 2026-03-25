@@ -14,9 +14,12 @@ import {
   WorkspaceModalTitleBlock,
 } from "./styles";
 import type {
-  FarmItemPayloadV1,
-  FarmOrderStatusV1,
-} from "../types/workspace";
+  FarmCropIssueSeverity,
+  FarmCropIssue,
+  FarmOrderStatus,
+  FarmRecordPayload,
+} from "../types/farm";
+import { normalizeFarmPayload, summarizeFarmCropIssues } from "../lib/farm";
 
 export type FarmRecordFocusTarget =
   | { kind: "record" }
@@ -36,10 +39,12 @@ export function FarmRecordPanel({
   onEditOrder,
   onSetOrderStatus,
   orderShareUrls,
+  showCropsSection = true,
   showOrdersSection = true,
+  showDescriptionSection = true,
   isMutating = false,
 }: {
-  farm: FarmItemPayloadV1;
+  farm: FarmRecordPayload;
   focusTarget?: FarmRecordFocusTarget | null;
   highlightRecord?: boolean;
   dataTestId?: string;
@@ -49,20 +54,27 @@ export function FarmRecordPanel({
   onDeleteOrder?: (orderId: string) => void;
   onEditFarm?: () => void;
   onEditOrder?: (orderId: string) => void;
-  onSetOrderStatus?: (orderId: string, status: FarmOrderStatusV1) => void;
+  onSetOrderStatus?: (orderId: string, status: FarmOrderStatus) => void;
   orderShareUrls?: Record<string, string>;
+  showCropsSection?: boolean;
   showOrdersSection?: boolean;
+  showDescriptionSection?: boolean;
   isMutating?: boolean;
 }) {
+  const normalizedFarm = normalizeFarmPayload(farm);
   const recordRef = useRef<HTMLElement | null>(null);
   const cropRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const orderRefs = useRef<Record<string, HTMLElement | null>>({});
-  const [activeCropNotes, setActiveCropNotes] = useState<{
+  const [activeCropIssues, setActiveCropIssues] = useState<{
     cropId: string;
     cropName: string;
-    notes: string;
+    issues: FarmCropIssue[];
   } | null>(null);
-  const orders = farm.orders ?? [];
+  const orders = normalizedFarm.orders ?? [];
+  const totalIssueCount = normalizedFarm.crops.reduce(
+    (count, crop) => count + crop.issues.length,
+    0,
+  );
 
   useEffect(() => {
     if (!focusTarget) {
@@ -83,19 +95,19 @@ export function FarmRecordPanel({
   }, [focusTarget]);
 
   useEffect(() => {
-    if (!activeCropNotes || typeof window === "undefined") {
+    if (!activeCropIssues || typeof window === "undefined") {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setActiveCropNotes(null);
+        setActiveCropIssues(null);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeCropNotes]);
+  }, [activeCropIssues]);
 
   const recordHighlighted = highlightRecord || focusTarget?.kind === "record";
 
@@ -115,17 +127,22 @@ export function FarmRecordPanel({
             ) : (
               <>
                 <FarmTitleRow>
-                  <FarmTitle>{farm.farm_name}</FarmTitle>
-                  {farm.location ? <FarmLocation>{farm.location}</FarmLocation> : null}
+                  <FarmTitle>{normalizedFarm.farm_name}</FarmTitle>
+                  {normalizedFarm.location ? (
+                    <FarmLocation>{normalizedFarm.location}</FarmLocation>
+                  ) : null}
                 </FarmTitleRow>
+                {normalizedFarm.description ? (
+                  <FarmDescription>{normalizedFarm.description}</FarmDescription>
+                ) : null}
                 <FarmMetrics>
                   <FarmMetric>
-                    <strong>{farm.crops.length}</strong>
-                    <span>Crops</span>
+                    <strong>{normalizedFarm.crops.length}</strong>
+                    <span>Blocks</span>
                   </FarmMetric>
                   <FarmMetric>
-                    <strong>{farm.notes?.trim() ? "Saved" : "Empty"}</strong>
-                    <span>Notes</span>
+                    <strong>{totalIssueCount}</strong>
+                    <span>Issues</span>
                   </FarmMetric>
                   <FarmMetric>
                     <strong>{orders.length}</strong>
@@ -162,87 +179,112 @@ export function FarmRecordPanel({
         </FarmHeroHeader>
       </FarmHero>
 
-      <FarmSection>
-        <FarmSectionTitle>Crops</FarmSectionTitle>
-        {farm.crops.length ? (
-          <CropTableWrap>
-            <CropTable>
-              <thead>
-                <tr>
-                  <th>What</th>
-                  <th>Where / amount</th>
-                  <th>Yield</th>
-                  <th>Notes</th>
-                  <CropActionHeader aria-hidden="true" />
-                </tr>
-              </thead>
-              <tbody>
-                {farm.crops.map((crop) => {
-                  const highlighted =
-                    focusTarget?.kind === "crop" && focusTarget.itemId === crop.id;
-                  const cropNotes = crop.notes?.trim() || "";
-                  return (
-                    <CropTableRow
-                      key={crop.id}
-                      ref={(node) => {
-                        cropRefs.current[crop.id] = node;
-                      }}
-                      $highlighted={highlighted}
-                      data-highlighted={highlighted ? "true" : undefined}
-                      data-testid={`farm-crop-${crop.id}`}
-                    >
-                      <td>
-                        <CropName>{crop.name}</CropName>
-                      </td>
-                      <td>{crop.area}</td>
-                      <td>{crop.expected_yield?.trim() || "-"}</td>
-                      <td>
-                        {cropNotes ? (
-                          <CropNotesCell>
-                            <CropNotesPreview data-testid={`farm-crop-notes-preview-${crop.id}`}>
-                              {cropNotes}
-                            </CropNotesPreview>
-                            <CropNotesButton
-                              data-testid={`farm-open-crop-notes-${crop.id}`}
-                              onClick={() =>
-                                setActiveCropNotes({
-                                  cropId: crop.id,
-                                  cropName: crop.name,
-                                  notes: cropNotes,
-                                })
-                              }
+      {showCropsSection ? (
+        <FarmSection>
+          <FarmSectionTitle>Crop Blocks</FarmSectionTitle>
+          {normalizedFarm.crops.length ? (
+            <CropTableWrap>
+              <CropTable>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Expected yield</th>
+                    <th>Issues</th>
+                    <CropActionHeader aria-hidden="true" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizedFarm.crops.map((crop) => {
+                    const highlighted =
+                      focusTarget?.kind === "crop" && focusTarget.itemId === crop.id;
+                    const issueSummary = summarizeFarmCropIssues(crop);
+                    return (
+                      <CropTableRow
+                        key={crop.id}
+                        ref={(node) => {
+                          cropRefs.current[crop.id] = node;
+                        }}
+                        $highlighted={highlighted}
+                        data-highlighted={highlighted ? "true" : undefined}
+                        data-testid={`farm-crop-${crop.id}`}
+                      >
+                        <td>
+                          <CropName>{crop.name}</CropName>
+                        </td>
+                        <td>{crop.type?.trim() || "-"}</td>
+                        <td>{crop.size?.trim() || "-"}</td>
+                        <td>{crop.expected_yield?.trim() || "-"}</td>
+                        <td>
+                          {crop.issues.length ? (
+                            <CropNotesCell>
+                              <CropNotesPreview data-testid={`farm-crop-issues-preview-${crop.id}`}>
+                                <CropIssueSummaryRow>
+                                  <strong>
+                                    {issueSummary.issueCount} issue
+                                    {issueSummary.issueCount === 1 ? "" : "s"}
+                                  </strong>
+                                  {issueSummary.highestSeverity ? (
+                                    <IssueSeverityPill $severity={issueSummary.highestSeverity}>
+                                      {issueSummary.highestSeverity}
+                                    </IssueSeverityPill>
+                                  ) : null}
+                                </CropIssueSummaryRow>
+                                {issueSummary.nextDeadline ? (
+                                  <CropIssueDeadline>
+                                    Deadline: {issueSummary.nextDeadline}
+                                  </CropIssueDeadline>
+                                ) : null}
+                                <CropIssuePreviewList>
+                                  {crop.issues
+                                    .slice(0, 2)
+                                    .map((issue) => issue.title)
+                                    .join(" · ")}
+                                </CropIssuePreviewList>
+                              </CropNotesPreview>
+                              <CropNotesButton
+                                data-testid={`farm-open-crop-issues-${crop.id}`}
+                                onClick={() =>
+                                  setActiveCropIssues({
+                                    cropId: crop.id,
+                                    cropName: crop.name,
+                                    issues: crop.issues,
+                                  })
+                                }
+                                type="button"
+                              >
+                                View
+                              </CropNotesButton>
+                            </CropNotesCell>
+                          ) : (
+                            "No issues saved"
+                          )}
+                        </td>
+                        <CropActionCell>
+                          {onDeleteCrop ? (
+                            <CropDeleteButton
+                              aria-label={`Delete ${crop.name}`}
+                              data-testid={`farm-delete-crop-${crop.id}`}
+                              disabled={isMutating}
+                              onClick={() => onDeleteCrop(crop.id)}
                               type="button"
                             >
-                              View
-                            </CropNotesButton>
-                          </CropNotesCell>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      <CropActionCell>
-                        {onDeleteCrop ? (
-                          <CropDeleteButton
-                            aria-label={`Delete ${crop.name}`}
-                            data-testid={`farm-delete-crop-${crop.id}`}
-                            disabled={isMutating}
-                            onClick={() => onDeleteCrop(crop.id)}
-                            type="button"
-                          >
-                            x
-                          </CropDeleteButton>
-                        ) : null}
-                      </CropActionCell>
-                    </CropTableRow>
-                  );
-                })}
-              </tbody>
-            </CropTable>
-          </CropTableWrap>
-        ) : (
-          <MetaText>No crops tracked yet.</MetaText>
-        )}
-      </FarmSection>
+                              x
+                            </CropDeleteButton>
+                          ) : null}
+                        </CropActionCell>
+                      </CropTableRow>
+                    );
+                  })}
+                </tbody>
+              </CropTable>
+            </CropTableWrap>
+          ) : (
+            <MetaText>No crop blocks tracked yet.</MetaText>
+          )}
+        </FarmSection>
+      ) : null}
 
       {showOrdersSection ? (
         <FarmSection>
@@ -339,42 +381,66 @@ export function FarmRecordPanel({
         </FarmSection>
       ) : null}
 
-      <FarmSection>
-        <FarmSectionTitle>Notes</FarmSectionTitle>
-        {farm.notes?.trim() ? (
-          <MetaText>{farm.notes}</MetaText>
-        ) : (
-          <MetaText>
-            No notes saved yet. The PlodAI agent will keep durable observations here.
-          </MetaText>
-        )}
-      </FarmSection>
+      {showDescriptionSection ? (
+        <FarmSection>
+          <FarmSectionTitle>Description</FarmSectionTitle>
+          {normalizedFarm.description?.trim() ? (
+            <MetaText>{normalizedFarm.description}</MetaText>
+          ) : (
+            <MetaText>
+              No description saved yet. The PlodAI agent will keep the durable field context here.
+            </MetaText>
+          )}
+        </FarmSection>
+      ) : null}
 
-      {activeCropNotes ? (
+      {activeCropIssues ? (
         <WorkspaceModalBackdrop
-          data-testid="farm-crop-notes-modal-backdrop"
-          onClick={() => setActiveCropNotes(null)}
+          data-testid="farm-crop-issues-modal-backdrop"
+          onClick={() => setActiveCropIssues(null)}
         >
           <CropNotesModalCard
-            data-testid="farm-crop-notes-modal"
+            data-testid="farm-crop-issues-modal"
             onClick={(event) => event.stopPropagation()}
           >
             <WorkspaceModalHeader>
               <WorkspaceModalTitleBlock>
-                <WorkspaceModalTitle>{activeCropNotes.cropName}</WorkspaceModalTitle>
-                <WorkspaceModalMeta>Full crop notes rendered as markdown.</WorkspaceModalMeta>
+                <WorkspaceModalTitle>{activeCropIssues.cropName}</WorkspaceModalTitle>
+                <WorkspaceModalMeta>Structured grouped findings for this crop block.</WorkspaceModalMeta>
               </WorkspaceModalTitleBlock>
               <WorkspaceModalCloseButton
-                onClick={() => setActiveCropNotes(null)}
+                onClick={() => setActiveCropIssues(null)}
                 type="button"
               >
                 Close
               </WorkspaceModalCloseButton>
             </WorkspaceModalHeader>
-            <CropNotesMarkdown data-testid="farm-crop-notes-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {activeCropNotes.notes}
-              </ReactMarkdown>
+            <CropNotesMarkdown data-testid="farm-crop-issues-markdown">
+              <IssueList>
+                {activeCropIssues.issues.map((issue) => (
+                  <IssueCard key={issue.id}>
+                    <IssueHeader>
+                      <IssueTitle>{issue.title}</IssueTitle>
+                      <IssueSeverityPill $severity={issue.severity}>
+                        {issue.severity}
+                      </IssueSeverityPill>
+                    </IssueHeader>
+                    {issue.deadline?.trim() ? (
+                      <IssueMeta>Deadline: {issue.deadline}</IssueMeta>
+                    ) : null}
+                    {issue.description?.trim() ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {issue.description}
+                      </ReactMarkdown>
+                    ) : null}
+                    {issue.recommended_follow_up?.trim() ? (
+                      <IssueFollowUp>
+                        <strong>Follow-up:</strong> {issue.recommended_follow_up}
+                      </IssueFollowUp>
+                    ) : null}
+                  </IssueCard>
+                ))}
+              </IssueList>
             </CropNotesMarkdown>
           </CropNotesModalCard>
         </WorkspaceModalBackdrop>
@@ -383,11 +449,11 @@ export function FarmRecordPanel({
   );
 }
 
-function formatOrderStatus(status: FarmOrderStatusV1): string {
+function formatOrderStatus(status: FarmOrderStatus): string {
   return status === "sold_out" ? "sold out" : status;
 }
 
-function nextOrderStatus(status: FarmOrderStatusV1): FarmOrderStatusV1 | null {
+function nextOrderStatus(status: FarmOrderStatus): FarmOrderStatus | null {
   if (status === "draft") {
     return "live";
   }
@@ -397,7 +463,7 @@ function nextOrderStatus(status: FarmOrderStatusV1): FarmOrderStatusV1 | null {
   return "live";
 }
 
-function statusActionLabel(status: FarmOrderStatusV1): string {
+function statusActionLabel(status: FarmOrderStatus): string {
   if (status === "live") {
     return "Go live";
   }
@@ -405,6 +471,27 @@ function statusActionLabel(status: FarmOrderStatusV1): string {
     return "Mark sold out";
   }
   return "Set draft";
+}
+
+function issueSeverityTone(
+  severity: FarmCropIssueSeverity,
+): { background: string; color: string } {
+  if (severity === "high") {
+    return {
+      background: "rgba(186, 92, 78, 0.16)",
+      color: "#8b3e32",
+    };
+  }
+  if (severity === "medium") {
+    return {
+      background: "rgba(178, 128, 55, 0.14)",
+      color: "#6f4b1d",
+    };
+  }
+  return {
+    background: "rgba(121, 160, 106, 0.16)",
+    color: "#35533d",
+  };
 }
 
 function isAbsoluteHttpUrl(value: string | null | undefined): value is string {
@@ -495,6 +582,13 @@ const FarmLocation = styled.span`
   font-size: 0.82rem;
   line-height: 1.3;
   color: var(--muted);
+`;
+
+const FarmDescription = styled.p`
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ink) 88%, var(--muted) 12%);
 `;
 
 const FarmEditorWrap = styled.div`
@@ -606,10 +700,32 @@ const CropNotesPreview = styled.div`
   max-height: 8.75rem;
   overflow: auto;
   padding-right: 0.25rem;
-  white-space: pre-wrap;
-  line-height: 1.5;
+  display: grid;
+  gap: 0.35rem;
+  line-height: 1.45;
   color: color-mix(in srgb, var(--ink) 92%, var(--muted) 8%);
   scrollbar-gutter: stable;
+`;
+
+const CropIssueSummaryRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+
+  strong {
+    font-size: 0.78rem;
+  }
+`;
+
+const CropIssueDeadline = styled.div`
+  font-size: 0.74rem;
+  color: color-mix(in srgb, var(--ink) 86%, var(--muted) 14%);
+`;
+
+const CropIssuePreviewList = styled.div`
+  font-size: 0.78rem;
+  white-space: pre-wrap;
 `;
 
 const CropNotesButton = styled.button`
@@ -681,6 +797,20 @@ const FarmStatusPill = styled.span<{ $tone: string }>`
       : $tone === "active"
         ? "#6f4b1d"
         : "#34546d"};
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: capitalize;
+`;
+
+const IssueSeverityPill = styled.span<{ $severity: FarmCropIssueSeverity }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: ${({ $severity }) => issueSeverityTone($severity).background};
+  color: ${({ $severity }) => issueSeverityTone($severity).color};
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: capitalize;
@@ -844,4 +974,43 @@ const CropNotesMarkdown = styled.div`
     border-radius: 0.8rem;
     background: rgba(17, 24, 39, 0.06);
   }
+`;
+
+const IssueList = styled.div`
+  display: grid;
+  gap: 0.8rem;
+`;
+
+const IssueCard = styled.article`
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+`;
+
+const IssueHeader = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+`;
+
+const IssueTitle = styled.div`
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink);
+`;
+
+const IssueMeta = styled.div`
+  font-size: 0.78rem;
+  color: var(--muted);
+`;
+
+const IssueFollowUp = styled.div`
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--ink) 92%, var(--muted) 8%);
 `;

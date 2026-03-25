@@ -1,7 +1,6 @@
-import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { Suspense, lazy } from "react";
 
 import { AppStateProvider } from "./app/context";
-import { WorkspaceProvider } from "./app/workspace";
 import { useAppRouteGuards, useAppSessionState, useToastState } from "./app/hooks";
 import {
   AppEmptyMetaText,
@@ -14,115 +13,64 @@ import {
 } from "./app/styles";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
-import { allAgentDefinitions } from "./agents/definitions";
-import { isFarmOrderPath, navigate, usePathname } from "./lib/router";
-import { isWritingPath } from "./lib/writing";
-import type { WorkspaceAppId } from "./types/workspace";
-
-type AgentPageProps = Record<string, never>;
-
-type AgentPageComponent = ComponentType<AgentPageProps>;
-
-const WritingPage = lazy(async () => {
-  const module = await import("./components/WritingPage");
-  return { default: module.WritingPage };
-});
+import {
+  ADMIN_USERS_PATH,
+  isAdminUsersPath,
+  isFarmOrderPath,
+  navigate,
+  PLODAI_PATH,
+  usePathname,
+} from "./lib/router";
 
 const FarmOrderPage = lazy(async () => {
   const module = await import("./components/FarmOrderPage");
   return { default: module.FarmOrderPage };
 });
 
-const PlodaiAgentPage = lazy(async () => {
-  const module = await import("./agents/workspaceApp");
-  return { default: module.PlodaiWorkspacePage };
-});
-
-const DocumentAgentPage = lazy(async () => {
-  const module = await import("./agents/workspaceApp");
-  return { default: module.DocumentWorkspacePage };
+const PlodaiFarmPane = lazy(async () => {
+  const module = await import("./components/PlodaiFarmPane");
+  return { default: module.PlodaiFarmPane };
 });
 
 const AdminUsersPage = lazy(async () => {
-  const module = await import("./agents/adminUsers");
-  const WrappedAdminUsersPage: AgentPageComponent = () => <module.AdminUsersPage />;
-  return { default: WrappedAdminUsersPage };
+  const module = await import("./components/AdminUsersPage");
+  return { default: module.AdminUsersPage };
 });
-
-const agentPages: Record<string, LazyExoticComponent<AgentPageComponent>> = {
-  "plodai-agent": PlodaiAgentPage,
-  "document-agent": DocumentAgentPage,
-  "admin-users": AdminUsersPage,
-};
 
 function RouteLoadingState({ label }: { label: string }) {
   return (
     <AppEmptyState>
       <strong>Loading {label}</strong>
-      <AppEmptyMetaText>Fetching just the code needed for this workspace route.</AppEmptyMetaText>
+      <AppEmptyMetaText>Fetching the PlodAI route you asked for.</AppEmptyMetaText>
     </AppEmptyState>
   );
 }
 
-function filterAgents(role: "admin" | "user") {
-  return allAgentDefinitions.filter((agent) =>
-    agent.showInSidebar !== false &&
-    (agent.tabs.length === 0 ||
-      agent.tabs.some((tab) => (tab.visible ? tab.visible({ role }) : true))),
-  );
-}
-
-function resolveVisibleAgent(pathname: string, role: "admin" | "user") {
-  const agents = filterAgents(role);
-  return agents.find((agent) => agent.path === pathname) ?? null;
-}
-
-function workspaceAppIdForAgent(agentId: string | null): WorkspaceAppId | null {
-  if (agentId === "plodai-agent") {
-    return "plodai";
-  }
-  if (agentId === "document-agent") {
-    return "documents";
-  }
-  return null;
-}
-
-function WorkspaceShellFrame({
-  agents,
-  activeAgent,
-  ActiveAgentPage,
-}: {
-  agents: ReturnType<typeof filterAgents>;
-  activeAgent: ReturnType<typeof resolveVisibleAgent>;
-  ActiveAgentPage: LazyExoticComponent<AgentPageComponent> | null;
-}) {
+function ToastLayer({
+  dismissToast,
+  toasts,
+}: ReturnType<typeof useToastState>) {
   return (
-    <PlatformShell
-      agents={agents}
-      activeAgentId={activeAgent?.id ?? null}
-      themeAgentId={activeAgent?.id ?? null}
-      onSelectAgent={navigate}
-    >
-      {!activeAgent ? (
-        <AppEmptyState>
-          <strong>Unknown route</strong>
-          <AppEmptyMetaText>Open the workspace or admin tools from the shell navigation.</AppEmptyMetaText>
-        </AppEmptyState>
-      ) : null}
-      {activeAgent && ActiveAgentPage ? (
-        <Suspense fallback={<RouteLoadingState label={activeAgent.title} />}>
-          <ActiveAgentPage />
-        </Suspense>
-      ) : null}
-    </PlatformShell>
+    <ToastViewport>
+      {toasts.map((toast) => (
+        <ToastCard key={toast.id} $tone={toast.tone}>
+          <ToastHeader>
+            <ToastTitle>{toast.title}</ToastTitle>
+            <ToastDismissButton onClick={() => dismissToast(toast.id)} type="button">
+              Dismiss
+            </ToastDismissButton>
+          </ToastHeader>
+          <AppEmptyMetaText>{toast.message}</AppEmptyMetaText>
+        </ToastCard>
+      ))}
+    </ToastViewport>
   );
 }
 
 export function App() {
   const pathname = usePathname();
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
-  const { dismissToast, toasts } = useToastState();
-  const viewingWriting = isWritingPath(pathname);
+  const toastState = useToastState();
   const viewingPublicFarmOrder = isFarmOrderPath(pathname);
 
   useAppRouteGuards({
@@ -132,25 +80,18 @@ export function App() {
     hydrating,
   });
 
-  if (viewingWriting || viewingPublicFarmOrder) {
+  if (pathname === "/") {
+    navigate(PLODAI_PATH);
+    return null;
+  }
+
+  if (viewingPublicFarmOrder) {
     return (
       <>
-        <Suspense fallback={<RouteLoadingState label={viewingWriting ? "writing" : "farm order"} />}>
-          {viewingWriting ? <WritingPage /> : <FarmOrderPage />}
+        <Suspense fallback={<RouteLoadingState label="farm order" />}>
+          <FarmOrderPage />
         </Suspense>
-        <ToastViewport>
-          {toasts.map((toast) => (
-            <ToastCard key={toast.id} $tone={toast.tone}>
-              <ToastHeader>
-                <ToastTitle>{toast.title}</ToastTitle>
-                <ToastDismissButton onClick={() => dismissToast(toast.id)} type="button">
-                  Dismiss
-                </ToastDismissButton>
-              </ToastHeader>
-              <AppEmptyMetaText>{toast.message}</AppEmptyMetaText>
-            </ToastCard>
-          ))}
-        </ToastViewport>
+        <ToastLayer {...toastState} />
       </>
     );
   }
@@ -159,7 +100,7 @@ export function App() {
     return (
       <AppEmptyState>
         <strong>Loading session</strong>
-        <AppEmptyMetaText>Checking whether you already have an authenticated workspace session.</AppEmptyMetaText>
+        <AppEmptyMetaText>Checking whether you already have an authenticated PlodAI session.</AppEmptyMetaText>
       </AppEmptyState>
     );
   }
@@ -167,34 +108,23 @@ export function App() {
   if (!user) {
     return <SignInPage authError={authError} hasClerkSession={isSignedIn} onRetryAuth={reloadSession} />;
   }
-  const currentUser = user;
 
-  const agents = filterAgents(currentUser.role);
-  const activeAgent = resolveVisibleAgent(pathname, currentUser.role);
-  const activeWorkspaceAppId = workspaceAppIdForAgent(activeAgent?.id ?? null);
-  const ActiveAgentPage = activeAgent ? agentPages[activeAgent.id] : null;
+  const currentUser = user;
+  const showingAdmin = isAdminUsersPath(pathname) && currentUser.role === "admin";
+  const activePath = showingAdmin ? ADMIN_USERS_PATH : PLODAI_PATH;
+
   return (
     <AppStateProvider value={{ authError, setAuthError, user: currentUser, setUser }}>
-      <WorkspaceProvider appId={activeWorkspaceAppId}>
-        <WorkspaceShellFrame
-          agents={agents}
-          activeAgent={activeAgent}
-          ActiveAgentPage={ActiveAgentPage}
-        />
-      </WorkspaceProvider>
-      <ToastViewport>
-        {toasts.map((toast) => (
-          <ToastCard key={toast.id} $tone={toast.tone}>
-            <ToastHeader>
-              <ToastTitle>{toast.title}</ToastTitle>
-              <ToastDismissButton onClick={() => dismissToast(toast.id)} type="button">
-                Dismiss
-              </ToastDismissButton>
-            </ToastHeader>
-            <AppEmptyMetaText>{toast.message}</AppEmptyMetaText>
-          </ToastCard>
-        ))}
-      </ToastViewport>
+      <PlatformShell
+        activePath={activePath}
+        canViewAdmin={currentUser.role === "admin"}
+        title={showingAdmin ? "PlodAI admin" : "PlodAI"}
+      >
+        <Suspense fallback={<RouteLoadingState label={showingAdmin ? "admin" : "farms"} />}>
+          {showingAdmin ? <AdminUsersPage /> : <PlodaiFarmPane />}
+        </Suspense>
+      </PlatformShell>
+      <ToastLayer {...toastState} />
     </AppStateProvider>
   );
 }

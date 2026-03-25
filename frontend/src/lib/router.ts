@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
-const FARM_ORDER_PATH_PREFIX = "/farm-orders/";
+export const PLODAI_PATH = "/plodai";
+export const ADMIN_USERS_PATH = "/admin/users";
+const FARM_ORDER_PATH_PREFIX = "/farms/";
 
 function currentPathname(): string {
   if (typeof window === "undefined") {
@@ -28,7 +30,7 @@ export function usePathname(): string {
   return pathname;
 }
 
-export function navigate(pathname: string) {
+export function navigate(pathname: string): void {
   if (window.location.pathname === pathname) {
     return;
   }
@@ -36,28 +38,34 @@ export function navigate(pathname: string) {
   window.dispatchEvent(new Event("app:navigate"));
 }
 
+export function isPlodaiPath(pathname: string): boolean {
+  return pathname === PLODAI_PATH || pathname.startsWith(`${PLODAI_PATH}/`);
+}
+
+export function isAdminUsersPath(pathname: string): boolean {
+  return pathname === ADMIN_USERS_PATH;
+}
+
 export function isFarmOrderPath(pathname: string): boolean {
-  return pathname.startsWith(FARM_ORDER_PATH_PREFIX);
+  return /^\/farms\/[^/]+\/orders\/[^/]+$/.test(pathname);
 }
 
 export function parseFarmOrderPath(
   pathname: string,
-): { workspaceId: string; orderId: string } | null {
+): { farmId: string; orderId: string } | null {
   if (!isFarmOrderPath(pathname)) {
     return null;
   }
-  const [, workspaceId = "", orderId = ""] = pathname
-    .slice(FARM_ORDER_PATH_PREFIX.length)
-    .split("/");
-  if (!workspaceId || !orderId) {
+  const [, , farmId = "", , orderId = ""] = pathname.split("/");
+  if (!farmId || !orderId) {
     return null;
   }
   return {
-    workspaceId: decodeURIComponent(workspaceId),
+    farmId: decodeURIComponent(farmId),
     orderId: decodeURIComponent(orderId),
   };
 }
 
-export function buildFarmOrderPath(workspaceId: string, orderId: string): string {
-  return `${FARM_ORDER_PATH_PREFIX}${encodeURIComponent(workspaceId)}/${encodeURIComponent(orderId)}`;
+export function buildFarmOrderPath(farmId: string, orderId: string): string {
+  return `${FARM_ORDER_PATH_PREFIX}${encodeURIComponent(farmId)}/orders/${encodeURIComponent(orderId)}`;
 }

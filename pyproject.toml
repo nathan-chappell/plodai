@@ -18,7 +18,6 @@ dependencies = [
   "pydantic-settings",
   "python-multipart",
   "sqlalchemy",
-  "typer",
   "uvicorn[standard]"
 ]
 

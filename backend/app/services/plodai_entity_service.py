@@ -2,18 +2,15 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from fastapi import HTTPException, status
 
-from backend.app.models.chatkit import WorkspaceChat
-from backend.app.models.stored_file import StoredFile
-from backend.app.models.workspace import Workspace, WorkspaceItem
+from backend.app.models.farm import FarmImage
+from backend.app.schemas.farm import FarmCrop, FarmRecordPayload
 from backend.app.schemas.plodai_entities import (
     PlodaiComposerEntity,
     PlodaiEntitySearchResponse,
 )
-from backend.app.schemas.workspace import FarmItemPayload
-from backend.app.services.stored_file_service import StoredFileService
+from backend.app.services.farm_image_service import FarmImageService
+from backend.app.services.farm_service import FarmService
 
 
 class PlodaiEntityService:
@@ -21,174 +18,152 @@ class PlodaiEntityService:
         self,
         db: AsyncSession,
         *,
-        file_service: StoredFileService | None = None,
+        image_service: FarmImageService | None = None,
+        farm_service: FarmService | None = None,
     ):
         self.db = db
-        self.file_service = file_service or StoredFileService(db)
+        self.image_service = image_service or FarmImageService(db)
+        self.farm_service = farm_service or FarmService(db)
 
     async def search_entities(
         self,
         *,
         user_id: str,
-        workspace_id: str,
-        app_id: str,
-        thread_id: str,
+        farm_id: str,
         query: str,
         public_base_url: str | None = None,
     ) -> PlodaiEntitySearchResponse:
-        if app_id != "plodai":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="PlodAI entities are only available for the PlodAI app.",
-            )
-
-        workspace = await self.db.get(Workspace, workspace_id)
-        if workspace is None or workspace.user_id != user_id or workspace.app_id != "plodai":
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Workspace not found.",
-            )
-
-        chat = await self.db.get(WorkspaceChat, thread_id)
-        if chat is None or chat.user_id != user_id or chat.workspace_id != workspace_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Thread not found.",
-            )
-
+        await self.farm_service.require_farm(user_id=user_id, farm_id=farm_id)
+        record = await self.farm_service.get_record(user_id=user_id, farm_id=farm_id)
         normalized_query = query.strip().lower()
         entities = [
-            *await self._search_thread_images(
+            *await self._search_images(
                 user_id=user_id,
-                workspace_id=workspace_id,
-                thread_id=thread_id,
+                farm_id=farm_id,
                 normalized_query=normalized_query,
                 public_base_url=public_base_url,
             ),
-            *await self._search_farm_entities(
-                user_id=user_id,
-                workspace_id=workspace_id,
+            *self._search_record(
+                farm_id=farm_id,
+                record=record,
                 normalized_query=normalized_query,
             ),
         ]
         return PlodaiEntitySearchResponse(entities=entities[:24])
 
-    async def _search_thread_images(
+    async def _search_images(
         self,
         *,
         user_id: str,
-        workspace_id: str,
-        thread_id: str,
+        farm_id: str,
         normalized_query: str,
         public_base_url: str | None,
     ) -> list[PlodaiComposerEntity]:
         result = await self.db.execute(
-            select(StoredFile)
+            select(FarmImage)
             .where(
-                StoredFile.user_id == user_id,
-                StoredFile.workspace_id == workspace_id,
-                StoredFile.thread_id == thread_id,
-                StoredFile.scope == "chat_attachment",
-                StoredFile.kind == "image",
-                StoredFile.status != "deleted",
+                FarmImage.user_id == user_id,
+                FarmImage.farm_id == farm_id,
+                FarmImage.status != "deleted",
             )
-            .order_by(StoredFile.created_at.desc())
+            .order_by(FarmImage.created_at.desc())
         )
-        records = list(result.scalars().all())
         entities: list[PlodaiComposerEntity] = []
-        for record in records:
-            width = ""
-            height = ""
-            if record.preview_json.get("kind") == "image":
-                width = str(record.preview_json.get("width") or "")
-                height = str(record.preview_json.get("height") or "")
+        for record in result.scalars().all():
             haystack = " ".join(
-                value for value in [record.name, record.mime_type or "", width, height] if value
+                [
+                    record.name,
+                    record.mime_type or "",
+                    str(record.width),
+                    str(record.height),
+                ]
             ).lower()
             if normalized_query and normalized_query not in haystack:
                 continue
+            preview_url = self.image_service.build_public_preview_url(
+                record,
+                public_base_url=public_base_url,
+            )
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"thread-image:{record.id}",
+                    id=f"farm-image:{record.id}",
                     title=record.name,
                     icon="images",
                     interactive=True,
-                    group="Thread images",
+                    group="Farm images",
                     data={
-                        "entity_type": "thread_image",
-                        "stored_file_id": record.id,
-                        "file_id": record.id,
-                        "workspace_item_id": record.id,
-                        "thread_id": thread_id,
+                        "entity_type": "farm_image",
+                        "farm_id": farm_id,
+                        "image_id": record.id,
+                        "chat_id": record.chat_id or "",
                         "attachment_id": record.attachment_id or "",
-                        "preview_url": self.file_service.build_public_preview_url(
-                            record,
-                            public_base_url=public_base_url,
-                        ),
+                        "preview_url": preview_url,
                         "mime_type": record.mime_type or "",
-                        "width": width,
-                        "height": height,
+                        "width": str(record.width),
+                        "height": str(record.height),
                     },
                 )
             )
         return entities
 
-    async def _search_farm_entities(
+    def _search_record(
         self,
         *,
-        user_id: str,
-        workspace_id: str,
+        farm_id: str,
+        record: FarmRecordPayload,
         normalized_query: str,
     ) -> list[PlodaiComposerEntity]:
-        result = await self.db.execute(
-            select(WorkspaceItem)
-            .options(selectinload(WorkspaceItem.revisions))
-            .where(
-                WorkspaceItem.workspace_id == workspace_id,
-                WorkspaceItem.created_by_user_id == user_id,
-                WorkspaceItem.item_origin == "created",
-                WorkspaceItem.kind == "farm.v1",
-            )
-            .order_by(WorkspaceItem.updated_at.desc())
-            .limit(1)
-        )
-        farm_item = result.scalar_one_or_none()
-        if farm_item is None or not farm_item.revisions:
-            return []
-
-        farm_payload = FarmItemPayload.model_validate(farm_item.revisions[-1].payload_json)
         entities: list[PlodaiComposerEntity] = []
 
-        for crop in farm_payload.crops:
+        for crop in record.crops:
+            issue_terms: list[str | None] = []
+            for issue in crop.issues:
+                issue_terms.extend(
+                    [
+                        issue.title,
+                        issue.description,
+                        issue.severity,
+                        issue.deadline,
+                        issue.recommended_follow_up,
+                    ]
+                )
             if not _matches_query(
                 normalized_query,
+                record.farm_name,
+                record.description,
+                record.location,
                 crop.name,
-                crop.area,
+                crop.type,
+                crop.size,
                 crop.expected_yield,
-                crop.notes,
-                farm_payload.farm_name,
+                *issue_terms,
             ):
                 continue
+            highest_severity = _highest_crop_issue_severity(crop)
+            next_deadline = _next_crop_issue_deadline(crop)
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"farm-crop:{farm_item.id}:{crop.id}",
+                    id=f"farm-crop:{farm_id}:{crop.id}",
                     title=crop.name,
                     icon="notebook",
                     interactive=True,
                     group="Farm crops",
                     data={
                         "entity_type": "farm_crop",
-                        "artifact_id": farm_item.id,
-                        "farm_name": farm_payload.farm_name,
+                        "farm_id": farm_id,
+                        "farm_name": record.farm_name,
                         "item_id": crop.id,
-                        "area": crop.area,
+                        "type": crop.type or "",
+                        "size": crop.size or "",
                         "expected_yield": crop.expected_yield or "",
-                        "notes": crop.notes or "",
+                        "issue_count": str(len(crop.issues)),
+                        "highest_severity": highest_severity or "",
+                        "next_deadline": next_deadline or "",
                     },
                 )
             )
 
-        for order in farm_payload.orders:
+        for order in record.orders:
             order_item_terms: list[str | None] = []
             for order_item in order.items:
                 order_item_terms.extend(
@@ -200,27 +175,28 @@ class PlodaiEntityService:
                 )
             if not _matches_query(
                 normalized_query,
+                record.farm_name,
+                record.location,
                 order.title,
                 order.status,
                 order.summary,
                 order.price_label,
                 order.notes,
                 order.order_url,
-                farm_payload.farm_name,
                 *order_item_terms,
             ):
                 continue
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"farm-order:{farm_item.id}:{order.id}",
+                    id=f"farm-order:{farm_id}:{order.id}",
                     title=order.title,
                     icon="cart",
                     interactive=True,
                     group="Farm orders",
                     data={
                         "entity_type": "farm_order",
-                        "artifact_id": farm_item.id,
-                        "farm_name": farm_payload.farm_name,
+                        "farm_id": farm_id,
+                        "farm_name": record.farm_name,
                         "item_id": order.id,
                         "status": order.status,
                         "price_label": order.price_label or "",
@@ -239,3 +215,24 @@ def _matches_query(normalized_query: str, *values: str | None) -> bool:
         return True
     haystack = " ".join(value for value in values if value).lower()
     return normalized_query in haystack
+
+
+def _highest_crop_issue_severity(crop: FarmCrop) -> str | None:
+    severity_order = {"low": 1, "medium": 2, "high": 3}
+    highest = None
+    highest_rank = -1
+    for issue in crop.issues:
+        rank = severity_order.get(issue.severity, 0)
+        if rank > highest_rank:
+            highest = issue.severity
+            highest_rank = rank
+    return highest
+
+
+def _next_crop_issue_deadline(crop: FarmCrop) -> str | None:
+    deadlines = [
+        issue.deadline.strip()
+        for issue in crop.issues
+        if issue.deadline and issue.deadline.strip()
+    ]
+    return sorted(deadlines)[0] if deadlines else None

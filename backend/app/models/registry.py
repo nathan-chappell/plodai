@@ -3,32 +3,26 @@ from backend.app.db.session import Base
 
 def import_models() -> tuple[type[Base], ...]:
     """Import ORM models so Base.metadata is populated before create_all()."""
-    from backend.app.models.chatkit import (
-        WorkspaceChat,
-        WorkspaceWorkspaceChatAttachment,
-        WorkspaceChatEntry,
-        WorkspaceChatFeedback,
-    )
     from backend.app.models.cost import CostEvent
     from backend.app.models.credit import UserCreditBalance
     from backend.app.models.credit_grant import CreditGrant
-    from backend.app.models.stored_file import StoredFile
-    from backend.app.models.workspace import (
-        Workspace,
-        WorkspaceItem,
-        WorkspaceItemRevision,
+    from backend.app.models.farm import (
+        Farm,
+        FarmChat,
+        FarmChatAttachment,
+        FarmChatEntry,
+        FarmImage,
+        FarmRecord,
     )
 
     return (
-        WorkspaceChat,
-        WorkspaceWorkspaceChatAttachment,
-        WorkspaceChatEntry,
-        WorkspaceChatFeedback,
         CostEvent,
         UserCreditBalance,
         CreditGrant,
-        StoredFile,
-        Workspace,
-        WorkspaceItem,
-        WorkspaceItemRevision,
+        Farm,
+        FarmRecord,
+        FarmImage,
+        FarmChat,
+        FarmChatEntry,
+        FarmChatAttachment,
     )

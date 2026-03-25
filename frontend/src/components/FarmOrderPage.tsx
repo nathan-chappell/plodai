@@ -3,7 +3,7 @@ import styled from "styled-components";
 
 import { ApiError, fetchPublicFarmOrder } from "../lib/api";
 import { parseFarmOrderPath, usePathname } from "../lib/router";
-import type { PublicFarmOrderResponse } from "../types/workspace";
+import type { PublicFarmOrderResponse } from "../types/farm";
 
 export function FarmOrderPage() {
   const pathname = usePathname();
@@ -26,7 +26,7 @@ export function FarmOrderPage() {
     setError(null);
     void (async () => {
       try {
-        const response = await fetchPublicFarmOrder(route.workspaceId, route.orderId);
+        const response = await fetchPublicFarmOrder(route.farmId, route.orderId);
         if (!cancelled) {
           setOrderData(response);
           setError(null);
@@ -50,7 +50,7 @@ export function FarmOrderPage() {
     return () => {
       cancelled = true;
     };
-  }, [route?.orderId, route?.workspaceId]);
+  }, [route?.farmId, route?.orderId]);
 
   const order = orderData?.order ?? null;
 

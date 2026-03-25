@@ -1,5 +1,3 @@
-import secrets
-import logging
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -10,11 +8,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.clerk_metadata import (
-    DEFAULT_CREDIT_FLOOR_USD,
     as_public_metadata,
     resolve_credit_floor_usd,
 )
-from backend.app.core.logging import get_logger, log_event
 from backend.app.db.session import get_db
 from backend.app.models.credit import UserCreditBalance
 from backend.app.models.types import UserRole
@@ -22,8 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
-logger = get_logger("auth")
-DEFAULT_DEV_AUTH_BEARER_TOKEN = "banana-for-scale"
 
 
 @dataclass
@@ -40,49 +34,12 @@ class AuthenticatedUser:
 class ClerkRequest:
     headers: Mapping[str, str]
 
-
-def _resolve_dev_authenticated_user(
-    credentials: HTTPAuthorizationCredentials | None,
-    *,
-    settings: Settings | None = None,
-) -> AuthenticatedUser | None:
-    resolved_settings = settings if settings is not None else get_settings()
-    if not resolved_settings.ENABLE_DEV_AUTH_BEARER:
-        return None
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        return None
-    if not secrets.compare_digest(
-        credentials.credentials, DEFAULT_DEV_AUTH_BEARER_TOKEN
-    ):
-        return None
-
-    user = AuthenticatedUser(
-        id="local-dev-admin",
-        email="dev@local.test",
-        full_name="Local Dev Admin",
-        role="admin",
-        is_active=True,
-        credit_floor_usd=DEFAULT_CREDIT_FLOOR_USD,
-    )
-    log_event(
-        logger,
-        logging.INFO,
-        "auth.dev_bearer_authenticated",
-        user_id=user.id,
-        role=user.role,
-    )
-    return user
-
-
 async def _require_clerk_user(
     credentials: HTTPAuthorizationCredentials | None,
     *,
     settings: Settings | None = None,
 ) -> AuthenticatedUser:
     resolved_settings = settings if settings is not None else get_settings()
-    dev_user = _resolve_dev_authenticated_user(credentials, settings=resolved_settings)
-    if dev_user is not None:
-        return dev_user
 
     if not resolved_settings.CLERK_SECRET_KEY:
         raise HTTPException(
@@ -201,6 +158,6 @@ async def require_paid_user(
     if current_credit_usd <= user.credit_floor_usd:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Credit limit reached. Add credit to continue using the workspace.",
+            detail="Credit limit reached. Add credit to continue using PlodAI.",
         )
     return user

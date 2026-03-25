@@ -1,5 +1,5 @@
 export type PlodaiEntityType =
-  | "thread_image"
+  | "farm_image"
   | "farm_crop"
   | "farm_order";
 

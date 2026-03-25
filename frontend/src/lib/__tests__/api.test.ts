@@ -1,147 +1,43 @@
-// @vitest-environment jsdom
-
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("../../app/toasts", () => ({
-  publishPaymentRequiredToast: vi.fn(),
-}));
+import { describe, expect, it, vi } from "vitest";
 
 import {
   authenticatedFetch,
   getChatKitConfig,
-  searchPlodaiEntities,
   setChatKitMetadataGetter,
-  setChatKitNativeFeedbackHandler,
 } from "../api";
 
-describe("authenticatedFetch", () => {
-  afterEach(() => {
-    setChatKitMetadataGetter(null);
-    setChatKitNativeFeedbackHandler(null);
-    vi.restoreAllMocks();
+describe("farm api helpers", () => {
+  it("builds farm-scoped ChatKit URLs", () => {
+    expect(getChatKitConfig("farm_abc").url).toContain("/api/farms/farm_abc/chatkit");
   });
 
-  it("intercepts native ChatKit feedback requests and returns a synthetic success response", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
-    const handler = vi.fn(async () => {});
-    setChatKitNativeFeedbackHandler(handler);
-
-    const response = await authenticatedFetch(getChatKitConfig().url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        type: "items.feedback",
-        params: {
-          thread_id: "thread_123",
-          item_ids: ["msg_123"],
-          kind: "negative",
-        },
-      }),
-    });
-
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(handler).toHaveBeenCalledWith({
-      threadId: "thread_123",
-      itemIds: ["msg_123"],
-      kind: "negative",
-    });
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({});
-  });
-
-  it("still attaches ChatKit metadata for normal ChatKit requests", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+  it("attaches chat metadata to ChatKit requests", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
     setChatKitMetadataGetter(() => ({
-      origin: "interactive",
-      workspace_state: { workspace_id: "workspace" },
+      origin: "ui_integration_test",
     }));
 
-    await authenticatedFetch(getChatKitConfig().url, {
+    await authenticatedFetch(getChatKitConfig("farm_abc").url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
-        type: "threads.create",
-        params: {
-          input: {
-            text: "Hello",
-          },
+        type: "thread.new",
+        metadata: {
+          title: "Field check",
         },
       }),
     });
 
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const [requestUrl, requestInit] = fetchSpy.mock.calls[0] ?? [];
-    expect(requestUrl).toBe(getChatKitConfig().url);
-    expect(JSON.parse(String(requestInit?.body))).toMatchObject({
-      type: "threads.create",
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      type: "thread.new",
       metadata: {
-        origin: "interactive",
-        workspace_state: { workspace_id: "workspace" },
+        title: "Field check",
+        origin: "ui_integration_test",
       },
     });
-  });
 
-  it("forwards ordinary ChatKit messages without rewriting their text", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
-
-    await authenticatedFetch(getChatKitConfig().url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        type: "threads.create",
-        params: {
-          input: {
-            text: "Inspect the current orchard photos.",
-          },
-        },
-      }),
-    });
-
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const [, requestInit] = fetchSpy.mock.calls[0] ?? [];
-    expect(JSON.parse(String(requestInit?.body))).toMatchObject({
-      params: {
-        input: {
-          text: "Inspect the current orchard photos.",
-        },
-      },
-    });
-  });
-
-  it("posts plodai entity searches with the expected request shape", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          entities: [],
-        }),
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-      ),
-    );
-
-    await searchPlodaiEntities({
-      appId: "plodai",
-      workspaceId: "workspace_123",
-      threadId: "thread_123",
-      query: "orchard",
-    });
-
-    const [requestUrl, requestInit] = fetchSpy.mock.calls[0] ?? [];
-    expect(requestUrl).toBe("/api/plodai/entities/search");
-    expect(JSON.parse(String(requestInit?.body))).toEqual({
-      app_id: "plodai",
-      workspace_id: "workspace_123",
-      thread_id: "thread_123",
-      query: "orchard",
-    });
+    setChatKitMetadataGetter(null);
+    vi.unstubAllGlobals();
   });
 });

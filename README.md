@@ -1,91 +1,53 @@
-# AI Portfolio
+# PlodAI
 
-AI Portfolio is a demo app for showcasing reusable frontend agents with a FastAPI backend and a Vite TypeScript React frontend. The original Report Foundry CSV workflow now lives inside the app as the current dataset-first analysis flow. The Python app code lives under `backend/`, while the frontend source lives under `frontend/`.
+PlodAI is a farm-first demo app with a FastAPI backend and a Vite React frontend. The app centers on farms, one canonical farm record per farm, farm image uploads, one persistent chat per farm, entity search, and public farm-order pages.
 
-## Why this shape
+## Stack
 
-- Backend: FastAPI on Python 3.14 keeps the agent orchestration surface simple and deployable on Railway.
-- Frontend: React plus Vite lives in `frontend/`, and Vite emits production assets to the repo-root `dist/` directory.
-- Persistence: SQLite on a Railway volume is the best fit for this demo stage. It backs users, report runs, and ChatKit conversation memory.
-- Auth: tokens are signed with `itsdangerous`, users live in SQLite, and the app can bootstrap an admin from env while also syncing a server-editable `backend/data/users.json` file.
-- Database access: the backend uses async SQLAlchemy sessions end to end.
+- Backend: FastAPI, ChatKit, the OpenAI Agents SDK, async SQLAlchemy, SQLite
+- Frontend: React, Vite, styled-components, Clerk auth
+- Storage: SQLite for app state and ChatKit memory, Railway object storage for farm images
 
-## Layout
+## Routes
 
-- Frontend/tooling root: `package.json`, `frontend/vite.config.ts`, `frontend/tsconfig.json`, `frontend/src/`
-- Built frontend assets: `dist/`
-- Python app: `backend/app/`
-- Python runtime config: `requirements.txt`, `requirements-dev.txt`
-- Release automation: `release.py`
-- Runtime entrypoint: `main.py`
+- `/plodai` for the signed-in PlodAI app
+- `/farms/{farm_id}/orders/{order_id}` for public farm-order pages
+- `/admin/users` for admin credit tools
 
-## Build and run
+## Backend API
 
-### Backend dev
+- `GET /api/farms`
+- `POST /api/farms`
+- `GET /api/farms/{farm_id}`
+- `PATCH /api/farms/{farm_id}`
+- `GET /api/farms/{farm_id}/record`
+- `PUT /api/farms/{farm_id}/record`
+- `POST /api/farms/{farm_id}/images`
+- `DELETE /api/farms/{farm_id}/images/{image_id}`
+- `POST /api/farms/{farm_id}/entities/search`
+- `GET /api/public/farms/{farm_id}/orders/{order_id}`
+- `POST /api/farms/{farm_id}/chatkit`
+
+## Local run
 
 ```bash
-cd backend
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r ..\requirements.txt
-pip install -r ..\requirements-dev.txt
-python ..\main.py
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+npm install
+npm run build
+python main.py
 ```
 
-### Frontend dev
+For frontend-only development:
 
 ```bash
-npm install
 npm run dev
 ```
 
-### Production-style local run
+## Notes
 
-1. Build the frontend with `npm run build`.
-2. Run `python main.py` or use the default `Backend: Uvicorn` VS Code launch, which builds the frontend first and then serves the repo-root `dist/` directory.
-
-The repo includes VS Code launch configs for both API-only development and production-style Uvicorn serving with freshly built frontend assets. Generated frontend assets are treated as disposable build output and are ignored by git.
-
-## Docker and release
-
-- `Dockerfile` expects prebuilt frontend assets in the repo-root `dist/` directory and copies them into the runtime image.
-- The runtime image copies `backend/`, `dist/`, and the root `main.py` entrypoint.
-- The root `main.py` prints version/runtime details first, then starts Uvicorn directly on `0.0.0.0:8000`.
-- `release.py` is the release helper at the repo root.
-- `release.py bump` prompts for `p/m/M` and updates the frontend package version plus the backend FastAPI version.
-- `release.py release` updates the version and prints the manual release checklist, including the `npm run build` and Git commands to run.
-
-Examples:
-
-```bash
-python release.py bump
-python release.py release
-```
-
-## Railway notes
-
-- Railway can deploy a prebuilt Docker Hub image directly.
-- Railway provides the public HTTPS endpoint, so the container should serve plain HTTP only.
-- This app is currently hardcoded to listen on `0.0.0.0:8000` to match the current Railway setup.
-- Railway volumes are a good match for this demo if you want SQLite plus editable local assets.
-- Async SQLAlchemy keeps the app ready for streaming ChatKit request handling.
-
-## Current status
-
-This scaffold provides:
-
-- a FastAPI API with async SQLAlchemy and SQLite-backed users
-- signed auth tokens with a typed `admin | user` role model
-- DB-backed ChatKit memory models and a request-scoped server adapter
-- a `/chatkit` entrypoint that builds per-request agent context
-- a React UI with styled-components, ChatKit scaffolding, Chart.js, and client analysis tooling
-- Docker, VS Code tasks, and a release script scaffold
-
-The biggest missing pieces are fuller dataset-tool verification, smoother end-to-end integration coverage, and deeper testing of the client-tool round trips.
-
-## App routes
-
-- `/plodai` is the PlodAI app.
-- `/documents` is the Documents app.
-- `/admin` includes the admin-only credit tools plus repo-backed test cases that create a normal workspace, load fixture files, and prefill the composer without auto-sending.
-
+- Clerk bearer auth gates the signed-in API.
+- The backend owns the PlodAI agent definition and tool set.
+- Farm images are image-only; there is no document/report/chart workspace layer anymore.

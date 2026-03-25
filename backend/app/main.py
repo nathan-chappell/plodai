@@ -11,11 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
-from sqlalchemy import inspect
 
 from backend.app.api.routes import router
 from backend.app.chatkit.server import (
-    ClientWorkspaceChatKitServer,
+    FarmChatKitServer,
     build_chatkit_server,
 )
 from backend.app.core.auth import AuthenticatedUser, require_paid_user
@@ -36,65 +35,10 @@ def _read_version() -> str:
         return "unknown"
     version = data.get("version")
     return version if isinstance(version, str) and version else "unknown"
-
-
-def _should_reset_sqlite_schema(sync_conn) -> bool:
-    inspector = inspect(sync_conn)
-    table_names = set(inspector.get_table_names())
-    if not table_names:
-        return False
-
-    expected_tables = {
-        "workspaces",
-        "workspace_items",
-        "workspace_item_revisions",
-        "workspace_chats",
-        "workspace_chat_entries",
-        "workspace_chat_attachments",
-        "workspace_chat_feedback",
-        "stored_files",
-    }
-    legacy_tables = {
-        "workspace_files",
-        "workspace_artifacts",
-        "workspace_artifact_revisions",
-        "chat_threads",
-        "chat_messages",
-        "chat_attachments",
-        "chat_feedback",
-    }
-    if legacy_tables & table_names:
-        return True
-    if not expected_tables.issubset(table_names):
-        return True
-
-    workspace_columns = {
-        column["name"] for column in inspector.get_columns("workspaces")
-    }
-    return not {
-        "app_id",
-        "active_chat_id",
-        "selected_item_id",
-        "current_report_item_id",
-    }.issubset(workspace_columns)
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     import_models()
     async with engine.begin() as conn:
-        should_reset = (
-            settings.database_url.startswith("sqlite:///")
-            and await conn.run_sync(_should_reset_sqlite_schema)
-        )
-        if should_reset:
-            await conn.run_sync(Base.metadata.drop_all)
-            log_event(
-                logger,
-                logging.WARNING,
-                "startup.sqlite_schema_reset",
-                detail="detected legacy local schema and rebuilt the database",
-            )
         await conn.run_sync(Base.metadata.create_all)
 
     bucket_service = RailwayBucketService(settings)
@@ -160,13 +104,6 @@ if not settings.CLERK_SECRET_KEY:
         "clerk.secret_key_missing",
         detail="auth routes will return 503 until CLERK_SECRET_KEY is configured",
     )
-if settings.ENABLE_DEV_AUTH_BEARER:
-    log_event(
-        logger,
-        logging.WARNING,
-        "auth.dev_bearer_enabled",
-        detail="local bearer token auth bypass is active",
-    )
 if settings.OPENAI_API_KEY:
     os.environ.setdefault("OPENAI_API_KEY", settings.OPENAI_API_KEY)
     default_openai_client = AsyncOpenAI(
@@ -182,9 +119,9 @@ if settings.OPENAI_API_KEY:
     )
 
 app = FastAPI(
-    title="AI Portfolio API",
+    title="PlodAI API",
     version="0.8.3",
-    description="Agentic agent platform backend.",
+    description="Farm-first PlodAI backend.",
     lifespan=lifespan,
 )
 
@@ -238,11 +175,12 @@ async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/chatkit")
-async def chatkit_entrypoint(
+@app.post("/api/farms/{farm_id}/chatkit")
+async def farm_chatkit_entrypoint(
+    farm_id: str,
     request: Request,
     user: AuthenticatedUser = Depends(require_paid_user),
-    chatkit_server: ClientWorkspaceChatKitServer = Depends(build_chatkit_server),
+    chatkit_server: FarmChatKitServer = Depends(build_chatkit_server),
 ):
     raw_request = await request.body()
     context = await chatkit_server.build_request_context(

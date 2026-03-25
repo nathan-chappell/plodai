@@ -4,7 +4,7 @@ import type { PlodaiComposerEntity, PlodaiEntityType } from "../types/chat-entit
 
 function getEntityType(entity: Entity): PlodaiEntityType | null {
   const entityType = entity.data?.entity_type;
-  return entityType === "thread_image" ||
+  return entityType === "farm_image" ||
     entityType === "farm_crop" ||
     entityType === "farm_order"
     ? entityType
@@ -27,7 +27,7 @@ export function buildPlodaiEntityPreview(
     return { preview: null };
   }
 
-  if (entityType === "thread_image") {
+  if (entityType === "farm_image") {
     const previewUrl = entity.data.preview_url;
     if (!previewUrl) {
       return { preview: null };
@@ -58,7 +58,7 @@ export function buildPlodaiEntityPreview(
               },
               {
                 type: "Caption",
-                value: sizeLabel || "Thread image",
+                value: sizeLabel || "Farm image",
               },
             ],
           },
@@ -73,11 +73,21 @@ export function buildPlodaiEntityPreview(
       : "Farm order";
   const summary =
     entityType === "farm_crop"
-      ? [entity.data.area, entity.data.expected_yield && `Expected yield: ${entity.data.expected_yield}`]
+      ? [
+          entity.data.type,
+          entity.data.size,
+          entity.data.expected_yield && `Expected yield: ${entity.data.expected_yield}`,
+          entity.data.issue_count && `${entity.data.issue_count} issue${entity.data.issue_count === "1" ? "" : "s"}`,
+          entity.data.highest_severity && `${entity.data.highest_severity} severity`,
+        ]
           .filter(Boolean)
           .join(" | ")
       : [entity.data.status, entity.data.price_label].filter(Boolean).join(" | ");
-  const notes = entityType === "farm_order" ? entity.data.summary || entity.data.notes || "" : entity.data.notes || "";
+  const notes = entityType === "farm_order"
+    ? entity.data.summary || entity.data.notes || ""
+    : entity.data.next_deadline
+      ? `Next deadline: ${entity.data.next_deadline}`
+      : "";
 
   return {
     preview: {

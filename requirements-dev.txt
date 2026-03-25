@@ -1,7 +1,4 @@
 -r requirements.txt
 httpx
-matplotlib
-pillow
 pytest
 ruff
-torch

@@ -1,1 +1,0 @@
-# Agents SDK scaffolding package.

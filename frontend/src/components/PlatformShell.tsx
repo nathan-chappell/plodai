@@ -2,31 +2,24 @@ import type { ReactNode } from "react";
 import styled from "styled-components";
 
 import { AuthPanel } from "./AuthPanel";
-import type { AgentDefinition } from "../agents/types";
-import { getAgentDefinition } from "../agents/definitions";
 import { BRAND_MARK_URL } from "../lib/brand";
 import { PlatformThemeProvider } from "./platformTheme";
+import { ADMIN_USERS_PATH, PLODAI_PATH, navigate } from "../lib/router";
 import { PlatformMain, PlatformPage } from "./styles";
 
 export function PlatformShell({
-  agents: _agents,
-  activeAgentId,
-  themeAgentId,
-  onSelectAgent: _onSelectAgent,
+  title,
+  activePath,
+  canViewAdmin = false,
   children,
 }: {
-  agents: AgentDefinition[];
-  activeAgentId: string | null;
-  themeAgentId?: string | null;
-  onSelectAgent: (path: string) => void;
+  title: string;
+  activePath: string;
+  canViewAdmin?: boolean;
   children: ReactNode;
 }) {
-  const activeAgent = activeAgentId ? getAgentDefinition(activeAgentId) : null;
-  const themedAgent = themeAgentId ? getAgentDefinition(themeAgentId) : null;
-  const brandLabel = activeAgent?.title ?? themedAgent?.title ?? "Workspace";
-
   return (
-    <PlatformThemeProvider agentId={themeAgentId}>
+    <PlatformThemeProvider agentId="plodai-agent">
       <PlatformPage>
         <ShellFrame>
           <TopChrome>
@@ -34,8 +27,26 @@ export function PlatformShell({
               <BrandCluster>
                 <BrandBlock>
                   <BrandLogo alt="" aria-hidden="true" data-testid="shell-logo" src={BRAND_MARK_URL} />
-                  <BrandTitle>{brandLabel}</BrandTitle>
+                  <BrandTitle>{title}</BrandTitle>
                 </BrandBlock>
+                <NavRow>
+                  <NavButton
+                    $active={activePath === PLODAI_PATH}
+                    onClick={() => navigate(PLODAI_PATH)}
+                    type="button"
+                  >
+                    Farms
+                  </NavButton>
+                  {canViewAdmin ? (
+                    <NavButton
+                      $active={activePath === ADMIN_USERS_PATH}
+                      onClick={() => navigate(ADMIN_USERS_PATH)}
+                      type="button"
+                    >
+                      Admin
+                    </NavButton>
+                  ) : null}
+                </NavRow>
               </BrandCluster>
 
               <TopActions>
@@ -80,10 +91,6 @@ const TopChrome = styled.header`
     linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(249, 244, 238, 0.92)),
     var(--panel);
   box-shadow: 0 14px 32px rgba(32, 26, 20, 0.08);
-
-  @media (max-width: 740px) {
-    padding: 0.48rem 0.56rem;
-  }
 `;
 
 const TopChromeRow = styled.div`
@@ -95,24 +102,14 @@ const TopChromeRow = styled.div`
   @media (max-width: 1180px) {
     grid-template-columns: 1fr;
   }
-
-  @media (max-width: 740px) {
-    gap: 0.4rem;
-  }
 `;
 
 const BrandCluster = styled.div`
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.8rem;
   min-width: 0;
   flex-wrap: wrap;
-
-  @media (max-width: 740px) {
-    gap: 0.55rem;
-    align-items: center;
-    flex-wrap: nowrap;
-  }
 `;
 
 const BrandBlock = styled.div`
@@ -120,10 +117,6 @@ const BrandBlock = styled.div`
   align-items: center;
   gap: 0.62rem;
   min-width: 0;
-
-  @media (max-width: 740px) {
-    gap: 0.52rem;
-  }
 `;
 
 const BrandLogo = styled.img`
@@ -132,11 +125,6 @@ const BrandLogo = styled.img`
   flex: 0 0 auto;
   display: block;
   object-fit: contain;
-
-  @media (max-width: 740px) {
-    width: 1.9rem;
-    height: 1.9rem;
-  }
 `;
 
 const BrandTitle = styled.h1`
@@ -145,10 +133,24 @@ const BrandTitle = styled.h1`
   line-height: 1.02;
   color: var(--ink);
   letter-spacing: -0.02em;
+`;
 
-  @media (max-width: 740px) {
-    font-size: 0.94rem;
-  }
+const NavRow = styled.div`
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+`;
+
+const NavButton = styled.button<{ $active?: boolean }>`
+  appearance: none;
+  border: 1px solid ${({ $active }) => ($active ? "rgba(21, 128, 61, 0.28)" : "var(--line)")};
+  background: ${({ $active }) => ($active ? "rgba(21, 128, 61, 0.12)" : "rgba(255, 255, 255, 0.74)")};
+  color: ${({ $active }) => ($active ? "var(--accent-deep)" : "var(--ink)")};
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 `;
 
 const TopActions = styled.div`
@@ -165,13 +167,4 @@ const TopActions = styled.div`
 const AccountShell = styled.div`
   min-width: min(500px, 100%);
   justify-self: end;
-
-  @media (max-width: 1180px) {
-    min-width: 0;
-    justify-self: stretch;
-  }
-
-  @media (max-width: 740px) {
-    width: 100%;
-  }
 `;

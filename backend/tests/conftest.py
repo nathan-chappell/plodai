@@ -15,7 +15,7 @@ def _reset_test_schema(sync_conn) -> None:
     Base.metadata.create_all(sync_conn)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(autouse=True)
 def initialized_db() -> None:
     get_settings()
     import_models()

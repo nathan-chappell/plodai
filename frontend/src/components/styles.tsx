@@ -6,15 +6,11 @@ import {
   emptyStateCss,
   flexWrapRowCss,
   gridStackCss,
-  panelSurfaceCss,
   primaryButtonCss,
   secondaryButtonCss,
   sectionPanelCss,
-  stackedListCss,
-  strongSurfaceCss,
   tableBodyCellCss,
   tableHeaderCellCss,
-  warmSurfaceCss,
 } from "../app/styles";
 import { css } from "styled-components";
 
@@ -24,16 +20,6 @@ const CardSection = styled.section`
 
 const WrapRow = styled.div`
   ${flexWrapRowCss()};
-`;
-
-const SecondaryActionButton = styled.button`
-  ${secondaryButtonCss};
-`;
-
-const OverlayMetaText = styled.p`
-  margin: 0;
-  color: rgba(248, 246, 242, 0.74);
-  line-height: 1.6;
 `;
 
 const SidebarSurfaceSection = styled.section<{ $collapsed?: boolean }>`
@@ -52,14 +38,6 @@ const sidebarFadingMetaCss = (maxHeight: string) => css<{ $collapsed?: boolean }
   opacity: ${({ $collapsed }) => ($collapsed ? 0 : 1)};
   max-height: ${({ $collapsed }) => ($collapsed ? "0" : maxHeight)};
   transition: opacity 180ms ease, max-height 180ms ease;
-`;
-
-const TableScroller = styled.div`
-  overflow-x: auto;
-`;
-
-const PlainTable = styled.table`
-  border-collapse: collapse;
 `;
 
 export const SignInPageRoot = styled.main`
@@ -1078,37 +1056,6 @@ export const PlatformSidebarMeta = styled(MetaText)<{ $collapsed?: boolean }>`
   ${sidebarFadingMetaCss("120px")};
 `;
 
-export const ChartCardShell = styled.article`
-  ${strongSurfaceCss};
-  background: linear-gradient(180deg, rgba(255, 253, 249, 0.98), rgba(248, 241, 234, 0.96));
-  padding: 1.2rem;
-  min-height: 280px;
-`;
-
-export const ChartCardHeading = styled.h3`
-  ${displayHeadingCss};
-  margin: 0 0 0.75rem;
-  font-size: 1.25rem;
-`;
-
-export const ChartCardPreview = styled.div`
-  min-height: 200px;
-  border-radius: var(--radius-md);
-  border: 1px dashed rgba(31, 41, 55, 0.18);
-  background: rgba(201, 111, 59, 0.08);
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  padding: 1rem;
-  text-align: center;
-`;
-
-export const ChartCardPreviewImage = styled.img`
-  display: block;
-  max-width: 100%;
-  border-radius: calc(var(--radius-md) - 4px);
-`;
-
 function resolveTabletChatPaneMinHeight(minHeight?: number): string {
   const clampedHeight = Math.min(minHeight ?? 430, 620);
   return `min(${clampedHeight}px, 72dvh)`;
@@ -1118,16 +1065,6 @@ function resolvePhoneChatPaneMinHeight(minHeight?: number): string {
   const clampedHeight = Math.min(minHeight ?? 430, 520);
   return `min(${clampedHeight}px, 68dvh)`;
 }
-
-export const ChartCardCode = styled.pre`
-  margin: 1rem 0 0;
-  padding: 0.9rem;
-  border-radius: var(--radius-md);
-  background: #221f1b;
-  color: #f8f6f2;
-  overflow: auto;
-  font-size: 0.85rem;
-`;
 
 export const ChatKitPaneCard = styled.section`
   position: sticky;
@@ -1158,102 +1095,12 @@ export const ChatKitPaneCard = styled.section`
   }
 `;
 
-export const ChatKitPaneMeta = styled(OverlayMetaText)``;
-
 export const ChatKitPaneHarness = styled.div`
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   gap: 0.35rem;
   min-height: 0;
-`;
-
-export const ChatKitPaneStatusRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem;
-  min-height: 2rem;
-
-  @media (max-width: 760px) {
-    align-items: flex-start;
-  }
-`;
-
-export const ChatKitPaneStatusActions = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-  width: 100%;
-  flex: 1 1 auto;
-  flex-wrap: nowrap;
-
-  @media (max-width: 760px) {
-    flex-wrap: wrap;
-  }
-`;
-
-export const ChatKitPaneStatusText = styled(OverlayMetaText)<{ $light?: boolean }>`
-  margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
-  margin-left: auto;
-  text-align: right;
-  color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.72)")};
-  font-size: 0.8rem;
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-
-  @media (max-width: 760px) {
-    order: 3;
-    flex-basis: 100%;
-    text-align: left;
-    white-space: normal;
-  }
-`;
-
-export const ChatKitPaneIconButton = styled.button<{ $light?: boolean }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.14)" : "rgba(255, 255, 255, 0.18)")};
-  background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.92)" : "rgba(255, 255, 255, 0.08)")};
-  color: ${({ $light }) => ($light ? "#1f2937" : "#f8f6f2")};
-  cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
-
-  &:hover:not(:disabled) {
-    transform: translateY(-1px);
-    background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.98)" : "rgba(255, 255, 255, 0.12)")};
-  }
-
-  &:disabled {
-    cursor: default;
-    opacity: 0.48;
-  }
-
-  svg {
-    width: 0.95rem;
-    height: 0.95rem;
-  }
-`;
-
-export const ChatKitPanePill = styled.div`
-  display: inline-flex;
-  width: fit-content;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 0.82rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 `;
 
 export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: number }>`
@@ -1295,279 +1142,4 @@ export const ChatKitPaneEmpty = styled.div`
   min-height: inherit;
   color: rgba(248, 246, 242, 0.74);
   padding: 1rem;
-`;
-
-export const ChatKitPaneToolbar = styled(WrapRow)`
-  gap: 0.35rem;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-
-  @media (max-width: 760px) {
-    flex-wrap: wrap;
-    width: 100%;
-  }
-`;
-
-export const ChatKitPaneToolbarButton = styled.button`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(31, 41, 55, 0.14);
-  background: rgba(255, 255, 255, 0.92);
-  color: #1f2937;
-  border-radius: 999px;
-  padding: 0.48rem 0.78rem;
-  font: inherit;
-  font-weight: 700;
-  font-size: 0.84rem;
-  line-height: 1;
-  cursor: pointer;
-
-  @media (max-width: 760px) {
-    flex: 1 1 0;
-    min-height: 2.6rem;
-  }
-`;
-
-export const ChatKitPaneModeRow = styled.div<{ $light?: boolean }>`
-  display: inline-flex;
-  align-items: center;
-  gap: 0.14rem;
-  flex: 0 0 auto;
-  padding: 0.12rem;
-  border-radius: 999px;
-  border: 1px solid ${({ $light }) => ($light ? "rgba(31, 41, 55, 0.12)" : "rgba(255, 255, 255, 0.12)")};
-  background: ${({ $light }) => ($light ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.07)")};
-`;
-
-export const ChatKitPaneModeButton = styled.button<{ $active?: boolean; $light?: boolean }>`
-  border: 1px solid
-    ${({ $active, $light }) =>
-      $active
-        ? $light
-          ? "rgba(31, 41, 55, 0.18)"
-          : "rgba(244, 196, 48, 0.62)"
-        : $light
-          ? "rgba(31, 41, 55, 0.14)"
-          : "rgba(255, 255, 255, 0.2)"};
-  background: ${({ $active, $light }) =>
-    $active
-      ? $light
-        ? "rgba(31, 41, 55, 0.08)"
-        : "rgba(244, 196, 48, 0.18)"
-      : $light
-        ? "rgba(255, 255, 255, 0.78)"
-        : "rgba(255, 255, 255, 0.08)"};
-  color: ${({ $light }) => ($light ? "#1f2937" : "#f8f6f2")};
-  border-radius: 999px;
-  padding: 0.28rem 0.56rem;
-  font: inherit;
-  font-weight: 700;
-  font-size: 0.76rem;
-  line-height: 1;
-  cursor: pointer;
-
-  &:disabled {
-    cursor: default;
-    opacity: 0.5;
-  }
-`;
-
-export const ChatKitPaneHarnessMeta = styled(OverlayMetaText)<{ $light?: boolean }>`
-  margin: 0;
-  color: ${({ $light }) => ($light ? "var(--muted)" : "rgba(248, 246, 242, 0.74)")};
-  font-size: 0.8rem;
-  line-height: 1.35;
-`;
-
-export const DatasetInventoryPanel = styled(CardSection)``;
-
-export const DatasetInventoryHeader = styled.div`
-  ${gridStackCss("0.35rem")};
-`;
-
-export const DatasetInventoryToolbar = styled(WrapRow)`
-  align-items: center;
-`;
-
-export const DatasetInventoryUploadInput = styled.input`
-  max-width: 100%;
-`;
-
-export const DatasetInventoryButton = styled(SecondaryActionButton)``;
-
-export const DatasetInventoryList = styled.div`
-  ${gridStackCss("0.8rem")};
-`;
-
-export const DatasetInventoryCard = styled.article`
-  border: 1px solid rgba(31, 41, 55, 0.1);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.72);
-  overflow: hidden;
-`;
-
-export const DatasetInventoryToggle = styled.button`
-  width: 100%;
-  border: 0;
-  background: transparent;
-  padding: 1rem;
-  text-align: left;
-  ${gridStackCss("0.35rem")};
-  cursor: pointer;
-`;
-
-export const DatasetInventoryMetaRow = styled.div`
-  ${flexWrapRowCss("0.6rem")};
-`;
-
-export const DatasetInventoryExpanded = styled.div`
-  border-top: 1px solid rgba(31, 41, 55, 0.08);
-  padding: 1rem;
-  ${gridStackCss("0.8rem")};
-`;
-
-export const DatasetInventoryScroller = styled(TableScroller)``;
-
-export const DatasetInventoryTable = styled(PlainTable)`
-  width: max-content;
-  min-width: 100%;
-`;
-
-export const DatasetInventoryTh = styled.th`
-  ${tableHeaderCellCss};
-  padding: 0.7rem 0.75rem;
-  background: rgba(31, 41, 55, 0.04);
-  font-size: 0.9rem;
-  max-width: 400px;
-`;
-
-export const DatasetInventoryTd = styled.td`
-  ${tableBodyCellCss};
-  padding: 0.7rem 0.75rem;
-  vertical-align: top;
-  max-width: 400px;
-`;
-
-export const DatasetInventoryCell = styled.div`
-  max-width: 400px;
-  overflow-wrap: anywhere;
-  white-space: normal;
-`;
-
-export const DatasetInventoryPager = styled.div`
-  ${flexWrapRowCss("0.6rem")};
-  align-items: center;
-`;
-
-export const DatasetInventoryPageButton = styled(SecondaryActionButton)`
-  padding: 0.7rem 1rem;
-`;
-
-export const SmokeTestPanel = styled(CardSection)``;
-
-export const SmokeTestToolbar = styled(WrapRow)``;
-
-export const SmokeTestButton = styled.button`
-  ${primaryButtonCss};
-  background: linear-gradient(135deg, var(--accent-deep), #9f4d21);
-  color: #fffaf4;
-`;
-
-export const SmokeTestResultList = styled.div`
-  ${gridStackCss("0.75rem")};
-`;
-
-export const SmokeTestResultCard = styled.div<{ $ok: boolean }>`
-  border-radius: var(--radius-md);
-  padding: 0.85rem 0.95rem;
-  border: 1px solid ${({ $ok }) => ($ok ? "rgba(34, 197, 94, 0.28)" : "rgba(220, 38, 38, 0.28)")};
-  background: ${({ $ok }) => ($ok ? "rgba(34, 197, 94, 0.08)" : "rgba(220, 38, 38, 0.08)")};
-`;
-
-export const SmokeTestAggregateTable = styled(PlainTable)`
-  width: 100%;
-`;
-
-export const SmokeTestTh = styled.th`
-  ${tableHeaderCellCss};
-  padding: 0.6rem 0.7rem;
-`;
-
-export const SmokeTestTd = styled.td`
-  ${tableBodyCellCss};
-  padding: 0.6rem 0.7rem;
-`;
-
-export const SmokeTestChartGrid = styled.div`
-  ${gridStackCss("1rem")};
-`;
-
-export const SmokeTestExpectations = styled.ul`
-  margin: 0;
-  padding-left: 1.2rem;
-  ${gridStackCss("0.45rem")};
-`;
-
-export const NarrativeCardShell = styled.article`
-  ${strongSurfaceCss};
-  padding: 1.2rem;
-`;
-
-export const NarrativeCardHeading = styled.h3`
-  ${displayHeadingCss};
-  margin: 0 0 1rem;
-  font-size: 1.35rem;
-`;
-
-export const NarrativeCardBody = styled.div`
-  color: var(--muted);
-  line-height: 1.7;
-
-  h2,
-  h3 {
-    color: var(--ink);
-    font-family: var(--font-display);
-  }
-`;
-
-export const DatasetChartWrapper = styled.div<{ $background: string; $border: string }>`
-  min-height: 300px;
-  padding: 1rem;
-  border-radius: var(--radius-md);
-  background: ${(props) => props.$background};
-  border: 1px solid ${(props) => props.$border};
-`;
-
-export const DatasetChartEmpty = styled.div`
-  min-height: 240px;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  text-align: center;
-`;
-
-export const ToolLogCard = styled.aside`
-  ${warmSurfaceCss};
-  padding: 1rem 1.2rem;
-`;
-
-export const ToolLogHeading = styled.h3`
-  ${displayHeadingCss};
-  margin: 0 0 0.8rem;
-  font-size: 1rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-deep);
-`;
-
-export const ToolLogList = styled.ul`
-  ${stackedListCss};
-  padding-left: 1.1rem;
-  color: var(--muted);
-  gap: 0.7rem;
-`;
-
-export const ToolLogName = styled.strong`
-  color: var(--ink);
 `;

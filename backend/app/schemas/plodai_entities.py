@@ -4,17 +4,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.app.schemas.workspace import WorkspaceAppId
-
 
 class PlodaiEntitySchemaBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 class PlodaiEntitySearchRequest(PlodaiEntitySchemaBase):
-    app_id: WorkspaceAppId
-    workspace_id: str
-    thread_id: str
     query: str = Field(default="", max_length=200)
 
 
@@ -32,7 +27,7 @@ class PlodaiEntitySearchResponse(PlodaiEntitySchemaBase):
 
 
 PlodaiEntityType = Literal[
-    "thread_image",
+    "farm_image",
     "farm_crop",
     "farm_order",
 ]

@@ -35,17 +35,8 @@ function manualChunks(id: string): string | undefined {
   if (!id.includes("node_modules")) {
     return undefined;
   }
-  if (id.includes("pdfjs-dist")) {
-    return "vendor-pdfjs";
-  }
-  if (id.includes("pdf-lib") || id.includes("@pdf-lib") || id.includes("pako")) {
-    return "vendor-pdf-lib";
-  }
   if (id.includes("@openai/chatkit")) {
     return "vendor-chatkit";
-  }
-  if (id.includes("chart.js") || id.includes("react-chartjs-2")) {
-    return "vendor-charts";
   }
   if (id.includes("react-markdown")) {
     return "vendor-markdown";
@@ -76,9 +67,6 @@ export default defineConfig({
         manualChunks,
       },
     },
-  },
-  worker: {
-    format: "es",
   },
   server: {
     host: "127.0.0.1",

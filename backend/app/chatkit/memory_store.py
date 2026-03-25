@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import logging
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
-from typing import cast
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from pydantic import TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chatkit.store import AttachmentStore, NotFoundError, Store
@@ -22,37 +20,31 @@ from chatkit.types import (
     ThreadStatus,
 )
 
-from backend.app.agents.context import ReportAgentContext
+from backend.app.agents.context import FarmAgentContext
 from backend.app.chatkit.attachment_payloads import (
     build_canonical_attachment,
     build_display_attachment,
     normalize_attachment_for_storage,
 )
-from backend.app.chatkit.metadata import (
-    build_remove_plodai_image_ref_patch,
-    merge_chat_metadata,
-    parse_chat_metadata,
-)
 from backend.app.core.config import Settings, get_settings, resolve_public_base_url
-from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_log
-from backend.app.models.chatkit import (
-    WorkspaceChat,
-    WorkspaceWorkspaceChatAttachment,
-    WorkspaceChatEntry,
+from backend.app.models.farm import (
+    Farm,
+    FarmChat,
+    FarmChatAttachment,
+    FarmChatEntry,
+    FarmImage,
 )
-from backend.app.models.stored_file import StoredFile
-from backend.app.models.workspace import Workspace
 from backend.app.services.bucket_storage import BucketStorageService, RailwayBucketService
-
+from backend.app.services.farm_image_service import FarmImageService
+from backend.app.services.upload_rules import validate_farm_image_upload
 
 THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
 ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
-logger = get_logger("chatkit.memory_store")
 
 
-class DatabaseMemoryStore(
-    Store[ReportAgentContext],
-    AttachmentStore[ReportAgentContext],
+class FarmMemoryStore(
+    Store[FarmAgentContext],
+    AttachmentStore[FarmAgentContext],
 ):
     def __init__(
         self,
@@ -69,20 +61,29 @@ class DatabaseMemoryStore(
             settings=self.settings,
         )
         self.bucket_service = bucket_service or RailwayBucketService(self.settings)
+        self.image_service = FarmImageService(
+            db,
+            settings=self.settings,
+            bucket_service=self.bucket_service,
+        )
+
+    def generate_thread_id(self, context: FarmAgentContext) -> str:
+        if context.chat_id and context.chat_id != "pending_chat":
+            return context.chat_id
+        return f"chat_{uuid4().hex}"
 
     async def create_attachment(
         self,
         input: AttachmentCreateParams,
-        context: ReportAgentContext,
+        context: FarmAgentContext,
     ) -> Attachment:
-        workspace = await self._require_workspace(context)
-        self._validate_pending_attachment_input(
-            workspace=workspace,
+        await self._require_farm(context)
+        validate_farm_image_upload(
+            settings=self.settings,
             file_name=input.name,
             mime_type=input.mime_type,
             byte_size=input.size,
         )
-
         attachment_id = self.generate_attachment_id(input.mime_type, context)
         storage_key = self.bucket_service.build_object_key(
             scope="chat_attachment",
@@ -93,7 +94,7 @@ class DatabaseMemoryStore(
             mime_type=input.mime_type,
             file_name=input.name,
         )
-        return FileAttachment(
+        attachment = FileAttachment(
             id=attachment_id,
             name=input.name,
             mime_type=input.mime_type,
@@ -105,45 +106,38 @@ class DatabaseMemoryStore(
             thread_id=None,
             metadata={
                 "user_id": context.user_id,
-                "workspace_id": workspace.id,
-                "app_id": workspace.app_id,
+                "farm_id": context.farm_id,
                 "declared_size": input.size,
                 "storage_provider": self.bucket_service.storage_provider,
                 "storage_key": storage_key,
-                "scope": "chat_attachment",
-                "attach_mode": "model_input",
-                "input_kind": (
-                    "image"
-                    if _kind_for_attachment_input(
-                        file_name=input.name,
-                        mime_type=input.mime_type,
-                    )
-                    == "image"
-                    else "file"
-                ),
+                "input_kind": "image",
                 "upload_state": "pending",
             },
         )
+        await self.save_attachment(attachment, context)
+        return attachment
 
     async def load_thread(
-        self, thread_id: str, context: ReportAgentContext
+        self,
+        thread_id: str,
+        context: FarmAgentContext,
     ) -> ThreadMetadata:
-        chat = await self._get_chat(thread_id)
+        chat = await self._get_chat(thread_id, context)
         return self._to_thread_metadata(chat)
 
     async def save_thread(
-        self, thread: ThreadMetadata, context: ReportAgentContext
+        self,
+        thread: ThreadMetadata,
+        context: FarmAgentContext,
     ) -> None:
-        existing = await self.db.get(WorkspaceChat, thread.id)
-        next_sequence = await self._next_sequence(WorkspaceChat.updated_sequence)
+        existing = await self.db.get(FarmChat, thread.id)
+        next_sequence = await self._next_sequence(FarmChat.updated_sequence)
         if existing is None:
-            if context.workspace_id is None:
-                raise ValueError("workspace_id is required to create a chat")
             self.db.add(
-                WorkspaceChat(
+                FarmChat(
                     id=thread.id,
+                    farm_id=context.farm_id,
                     user_id=context.user_id,
-                    workspace_id=context.workspace_id,
                     title=thread.title,
                     metadata_json=thread.metadata,
                     status_json=thread.status.model_dump(),
@@ -158,8 +152,8 @@ class DatabaseMemoryStore(
             existing.allowed_image_domains_json = thread.allowed_image_domains
             existing.updated_sequence = next_sequence
             existing.updated_at = datetime.now(UTC)
-            if context.workspace_id is not None:
-                existing.workspace_id = context.workspace_id
+            existing.farm_id = context.farm_id
+            existing.user_id = context.user_id
         await self.db.commit()
 
     async def load_thread_items(
@@ -168,40 +162,40 @@ class DatabaseMemoryStore(
         after: str | None,
         limit: int,
         order: str,
-        context: ReportAgentContext,
+        context: FarmAgentContext,
     ) -> Page[ThreadItem]:
-        await self._get_chat(thread_id)
-        query = select(WorkspaceChatEntry).where(WorkspaceChatEntry.chat_id == thread_id)
+        await self._get_chat(thread_id, context)
+        query = select(FarmChatEntry).where(FarmChatEntry.chat_id == thread_id)
         query = await self._apply_item_cursor(query, after, order)
         query = query.order_by(
-            WorkspaceChatEntry.sequence.desc()
+            FarmChatEntry.sequence.desc()
             if order == "desc"
-            else WorkspaceChatEntry.sequence.asc()
+            else FarmChatEntry.sequence.asc()
         )
         query = query.limit(limit + 1)
         result = await self.db.execute(query)
         records = list(result.scalars().all())
-
         has_more = len(records) > limit
         page_records = records[:limit]
         next_after = page_records[-1].id if has_more and page_records else None
-        hydrated_items = [await self._to_thread_item(item) for item in page_records]
         return Page[ThreadItem](
-            data=hydrated_items,
+            data=[await self._to_thread_item(record) for record in page_records],
             has_more=has_more,
             after=next_after,
         )
 
     async def save_attachment(
-        self, attachment: Attachment, context: ReportAgentContext
+        self,
+        attachment: Attachment,
+        context: FarmAgentContext,
     ) -> None:
         canonical_attachment = normalize_attachment_for_storage(attachment)
         payload = canonical_attachment.model_dump(mode="json")
-        existing = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment.id)
+        existing = await self.db.get(FarmChatAttachment, canonical_attachment.id)
         if existing is None:
             self.db.add(
-                WorkspaceWorkspaceChatAttachment(
-                    id=attachment.id,
+                FarmChatAttachment(
+                    id=canonical_attachment.id,
                     kind=canonical_attachment.type,
                     payload=payload,
                 )
@@ -209,41 +203,22 @@ class DatabaseMemoryStore(
         else:
             existing.kind = canonical_attachment.type
             existing.payload = payload
-        metadata = (
-            canonical_attachment.metadata
-            if isinstance(canonical_attachment.metadata, dict)
-            else None
-        )
-        stored_file_id = (
-            metadata.get("stored_file_id")
-            if metadata is not None
-            else None
-        )
-        if isinstance(stored_file_id, str) and stored_file_id.strip():
-            stored_file = await self.db.get(StoredFile, stored_file_id.strip())
-            if stored_file is not None:
-                stored_file.attachment_id = canonical_attachment.id
-                if (
-                    isinstance(canonical_attachment.thread_id, str)
-                    and canonical_attachment.thread_id.strip()
-                ):
-                    stored_file.thread_id = canonical_attachment.thread_id.strip()
         await self.db.commit()
 
     async def load_attachment(
         self,
         attachment_id: str,
-        context: ReportAgentContext,
+        context: FarmAgentContext,
         *,
         hydrate_preview: bool = False,
     ) -> Attachment:
-        attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
-        if attachment is None:
+        record = await self.db.get(FarmChatAttachment, attachment_id)
+        if record is None:
             raise NotFoundError(f"Attachment {attachment_id} was not found")
-        parsed_attachment = ATTACHMENT_ADAPTER.validate_python(attachment.payload)
+        attachment = ATTACHMENT_ADAPTER.validate_python(record.payload)
         if not hydrate_preview:
-            return parsed_attachment
-        return await self._hydrate_attachment_for_display(parsed_attachment)
+            return attachment
+        return await self._hydrate_attachment_for_display(attachment)
 
     async def bind_attachment_to_thread(
         self,
@@ -251,75 +226,48 @@ class DatabaseMemoryStore(
         attachment_id: str,
         thread_id: str,
     ) -> None:
-        attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
-        if attachment is None:
+        record = await self.db.get(FarmChatAttachment, attachment_id)
+        if record is None:
             raise NotFoundError(f"Attachment {attachment_id} was not found")
-
-        parsed_attachment = ATTACHMENT_ADAPTER.validate_python(attachment.payload)
+        attachment = ATTACHMENT_ADAPTER.validate_python(record.payload)
         canonical_attachment = normalize_attachment_for_storage(
-            parsed_attachment.model_copy(update={"thread_id": thread_id})
+            attachment.model_copy(update={"thread_id": thread_id})
         )
-        attachment.kind = canonical_attachment.type
-        attachment.payload = canonical_attachment.model_dump(mode="json")
-
+        record.kind = canonical_attachment.type
+        record.payload = canonical_attachment.model_dump(mode="json")
         metadata = (
             canonical_attachment.metadata
             if isinstance(canonical_attachment.metadata, dict)
-            else None
+            else {}
         )
-        stored_file_id = (
-            metadata.get("stored_file_id")
-            if metadata is not None
-            else None
-        )
-        if isinstance(stored_file_id, str) and stored_file_id.strip():
-            stored_file = await self.db.get(StoredFile, stored_file_id.strip())
-            if stored_file is not None:
-                stored_file.attachment_id = canonical_attachment.id
-                stored_file.thread_id = thread_id
+        image_id = metadata.get("image_id")
+        if isinstance(image_id, str) and image_id.strip():
+            image = await self.db.get(FarmImage, image_id.strip())
+            if image is not None:
+                image.chat_id = thread_id
+                image.attachment_id = attachment_id
         await self.db.commit()
 
     async def delete_attachment(
-        self, attachment_id: str, context: ReportAgentContext
+        self,
+        attachment_id: str,
+        context: FarmAgentContext,
     ) -> None:
-        result = await self.db.execute(
-            select(StoredFile).where(
-                StoredFile.attachment_id == attachment_id,
-                StoredFile.status != "deleted",
-            )
-        )
-        stored_files = list(result.scalars().all())
-        for stored_file in stored_files:
-            if isinstance(stored_file.thread_id, str) and stored_file.thread_id.strip():
-                chat = await self.db.get(WorkspaceChat, stored_file.thread_id.strip())
-                if chat is not None and isinstance(chat.metadata_json, dict):
-                    current_metadata = parse_chat_metadata(chat.metadata_json)
-                    patch = build_remove_plodai_image_ref_patch(
-                        current_metadata,
-                        stored_file_id=stored_file.id,
-                        attachment_id=attachment_id,
-                    )
-                    if patch is not None:
-                        chat.metadata_json = merge_chat_metadata(current_metadata, patch)
-            try:
-                await self.bucket_service.delete_object(key=stored_file.storage_key)
-            except Exception:
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "attachment.remote_delete_failed",
-                    summary=summarize_pairs_for_log(
-                        (
-                            ("attachment", attachment_id),
-                            ("stored_file", stored_file.id),
-                        )
-                    ),
-                )
-            stored_file.status = "deleted"
-
-        attachment = await self.db.get(WorkspaceWorkspaceChatAttachment, attachment_id)
-        if attachment is not None:
-            await self.db.delete(attachment)
+        record = await self.db.get(FarmChatAttachment, attachment_id)
+        if record is None:
+            return
+        attachment = ATTACHMENT_ADAPTER.validate_python(record.payload)
+        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
+        image_id = metadata.get("image_id")
+        if isinstance(image_id, str) and image_id.strip():
+            image = await self.db.get(FarmImage, image_id.strip())
+            if image is not None:
+                image.status = "deleted"
+                try:
+                    await self.bucket_service.delete_object(key=image.storage_key)
+                except Exception:
+                    pass
+        await self.db.delete(record)
         await self.db.commit()
 
     async def finalize_attachment(
@@ -328,71 +276,45 @@ class DatabaseMemoryStore(
         *,
         thread_id: str | None,
     ) -> Attachment:
-        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else None
-        if metadata is None:
-            return normalize_attachment_for_storage(attachment)
-
-        stored_file_id = metadata.get("stored_file_id")
-        if isinstance(stored_file_id, str) and stored_file_id.strip():
-            return normalize_attachment_for_storage(
-                attachment.model_copy(update={"thread_id": thread_id})
-            )
-
+        metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
         if metadata.get("upload_state") != "pending":
             return normalize_attachment_for_storage(
                 attachment.model_copy(update={"thread_id": thread_id})
             )
-
         user_id = metadata.get("user_id")
-        workspace_id = metadata.get("workspace_id")
-        app_id = metadata.get("app_id")
+        farm_id = metadata.get("farm_id")
         declared_size = metadata.get("declared_size")
         storage_key = metadata.get("storage_key")
-        scope = metadata.get("scope")
         if (
             not isinstance(user_id, str)
             or not user_id.strip()
-            or not isinstance(workspace_id, str)
-            or not workspace_id.strip()
-            or not isinstance(app_id, str)
-            or not app_id.strip()
+            or not isinstance(farm_id, str)
+            or not farm_id.strip()
             or not isinstance(declared_size, int)
             or declared_size < 0
             or not isinstance(storage_key, str)
             or not storage_key.strip()
-            or scope != "chat_attachment"
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Attachment upload metadata was incomplete.",
             )
-
-        from backend.app.services.stored_file_service import StoredFileService
-
-        service = StoredFileService(
-            self.db,
-            settings=self.settings,
-            bucket_service=self.bucket_service,
-        )
-        stored_file = await service.finalize_pending_attachment(
+        image = await self.image_service.finalize_pending_attachment(
             user_id=user_id.strip(),
-            workspace_id=workspace_id.strip(),
-            app_id=app_id.strip(),
-            thread_id=thread_id,
+            farm_id=farm_id.strip(),
+            chat_id=thread_id,
             attachment_id=attachment.id,
-            scope="chat_attachment",
             file_name=attachment.name,
             mime_type=attachment.mime_type,
             declared_size=declared_size,
             storage_key=storage_key.strip(),
         )
         canonical_attachment = build_canonical_attachment(
-            stored_file=stored_file,
+            image=image,
             attachment_id=attachment.id,
-            scope="chat_attachment",
             thread_id=thread_id,
         )
-        await self.save_attachment(canonical_attachment, context=None)
+        await self.save_attachment(canonical_attachment, context=None)  # type: ignore[arg-type]
         return canonical_attachment
 
     async def load_threads(
@@ -400,37 +322,40 @@ class DatabaseMemoryStore(
         limit: int,
         after: str | None,
         order: str,
-        context: ReportAgentContext,
+        context: FarmAgentContext,
     ) -> Page[ThreadMetadata]:
-        query = select(WorkspaceChat).where(WorkspaceChat.user_id == context.user_id)
-        if context.workspace_id is not None:
-            query = query.where(WorkspaceChat.workspace_id == context.workspace_id)
+        query = select(FarmChat).where(
+            FarmChat.user_id == context.user_id,
+            FarmChat.farm_id == context.farm_id,
+        )
         query = await self._apply_thread_cursor(query, after, order)
         query = query.order_by(
-            WorkspaceChat.updated_sequence.desc()
+            FarmChat.updated_sequence.desc()
             if order == "desc"
-            else WorkspaceChat.updated_sequence.asc()
+            else FarmChat.updated_sequence.asc()
         )
         query = query.limit(limit + 1)
         result = await self.db.execute(query)
         records = list(result.scalars().all())
-
         has_more = len(records) > limit
         page_records = records[:limit]
         next_after = page_records[-1].id if has_more and page_records else None
         return Page[ThreadMetadata](
-            data=[self._to_thread_metadata(chat) for chat in page_records],
+            data=[self._to_thread_metadata(record) for record in page_records],
             has_more=has_more,
             after=next_after,
         )
 
     async def add_thread_item(
-        self, thread_id: str, item: ThreadItem, context: ReportAgentContext
+        self,
+        thread_id: str,
+        item: ThreadItem,
+        context: FarmAgentContext,
     ) -> None:
-        existing = await self.db.get(WorkspaceChatEntry, item.id)
+        existing = await self.db.get(FarmChatEntry, item.id)
         attachments = getattr(item, "attachments", None)
         if isinstance(attachments, list) and attachments:
-            canonical_item = item.model_copy(
+            item = item.model_copy(
                 update={
                     "attachments": [
                         normalize_attachment_for_storage(attachment)
@@ -438,59 +363,75 @@ class DatabaseMemoryStore(
                     ]
                 }
             )
-        else:
-            canonical_item = item
-        payload = canonical_item.model_dump(mode="json")
+        payload = item.model_dump(mode="json")
         if existing is None:
             self.db.add(
-                WorkspaceChatEntry(
-                    id=canonical_item.id,
+                FarmChatEntry(
+                    id=item.id,
                     chat_id=thread_id,
-                    kind=canonical_item.type,
+                    kind=item.type,
                     payload=payload,
-                    sequence=await self._next_sequence(WorkspaceChatEntry.sequence),
+                    sequence=await self._next_sequence(FarmChatEntry.sequence),
                 )
             )
         else:
             existing.chat_id = thread_id
-            existing.kind = canonical_item.type
+            existing.kind = item.type
             existing.payload = payload
         await self._touch_chat(thread_id)
         await self.db.commit()
 
     async def save_item(
-        self, thread_id: str, item: ThreadItem, context: ReportAgentContext
+        self,
+        thread_id: str,
+        item: ThreadItem,
+        context: FarmAgentContext,
     ) -> None:
         await self.add_thread_item(thread_id, item, context)
 
     async def load_item(
-        self, thread_id: str, item_id: str, context: ReportAgentContext
+        self,
+        thread_id: str,
+        item_id: str,
+        context: FarmAgentContext,
     ) -> ThreadItem:
-        item = await self.db.get(WorkspaceChatEntry, item_id)
-        if item is None or item.chat_id != thread_id:
+        record = await self.db.get(FarmChatEntry, item_id)
+        if record is None or record.chat_id != thread_id:
             raise NotFoundError(f"Thread item {item_id} was not found")
-        return await self._to_thread_item(item)
+        return await self._to_thread_item(record)
 
-    async def delete_thread(self, thread_id: str, context: ReportAgentContext) -> None:
-        chat = await self.db.get(WorkspaceChat, thread_id)
+    async def delete_thread(
+        self,
+        thread_id: str,
+        context: FarmAgentContext,
+    ) -> None:
+        chat = await self.db.get(FarmChat, thread_id)
         if chat is None:
             return
+        await self.db.execute(delete(FarmChatEntry).where(FarmChatEntry.chat_id == thread_id))
         await self.db.delete(chat)
         await self.db.commit()
 
     async def delete_thread_item(
-        self, thread_id: str, item_id: str, context: ReportAgentContext
+        self,
+        thread_id: str,
+        item_id: str,
+        context: FarmAgentContext,
     ) -> None:
-        item = await self.db.get(WorkspaceChatEntry, item_id)
-        if item is None or item.chat_id != thread_id:
+        record = await self.db.get(FarmChatEntry, item_id)
+        if record is None or record.chat_id != thread_id:
             return
-        await self.db.delete(item)
+        await self.db.delete(record)
         await self._touch_chat(thread_id)
         await self.db.commit()
 
-    async def _get_chat(self, thread_id: str) -> WorkspaceChat:
+    async def _get_chat(self, thread_id: str, context: FarmAgentContext) -> FarmChat:
         result = await self.db.execute(
-            select(WorkspaceChat).where(WorkspaceChat.id == thread_id)
+            select(FarmChat).where(
+                FarmChat.id == thread_id,
+                FarmChat.user_id == context.user_id,
+                FarmChat.farm_id == context.farm_id,
+            )
         )
         chat = result.scalar_one_or_none()
         if chat is None:
@@ -498,104 +439,67 @@ class DatabaseMemoryStore(
         return chat
 
     async def _touch_chat(self, thread_id: str) -> None:
-        chat = await self.db.get(WorkspaceChat, thread_id)
+        chat = await self.db.get(FarmChat, thread_id)
         if chat is not None:
-            chat.updated_sequence = await self._next_sequence(
-                WorkspaceChat.updated_sequence
-            )
+            chat.updated_sequence = await self._next_sequence(FarmChat.updated_sequence)
             chat.updated_at = datetime.now(UTC)
 
     async def _apply_thread_cursor(self, query, after: str | None, order: str):
         if after is None:
             return query
-        cursor = await self.db.get(WorkspaceChat, after)
+        cursor = await self.db.get(FarmChat, after)
         if cursor is None:
             return query
         if order == "desc":
-            return query.where(WorkspaceChat.updated_sequence < cursor.updated_sequence)
-        return query.where(WorkspaceChat.updated_sequence > cursor.updated_sequence)
+            return query.where(FarmChat.updated_sequence < cursor.updated_sequence)
+        return query.where(FarmChat.updated_sequence > cursor.updated_sequence)
 
     async def _apply_item_cursor(self, query, after: str | None, order: str):
         if after is None:
             return query
-        cursor = await self.db.get(WorkspaceChatEntry, after)
+        cursor = await self.db.get(FarmChatEntry, after)
         if cursor is None:
             return query
         if order == "desc":
-            return query.where(WorkspaceChatEntry.sequence < cursor.sequence)
-        return query.where(WorkspaceChatEntry.sequence > cursor.sequence)
+            return query.where(FarmChatEntry.sequence < cursor.sequence)
+        return query.where(FarmChatEntry.sequence > cursor.sequence)
 
     async def _next_sequence(self, column) -> int:
         result = await self.db.execute(select(func.max(column)))
-        current = result.scalar_one()
-        return int(current or 0) + 1
+        return int(result.scalar_one() or 0) + 1
 
-    async def _require_workspace(self, context: ReportAgentContext) -> Workspace:
-        workspace_id = context.workspace_id
-        if not isinstance(workspace_id, str) or not workspace_id.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="workspace_id is required for attachment uploads.",
-            )
-        workspace = await self.db.get(Workspace, workspace_id.strip())
-        if workspace is None or workspace.user_id != context.user_id:
+    async def _require_farm(self, context: FarmAgentContext) -> Farm:
+        farm = await self.db.get(Farm, context.farm_id)
+        if farm is None or farm.user_id != context.user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Workspace not found.",
+                detail="Farm not found.",
             )
-        return workspace
+        return farm
 
-    def _validate_pending_attachment_input(
-        self,
-        *,
-        workspace: Workspace,
-        file_name: str,
-        mime_type: str,
-        byte_size: int,
-    ) -> None:
-        if workspace.app_id == "plodai":
-            if (
-                _kind_for_attachment_input(file_name=file_name, mime_type=mime_type)
-                != "image"
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="PlodAI chat attachments must be image files.",
-                )
-            if byte_size > self.settings.plodai_chat_attachment_max_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail="PlodAI chat attachments must be 10 MB or smaller.",
-                )
-
-        if byte_size > self.settings.chat_attachment_max_model_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail="The selected file is too large for this upload path.",
-            )
-
-    def _to_thread_metadata(self, chat: WorkspaceChat) -> ThreadMetadata:
+    def _to_thread_metadata(self, chat: FarmChat) -> ThreadMetadata:
         return ThreadMetadata(
             id=chat.id,
             title=chat.title,
             created_at=chat.created_at,
             status=TypeAdapter(ThreadStatus).validate_python(chat.status_json),
             allowed_image_domains=chat.allowed_image_domains_json,
-            metadata=cast(dict, chat.metadata_json),
+            metadata=dict(chat.metadata_json),
         )
 
-    async def _to_thread_item(self, item: WorkspaceChatEntry) -> ThreadItem:
+    async def _to_thread_item(self, item: FarmChatEntry) -> ThreadItem:
         parsed_item = THREAD_ITEM_ADAPTER.validate_python(item.payload)
         attachments = getattr(parsed_item, "attachments", None)
         if not isinstance(attachments, list) or not attachments:
             return parsed_item
-
-        hydrated_attachments: list[Attachment] = []
-        for attachment in attachments:
-            hydrated_attachments.append(
-                await self._hydrate_attachment_for_display(attachment)
-            )
-        return parsed_item.model_copy(update={"attachments": hydrated_attachments})
+        return parsed_item.model_copy(
+            update={
+                "attachments": [
+                    await self._hydrate_attachment_for_display(attachment)
+                    for attachment in attachments
+                ]
+            }
+        )
 
     async def _hydrate_attachment_for_display(
         self,
@@ -604,40 +508,13 @@ class DatabaseMemoryStore(
         metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
         if metadata.get("input_kind") != "image" or attachment.upload_descriptor is not None:
             return attachment
-
-        stored_file_id = metadata.get("stored_file_id")
-        if not isinstance(stored_file_id, str) or not stored_file_id.strip():
+        image_id = metadata.get("image_id")
+        if not isinstance(image_id, str) or not image_id.strip():
             return attachment
-
-        record = await self.db.get(StoredFile, stored_file_id.strip())
-        if (
-            record is None
-            or record.status == "deleted"
-            or record.kind != "image"
-        ):
+        image = await self.db.get(FarmImage, image_id.strip())
+        if image is None or image.status == "deleted":
             return attachment
-
-        from backend.app.services.stored_file_service import StoredFileService
-
         return build_display_attachment(
             canonical_attachment=attachment,
-            file_bytes=None,
-            preview_url=StoredFileService(
-                self.db,
-                settings=self.settings,
-                bucket_service=self.bucket_service,
-            ).build_public_preview_url(record),
+            preview_url=self.image_service.build_public_preview_url(image),
         )
-
-
-def _kind_for_attachment_input(
-    *,
-    file_name: str,
-    mime_type: str | None,
-) -> str:
-    extension = PurePosixPath(file_name).suffix.lower()
-    if extension in {".png", ".jpg", ".jpeg", ".webp"}:
-        return "image"
-    if isinstance(mime_type, str) and mime_type.startswith("image/"):
-        return "image"
-    return "other"
