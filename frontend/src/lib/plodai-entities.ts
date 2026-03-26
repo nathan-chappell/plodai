@@ -1,5 +1,6 @@
 import type { Entity, Widgets } from "@openai/chatkit";
 
+import { formatFarmCropType } from "./farm";
 import type { PlodaiComposerEntity, PlodaiEntityType } from "../types/chat-entities";
 
 function getEntityType(entity: Entity): PlodaiEntityType | null {
@@ -74,8 +75,8 @@ export function buildPlodaiEntityPreview(
   const summary =
     entityType === "farm_crop"
       ? [
-          entity.data.type,
-          entity.data.size,
+          formatFarmCropType(entity.data.type),
+          entity.data.quantity && `Quantity: ${entity.data.quantity}`,
           entity.data.expected_yield && `Expected yield: ${entity.data.expected_yield}`,
           entity.data.issue_count && `${entity.data.issue_count} issue${entity.data.issue_count === "1" ? "" : "s"}`,
           entity.data.highest_severity && `${entity.data.highest_severity} severity`,

@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import timedelta
+from io import BytesIO
 from pathlib import PurePosixPath
-from typing import Protocol
+from typing import Protocol, cast
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from minio import Minio
+from minio.error import S3Error, ServerError
+from minio.helpers import md5sum_hash
+from minio.xml import Element, SubElement, getbytes
 
 from backend.app.core.config import Settings, get_settings
 
@@ -75,6 +82,7 @@ class RailwayBucketService:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        self._cached_client: Minio | None = None
 
     def is_configured(self) -> bool:
         return all(
@@ -94,7 +102,11 @@ class RailwayBucketService:
         attachment_id: str | None = None,
     ) -> str:
         prefix = scope.strip("/") or "uploads"
-        suffix = attachment_id.strip() if isinstance(attachment_id, str) and attachment_id.strip() else uuid4().hex
+        suffix = (
+            attachment_id.strip()
+            if isinstance(attachment_id, str) and attachment_id.strip()
+            else uuid4().hex
+        )
         return f"{prefix}/{uuid4().hex}/{suffix}"
 
     def build_presigned_upload(
@@ -106,19 +118,15 @@ class RailwayBucketService:
     ) -> BucketPresignedUpload:
         del file_name
         client = self._client()
-        params: dict[str, str] = {
-            "Bucket": self._bucket_name(),
-            "Key": key,
-        }
         headers: dict[str, str] = {}
         if isinstance(mime_type, str) and mime_type:
-            params["ContentType"] = mime_type
             headers["Content-Type"] = mime_type
-        url = client.generate_presigned_url(
-            "put_object",
-            Params=params,
-            ExpiresIn=self.settings.storage_bucket_upload_url_ttl_seconds,
-            HttpMethod="PUT",
+        url = client.presigned_put_object(
+            self._bucket_name(),
+            key,
+            expires=timedelta(
+                seconds=self.settings.storage_bucket_upload_url_ttl_seconds,
+            ),
         )
         return BucketPresignedUpload(url=url, headers=headers)
 
@@ -137,18 +145,18 @@ class RailwayBucketService:
             if isinstance(filename, str) and filename.strip()
             else "download"
         )
-        params: dict[str, str] = {
-            "Bucket": self._bucket_name(),
-            "Key": key,
-            "ResponseContentDisposition": f'{disposition}; filename="{safe_filename}"',
+        response_headers: dict[str, str] = {
+            "response-content-disposition": f'{disposition}; filename="{safe_filename}"',
         }
         if isinstance(mime_type, str) and mime_type:
-            params["ResponseContentType"] = mime_type
-        return client.generate_presigned_url(
-            "get_object",
-            Params=params,
-            ExpiresIn=self.settings.storage_bucket_download_url_ttl_seconds,
-            HttpMethod="GET",
+            response_headers["response-content-type"] = mime_type
+        return client.presigned_get_object(
+            self._bucket_name(),
+            key,
+            expires=timedelta(
+                seconds=self.settings.storage_bucket_download_url_ttl_seconds,
+            ),
+            response_headers=response_headers,
         )
 
     async def put_object_bytes(
@@ -159,19 +167,18 @@ class RailwayBucketService:
         mime_type: str | None,
     ) -> None:
         await asyncio.to_thread(
-            self._client().put_object,
-            Bucket=self._bucket_name(),
-            Key=key,
-            Body=file_bytes,
-            ContentType=mime_type or "application/octet-stream",
+            self._put_object_bytes_sync,
+            key,
+            file_bytes,
+            mime_type,
         )
 
     async def head_object(self, *, key: str) -> BucketObjectMetadata:
         try:
             response = await asyncio.to_thread(
-                self._client().head_object,
-                Bucket=self._bucket_name(),
-                Key=key,
+                self._client().stat_object,
+                self._bucket_name(),
+                key,
             )
         except Exception as exc:
             if self._is_missing_error(exc):
@@ -181,17 +188,17 @@ class RailwayBucketService:
                 ) from exc
             raise
         return BucketObjectMetadata(
-            content_length=int(response.get("ContentLength", 0)),
-            content_type=response.get("ContentType"),
-            etag=response.get("ETag"),
+            content_length=int(response.size or 0),
+            content_type=response.content_type,
+            etag=response.etag,
         )
 
     async def get_object_bytes(self, *, key: str) -> bytes:
         try:
             response = await asyncio.to_thread(
                 self._client().get_object,
-                Bucket=self._bucket_name(),
-                Key=key,
+                self._bucket_name(),
+                key,
             )
         except Exception as exc:
             if self._is_missing_error(exc):
@@ -200,71 +207,119 @@ class RailwayBucketService:
                     detail="Stored file not found.",
                 ) from exc
             raise
-        body = response["Body"]
-        return await asyncio.to_thread(body.read)
+        try:
+            return await asyncio.to_thread(response.read)
+        finally:
+            response.close()
+            response.release_conn()
 
     async def delete_object(self, *, key: str) -> None:
         await asyncio.to_thread(
-            self._client().delete_object,
-            Bucket=self._bucket_name(),
-            Key=key,
+            self._client().remove_object,
+            self._bucket_name(),
+            key,
         )
 
     async def ensure_cors(self, *, allowed_origins: list[str]) -> None:
-        origins = [origin for origin in dict.fromkeys(allowed_origins) if isinstance(origin, str) and origin]
+        origins = [
+            origin
+            for origin in dict.fromkeys(allowed_origins)
+            if isinstance(origin, str) and origin
+        ]
         if not origins:
             return
-        cors_configuration = {
-            "CORSRules": [
-                {
-                    "AllowedMethods": ["GET", "HEAD", "PUT"],
-                    "AllowedOrigins": origins,
-                    "AllowedHeaders": ["*"],
-                    "ExposeHeaders": ["Content-Length", "Content-Type", "ETag"],
-                    "MaxAgeSeconds": 300,
-                }
-            ]
-        }
+        cors_body = self._build_cors_configuration_body(origins)
         await asyncio.to_thread(
-            self._client().put_bucket_cors,
-            Bucket=self._bucket_name(),
-            CORSConfiguration=cors_configuration,
+            self._put_bucket_cors_sync,
+            cors_body,
         )
 
     def _bucket_name(self) -> str:
         bucket_name = self.settings.storage_bucket_name
         if isinstance(bucket_name, str) and bucket_name.strip():
             return bucket_name.strip()
-        raise RuntimeError("storage bucket configuration is incomplete: missing bucket name")
+        raise RuntimeError(
+            "storage bucket configuration is incomplete: missing bucket name"
+        )
 
-    def _client(self):
+    def _client(self) -> Minio:
         if not self.is_configured():
             raise RuntimeError("storage bucket configuration is incomplete")
+        if self._cached_client is None:
+            endpoint, secure = self._parse_endpoint()
+            client = Minio(
+                endpoint,
+                access_key=self.settings.storage_bucket_access_key_id,
+                secret_key=self.settings.storage_bucket_secret_access_key,
+                region=self.settings.storage_bucket_region,
+                secure=secure,
+            )
+            if self.settings.storage_bucket_url_style == "path":
+                client.disable_virtual_style_endpoint()
+            else:
+                client.enable_virtual_style_endpoint()
+            self._cached_client = client
+        return self._cached_client
 
-        import boto3
-        from botocore.client import Config
+    def _parse_endpoint(self) -> tuple[str, bool]:
+        raw_endpoint = self.settings.storage_bucket_endpoint.strip()
+        parsed = urlsplit(
+            raw_endpoint if "://" in raw_endpoint else f"https://{raw_endpoint}"
+        )
+        endpoint = parsed.netloc or parsed.path
+        if not endpoint:
+            raise RuntimeError(
+                "storage bucket configuration is incomplete: missing endpoint"
+            )
+        return endpoint, parsed.scheme != "http"
 
-        return boto3.client(
-            "s3",
-            endpoint_url=self.settings.storage_bucket_endpoint,
-            aws_access_key_id=self.settings.storage_bucket_access_key_id,
-            aws_secret_access_key=self.settings.storage_bucket_secret_access_key,
-            region_name=self.settings.storage_bucket_region,
-            config=Config(
-                signature_version="s3v4",
-                s3={
-                    "addressing_style": self.settings.storage_bucket_url_style,
-                },
-            ),
+    def _put_object_bytes_sync(
+        self,
+        key: str,
+        file_bytes: bytes,
+        mime_type: str | None,
+    ) -> None:
+        data = BytesIO(file_bytes)
+        self._client().put_object(
+            self._bucket_name(),
+            key,
+            data,
+            len(file_bytes),
+            content_type=mime_type or "application/octet-stream",
+        )
+
+    def _build_cors_configuration_body(self, allowed_origins: list[str]) -> bytes:
+        root = Element("CORSConfiguration")
+        rule = SubElement(root, "CORSRule")
+        for method in ("GET", "HEAD", "PUT"):
+            SubElement(rule, "AllowedMethod", method)
+        for origin in allowed_origins:
+            SubElement(rule, "AllowedOrigin", origin)
+        SubElement(rule, "AllowedHeader", "*")
+        for header in ("Content-Length", "Content-Type", "ETag"):
+            SubElement(rule, "ExposeHeader", header)
+        SubElement(rule, "MaxAgeSeconds", "300")
+        return getbytes(root)
+
+    def _put_bucket_cors_sync(self, cors_body: bytes) -> None:
+        self._client()._execute(
+            "PUT",
+            self._bucket_name(),
+            body=cors_body,
+            headers={"Content-MD5": cast(str, md5sum_hash(cors_body))},
+            query_params={"cors": ""},
         )
 
     @staticmethod
     def _is_missing_error(exc: Exception) -> bool:
-        response = getattr(exc, "response", None)
-        if not isinstance(response, dict):
-            return False
-        error = response.get("Error")
-        if not isinstance(error, dict):
-            return False
-        code = str(error.get("Code") or "")
-        return code in {"404", "NoSuchKey", "NotFound"}
+        if isinstance(exc, S3Error):
+            return (exc.code or "") in {
+                "404",
+                "NoSuchKey",
+                "NoSuchObject",
+                "NotFound",
+            }
+        if isinstance(exc, ServerError):
+            return exc.status_code == 404
+        status_code = getattr(exc, "status_code", None)
+        return status_code == 404

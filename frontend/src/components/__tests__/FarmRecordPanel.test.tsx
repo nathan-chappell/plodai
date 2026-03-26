@@ -12,9 +12,9 @@ const SAMPLE_FARM: FarmRecordPayload = {
   crops: [
     {
       id: "crop_1",
-      name: "Spring lettuce",
-      type: "leafy greens",
-      size: "2 beds",
+      name: "Chestnuts",
+      type: "tree_nuts",
+      quantity: "2 beds",
       expected_yield: "40 heads",
       issues: [],
     },
@@ -36,30 +36,33 @@ const SAMPLE_FARM: FarmRecordPayload = {
 };
 
 describe("FarmRecordPanel", () => {
-  it("can render an overview-only pane", () => {
+  it("can render an overview pane with crops and without orders", () => {
     const markup = renderToStaticMarkup(
       <FarmRecordPanel
         farm={SAMPLE_FARM}
-        showCropsSection={false}
         showOrdersSection={false}
       />,
     );
 
     expect(markup).toContain("Description");
-    expect(markup).not.toContain("Crop Blocks");
+    expect(markup).toContain("Crops");
+    expect(markup).toContain("Quantity");
+    expect(markup).toContain("Tree nuts");
     expect(markup).not.toContain("CSA box");
   });
 
-  it("can render the inventory and orders pane without the description section", () => {
+  it("can render an orders-only pane without the description or crop sections", () => {
     const markup = renderToStaticMarkup(
       <FarmRecordPanel
         farm={SAMPLE_FARM}
+        showCropsSection={false}
         showDescriptionSection={false}
       />,
     );
 
-    expect(markup).toContain("Crop Blocks");
     expect(markup).toContain(">Orders<");
+    expect(markup).not.toContain("Chestnuts");
+    expect(markup).not.toContain("Quantity");
     expect(markup).not.toContain(">Description<");
   });
 });

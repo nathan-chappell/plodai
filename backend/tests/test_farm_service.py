@@ -54,3 +54,32 @@ def test_farm_service_creates_and_saves_canonical_records() -> None:
             assert hydrated_farm.location == "East field"
 
     asyncio.run(_run())
+
+
+def test_farm_service_bootstraps_a_blank_default_farm_for_new_users() -> None:
+    async def _run() -> None:
+        async with AsyncSessionLocal() as db:
+            service = FarmService(db)
+
+            farms = await service.list_farms(user_id="user_456")
+
+            assert len(farms) == 1
+            assert farms[0].name == ""
+
+            record = await service.get_record(
+                user_id="user_456",
+                farm_id=farms[0].id,
+            )
+            assert record.model_dump(mode="json") == {
+                "version": "v1",
+                "farm_name": "",
+                "description": None,
+                "location": None,
+                "crops": [],
+                "orders": [],
+            }
+
+            farms_again = await service.list_farms(user_id="user_456")
+            assert [farm.id for farm in farms_again] == [farms[0].id]
+
+    asyncio.run(_run())

@@ -1,9 +1,12 @@
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.api.routes import router
-from backend.app.core.auth import AuthenticatedUser, require_admin_user, require_current_user
+from backend.app.core.auth import (
+    AuthenticatedUser,
+    require_admin_user,
+    require_current_user,
+)
 from backend.app.db.session import AsyncSessionLocal, get_db
 
 
@@ -66,3 +69,25 @@ def test_farm_routes_support_create_get_and_save_record() -> None:
         assert detail_response.status_code == 200
         assert detail_response.json()["name"] == "API farm updated"
         assert detail_response.json()["description"] == "Saved through the API"
+
+
+def test_farm_routes_bootstrap_a_blank_default_farm() -> None:
+    app = build_test_app()
+
+    with TestClient(app) as client:
+        list_response = client.get("/api/farms")
+        assert list_response.status_code == 200
+        farms = list_response.json()
+        assert len(farms) == 1
+
+        farm = farms[0]
+        assert farm["name"] == ""
+
+        record_response = client.get(f"/api/farms/{farm['id']}/record")
+        assert record_response.status_code == 200
+        assert record_response.json()["record"]["farm_name"] == ""
+
+        second_list_response = client.get("/api/farms")
+        assert second_list_response.status_code == 200
+        second_farms = second_list_response.json()
+        assert [item["id"] for item in second_farms] == [farm["id"]]

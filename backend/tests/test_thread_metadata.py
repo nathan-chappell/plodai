@@ -7,14 +7,12 @@ def test_parse_chat_metadata_accepts_canonical_fields_only() -> None:
     metadata = parse_chat_metadata(
         {
             "title": " Walnut scouting ",
-            "investigation_brief": " Review disease pressure ",
             "origin": "interactive",
         }
     )
 
     assert metadata == {
         "title": "Walnut scouting",
-        "investigation_brief": "Review disease pressure",
         "origin": "interactive",
     }
 
@@ -31,16 +29,13 @@ def test_merge_chat_metadata_removes_null_fields() -> None:
     merged = merge_chat_metadata(
         {
             "title": "Current title",
-            "investigation_brief": "Check irrigation",
             "origin": "interactive",
         },
         {
             "title": None,
-            "investigation_brief": "Check irrigation and blight",
         },
     )
 
     assert merged == {
-        "investigation_brief": "Check irrigation and blight",
         "origin": "interactive",
     }

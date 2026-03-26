@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
     storage_bucket_secret_access_key: str = Field(init=False)
     storage_bucket_region: str = "auto"
-    storage_bucket_url_style: str = "virtual"
+    storage_bucket_url_style: str = "path"
     storage_bucket_upload_url_ttl_seconds: int = 15 * 60
     storage_bucket_download_url_ttl_seconds: int = 5 * 60
     clerk_authorized_parties: list[str] = []

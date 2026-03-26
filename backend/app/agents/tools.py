@@ -6,7 +6,7 @@ from agents import WebSearchTool, function_tool
 from agents.tool import Tool
 from agents.tool_context import ToolContext
 from chatkit.agents import AgentContext as ChatKitAgentContext
-from chatkit.types import ProgressUpdateEvent
+from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 from pydantic import BaseModel, ConfigDict
 
 from backend.app.agents.context import FarmAgentContext
@@ -81,7 +81,16 @@ def build_plodai_tools(context: FarmAgentContext) -> list[Tool]:
         request_context.farm_name = saved_record.farm_name
         await ctx.context.stream(
             ProgressUpdateEvent(
-                text=f"Saved farm record for {saved_record.farm_name}."
+                text=f"Saved farm record for {saved_record.farm_name or 'this farm'}."
+            )
+        )
+        await ctx.context.stream(
+            ClientEffectEvent(
+                name="farm_record_updated",
+                data={
+                    "farm_id": request_context.farm_id,
+                    "farm_name": saved_record.farm_name,
+                },
             )
         )
         return {

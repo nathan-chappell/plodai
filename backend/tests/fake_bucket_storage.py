@@ -105,11 +105,11 @@ class FakeBucketStorage:
     async def upload_from_presigned_descriptor(
         self,
         *,
-        descriptor_url: str,
+        descriptor_url: object,
         file_bytes: bytes,
         mime_type: str | None,
     ) -> str:
-        parsed = urlparse(descriptor_url)
+        parsed = urlparse(str(descriptor_url))
         if parse_qs(parsed.query).get("kind") != ["put"]:
             raise AssertionError("expected a fake presigned PUT URL")
         key = parsed.path.lstrip("/")

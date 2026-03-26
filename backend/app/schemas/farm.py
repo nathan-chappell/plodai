@@ -22,7 +22,7 @@ class FarmCrop(FarmSchemaBase):
     id: str
     name: str
     type: str | None = None
-    size: str | None = None
+    quantity: str | None = None
     expected_yield: str | None = None
     issues: list[FarmCropIssue] = Field(default_factory=list)
 

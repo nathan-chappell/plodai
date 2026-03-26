@@ -3,6 +3,7 @@ clerk-backend-api
 colorlog
 email-validator
 fastapi
+minio
 openai
 openai-agents
 openai-chatkit

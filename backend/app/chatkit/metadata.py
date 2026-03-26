@@ -19,7 +19,6 @@ class AppChatMetadataModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = None
-    investigation_brief: str | None = None
     openai_conversation_id: str | None = None
     openai_previous_response_id: str | None = None
     usage: ThreadUsageTotalsModel | None = None
@@ -27,7 +26,6 @@ class AppChatMetadataModel(BaseModel):
 
     @field_validator(
         "title",
-        "investigation_brief",
         "openai_conversation_id",
         "openai_previous_response_id",
         mode="before",
@@ -46,7 +44,6 @@ class AppChatMetadataModel(BaseModel):
 
 class ChatMetadataPatch(TypedDict, total=False):
     title: str | None
-    investigation_brief: str | None
     openai_conversation_id: str | None
     openai_previous_response_id: str | None
     usage: ThreadUsageTotalsModel | dict[str, object] | None
@@ -55,7 +52,6 @@ class ChatMetadataPatch(TypedDict, total=False):
 
 class AppChatMetadata(TypedDict, total=False):
     title: str
-    investigation_brief: str
     openai_conversation_id: str
     openai_previous_response_id: str
     usage: dict[str, object]

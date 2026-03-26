@@ -32,6 +32,8 @@ class FarmService:
             .order_by(Farm.updated_at.desc(), Farm.created_at.desc())
         )
         farms = list(result.scalars().all())
+        if not farms:
+            farms = [await self._create_farm_row(user_id=user_id, name="")]
         return [await self._serialize_farm_summary(farm) for farm in farms]
 
     async def create_farm(
@@ -40,32 +42,7 @@ class FarmService:
         user_id: str,
         request: FarmCreateRequest,
     ) -> FarmDetail:
-        cleaned_name = request.name.strip()
-        if not cleaned_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Farm name is required.",
-            )
-        farm = Farm(
-            id=f"farm_{uuid4().hex}",
-            user_id=user_id,
-            name=cleaned_name,
-        )
-        self.db.add(farm)
-        self.db.add(
-            FarmRecord(
-                farm_id=farm.id,
-                payload_json=FarmRecordPayload(
-                    version="v1",
-                    farm_name=cleaned_name,
-                    description=None,
-                    location=None,
-                    crops=[],
-                    orders=[],
-                ).model_dump(mode="json"),
-            )
-        )
-        await self.db.commit()
+        farm = await self._create_farm_row(user_id=user_id, name=request.name)
         return await self.get_farm(user_id=user_id, farm_id=farm.id)
 
     async def get_farm(
@@ -174,6 +151,35 @@ class FarmService:
                 detail="Farm record not found.",
             )
         return record
+
+    async def _create_farm_row(
+        self,
+        *,
+        user_id: str,
+        name: str,
+    ) -> Farm:
+        cleaned_name = name.strip()
+        farm = Farm(
+            id=f"farm_{uuid4().hex}",
+            user_id=user_id,
+            name=cleaned_name,
+        )
+        self.db.add(farm)
+        self.db.add(
+            FarmRecord(
+                farm_id=farm.id,
+                payload_json=FarmRecordPayload(
+                    version="v1",
+                    farm_name=cleaned_name,
+                    description=None,
+                    location=None,
+                    crops=[],
+                    orders=[],
+                ).model_dump(mode="json"),
+            )
+        )
+        await self.db.commit()
+        return farm
 
     async def _serialize_farm_summary(self, farm: Farm) -> FarmSummary:
         record = await self._get_record_row(farm.id)

@@ -4,6 +4,8 @@ import type {
   FarmRecordPayload,
 } from "../types/farm";
 
+export const UNNAMED_FARM_LABEL = "Unnamed Farm";
+
 function normalizeOptionalText(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -12,11 +14,24 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
   return normalized || null;
 }
 
+export function getFarmDisplayName(value: string | null | undefined): string {
+  return normalizeOptionalText(value) ?? UNNAMED_FARM_LABEL;
+}
+
+export function formatFarmCropType(value: string | null | undefined): string | null {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return null;
+  }
+  const humanized = normalized.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return humanized.charAt(0).toUpperCase() + humanized.slice(1);
+}
+
 export function normalizeFarmCrop(crop: FarmCrop): FarmCrop {
   return {
     ...crop,
-    type: normalizeOptionalText(crop.type),
-    size: normalizeOptionalText(crop.size),
+    type: formatFarmCropType(crop.type),
+    quantity: normalizeOptionalText(crop.quantity),
     expected_yield: normalizeOptionalText(crop.expected_yield),
     issues: crop.issues.map((issue) => ({
       ...issue,

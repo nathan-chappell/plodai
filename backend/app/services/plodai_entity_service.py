@@ -134,7 +134,8 @@ class PlodaiEntityService:
                 record.location,
                 crop.name,
                 crop.type,
-                crop.size,
+                _humanize_crop_type(crop.type),
+                crop.quantity,
                 crop.expected_yield,
                 *issue_terms,
             ):
@@ -153,8 +154,8 @@ class PlodaiEntityService:
                         "farm_id": farm_id,
                         "farm_name": record.farm_name,
                         "item_id": crop.id,
-                        "type": crop.type or "",
-                        "size": crop.size or "",
+                        "type": _humanize_crop_type(crop.type) or "",
+                        "quantity": crop.quantity or "",
                         "expected_yield": crop.expected_yield or "",
                         "issue_count": str(len(crop.issues)),
                         "highest_severity": highest_severity or "",
@@ -215,6 +216,15 @@ def _matches_query(normalized_query: str, *values: str | None) -> bool:
         return True
     haystack = " ".join(value for value in values if value).lower()
     return normalized_query in haystack
+
+
+def _humanize_crop_type(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.replace("_", " ").replace("-", " ").split())
+    if not normalized:
+        return None
+    return normalized[0].upper() + normalized[1:]
 
 
 def _highest_crop_issue_severity(crop: FarmCrop) -> str | None:

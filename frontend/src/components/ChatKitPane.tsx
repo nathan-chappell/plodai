@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Entity, Widgets } from "@openai/chatkit";
 import { ChatKit, type UseChatKitOptions, useChatKit } from "@openai/chatkit-react";
 
+import { publishToast } from "../app/toasts";
 import { authenticatedFetch, getChatKitConfig, setChatKitMetadataGetter } from "../lib/api";
 import {
   ChatKitPaneCard,
@@ -14,6 +15,11 @@ type ChatKitStarterPrompt = {
   label: string;
   prompt: string;
   icon?: "document" | "analytics" | "chart" | "bolt" | "check-circle";
+};
+
+type ChatKitClientEffect = {
+  name: string;
+  data?: Record<string, unknown>;
 };
 
 export type ChatKitEntityConfig = {
@@ -45,6 +51,8 @@ const CHATKIT_MODEL_CHOICES = [
   },
 ] as const;
 
+const ATTACHMENT_LIMIT_ERROR_MESSAGE = "Cannot attach any more files to this message.";
+
 function buildStarterPrompts(): readonly ChatKitStarterPrompt[] {
   return [
     {
@@ -68,6 +76,10 @@ function buildStarterPrompts(): readonly ChatKitStarterPrompt[] {
   ] as const;
 }
 
+function isDraftAttachmentLimitError(error: Error): boolean {
+  return error.message.includes(ATTACHMENT_LIMIT_ERROR_MESSAGE);
+}
+
 export function buildChatKitRequestMetadata(options: {
   threadOrigin?: "interactive" | "ui_integration_test";
 }): Record<string, unknown> {
@@ -80,6 +92,7 @@ export function ChatKitPane({
   farmId,
   activeChatId,
   onActiveChatChange,
+  onClientEffect,
   headerTitle = "PlodAI chat",
   greeting = "Review farm images, inspect the saved record, and decide the next step.",
   entitiesConfig,
@@ -90,6 +103,7 @@ export function ChatKitPane({
   farmId: string | null;
   activeChatId?: string | null;
   onActiveChatChange?: (chatId: string | null) => Promise<void> | void;
+  onClientEffect?: (effect: ChatKitClientEffect) => Promise<void> | void;
   headerTitle?: string;
   greeting?: string;
   entitiesConfig?: ChatKitEntityConfig;
@@ -123,6 +137,7 @@ export function ChatKitPane({
             greeting={greeting}
             headerTitle={headerTitle}
             onActiveChatChange={onActiveChatChange}
+            onClientEffect={onClientEffect}
             showDictation={showDictation}
             surfaceMinHeight={surfaceMinHeight}
           />
@@ -136,6 +151,7 @@ function ActiveFarmChatKit({
   farmId,
   activeChatId,
   onActiveChatChange,
+  onClientEffect,
   headerTitle,
   greeting,
   entitiesConfig,
@@ -145,6 +161,7 @@ function ActiveFarmChatKit({
   farmId: string;
   activeChatId?: string | null;
   onActiveChatChange?: (chatId: string | null) => Promise<void> | void;
+  onClientEffect?: (effect: ChatKitClientEffect) => Promise<void> | void;
   headerTitle: string;
   greeting: string;
   entitiesConfig?: ChatKitEntityConfig;
@@ -153,10 +170,16 @@ function ActiveFarmChatKit({
 }) {
   const threadIdRef = useRef<string | null>(activeChatId ?? null);
   const onActiveChatChangeRef = useRef(onActiveChatChange);
+  const onClientEffectRef = useRef(onClientEffect);
+  const chatKitRef = useRef<ReturnType<typeof useChatKit> | null>(null);
 
   useEffect(() => {
     onActiveChatChangeRef.current = onActiveChatChange;
   }, [onActiveChatChange]);
+
+  useEffect(() => {
+    onClientEffectRef.current = onClientEffect;
+  }, [onClientEffect]);
 
   const starterPrompts = useMemo(() => buildStarterPrompts(), []);
   const options = useMemo<UseChatKitOptions>(() => {
@@ -218,7 +241,6 @@ function ActiveFarmChatKit({
             "image/jpeg": [".jpg", ".jpeg"],
             "image/webp": [".webp"],
           },
-          maxCount: 6,
           maxSize: 10 * 1024 * 1024,
         },
         dictation: { enabled: showDictation },
@@ -227,9 +249,26 @@ function ActiveFarmChatKit({
           default: choice.id === CHATKIT_DEFAULT_MODEL_ID,
         })),
       },
+      onError: ({ error }) => {
+        if (!isDraftAttachmentLimitError(error)) {
+          return;
+        }
+
+        void chatKitRef.current?.setComposerValue({
+          attachments: [],
+        });
+        publishToast({
+          title: "Draft attachments reset",
+          message: "Removed the stale draft attachments. Try attaching those files again.",
+          tone: "warning",
+        });
+      },
       onThreadChange: ({ threadId: nextThreadId }) => {
         threadIdRef.current = nextThreadId;
         void onActiveChatChangeRef.current?.(nextThreadId ?? null);
+      },
+      onEffect: (effect) => {
+        void onClientEffectRef.current?.(effect);
       },
     };
   }, [
@@ -243,6 +282,7 @@ function ActiveFarmChatKit({
   ]);
 
   const chatKit = useChatKit(options);
+  chatKitRef.current = chatKit;
 
   useEffect(() => {
     if (!chatKit || activeChatId === undefined) {

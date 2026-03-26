@@ -19,7 +19,12 @@ import type {
   FarmOrderStatus,
   FarmRecordPayload,
 } from "../types/farm";
-import { normalizeFarmPayload, summarizeFarmCropIssues } from "../lib/farm";
+import {
+  formatFarmCropType,
+  getFarmDisplayName,
+  normalizeFarmPayload,
+  summarizeFarmCropIssues,
+} from "../lib/farm";
 
 export type FarmRecordFocusTarget =
   | { kind: "record" }
@@ -127,7 +132,7 @@ export function FarmRecordPanel({
             ) : (
               <>
                 <FarmTitleRow>
-                  <FarmTitle>{normalizedFarm.farm_name}</FarmTitle>
+                  <FarmTitle>{getFarmDisplayName(normalizedFarm.farm_name)}</FarmTitle>
                   {normalizedFarm.location ? (
                     <FarmLocation>{normalizedFarm.location}</FarmLocation>
                   ) : null}
@@ -138,7 +143,7 @@ export function FarmRecordPanel({
                 <FarmMetrics>
                   <FarmMetric>
                     <strong>{normalizedFarm.crops.length}</strong>
-                    <span>Blocks</span>
+                    <span>Crops</span>
                   </FarmMetric>
                   <FarmMetric>
                     <strong>{totalIssueCount}</strong>
@@ -181,7 +186,7 @@ export function FarmRecordPanel({
 
       {showCropsSection ? (
         <FarmSection>
-          <FarmSectionTitle>Crop Blocks</FarmSectionTitle>
+          <FarmSectionTitle>Crops</FarmSectionTitle>
           {normalizedFarm.crops.length ? (
             <CropTableWrap>
               <CropTable>
@@ -189,7 +194,7 @@ export function FarmRecordPanel({
                   <tr>
                     <th>Name</th>
                     <th>Type</th>
-                    <th>Size</th>
+                    <th>Quantity</th>
                     <th>Expected yield</th>
                     <th>Issues</th>
                     <CropActionHeader aria-hidden="true" />
@@ -213,8 +218,8 @@ export function FarmRecordPanel({
                         <td>
                           <CropName>{crop.name}</CropName>
                         </td>
-                        <td>{crop.type?.trim() || "-"}</td>
-                        <td>{crop.size?.trim() || "-"}</td>
+                        <td>{formatFarmCropType(crop.type)?.trim() || "-"}</td>
+                        <td>{crop.quantity?.trim() || "-"}</td>
                         <td>{crop.expected_yield?.trim() || "-"}</td>
                         <td>
                           {crop.issues.length ? (
@@ -281,7 +286,7 @@ export function FarmRecordPanel({
               </CropTable>
             </CropTableWrap>
           ) : (
-            <MetaText>No crop blocks tracked yet.</MetaText>
+            <MetaText>No crops tracked yet.</MetaText>
           )}
         </FarmSection>
       ) : null}
@@ -387,9 +392,7 @@ export function FarmRecordPanel({
           {normalizedFarm.description?.trim() ? (
             <MetaText>{normalizedFarm.description}</MetaText>
           ) : (
-            <MetaText>
-              No description saved yet. The PlodAI agent will keep the durable field context here.
-            </MetaText>
+            <MetaText>No farm summary yet.</MetaText>
           )}
         </FarmSection>
       ) : null}
@@ -406,7 +409,7 @@ export function FarmRecordPanel({
             <WorkspaceModalHeader>
               <WorkspaceModalTitleBlock>
                 <WorkspaceModalTitle>{activeCropIssues.cropName}</WorkspaceModalTitle>
-                <WorkspaceModalMeta>Structured grouped findings for this crop block.</WorkspaceModalMeta>
+                <WorkspaceModalMeta>Structured grouped findings for this crop.</WorkspaceModalMeta>
               </WorkspaceModalTitleBlock>
               <WorkspaceModalCloseButton
                 onClick={() => setActiveCropIssues(null)}
@@ -509,11 +512,14 @@ function isAbsoluteHttpUrl(value: string | null | undefined): value is string {
 const FarmPreview = styled.section<{ $highlighted: boolean }>`
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.72rem;
   width: 100%;
-  min-height: 100%;
+  min-height: 0;
+  height: 100%;
   box-sizing: border-box;
-  padding: 0.2rem;
+  padding: 0.12rem;
+  overflow: auto;
+  overscroll-behavior: contain;
   border-radius: 1.1rem;
   border: 1px solid
     ${({ $highlighted }) =>
@@ -527,8 +533,8 @@ const FarmPreview = styled.section<{ $highlighted: boolean }>`
 
 const FarmHero = styled.section`
   display: grid;
-  gap: 0.55rem;
-  padding: 0.8rem 0.88rem;
+  gap: 0.42rem;
+  padding: 0.68rem 0.76rem;
   border-radius: 1rem;
   background: linear-gradient(135deg, rgba(117, 158, 126, 0.13), rgba(255, 255, 255, 0.88));
   border: 1px solid rgba(101, 144, 115, 0.12);
@@ -550,9 +556,9 @@ const FarmHeroMain = styled.div`
 `;
 
 const FarmEyebrow = styled.div`
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--accent-deep) 74%, var(--ink) 26%);
 `;
@@ -574,7 +580,7 @@ const FarmTitleActions = styled.div`
 
 const FarmTitle = styled.h4`
   margin: 0;
-  font-size: 1.08rem;
+  font-size: 1rem;
   line-height: 1.05;
 `;
 
@@ -598,15 +604,15 @@ const FarmEditorWrap = styled.div`
 const FarmMetrics = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: 0.42rem;
+  gap: 0.34rem;
 `;
 
 const FarmMetric = styled.div`
   display: inline-flex;
   align-items: center;
   gap: 0.34rem;
-  min-height: 1.9rem;
-  padding: 0.3rem 0.6rem;
+  min-height: 1.65rem;
+  padding: 0.22rem 0.52rem;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid rgba(31, 41, 55, 0.08);
@@ -625,7 +631,7 @@ const FarmMetric = styled.div`
 const FarmSection = styled.section`
   display: grid;
   gap: 0.55rem;
-  padding: 0.9rem 0.95rem;
+  padding: 0.75rem 0.82rem;
   border-radius: 0.95rem;
   border: 1px solid rgba(31, 41, 55, 0.08);
   background: rgba(255, 255, 255, 0.78);

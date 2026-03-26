@@ -13,7 +13,6 @@ from chatkit.actions import Action
 from chatkit.agents import (
     AgentContext as ChatKitAgentContext,
     ThreadItemConverter,
-    stream_agent_response,
 )
 from chatkit.server import ChatKitServer
 from chatkit.types import (
@@ -52,6 +51,7 @@ from typing_extensions import assert_never
 
 from backend.app.agents.agent_builder import build_plodai_agent
 from backend.app.agents.context import FarmAgentContext
+from backend.app.chatkit.agent_stream import stream_agent_response_with_tool_progress
 from backend.app.chatkit.memory_store import FarmMemoryStore
 from backend.app.chatkit.metadata import (
     AppChatMetadata,
@@ -84,6 +84,7 @@ MODEL_ALIASES = {
 }
 DEFAULT_MODEL = MODEL_ALIASES["default"]
 MAX_AGENT_TURNS = 30
+VISION_IMAGE_DETAIL = "high"
 RATE_LIMIT_RETRY_PATTERN = re.compile(
     r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
     re.IGNORECASE,
@@ -210,7 +211,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
                 mime_type=image.mime_type or attachment.mime_type,
                 file_bytes=image_bytes,
             ),
-            detail="high",
+            detail=VISION_IMAGE_DETAIL,
         )
 
     async def user_message_to_input(
@@ -384,7 +385,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
                     mime_type=image.mime_type,
                     file_bytes=image_bytes,
                 ),
-                detail="high",
+                detail=VISION_IMAGE_DETAIL,
             ),
         ]
 
@@ -399,7 +400,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
             for key, prefix in (
                 ("farm_name", "Farm"),
                 ("type", "Type"),
-                ("size", "Size"),
+                ("quantity", "Quantity"),
                 ("expected_yield", "Expected yield"),
                 ("issue_count", "Issue count"),
                 ("highest_severity", "Highest severity"),
@@ -676,7 +677,10 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                     conversation_id=conversation_id,
                 )
                 run_started = True
-                async for event in stream_agent_response(agent_context, result):
+                async for event in stream_agent_response_with_tool_progress(
+                    agent_context,
+                    result,
+                ):
                     yield event
                 break
             except Exception as exc:
@@ -781,7 +785,6 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                 "openai_previous_response_id": result_response_id,
                 "usage": cast(dict[str, object] | None, updated_usage),
                 "origin": typed_metadata.get("origin"),
-                "investigation_brief": typed_metadata.get("investigation_brief"),
             },
         )
 

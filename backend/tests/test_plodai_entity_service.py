@@ -49,8 +49,8 @@ def test_entity_search_uses_saved_farm_record_and_images() -> None:
                         {
                             "id": "crop_1",
                             "name": "Block A",
-                            "type": "walnut",
-                            "size": "12 acres",
+                            "type": "tree_nuts",
+                            "quantity": "12 acres",
                             "expected_yield": "4 tons",
                             "issues": [
                                 {
@@ -84,5 +84,11 @@ def test_entity_search_uses_saved_farm_record_and_images() -> None:
 
             entity_types = {entity.data["entity_type"] for entity in response.entities}
             assert entity_types == {"farm_image", "farm_crop", "farm_order"}
+            crop_entity = next(
+                entity for entity in response.entities if entity.data["entity_type"] == "farm_crop"
+            )
+            assert crop_entity.data["type"] == "Tree nuts"
+            assert crop_entity.data["quantity"] == "12 acres"
+            assert "size" not in crop_entity.data
 
     asyncio.run(_run())

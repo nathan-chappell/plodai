@@ -13,7 +13,7 @@ export type FarmCrop = {
   id: string;
   name: string;
   type?: string | null;
-  size?: string | null;
+  quantity?: string | null;
   expected_yield?: string | null;
   issues: FarmCropIssue[];
 };

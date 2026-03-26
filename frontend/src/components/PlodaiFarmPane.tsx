@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import type { Entity } from "@openai/chatkit";
 
@@ -16,7 +16,7 @@ import {
   updateFarm,
 } from "../lib/api";
 import { buildFarmOrderPath } from "../lib/router";
-import { normalizeFarmPayload } from "../lib/farm";
+import { UNNAMED_FARM_LABEL, getFarmDisplayName, normalizeFarmPayload } from "../lib/farm";
 import { buildPlodaiEntityPreview } from "../lib/plodai-entities";
 import type { FarmDetail, FarmRecordPayload, FarmSummary } from "../types/farm";
 
@@ -26,11 +26,11 @@ type LoadState = {
   record: FarmRecordPayload | null;
 };
 
-type FarmViewTab = "overview" | "inventory_orders";
+type FarmViewTab = "overview" | "orders";
 
 const EMPTY_RECORD: FarmRecordPayload = {
   version: "v1",
-  farm_name: "Untitled farm",
+  farm_name: "",
   description: null,
   location: null,
   crops: [],
@@ -51,6 +51,12 @@ export function PlodaiFarmPane() {
   const [recordEditorValue, setRecordEditorValue] = useState("");
   const [recordEditorOpen, setRecordEditorOpen] = useState(false);
   const [activeViewTab, setActiveViewTab] = useState<FarmViewTab>("overview");
+  const selectedFarmIdRef = useRef<string | null>(selectedFarmId);
+  const farmLoadRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    selectedFarmIdRef.current = selectedFarmId;
+  }, [selectedFarmId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,24 +101,36 @@ export function PlodaiFarmPane() {
     setFarmNameDraft(nextFarmName);
   }, [state.farm?.id, state.farm?.name, state.record?.farm_name]);
 
+  async function loadFarmState(farmId: string): Promise<LoadState> {
+    const [farms, farm, recordResponse] = await Promise.all([
+      listFarms(),
+      getFarm(farmId),
+      getFarmRecord(farmId),
+    ]);
+
+    return {
+      farms,
+      farm,
+      record: normalizeFarmPayload(recordResponse.record),
+    };
+  }
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadFarm(farmId: string) {
+      const requestId = ++farmLoadRequestIdRef.current;
       setLoading(true);
       try {
-        const [farm, recordResponse] = await Promise.all([
-          getFarm(farmId),
-          getFarmRecord(farmId),
-        ]);
-        if (cancelled) {
+        const nextState = await loadFarmState(farmId);
+        if (
+          cancelled ||
+          selectedFarmIdRef.current !== farmId ||
+          farmLoadRequestIdRef.current !== requestId
+        ) {
           return;
         }
-        setState((current) => ({
-          ...current,
-          farm,
-          record: normalizeFarmPayload(recordResponse.record),
-        }));
+        setState(nextState);
       } catch (error) {
         if (!cancelled) {
           publishToast({
@@ -123,7 +141,11 @@ export function PlodaiFarmPane() {
           });
         }
       } finally {
-        if (!cancelled) {
+        if (
+          !cancelled &&
+          selectedFarmIdRef.current === farmId &&
+          farmLoadRequestIdRef.current === requestId
+        ) {
           setLoading(false);
         }
       }
@@ -161,7 +183,7 @@ export function PlodaiFarmPane() {
     const query = farmSearch.trim().toLowerCase();
     const selectedFarm = state.farms.find((farm) => farm.id === selectedFarmId) ?? null;
     const filteredFarms = query
-      ? state.farms.filter((farm) => farm.name.toLowerCase().includes(query))
+      ? state.farms.filter((farm) => getFarmDisplayName(farm.name).toLowerCase().includes(query))
       : state.farms;
 
     if (selectedFarm && !filteredFarms.some((farm) => farm.id === selectedFarm.id)) {
@@ -172,19 +194,28 @@ export function PlodaiFarmPane() {
   }, [farmSearch, selectedFarmId, state.farms]);
 
   async function refreshSelectedFarm(): Promise<void> {
-    if (!selectedFarmId) {
+    const farmId = selectedFarmIdRef.current;
+    if (!farmId) {
       return;
     }
-    const [farms, farm, recordResponse] = await Promise.all([
-      listFarms(),
-      getFarm(selectedFarmId),
-      getFarmRecord(selectedFarmId),
-    ]);
-    setState({
-      farms,
-      farm,
-      record: normalizeFarmPayload(recordResponse.record),
-    });
+    try {
+      const requestId = ++farmLoadRequestIdRef.current;
+      const nextState = await loadFarmState(farmId);
+      if (
+        selectedFarmIdRef.current !== farmId ||
+        farmLoadRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
+      setState(nextState);
+    } catch (error) {
+      publishToast({
+        title: "Unable to refresh farm",
+        message:
+          error instanceof Error ? error.message : "The latest farm updates could not be loaded.",
+        tone: "error",
+      });
+    }
   }
 
   async function handleCreateFarm() {
@@ -192,16 +223,9 @@ export function PlodaiFarmPane() {
     try {
       const farm = await createFarm(buildUntitledFarmName(state.farms));
       setSelectedFarmId(farm.id);
-      const [farms, farmDetail, recordResponse] = await Promise.all([
-        listFarms(),
-        getFarm(farm.id),
-        getFarmRecord(farm.id),
-      ]);
-      setState({
-        farms,
-        farm: farmDetail,
-        record: normalizeFarmPayload(recordResponse.record),
-      });
+      selectedFarmIdRef.current = farm.id;
+      const nextState = await loadFarmState(farm.id);
+      setState(nextState);
     } catch (error) {
       publishToast({
         title: "Unable to create farm",
@@ -283,7 +307,7 @@ export function PlodaiFarmPane() {
       await refreshSelectedFarm();
       publishToast({
         title: "Farm record saved",
-        message: `Saved ${nextRecord.farm_name}.`,
+        message: `Saved ${getFarmDisplayName(nextRecord.farm_name)}.`,
       });
     } catch (error) {
       publishToast({
@@ -325,7 +349,7 @@ export function PlodaiFarmPane() {
                 )}
                 {selectableFarms.map((farm) => (
                   <option key={farm.id} value={farm.id}>
-                    {farm.name}
+                    {getFarmDisplayName(farm.name)}
                   </option>
                 ))}
               </FarmSelect>
@@ -337,7 +361,7 @@ export function PlodaiFarmPane() {
                 disabled={!state.farm}
                 id="farm-name"
                 onChange={(event) => setFarmNameDraft(event.target.value)}
-                placeholder="Edit farm name"
+                placeholder={state.farm ? UNNAMED_FARM_LABEL : "Edit farm name"}
                 value={farmNameDraft}
               />
             </FarmToolbarInputGroup>
@@ -367,78 +391,53 @@ export function PlodaiFarmPane() {
               <MetaText>Create a farm or choose one from the header to open PlodAI.</MetaText>
             </FarmEmptyState>
           ) : (
-            <>
-              <FarmViewTabs aria-label="Farm views" role="tablist">
-                <FarmViewTabButton
-                  aria-selected={activeViewTab === "overview"}
-                  onClick={() => setActiveViewTab("overview")}
-                  role="tab"
-                  type="button"
-                >
-                  Overview
-                </FarmViewTabButton>
-                <FarmViewTabButton
-                  aria-selected={activeViewTab === "inventory_orders"}
-                  onClick={() => setActiveViewTab("inventory_orders")}
-                  role="tab"
-                  type="button"
-                >
-                  Inventory &amp; orders
-                </FarmViewTabButton>
-              </FarmViewTabs>
+            <FarmContent>
+              <FarmViewBar>
+                <FarmViewTabs aria-label="Farm views" role="tablist">
+                  <FarmViewTabButton
+                    aria-selected={activeViewTab === "overview"}
+                    onClick={() => setActiveViewTab("overview")}
+                    role="tab"
+                    type="button"
+                  >
+                    Overview
+                  </FarmViewTabButton>
+                  <FarmViewTabButton
+                    aria-selected={activeViewTab === "orders"}
+                    onClick={() => setActiveViewTab("orders")}
+                    role="tab"
+                    type="button"
+                  >
+                    Orders
+                  </FarmViewTabButton>
+                </FarmViewTabs>
+
+                <FarmUtilityButton disabled={mutating} onClick={openRecordEditor} type="button">
+                  Edit JSON
+                </FarmUtilityButton>
+              </FarmViewBar>
 
               <FarmPaneGrid>
-                <FarmSectionCard>
+                <FarmDetailPane>
                   {activeViewTab === "overview" ? (
-                    <>
-                      <SectionHeader>
-                        <div>
-                          <SectionEyebrow>Farm overview</SectionEyebrow>
-                          <SectionTitle>{state.record.farm_name}</SectionTitle>
-                          <MetaText>
-                            Canonical farm context lives here. Crop inventory and customer orders now sit on
-                            their own tab.
-                          </MetaText>
-                        </div>
-                        <FarmSecondaryButton disabled={mutating} onClick={openRecordEditor} type="button">
-                          Edit JSON
-                        </FarmSecondaryButton>
-                      </SectionHeader>
-
-                      <FarmRecordPanel
-                        farm={state.record}
-                        isMutating={mutating}
-                        onEditFarm={openRecordEditor}
-                        orderShareUrls={orderShareUrls}
-                        showCropsSection={false}
-                        showOrdersSection={false}
-                      />
-                    </>
+                    <FarmRecordPanel
+                      farm={state.record}
+                      isMutating={mutating}
+                      onEditFarm={openRecordEditor}
+                      orderShareUrls={orderShareUrls}
+                      showOrdersSection={false}
+                    />
                   ) : (
-                    <>
-                      <SectionHeader>
-                        <div>
-                          <SectionEyebrow>Inventory &amp; orders</SectionEyebrow>
-                          <SectionTitle>Saved blocks and customer offers</SectionTitle>
-                          <MetaText>
-                            This tab holds the operational inventory view plus the public-facing order list.
-                          </MetaText>
-                        </div>
-                        <FarmSecondaryButton disabled={mutating} onClick={openRecordEditor} type="button">
-                          Edit JSON
-                        </FarmSecondaryButton>
-                      </SectionHeader>
-
-                      <FarmRecordPanel
-                        farm={state.record}
-                        isMutating={mutating}
-                        onEditFarm={openRecordEditor}
-                        orderShareUrls={orderShareUrls}
-                        showDescriptionSection={false}
-                      />
-                    </>
+                    <FarmRecordPanel
+                      farm={state.record}
+                      isMutating={mutating}
+                      onEditFarm={openRecordEditor}
+                      orderShareUrls={orderShareUrls}
+                      showCropsSection={false}
+                      showDescriptionSection={false}
+                    />
                   )}
-                </FarmSectionCard>
+                </FarmDetailPane>
 
                 <ChatKitPane
                   activeChatId={state.farm!.chat_id ?? null}
@@ -467,10 +466,15 @@ export function PlodaiFarmPane() {
                         : current,
                     );
                   }}
-                  surfaceMinHeight={720}
+                  onClientEffect={(effect) => {
+                    if (effect.name !== "farm_record_updated") {
+                      return;
+                    }
+                    void refreshSelectedFarm();
+                  }}
                 />
               </FarmPaneGrid>
-            </>
+            </FarmContent>
           )}
         </FarmSectionCard>
       </FarmMain>
@@ -508,29 +512,42 @@ export function PlodaiFarmPane() {
 }
 
 function buildUntitledFarmName(farms: FarmSummary[]): string {
-  const untitledCount = farms.filter((farm) => farm.name.startsWith("Untitled farm")).length;
-  return untitledCount ? `Untitled farm ${untitledCount + 1}` : "Untitled farm";
+  const unnamedCount = farms.filter((farm) => {
+    const displayName = getFarmDisplayName(farm.name);
+    return (
+      displayName === UNNAMED_FARM_LABEL ||
+      displayName.startsWith(`${UNNAMED_FARM_LABEL} `)
+    );
+  }).length;
+  return unnamedCount ? `${UNNAMED_FARM_LABEL} ${unnamedCount + 1}` : UNNAMED_FARM_LABEL;
 }
 
 const FarmWorkspaceGrid = styled.div`
-  display: block;
+  display: grid;
   min-height: 0;
+  height: 100%;
 `;
 
 const FarmMain = styled.div`
   display: grid;
   gap: 0.9rem;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 `;
 
 const FarmSectionCard = styled.section`
   ${sectionPanelCss("1rem", "0.9rem")};
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 `;
 
 const FarmToolbar = styled.div`
   display: grid;
   grid-template-columns: minmax(180px, 0.8fr) minmax(180px, 0.9fr) minmax(220px, 1.1fr) auto;
-  gap: 0.7rem;
+  gap: 0.5rem 0.65rem;
   align-items: end;
 
   @media (max-width: 1080px) {
@@ -544,22 +561,23 @@ const FarmToolbar = styled.div`
 
 const FarmToolbarInputGroup = styled.div`
   display: grid;
-  gap: 0.35rem;
+  gap: 0.22rem;
   min-width: 0;
 `;
 
 const FarmFieldLabel = styled.label`
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent-deep);
+  opacity: 0.86;
 `;
 
 const FarmToolbarActions = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.38rem;
   justify-content: flex-end;
 
   @media (max-width: 720px) {
@@ -567,20 +585,59 @@ const FarmToolbarActions = styled.div`
   }
 `;
 
+const FarmContent = styled.div`
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  overflow: hidden;
+`;
+
+const FarmViewBar = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+
+  @media (max-width: 720px) {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+`;
+
 const FarmViewTabs = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.18rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.16rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.08);
+  background: rgba(249, 246, 241, 0.88);
 `;
 
 const FarmViewTabButton = styled.button`
-  ${secondaryButtonCss};
+  appearance: none;
+  border: 0;
   border-radius: 999px;
+  min-height: 1.75rem;
+  padding: 0.18rem 0.62rem;
+  background: transparent;
+  color: color-mix(in srgb, var(--ink) 76%, var(--muted) 24%);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
 
   &[aria-selected="true"] {
-    border-color: rgba(21, 128, 61, 0.26);
-    background: rgba(21, 128, 61, 0.12);
+    background: rgba(255, 255, 255, 0.96);
     color: var(--accent-deep);
+    box-shadow: 0 1px 0 rgba(31, 41, 55, 0.06), 0 0 0 1px rgba(21, 128, 61, 0.16);
   }
 `;
 
@@ -589,10 +646,21 @@ const FarmPaneGrid = styled.div`
   grid-template-columns: minmax(0, 1.02fr) minmax(360px, 0.98fr);
   gap: 0.9rem;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  align-items: stretch;
 
   @media (max-width: 1180px) {
     grid-template-columns: 1fr;
+    height: auto;
   }
+`;
+
+const FarmDetailPane = styled.section`
+  ${sectionPanelCss("0.72rem", "0.72rem")};
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 `;
 
 const SectionHeader = styled.div`
@@ -623,18 +691,23 @@ const SectionTitle = styled.h2`
 const FarmInput = styled.input`
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
-  padding: 0.75rem 0.9rem;
+  min-height: 2.2rem;
+  padding: 0.46rem 0.7rem;
   background: rgba(255, 255, 255, 0.8);
   min-width: 0;
+  font: inherit;
+  font-size: 0.92rem;
 `;
 
 const FarmSelect = styled.select`
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
-  padding: 0.75rem 0.9rem;
+  min-height: 2.2rem;
+  padding: 0.46rem 0.7rem;
   background: rgba(255, 255, 255, 0.8);
   min-width: 0;
   font: inherit;
+  font-size: 0.92rem;
   color: var(--ink);
 `;
 
@@ -642,10 +715,22 @@ const FarmPrimaryButton = styled.button`
   ${secondaryButtonCss};
   background: var(--accent);
   color: white;
+  min-height: 2.2rem;
+  padding: 0.42rem 0.78rem;
+  font-size: 0.82rem;
 `;
 
 const FarmSecondaryButton = styled.button`
   ${secondaryButtonCss};
+  min-height: 2.2rem;
+  padding: 0.42rem 0.78rem;
+  font-size: 0.82rem;
+`;
+
+const FarmUtilityButton = styled(FarmSecondaryButton)`
+  min-height: 1.75rem;
+  padding: 0.18rem 0.62rem;
+  font-size: 0.76rem;
 `;
 
 const FarmEmptyState = styled.div`
@@ -653,6 +738,8 @@ const FarmEmptyState = styled.div`
   padding: 1rem;
   display: grid;
   gap: 0.45rem;
+  min-height: 100%;
+  align-content: center;
 `;
 
 const EditorBackdrop = styled.div`
