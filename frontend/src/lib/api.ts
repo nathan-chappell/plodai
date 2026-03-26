@@ -1,6 +1,7 @@
 import { publishPaymentRequiredToast } from "../app/toasts";
 import type { PlodaiEntitySearchResponse } from "../types/chat-entities";
 import type {
+  FarmDeleteResponse,
   FarmDetail,
   FarmImageDeleteResponse,
   FarmImageUploadResponse,
@@ -104,6 +105,12 @@ export async function createFarm(name: string): Promise<FarmDetail> {
 
 export async function getFarm(farmId: string): Promise<FarmDetail> {
   return apiRequest<FarmDetail>(`/farms/${encodeURIComponent(farmId)}`);
+}
+
+export async function deleteFarm(farmId: string): Promise<FarmDeleteResponse> {
+  return apiRequest<FarmDeleteResponse>(`/farms/${encodeURIComponent(farmId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function updateFarm(farmId: string, payload: { name?: string | null }): Promise<FarmDetail> {

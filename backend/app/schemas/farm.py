@@ -105,6 +105,11 @@ class FarmRecordUpdateRequest(FarmSchemaBase):
     record: FarmRecordPayload
 
 
+class FarmDeleteResponse(FarmSchemaBase):
+    farm_id: str
+    deleted: bool
+
+
 class FarmImageListResponse(FarmSchemaBase):
     farm_id: str
     images: list[FarmImageSummary] = Field(default_factory=list)

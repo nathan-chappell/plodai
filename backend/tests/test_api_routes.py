@@ -71,6 +71,27 @@ def test_farm_routes_support_create_get_and_save_record() -> None:
         assert detail_response.json()["description"] == "Saved through the API"
 
 
+def test_farm_routes_support_delete() -> None:
+    app = build_test_app()
+
+    with TestClient(app) as client:
+        create_response = client.post("/api/farms", json={"name": "Delete API farm"})
+        assert create_response.status_code == 200
+        farm_id = create_response.json()["id"]
+
+        delete_response = client.delete(f"/api/farms/{farm_id}")
+        assert delete_response.status_code == 200
+        assert delete_response.json() == {
+            "farm_id": farm_id,
+            "deleted": True,
+        }
+
+        list_response = client.get("/api/farms")
+        assert list_response.status_code == 200
+        farms = list_response.json()
+        assert all(item["id"] != farm_id for item in farms)
+
+
 def test_farm_routes_bootstrap_a_blank_default_farm() -> None:
     app = build_test_app()
 

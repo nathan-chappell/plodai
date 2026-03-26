@@ -88,6 +88,11 @@ export type FarmRecordResponse = {
   record: FarmRecordPayload;
 };
 
+export type FarmDeleteResponse = {
+  farm_id: string;
+  deleted: boolean;
+};
+
 export type FarmImageUploadResponse = {
   image: FarmImageSummary;
 };

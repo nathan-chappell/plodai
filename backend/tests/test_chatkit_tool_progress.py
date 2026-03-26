@@ -6,7 +6,8 @@ from typing import Any
 from agents.items import ToolCallItem, ToolSearchCallItem, ToolSearchOutputItem
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 from chatkit.agents import AgentContext as ChatKitAgentContext
-from chatkit.types import Page, ThreadMetadata
+from chatkit.agents import AnnotationURLCitation
+from chatkit.types import Annotation, Page, ThreadMetadata, URLSource
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseFunctionWebSearch,
@@ -263,6 +264,244 @@ def test_stream_adapter_handles_web_search_call_tool_items() -> None:
     asyncio.run(_run())
 
 
+def test_stream_adapter_forwards_url_citation_annotations() -> None:
+    async def _run() -> None:
+        context = _build_context()
+        events = [
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_text.annotation.added",
+                    item_id="msg_1",
+                    content_index=0,
+                    annotation=AnnotationURLCitation.model_validate(
+                        {
+                            "type": "url_citation",
+                            "title": "Extension guide",
+                            "url": "https://extension.example/guide",
+                            "start_index": 12,
+                            "end_index": 24,
+                        }
+                    ),
+                )
+            ),
+        ]
+
+        streamed_events = [
+            event
+            async for event in stream_agent_response_with_tool_progress(
+                context,
+                FakeRunResult(events),
+                converter=FakeConverter(),
+            )
+        ]
+
+        assert len(streamed_events) == 1
+        assert streamed_events[0].type == "thread.item.updated"
+        assert streamed_events[0].update.annotation.source.type == "url"
+        assert streamed_events[0].update.annotation.source.url == "https://extension.example/guide"
+
+    asyncio.run(_run())
+
+
+def test_stream_adapter_appends_references_footer_when_sources_exist_without_visible_citations() -> None:
+    async def _run() -> None:
+        context = _build_context()
+        events = [
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_item.added",
+                    item=ResponseFunctionWebSearch.model_validate(
+                        {
+                            "id": "web_1",
+                            "status": "completed",
+                            "type": "web_search_call",
+                            "action": {
+                                "type": "search",
+                                "query": "walnut leaf spot treatment",
+                                "sources": [
+                                    {"type": "url", "url": "https://source.example/one"},
+                                    {"type": "url", "url": "https://source.example/two"},
+                                    {"type": "url", "url": "https://source.example/one"},
+                                    {"type": "url", "url": "https://source.example/three"},
+                                    {"type": "url", "url": "https://source.example/four"},
+                                ],
+                            },
+                        }
+                    ),
+                )
+            ),
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_item.done",
+                    item=SimpleNamespace(
+                        type="message",
+                        id="msg_1",
+                        content=[
+                            SimpleNamespace(
+                                type="output_text",
+                                text="Likely fungal pressure is increasing in the canopy.",
+                                annotations=[],
+                            )
+                        ],
+                    ),
+                )
+            ),
+        ]
+
+        streamed_events = [
+            event
+            async for event in stream_agent_response_with_tool_progress(
+                context,
+                FakeRunResult(events),
+                converter=FakeConverter(),
+            )
+        ]
+
+        assert len(streamed_events) == 1
+        assert streamed_events[0].type == "thread.item.done"
+        final_text = streamed_events[0].item.content[0].text
+        assert "References:" in final_text
+        assert "- https://source.example/one" in final_text
+        assert "- https://source.example/two" in final_text
+        assert "- https://source.example/three" in final_text
+        assert "https://source.example/four" not in final_text
+        assert final_text.count("https://source.example/one") == 1
+
+    asyncio.run(_run())
+
+
+def test_stream_adapter_skips_references_footer_when_message_already_has_visible_url() -> None:
+    async def _run() -> None:
+        context = _build_context()
+        events = [
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_item.added",
+                    item=ResponseFunctionWebSearch.model_validate(
+                        {
+                            "id": "web_1",
+                            "status": "completed",
+                            "type": "web_search_call",
+                            "action": {
+                                "type": "search",
+                                "query": "walnut blight extension guidance",
+                                "sources": [
+                                    {"type": "url", "url": "https://source.example/one"},
+                                ],
+                            },
+                        }
+                    ),
+                )
+            ),
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_item.done",
+                    item=SimpleNamespace(
+                        type="message",
+                        id="msg_1",
+                        content=[
+                            SimpleNamespace(
+                                type="output_text",
+                                text="See https://extension.example/walnut-blight for the current extension guidance.",
+                                annotations=[],
+                            )
+                        ],
+                    ),
+                )
+            ),
+        ]
+
+        streamed_events = [
+            event
+            async for event in stream_agent_response_with_tool_progress(
+                context,
+                FakeRunResult(events),
+                converter=FakeConverter(),
+            )
+        ]
+
+        assert len(streamed_events) == 1
+        assert streamed_events[0].type == "thread.item.done"
+        assert "References:" not in streamed_events[0].item.content[0].text
+
+    asyncio.run(_run())
+
+
+def test_stream_adapter_skips_references_footer_when_url_citation_was_streamed() -> None:
+    async def _run() -> None:
+        context = _build_context()
+        events = [
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_item.added",
+                    item=ResponseFunctionWebSearch.model_validate(
+                        {
+                            "id": "web_1",
+                            "status": "completed",
+                            "type": "web_search_call",
+                            "action": {
+                                "type": "search",
+                                "query": "walnut disease references",
+                                "sources": [
+                                    {"type": "url", "url": "https://source.example/one"},
+                                ],
+                            },
+                        }
+                    ),
+                )
+            ),
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_text.annotation.added",
+                    item_id="msg_1",
+                    content_index=0,
+                    annotation=AnnotationURLCitation.model_validate(
+                        {
+                            "type": "url_citation",
+                            "title": "Extension guide",
+                            "url": "https://extension.example/guide",
+                            "start_index": 0,
+                            "end_index": 10,
+                        }
+                    ),
+                )
+            ),
+            RawResponsesStreamEvent(
+                data=SimpleNamespace(
+                    type="response.output_item.done",
+                    item=SimpleNamespace(
+                        type="message",
+                        id="msg_1",
+                        content=[
+                            SimpleNamespace(
+                                type="output_text",
+                                text="Monitor humidity and confirm fungal structures.",
+                                annotations=[],
+                            )
+                        ],
+                    ),
+                )
+            ),
+        ]
+
+        streamed_events = [
+            event
+            async for event in stream_agent_response_with_tool_progress(
+                context,
+                FakeRunResult(events),
+                converter=FakeConverter(),
+            )
+        ]
+
+        assert [event.type for event in streamed_events] == [
+            "thread.item.updated",
+            "thread.item.done",
+        ]
+        assert "References:" not in streamed_events[-1].item.content[0].text
+
+    asyncio.run(_run())
+
+
 def _build_context() -> ChatKitAgentContext[object]:
     return ChatKitAgentContext[object](
         thread=ThreadMetadata(
@@ -273,3 +512,23 @@ def _build_context() -> ChatKitAgentContext[object]:
         store=FakeStore(),
         request_context=SimpleNamespace(),
     )
+
+
+class FakeConverter:
+    async def url_citation_to_annotation(
+        self,
+        annotation: AnnotationURLCitation,
+    ) -> Annotation:
+        return Annotation(
+            source=URLSource(
+                title=annotation.title,
+                url=annotation.url,
+            ),
+            index=annotation.start_index,
+        )
+
+    async def file_citation_to_annotation(self, annotation: object) -> None:
+        return None
+
+    async def container_file_citation_to_annotation(self, annotation: object) -> None:
+        return None

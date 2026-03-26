@@ -4,10 +4,18 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.farm import Farm, FarmChat, FarmImage, FarmRecord
+from backend.app.core.config import get_settings
+from backend.app.models.farm import (
+    Farm,
+    FarmChat,
+    FarmChatAttachment,
+    FarmChatEntry,
+    FarmImage,
+    FarmRecord,
+)
 from backend.app.schemas.farm import (
     FarmCreateRequest,
     FarmDetail,
@@ -15,6 +23,7 @@ from backend.app.schemas.farm import (
     FarmSummary,
     FarmUpdateRequest,
 )
+from backend.app.services.bucket_storage import RailwayBucketService
 
 
 class FarmService:
@@ -116,6 +125,78 @@ class FarmService:
         record_row.updated_at = datetime.now(UTC)
         await self.db.commit()
         return record
+
+    async def delete_farm(
+        self,
+        *,
+        user_id: str,
+        farm_id: str,
+    ) -> None:
+        farm = await self.require_farm(user_id=user_id, farm_id=farm_id)
+        record = await self._get_record_row(farm_id)
+        bucket_service = RailwayBucketService(get_settings())
+
+        image_result = await self.db.execute(
+            select(FarmImage).where(FarmImage.farm_id == farm_id)
+        )
+        images = list(image_result.scalars().all())
+        chat_result = await self.db.execute(
+            select(FarmChat).where(FarmChat.farm_id == farm_id)
+        )
+        chats = list(chat_result.scalars().all())
+        chat_ids = {chat.id for chat in chats}
+        image_attachment_ids = {
+            image.attachment_id.strip()
+            for image in images
+            if image.attachment_id and image.attachment_id.strip()
+        }
+        storage_keys = {
+            image.storage_key.strip()
+            for image in images
+            if image.storage_key and image.storage_key.strip()
+        }
+
+        attachment_result = await self.db.execute(select(FarmChatAttachment))
+        attachments_to_delete: list[FarmChatAttachment] = []
+        for attachment in attachment_result.scalars().all():
+            payload = attachment.payload if isinstance(attachment.payload, dict) else {}
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            thread_id = payload.get("thread_id")
+            matches_farm = (
+                metadata.get("farm_id") == farm_id
+                or attachment.id in image_attachment_ids
+                or (isinstance(thread_id, str) and thread_id in chat_ids)
+            )
+            if not matches_farm:
+                continue
+            attachments_to_delete.append(attachment)
+            storage_key = metadata.get("storage_key")
+            if isinstance(storage_key, str) and storage_key.strip():
+                storage_keys.add(storage_key.strip())
+
+        for storage_key in storage_keys:
+            try:
+                await bucket_service.delete_object(key=storage_key)
+            except Exception:
+                pass
+
+        for attachment in attachments_to_delete:
+            await self.db.delete(attachment)
+
+        if chat_ids:
+            await self.db.execute(
+                delete(FarmChatEntry).where(FarmChatEntry.chat_id.in_(chat_ids))
+            )
+
+        for image in images:
+            await self.db.delete(image)
+
+        for chat in chats:
+            await self.db.delete(chat)
+
+        await self.db.delete(record)
+        await self.db.delete(farm)
+        await self.db.commit()
 
     async def require_farm(
         self,

@@ -67,6 +67,8 @@ export function FarmRecordPanel({
   isMutating?: boolean;
 }) {
   const normalizedFarm = normalizeFarmPayload(farm);
+  const cropsSectionShouldGrow =
+    showCropsSection && !showOrdersSection && !showDescriptionSection;
   const recordRef = useRef<HTMLElement | null>(null);
   const cropRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const orderRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -185,7 +187,7 @@ export function FarmRecordPanel({
       </FarmHero>
 
       {showCropsSection ? (
-        <FarmSection>
+        <FarmSection $grow={cropsSectionShouldGrow}>
           <FarmSectionTitle>Crops</FarmSectionTitle>
           {normalizedFarm.crops.length ? (
             <CropTableWrap>
@@ -628,13 +630,21 @@ const FarmMetric = styled.div`
   }
 `;
 
-const FarmSection = styled.section`
+const FarmSection = styled.section<{ $grow?: boolean }>`
   display: grid;
   gap: 0.55rem;
   padding: 0.75rem 0.82rem;
+  min-height: 0;
   border-radius: 0.95rem;
   border: 1px solid rgba(31, 41, 55, 0.08);
   background: rgba(255, 255, 255, 0.78);
+  ${({ $grow }) =>
+    $grow
+      ? `
+    flex: 1 1 auto;
+    grid-template-rows: auto minmax(0, 1fr);
+  `
+      : ""}
 `;
 
 const FarmSectionTitle = styled.h5`
@@ -646,7 +656,9 @@ const FarmSectionTitle = styled.h5`
 `;
 
 const CropTableWrap = styled.div`
-  overflow-x: auto;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
 `;
 
 const CropTable = styled.table`

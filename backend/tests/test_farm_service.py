@@ -83,3 +83,23 @@ def test_farm_service_bootstraps_a_blank_default_farm_for_new_users() -> None:
             assert [farm.id for farm in farms_again] == [farms[0].id]
 
     asyncio.run(_run())
+
+
+def test_farm_service_deletes_farms_and_excludes_them_from_future_lists() -> None:
+    async def _run() -> None:
+        async with AsyncSessionLocal() as db:
+            service = FarmService(db)
+            farm = await service.create_farm(
+                user_id="user_delete_123",
+                request=FarmCreateRequest(name="Delete me"),
+            )
+
+            await service.delete_farm(
+                user_id="user_delete_123",
+                farm_id=farm.id,
+            )
+
+            farms = await service.list_farms(user_id="user_delete_123")
+            assert all(item.id != farm.id for item in farms)
+
+    asyncio.run(_run())

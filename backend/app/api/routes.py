@@ -19,6 +19,7 @@ from backend.app.schemas.credits import (
 )
 from backend.app.schemas.farm import (
     FarmCreateRequest,
+    FarmDeleteResponse,
     FarmDetail,
     FarmImageDeleteResponse,
     FarmImageUploadResponse,
@@ -200,6 +201,16 @@ async def patch_farm(
             )
         }
     )
+
+
+@router.delete("/farms/{farm_id}", response_model=FarmDeleteResponse)
+async def delete_farm(
+    farm_id: str,
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await FarmService(db).delete_farm(user_id=user.id, farm_id=farm_id)
+    return FarmDeleteResponse(farm_id=farm_id, deleted=True)
 
 
 @router.get("/farms/{farm_id}/record", response_model=FarmRecordResponse)

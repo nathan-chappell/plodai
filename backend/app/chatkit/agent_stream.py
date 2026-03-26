@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime
@@ -49,6 +50,8 @@ from chatkit.types import (
 
 TOOL_PROGRESS_TEXT_LIMIT = 48
 TOOL_PROGRESS_ARG_LIMIT = 2
+MAX_REFERENCE_URLS = 3
+VISIBLE_URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 def format_tool_call_progress_summary(name: str, arguments: object | None = None) -> str:
@@ -218,6 +221,102 @@ def _extract_search_query_inner(value: object, *, depth: int) -> str | None:
     return None
 
 
+def _extend_unique_urls(target: list[str], values: Sequence[str]) -> None:
+    seen = set(target)
+    for value in values:
+        normalized = _normalize_text(value)
+        if normalized is None or normalized in seen:
+            continue
+        target.append(normalized)
+        seen.add(normalized)
+
+
+def _collect_search_source_urls(target: list[str], value: object | None) -> None:
+    if value is None:
+        return
+
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(exclude_unset=True)
+        _collect_search_source_urls(target, dumped)
+        return
+
+    if isinstance(value, Mapping):
+        sources = value.get("sources")
+        if isinstance(sources, Sequence) and not isinstance(
+            sources, str | bytes | bytearray
+        ):
+            urls = []
+            for source in sources:
+                source_type = _normalize_text(_get_mapping_or_attr(source, "type"))
+                url = _normalize_text(_get_mapping_or_attr(source, "url"))
+                if url is None:
+                    continue
+                if source_type is not None and source_type != "url":
+                    continue
+                urls.append(url)
+            _extend_unique_urls(target, urls)
+
+        action = value.get("action")
+        if action is not None:
+            _collect_search_source_urls(target, action)
+        return
+
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        for item in value:
+            _collect_search_source_urls(target, item)
+
+
+def _assistant_message_has_url_citation(
+    contents: Sequence[AssistantMessageContent],
+) -> bool:
+    for content in contents:
+        for annotation in content.annotations:
+            if _normalize_text(_get_mapping_or_attr(annotation.source, "url")) is not None:
+                return True
+    return False
+
+
+def _assistant_message_has_visible_url(
+    contents: Sequence[AssistantMessageContent],
+) -> bool:
+    return any(
+        bool(VISIBLE_URL_PATTERN.search(content.text))
+        for content in contents
+        if content.text
+    )
+
+
+def _build_references_footer(source_urls: Sequence[str]) -> str | None:
+    if not source_urls:
+        return None
+
+    lines = ["References:"]
+    for url in source_urls[:MAX_REFERENCE_URLS]:
+        lines.append(f"- {url}")
+    return "\n".join(lines)
+
+
+def _append_references_footer(
+    contents: Sequence[AssistantMessageContent],
+    source_urls: Sequence[str],
+) -> list[AssistantMessageContent]:
+    footer = _build_references_footer(source_urls)
+    if footer is None:
+        return list(contents)
+
+    if not contents:
+        return [AssistantMessageContent(text=footer, annotations=[])]
+
+    updated_contents = list(contents)
+    last_content = updated_contents[-1]
+    separator = "\n\n" if last_content.text.strip() else ""
+    updated_contents[-1] = AssistantMessageContent(
+        text=f"{last_content.text}{separator}{footer}",
+        annotations=last_content.annotations,
+    )
+    return updated_contents
+
+
 def _get_mapping_or_attr(value: object, key: str) -> object | None:
     if isinstance(value, Mapping):
         return value.get(key)
@@ -293,6 +392,8 @@ async def stream_agent_response_with_tool_progress(
     produced_items = set()
     streaming_thought: None | StreamingThoughtTracker = None
     search_summaries: dict[str, str] = {}
+    search_source_urls: list[str] = []
+    items_with_url_citation: set[str] = set()
     item_annotation_count: defaultdict[str, defaultdict[int, int]] = defaultdict(
         lambda: defaultdict(int)
     )
@@ -357,6 +458,9 @@ async def stream_agent_response_with_tool_progress(
                 raw_item_call_id = _get_mapping_or_attr(raw_item, "call_id")
                 raw_item_id = _get_mapping_or_attr(raw_item, "id")
 
+                if raw_item_type == "web_search_call":
+                    _collect_search_source_urls(search_source_urls, raw_item)
+
                 if event.type == "tool_call_item" and raw_item_type == "function_call":
                     current_tool_call = raw_item_call_id if isinstance(raw_item_call_id, str) else None
                     current_item_id = raw_item_id if isinstance(raw_item_id, str) else None
@@ -401,6 +505,8 @@ async def stream_agent_response_with_tool_progress(
             elif event.type == "response.output_text.annotation.added":
                 annotation = await _convert_annotation(event.annotation, converter)
                 if annotation:
+                    if _normalize_text(_get_mapping_or_attr(annotation.source, "url")) is not None:
+                        items_with_url_citation.add(event.item_id)
                     annotation_index = item_annotation_count[event.item_id][
                         event.content_index
                     ]
@@ -427,6 +533,9 @@ async def stream_agent_response_with_tool_progress(
                     )
                     produced_items.add(ctx.workflow_item.id)
                     yield ThreadItemAddedEvent(item=ctx.workflow_item)
+                if item.type == "web_search_call":
+                    _collect_search_source_urls(search_source_urls, item)
+                    continue
                 if item.type == "message":
                     if ctx.workflow_item:
                         yield end_workflow(ctx.workflow_item)
@@ -539,16 +648,28 @@ async def stream_agent_response_with_tool_progress(
                     )
             elif event.type == "response.output_item.done":
                 item = event.item
+                if item.type == "web_search_call":
+                    _collect_search_source_urls(search_source_urls, item)
+                    continue
                 if item.type == "message":
                     produced_items.add(item.id)
+                    content = [
+                        await _convert_content(c, converter)
+                        for c in item.content
+                    ]
+                    if (
+                        search_source_urls
+                        and item.id not in items_with_url_citation
+                        and not _assistant_message_has_url_citation(content)
+                        and not _assistant_message_has_visible_url(content)
+                    ):
+                        content = _append_references_footer(content, search_source_urls)
+                    search_source_urls.clear()
                     yield ThreadItemDoneEvent(
                         item=AssistantMessageItem(
                             id=item.id,
                             thread_id=thread.id,
-                            content=[
-                                await _convert_content(c, converter)
-                                for c in item.content
-                            ],
+                            content=content,
                             created_at=datetime.now(),
                         ),
                     )
