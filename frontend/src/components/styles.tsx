@@ -45,81 +45,175 @@ export const SignInPageRoot = styled.main`
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 2rem;
+  padding: clamp(1rem, 4vw, 2rem);
 `;
 
 export const SignInShell = styled.div`
-  width: min(1120px, 100%);
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 420px);
-  gap: 1.25rem;
-
-  @media (max-width: 920px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-export const SignInHero = styled.section`
-  ${sectionPanelCss("2rem")};
-  border-radius: var(--radius-xl);
-  background:
-    linear-gradient(145deg, rgba(255, 252, 247, 0.96), rgba(239, 228, 214, 0.92)),
-    radial-gradient(circle at top right, rgba(73, 127, 162, 0.14), transparent 34%);
+  width: min(760px, 100%);
 `;
 
 export const SignInEyebrow = styled.div`
+  margin-top: 0.08rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent-deep);
   font-size: 0.78rem;
+  font-weight: 800;
 `;
 
 export const SignInTitle = styled.h1`
   ${displayHeadingCss};
   margin: 0;
-  font-size: clamp(2.2rem, 5vw, 4.2rem);
-  line-height: 0.96;
+  font-size: clamp(2.3rem, 7vw, 4rem);
+  line-height: 0.94;
+  max-width: 11ch;
 `;
 
 export const SignInSubhead = styled.p`
   margin: 0;
-  max-width: 58ch;
+  max-width: 50ch;
   color: var(--muted);
-  font-size: 1.04rem;
-  line-height: 1.75;
-`;
-
-export const SignInFeatureList = styled.ul`
-  margin: 0;
-  padding-left: 1.1rem;
-  ${gridStackCss("0.65rem")};
-  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.72;
 `;
 
 export const SignInCard = styled(CardSection)`
-  border-radius: var(--radius-xl);
-  align-self: start;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  gap: 1rem;
+  border-radius: calc(var(--radius-xl) + 4px);
+  background:
+    radial-gradient(circle at top right, rgba(21, 128, 61, 0.16), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(241, 249, 242, 0.93));
+  box-shadow: 0 30px 80px rgba(21, 128, 61, 0.14);
 `;
 
-export const SignInErrorCard = styled(SignInCard)`
+export const SignInTopBar = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+
+  @media (max-width: 620px) {
+    flex-direction: column;
+  }
+`;
+
+export const SignInBrand = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 0;
+`;
+
+export const SignInBrandLogo = styled.img`
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  display: block;
+  object-fit: contain;
+`;
+
+export const SignInLanguageLabel = styled.div`
+  margin-bottom: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  text-align: right;
+
+  @media (max-width: 620px) {
+    text-align: left;
+  }
+`;
+
+export const SignInLanguageToggle = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.14rem;
+  padding: 0.16rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+`;
+
+export const SignInLanguageButton = styled.button<{ $active: boolean }>`
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  min-width: 2.4rem;
+  min-height: 2rem;
+  padding: 0.22rem 0.6rem;
+  background: ${({ $active }) => ($active ? "rgba(21, 128, 61, 0.14)" : "transparent")};
+  color: ${({ $active }) => ($active ? "var(--accent-deep)" : "var(--muted)")};
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  cursor: pointer;
+`;
+
+export const SignInLead = styled(MetaText)`
+  max-width: 44ch;
+  font-size: 0.86rem;
+  line-height: 1.55;
+`;
+
+export const SignInCardBody = styled.div`
+  ${gridStackCss("0.75rem")};
+  padding: 1rem 1.05rem 1.05rem;
+  border-radius: calc(var(--radius-lg) + 2px);
+  border: 1px solid color-mix(in srgb, var(--accent-deep) 14%, rgba(31, 41, 55, 0.12));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 250, 245, 0.9)),
+    var(--panel);
+`;
+
+export const SignInCardTitle = styled.h2`
+  margin: 0;
+  font-size: 1.18rem;
+  line-height: 1.2;
+  color: var(--ink);
+`;
+
+export const SignInErrorCard = styled(SignInCardBody)`
   border-color: color-mix(in srgb, var(--accent-deep) 26%, rgba(31, 41, 55, 0.12));
   background:
-    linear-gradient(145deg, rgba(255, 247, 241, 0.96), rgba(244, 231, 220, 0.92)),
-    radial-gradient(circle at top right, rgba(201, 111, 59, 0.14), transparent 34%);
+    linear-gradient(145deg, rgba(255, 249, 244, 0.98), rgba(247, 240, 230, 0.94)),
+    radial-gradient(circle at top right, rgba(201, 111, 59, 0.12), transparent 36%);
 `;
 
-export const SignInButtonRow = styled(WrapRow)``;
+export const SignInButtonRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: 0.65rem;
 
-export const SignInErrorActions = styled(WrapRow)``;
+  @media (max-width: 620px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+export const SignInErrorActions = styled(SignInButtonRow)``;
 
 export const SignInActionButton = styled.button`
   ${primaryButtonCss};
-  background: var(--ink);
+  width: 100%;
+  min-height: 3.1rem;
+  padding: 0.9rem 1.1rem;
+  background: linear-gradient(180deg, var(--accent-deep), #0f4f28);
+  box-shadow: 0 12px 28px rgba(21, 128, 61, 0.2);
 `;
 
 export const SignInSecondaryActionButton = styled.button`
   ${secondaryButtonCss};
-  padding: 0.72rem 1rem;
+  width: 100%;
+  min-height: 3.1rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--ink);
 `;
 
 export const AccountCard = styled(CardSection)<{ $blend?: boolean }>`

@@ -63,11 +63,13 @@ const CHATKIT_COPY: Record<
   PreferredOutputLanguage,
   {
     greeting: string;
+    placeholder: string;
     starterPrompts: readonly ChatKitStarterPrompt[];
   }
 > = {
   hr: {
     greeting: "Pregledaj slike farme, provjeri spremljeni zapis i predloži sljedeći najbolji korak.",
+    placeholder: "Zatraži od PlodAI-ja da pregleda slike, objasni zapis farme ili spremi promjene.",
     starterPrompts: [
       {
         label: "Procijeni slike polja",
@@ -91,6 +93,7 @@ const CHATKIT_COPY: Record<
   },
   en: {
     greeting: "Review farm images, inspect the saved record, and decide the next step.",
+    placeholder: "Ask PlodAI to inspect images, explain the farm record, or save updates.",
     starterPrompts: [
       {
         label: "Assess field images",
@@ -261,6 +264,7 @@ function ActiveFarmChatKit({
     [localizedCopy],
   );
   const resolvedGreeting = greeting ?? localizedCopy.greeting;
+  const composerPlaceholder = localizedCopy.placeholder;
   const chatKitConfig = useMemo(() => getChatKitConfig(farmId), [farmId]);
   const options = useMemo<UseChatKitOptions>(() => {
     return {
@@ -315,7 +319,7 @@ function ActiveFarmChatKit({
           }
         : undefined,
       composer: {
-        placeholder: "Ask PlodAI to inspect images, explain the farm record, or save updates.",
+        placeholder: composerPlaceholder,
         attachments: {
           enabled: true,
           accept: {
@@ -357,6 +361,7 @@ function ActiveFarmChatKit({
     entitiesConfig,
     farmId,
     chatKitConfig,
+    composerPlaceholder,
     headerTitle,
     resolvedGreeting,
     showDictation,

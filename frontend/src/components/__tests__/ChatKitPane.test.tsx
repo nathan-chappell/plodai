@@ -54,6 +54,7 @@ describe("ChatKitPane", () => {
     const options = useChatKitMock.mock.calls[0]?.[0] as Record<string, unknown>;
     const composer = options.composer as {
       attachments?: { enabled?: boolean };
+      placeholder?: string;
     };
     const header = options.header as { enabled?: boolean };
     const startScreen = options.startScreen as {
@@ -67,14 +68,20 @@ describe("ChatKitPane", () => {
     expect(markup).not.toContain("Review orders");
     expect(header.enabled).toBe(true);
     expect(composer.attachments?.enabled).toBe(true);
+    expect(composer.placeholder).toBe(
+      "Zatraži od PlodAI-ja da pregleda slike, objasni zapis farme ili spremi promjene.",
+    );
     expect(startScreen.greeting).toContain("Pregledaj slike farme");
     expect(startScreen.prompts?.[0]?.label).toBe("Procijeni slike polja");
   });
 
-  it("switches the greeting and starter prompts when English is selected", () => {
+  it("switches the greeting, starter prompts, and placeholder when English is selected", () => {
     renderToStaticMarkup(<ChatKitPane farmId="farm_123" preferredOutputLanguage="en" />);
 
     const options = useChatKitMock.mock.calls[0]?.[0] as {
+      composer?: {
+        placeholder?: string;
+      };
       startScreen?: {
         greeting?: string;
         prompts?: Array<{ label: string; prompt: string }>;
@@ -85,6 +92,9 @@ describe("ChatKitPane", () => {
       "Review farm images, inspect the saved record, and decide the next step.",
     );
     expect(options.startScreen?.prompts?.[0]?.label).toBe("Assess field images");
+    expect(options.composer?.placeholder).toBe(
+      "Ask PlodAI to inspect images, explain the farm record, or save updates.",
+    );
   });
 
   it("clears stale draft attachments when ChatKit reports the attachment limit error", async () => {

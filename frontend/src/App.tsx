@@ -118,7 +118,15 @@ export function App() {
   }
 
   if (!user) {
-    return <SignInPage authError={authError} hasClerkSession={isSignedIn} onRetryAuth={reloadSession} />;
+    return (
+      <SignInPage
+        authError={authError}
+        hasClerkSession={isSignedIn}
+        onPreferredOutputLanguageChange={setPreferredOutputLanguage}
+        onRetryAuth={reloadSession}
+        preferredOutputLanguage={preferredOutputLanguage}
+      />
+    );
   }
 
   const currentUser = user;

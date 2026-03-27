@@ -92,6 +92,7 @@ RATE_LIMIT_RETRY_PATTERN = re.compile(
     r"try again in\s+(?P<seconds>\d+(?:\.\d+)?)s",
     re.IGNORECASE,
 )
+SAFE_AUDIO_EXTENSION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._+-]*$", re.IGNORECASE)
 
 
 def _base64_data_url(*, mime_type: str | None, file_bytes: bytes) -> str:
@@ -102,6 +103,47 @@ def _base64_data_url(*, mime_type: str | None, file_bytes: bytes) -> str:
     )
     encoded = b64encode(file_bytes).decode("ascii")
     return f"data:{resolved_mime_type};base64,{encoded}"
+
+
+def _transcription_upload_filename(media_type: str | None) -> str:
+    normalized_media_type = (
+        media_type.strip().lower()
+        if isinstance(media_type, str) and media_type.strip()
+        else ""
+    )
+    if normalized_media_type == "audio/webm":
+        return "dictation.webm"
+    if normalized_media_type == "audio/ogg":
+        return "dictation.ogg"
+    if normalized_media_type == "audio/mp4":
+        return "dictation.mp4"
+    if normalized_media_type.startswith("audio/"):
+        subtype = normalized_media_type.split("/", 1)[1].strip()
+        if SAFE_AUDIO_EXTENSION_PATTERN.fullmatch(subtype):
+            return f"dictation.{subtype}"
+    return "dictation.bin"
+
+
+def _coerce_positive_seconds(value: object) -> float | None:
+    if not isinstance(value, int | float):
+        return None
+    seconds = float(value)
+    if seconds <= 0.0:
+        return None
+    return seconds
+
+
+def _transcription_duration_seconds(result: object) -> float | None:
+    direct_seconds = _coerce_positive_seconds(getattr(result, "duration", None))
+    if direct_seconds is not None:
+        return direct_seconds
+    usage = getattr(result, "usage", None)
+    usage_seconds = (
+        usage.get("seconds")
+        if isinstance(usage, dict)
+        else getattr(usage, "seconds", None)
+    )
+    return _coerce_positive_seconds(usage_seconds)
 
 
 def _current_thread_metadata(thread: ThreadMetadata) -> AppChatMetadata:
@@ -1029,28 +1071,98 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         context: FarmAgentContext,
     ) -> TranscriptionResult:
         model = "gpt-4o-mini-transcribe"
-        result = await self.openai_client.audio.transcriptions.create(
-            file=("dictation.webm", audio_input.data, audio_input.media_type),
-            model=model,
-            response_format="verbose_json",
-        )
-        seconds = float(getattr(result, "duration", 0.0) or 0.0)
-        context.thread_metadata = merge_chat_metadata(
-            context.thread_metadata,
-            {
-                "usage": accumulate_transcription_usage(
-                    cast(dict[str, Any] | None, context.thread_metadata.get("usage")),
-                    model=model,
-                    seconds=seconds,
+        upload_filename = _transcription_upload_filename(audio_input.media_type)
+        log_event(
+            logger,
+            logging.INFO,
+            "transcribe.start",
+            context=_context_line(
+                user_id=context.user_id,
+                thread_id=context.chat_id,
+                farm_id=context.farm_id,
+            ),
+            audio=summarize_pairs_for_log(
+                (
+                    ("media_type", audio_input.media_type),
+                    ("bytes", len(audio_input.data)),
+                    ("filename", upload_filename),
                 )
-            },
+            ),
         )
-        await CreditService.record_cost_event(
-            user_id=context.user_id,
-            thread_id=context.chat_id,
-            cost_usd=calculate_transcription_cost_usd(model, seconds),
+        try:
+            result = await self.openai_client.audio.transcriptions.create(
+                file=(upload_filename, audio_input.data, audio_input.media_type),
+                model=model,
+                response_format="json",
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                "transcribe.error",
+                exc_info=exc,
+                context=_context_line(
+                    user_id=context.user_id,
+                    thread_id=context.chat_id,
+                    farm_id=context.farm_id,
+                ),
+                audio=summarize_pairs_for_log(
+                    (
+                        ("media_type", audio_input.media_type),
+                        ("bytes", len(audio_input.data)),
+                        ("filename", upload_filename),
+                    )
+                ),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+        transcript_text = (
+            result.text if isinstance(getattr(result, "text", None), str) else ""
         )
-        return TranscriptionResult(text=result.text)
+        seconds = _transcription_duration_seconds(result)
+        if seconds is not None:
+            context.thread_metadata = merge_chat_metadata(
+                context.thread_metadata,
+                {
+                    "usage": accumulate_transcription_usage(
+                        cast(
+                            dict[str, Any] | None,
+                            context.thread_metadata.get("usage"),
+                        ),
+                        model=model,
+                        seconds=seconds,
+                    )
+                },
+            )
+            await CreditService.record_cost_event(
+                user_id=context.user_id,
+                thread_id=context.chat_id,
+                cost_usd=calculate_transcription_cost_usd(model, seconds),
+            )
+
+        log_event(
+            logger,
+            logging.INFO,
+            "transcribe.end",
+            context=_context_line(
+                user_id=context.user_id,
+                thread_id=context.chat_id,
+                farm_id=context.farm_id,
+            ),
+            result=summarize_pairs_for_log(
+                (
+                    ("model", model),
+                    ("text_length", len(transcript_text)),
+                    (
+                        "duration_seconds",
+                        f"{seconds:.3f}" if seconds is not None else None,
+                    ),
+                    ("billing_data", seconds is not None),
+                )
+            ),
+        )
+        return TranscriptionResult(text=transcript_text)
 
 
 async def build_chatkit_server(
