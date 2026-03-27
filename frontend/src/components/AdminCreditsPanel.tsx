@@ -252,16 +252,6 @@ export function AdminCreditsPanel() {
         >
           Search
         </AdminPanelSecondaryButton>
-        <AdminPanelSecondaryButton
-          onClick={() => {
-            setDraftQuery("");
-            setQuery("");
-            setOffset(0);
-          }}
-          type="button"
-        >
-          Clear
-        </AdminPanelSecondaryButton>
       </AdminPanelToolbar>
 
       <AdminPanelTableWrap>

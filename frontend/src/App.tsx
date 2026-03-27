@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 
 import { AppStateProvider } from "./app/context";
 import { useAppRouteGuards, useAppSessionState, useToastState } from "./app/hooks";
@@ -13,6 +13,11 @@ import {
 } from "./app/styles";
 import { PlatformShell } from "./components/PlatformShell";
 import { SignInPage } from "./components/SignInPage";
+import {
+  loadPreferredOutputLanguage,
+  persistPreferredOutputLanguage,
+  type PreferredOutputLanguage,
+} from "./lib/chat-language";
 import {
   ADMIN_USERS_PATH,
   isAdminUsersPath,
@@ -72,6 +77,13 @@ export function App() {
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const toastState = useToastState();
   const viewingPublicFarmOrder = isFarmOrderPath(pathname);
+  const [preferredOutputLanguage, setPreferredOutputLanguage] = useState<PreferredOutputLanguage>(() =>
+    loadPreferredOutputLanguage(),
+  );
+
+  useEffect(() => {
+    persistPreferredOutputLanguage(preferredOutputLanguage);
+  }, [preferredOutputLanguage]);
 
   useAppRouteGuards({
     authError,
@@ -114,7 +126,16 @@ export function App() {
   const activePath = showingAdmin ? ADMIN_USERS_PATH : PLODAI_PATH;
 
   return (
-    <AppStateProvider value={{ authError, setAuthError, user: currentUser, setUser }}>
+    <AppStateProvider
+      value={{
+        authError,
+        setAuthError,
+        user: currentUser,
+        setUser,
+        preferredOutputLanguage,
+        setPreferredOutputLanguage,
+      }}
+    >
       <PlatformShell
         activePath={activePath}
         canViewAdmin={currentUser.role === "admin"}

@@ -184,7 +184,10 @@ async def farm_chatkit_entrypoint(
 ):
     raw_request = await request.body()
     context = await chatkit_server.build_request_context(
-        raw_request, user_id=user.id, user_email=user.email
+        raw_request,
+        user_id=user.id,
+        user_email=user.email,
+        preferred_output_language=request.query_params.get("preferred_output_language"),
     )
     result = await chatkit_server.process(raw_request, context)
     if isinstance(result, StreamingResult):

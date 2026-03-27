@@ -29,5 +29,6 @@ class PlodaiEntitySearchResponse(PlodaiEntitySchemaBase):
 PlodaiEntityType = Literal[
     "farm_image",
     "farm_crop",
+    "farm_work_item",
     "farm_order",
 ]

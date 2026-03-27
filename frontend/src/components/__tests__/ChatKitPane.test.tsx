@@ -1,4 +1,7 @@
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { JSDOM } from "jsdom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { publishToastMock, useChatKitMock } = vi.hoisted(() => ({
@@ -53,6 +56,10 @@ describe("ChatKitPane", () => {
       attachments?: { enabled?: boolean };
     };
     const header = options.header as { enabled?: boolean };
+    const startScreen = options.startScreen as {
+      greeting?: string;
+      prompts?: Array<{ label: string; prompt: string }>;
+    };
 
     expect(markup).toContain("Mock ChatKit");
     expect(markup).not.toContain("Farm chat");
@@ -60,6 +67,24 @@ describe("ChatKitPane", () => {
     expect(markup).not.toContain("Review orders");
     expect(header.enabled).toBe(true);
     expect(composer.attachments?.enabled).toBe(true);
+    expect(startScreen.greeting).toContain("Pregledaj slike farme");
+    expect(startScreen.prompts?.[0]?.label).toBe("Procijeni slike polja");
+  });
+
+  it("switches the greeting and starter prompts when English is selected", () => {
+    renderToStaticMarkup(<ChatKitPane farmId="farm_123" preferredOutputLanguage="en" />);
+
+    const options = useChatKitMock.mock.calls[0]?.[0] as {
+      startScreen?: {
+        greeting?: string;
+        prompts?: Array<{ label: string; prompt: string }>;
+      };
+    };
+
+    expect(options.startScreen?.greeting).toBe(
+      "Review farm images, inspect the saved record, and decide the next step.",
+    );
+    expect(options.startScreen?.prompts?.[0]?.label).toBe("Assess field images");
   });
 
   it("clears stale draft attachments when ChatKit reports the attachment limit error", async () => {
@@ -99,5 +124,72 @@ describe("ChatKitPane", () => {
     options.onEffect?.(effect);
 
     expect(onClientEffect).toHaveBeenCalledWith(effect);
+  });
+
+  it("keeps the initial thread stable for same-farm rerenders", async () => {
+    const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>");
+    const rootElement = dom.window.document.getElementById("root");
+    const globalsToOverride = {
+      window: dom.window,
+      document: dom.window.document,
+      customElements: dom.window.customElements,
+      HTMLElement: dom.window.HTMLElement,
+      IS_REACT_ACT_ENVIRONMENT: true,
+      Node: dom.window.Node,
+    } as const;
+    const previousDescriptors = Object.fromEntries(
+      Object.keys(globalsToOverride).map((key) => [
+        key,
+        Object.getOwnPropertyDescriptor(globalThis, key),
+      ]),
+    );
+
+    for (const [key, value] of Object.entries(globalsToOverride)) {
+      Object.defineProperty(globalThis, key, {
+        configurable: true,
+        writable: true,
+        value,
+      });
+    }
+
+    if (!rootElement) {
+      throw new Error("Expected an interactive ChatKit test root.");
+    }
+
+    const root = createRoot(rootElement);
+
+    try {
+      await act(async () => {
+        root.render(<ChatKitPane activeChatId={null} farmId="farm_123" />);
+      });
+
+      await act(async () => {
+        root.render(<ChatKitPane activeChatId="chat_123" farmId="farm_123" />);
+      });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      for (const [key, descriptor] of Object.entries(previousDescriptors)) {
+        if (descriptor) {
+          Object.defineProperty(globalThis, key, descriptor);
+        } else {
+          delete (globalThis as Record<string, unknown>)[key];
+        }
+      }
+      dom.window.close();
+    }
+
+    const firstOptions = useChatKitMock.mock.calls[0]?.[0] as {
+      initialThread?: string | null;
+    };
+    const secondOptions = useChatKitMock.mock.calls[1]?.[0] as {
+      initialThread?: string | null;
+    };
+    const setThreadId = useChatKitMock.mock.results[0]?.value.setThreadId as ReturnType<typeof vi.fn>;
+
+    expect(firstOptions.initialThread).toBeNull();
+    expect(secondOptions.initialThread).toBeNull();
+    expect(setThreadId).toHaveBeenCalledWith("chat_123");
   });
 });

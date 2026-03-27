@@ -50,7 +50,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import assert_never
 
 from backend.app.agents.agent_builder import build_plodai_agent
-from backend.app.agents.context import FarmAgentContext
+from backend.app.agents.context import (
+    FarmAgentContext,
+    resolve_preferred_output_language,
+)
 from backend.app.chatkit.agent_stream import stream_agent_response_with_tool_progress
 from backend.app.chatkit.memory_store import FarmMemoryStore
 from backend.app.chatkit.metadata import (
@@ -331,7 +334,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
                 tag_data=tag_data,
                 current_attachment_image_ids=current_attachment_image_ids,
             )
-        if entity_type in {"farm_crop", "farm_order"}:
+        if entity_type in {"farm_crop", "farm_work_item", "farm_order"}:
             return [self._farm_entity_text(tag.text, tag_data)]
         return [
             {
@@ -402,9 +405,28 @@ class FarmThreadItemConverter(ThreadItemConverter):
                 ("type", "Type"),
                 ("quantity", "Quantity"),
                 ("expected_yield", "Expected yield"),
-                ("issue_count", "Issue count"),
+                ("area_names", "Areas"),
+                ("status", "Status"),
+                ("work_item_count", "Work item count"),
                 ("highest_severity", "Highest severity"),
-                ("next_deadline", "Next deadline"),
+                ("next_due_at", "Next due"),
+                ("notes", "Notes"),
+            ):
+                value = tag_data.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(f"{prefix}: {value.strip()}.")
+        elif entity_type == "farm_work_item":
+            for key, prefix in (
+                ("farm_name", "Farm"),
+                ("kind", "Kind"),
+                ("status", "Status"),
+                ("severity", "Severity"),
+                ("observed_at", "Observed"),
+                ("due_at", "Due"),
+                ("related_crop_names", "Related crops"),
+                ("related_area_names", "Related areas"),
+                ("description", "Description"),
+                ("recommended_follow_up", "Follow-up"),
             ):
                 value = tag_data.get(key)
                 if isinstance(value, str) and value.strip():
@@ -467,6 +489,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         raw_request: bytes | str,
         user_id: str,
         user_email: str | None,
+        preferred_output_language: str | None = None,
     ) -> FarmAgentContext:
         parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
         try:
@@ -488,6 +511,9 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             user_id=user_id,
             farm_id=self.farm_id,
         )
+        resolved_output_language = resolve_preferred_output_language(
+            preferred_output_language
+        )
         context = FarmAgentContext(
             chat_id=chat_id or "pending_chat",
             user_id=user_id,
@@ -498,6 +524,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             thread_title=metadata.get("title"),
             request_metadata=metadata,
             thread_metadata=metadata,
+            preferred_output_language=resolved_output_language,
             current_record=record,
             farm_images=images,
         )
@@ -510,6 +537,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                 (
                     ("op", parsed_request.type),
                     ("images", len(images)),
+                    ("output_language", resolved_output_language),
                 )
             ),
         )

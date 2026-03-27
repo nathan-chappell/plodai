@@ -1058,15 +1058,15 @@ export const PlatformSidebarMeta = styled(MetaText)<{ $collapsed?: boolean }>`
 
 function resolveTabletChatPaneMinHeight(minHeight?: number): string {
   const clampedHeight = Math.min(minHeight ?? 430, 620);
-  return `min(${clampedHeight}px, 72dvh)`;
+  return `min(${clampedHeight}px, 74dvh)`;
 }
 
 function resolvePhoneChatPaneMinHeight(minHeight?: number): string {
-  const clampedHeight = Math.min(minHeight ?? 430, 520);
-  return `min(${clampedHeight}px, 68dvh)`;
+  const clampedHeight = Math.min(minHeight ?? 470, 560);
+  return `min(${clampedHeight}px, 72dvh)`;
 }
 
-export const ChatKitPaneCard = styled.section`
+export const ChatKitPaneCard = styled.section<{ $fillHeight?: boolean }>`
   position: sticky;
   top: 0.8rem;
   min-width: 0;
@@ -1086,7 +1086,7 @@ export const ChatKitPaneCard = styled.section`
   @media (max-width: 1180px) {
     position: static;
     top: auto;
-    height: auto;
+    height: ${({ $fillHeight }) => ($fillHeight ? "100%" : "auto")};
   }
 
   @media (max-width: 760px) {
@@ -1095,20 +1095,23 @@ export const ChatKitPaneCard = styled.section`
   }
 `;
 
-export const ChatKitPaneHarness = styled.div`
+export const ChatKitPaneHarness = styled.div<{ $fillHeight?: boolean }>`
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   gap: 0.35rem;
   min-height: 0;
+  height: ${({ $fillHeight }) => ($fillHeight ? "100%" : "auto")};
 `;
 
-export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: number }>`
+export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: number; $fillHeight?: boolean }>`
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  flex: 1 1 ${({ $minHeight }) => ($minHeight ? `${$minHeight}px` : "430px")};
+  flex: ${({ $fillHeight, $minHeight }) =>
+    $fillHeight ? "1 1 auto" : `1 1 ${$minHeight ? `${$minHeight}px` : "430px"}`};
   min-height: 0;
+  height: ${({ $fillHeight }) => ($fillHeight ? "100%" : "auto")};
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-lg);
@@ -1127,12 +1130,14 @@ export const ChatKitPaneSurface = styled.div<{ $light?: boolean; $minHeight?: nu
   }
 
   @media (max-width: 1180px) {
-    min-height: ${({ $minHeight }) => resolveTabletChatPaneMinHeight($minHeight)};
+    min-height: ${({ $fillHeight, $minHeight }) =>
+      $fillHeight ? "0" : resolveTabletChatPaneMinHeight($minHeight)};
   }
 
   @media (max-width: 760px) {
     flex-basis: auto;
-    min-height: ${({ $minHeight }) => resolvePhoneChatPaneMinHeight($minHeight)};
+    min-height: ${({ $fillHeight, $minHeight }) =>
+      $fillHeight ? "0" : resolvePhoneChatPaneMinHeight($minHeight)};
   }
 `;
 

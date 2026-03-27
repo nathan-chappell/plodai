@@ -45,6 +45,13 @@ def test_entity_search_uses_saved_farm_record_and_images() -> None:
                     farm_name="Walnut south",
                     description="Weekly scouting",
                     location="South field",
+                    areas=[
+                        {
+                            "id": "area_1",
+                            "name": "South block",
+                            "kind": "orchard",
+                        }
+                    ],
                     crops=[
                         {
                             "id": "crop_1",
@@ -52,13 +59,23 @@ def test_entity_search_uses_saved_farm_record_and_images() -> None:
                             "type": "tree_nuts",
                             "quantity": "12 acres",
                             "expected_yield": "4 tons",
-                            "issues": [
-                                {
-                                    "id": "issue_1",
-                                    "title": "Blight pressure",
-                                    "severity": "high",
-                                }
-                            ],
+                            "area_ids": ["area_1"],
+                            "status": "active",
+                            "notes": "Main production zone",
+                        }
+                    ],
+                    work_items=[
+                        {
+                            "id": "work_1",
+                            "kind": "issue",
+                            "title": "Blight pressure",
+                            "description": "Scattered lesions in the outer canopy.",
+                            "severity": "high",
+                            "status": "monitoring",
+                            "due_at": "2026-04-12",
+                            "related_crop_ids": ["crop_1"],
+                            "related_area_ids": ["area_1"],
+                            "related_image_ids": [image.id],
                         }
                     ],
                     orders=[
@@ -83,12 +100,36 @@ def test_entity_search_uses_saved_farm_record_and_images() -> None:
             )
 
             entity_types = {entity.data["entity_type"] for entity in response.entities}
-            assert entity_types == {"farm_image", "farm_crop", "farm_order"}
+            assert entity_types == {
+                "farm_image",
+                "farm_crop",
+                "farm_work_item",
+                "farm_order",
+            }
             crop_entity = next(
                 entity for entity in response.entities if entity.data["entity_type"] == "farm_crop"
             )
             assert crop_entity.data["type"] == "Tree nuts"
             assert crop_entity.data["quantity"] == "12 acres"
+            assert crop_entity.data["area_names"] == "South block"
+            assert crop_entity.data["work_item_count"] == "1"
             assert "size" not in crop_entity.data
+            work_item_entity = next(
+                entity
+                for entity in response.entities
+                if entity.data["entity_type"] == "farm_work_item"
+            )
+            assert work_item_entity.data["related_crop_names"] == "Block A"
+            assert work_item_entity.data["related_area_names"] == "South block"
+
+            filtered_response = await entity_service.search_entities(
+                user_id="user_123",
+                farm_id=farm.id,
+                query="south block",
+            )
+            assert any(
+                entity.data["entity_type"] == "farm_work_item"
+                for entity in filtered_response.entities
+            )
 
     asyncio.run(_run())

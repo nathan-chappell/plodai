@@ -9,13 +9,17 @@ class FarmSchemaBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class FarmCropIssue(FarmSchemaBase):
+FarmWorkItemSeverity = Literal["low", "medium", "high"]
+FarmCropStatus = Literal["planned", "active", "harvested", "inactive"]
+FarmWorkItemKind = Literal["issue", "task", "observation"]
+FarmWorkItemStatus = Literal["open", "monitoring", "resolved"]
+
+
+class FarmArea(FarmSchemaBase):
     id: str
-    title: str
+    name: str
+    kind: str | None = None
     description: str | None = None
-    severity: Literal["low", "medium", "high"]
-    deadline: str | None = None
-    recommended_follow_up: str | None = None
 
 
 class FarmCrop(FarmSchemaBase):
@@ -24,7 +28,24 @@ class FarmCrop(FarmSchemaBase):
     type: str | None = None
     quantity: str | None = None
     expected_yield: str | None = None
-    issues: list[FarmCropIssue] = Field(default_factory=list)
+    area_ids: list[str] = Field(default_factory=list)
+    status: FarmCropStatus | None = None
+    notes: str | None = None
+
+
+class FarmWorkItem(FarmSchemaBase):
+    id: str
+    kind: FarmWorkItemKind
+    title: str
+    description: str | None = None
+    status: FarmWorkItemStatus | None = None
+    severity: FarmWorkItemSeverity | None = None
+    observed_at: str | None = None
+    due_at: str | None = None
+    recommended_follow_up: str | None = None
+    related_crop_ids: list[str] = Field(default_factory=list)
+    related_area_ids: list[str] = Field(default_factory=list)
+    related_image_ids: list[str] = Field(default_factory=list)
 
 
 class FarmOrderItem(FarmSchemaBase):
@@ -53,7 +74,9 @@ class FarmRecordPayload(FarmSchemaBase):
     farm_name: str
     description: str | None = None
     location: str | None = None
+    areas: list[FarmArea] = Field(default_factory=list)
     crops: list[FarmCrop] = Field(default_factory=list)
+    work_items: list[FarmWorkItem] = Field(default_factory=list)
     orders: list[FarmOrder] = Field(default_factory=list)
 
 

@@ -26,7 +26,9 @@ def test_farm_service_creates_and_saves_canonical_records() -> None:
                 "farm_name": "North orchard",
                 "description": None,
                 "location": None,
+                "areas": [],
                 "crops": [],
+                "work_items": [],
                 "orders": [],
             }
 
@@ -38,12 +40,54 @@ def test_farm_service_creates_and_saves_canonical_records() -> None:
                     farm_name="North orchard updated",
                     description="Main walnut block",
                     location="East field",
-                    crops=[],
+                    areas=[
+                        {
+                            "id": "area_1",
+                            "name": "East block",
+                            "kind": "orchard",
+                        }
+                    ],
+                    crops=[
+                        {
+                            "id": "crop_1",
+                            "name": "Walnut row A",
+                            "type": "tree_nuts",
+                            "quantity": "12 acres",
+                            "expected_yield": "4 tons",
+                            "area_ids": ["area_1"],
+                            "status": "active",
+                            "notes": "Main production zone",
+                        }
+                    ],
+                    work_items=[
+                        {
+                            "id": "work_1",
+                            "kind": "issue",
+                            "title": "Blight pressure",
+                            "severity": "high",
+                            "status": "monitoring",
+                            "due_at": "2026-04-15",
+                            "related_crop_ids": ["crop_1"],
+                            "related_area_ids": ["area_1"],
+                            "related_image_ids": [],
+                        },
+                        {
+                            "id": "work_2",
+                            "kind": "task",
+                            "title": "Check irrigation line",
+                            "status": "open",
+                            "related_crop_ids": [],
+                            "related_area_ids": ["area_1"],
+                            "related_image_ids": [],
+                        },
+                    ],
                     orders=[],
                 ),
             )
 
             assert saved_record.farm_name == "North orchard updated"
+            assert saved_record.areas[0].name == "East block"
+            assert saved_record.work_items[1].title == "Check irrigation line"
 
             hydrated_farm = await service.get_farm(
                 user_id="user_123",
@@ -75,7 +119,9 @@ def test_farm_service_bootstraps_a_blank_default_farm_for_new_users() -> None:
                 "farm_name": "",
                 "description": None,
                 "location": None,
+                "areas": [],
                 "crops": [],
+                "work_items": [],
                 "orders": [],
             }
 

@@ -254,7 +254,9 @@ class FarmService:
                     farm_name=cleaned_name,
                     description=None,
                     location=None,
+                    areas=[],
                     crops=[],
+                    work_items=[],
                     orders=[],
                 ).model_dump(mode="json"),
             )

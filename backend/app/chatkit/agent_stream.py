@@ -104,6 +104,14 @@ def _format_save_farm_record_summary(arguments: Mapping[str, object] | None) -> 
     if isinstance(crops, Sequence) and not isinstance(crops, str | bytes | bytearray):
         parts.append(f"crops={len(crops)}")
 
+    areas = record.get("areas")
+    if isinstance(areas, Sequence) and not isinstance(areas, str | bytes | bytearray):
+        parts.append(f"areas={len(areas)}")
+
+    work_items = record.get("work_items")
+    if isinstance(work_items, Sequence) and not isinstance(work_items, str | bytes | bytearray):
+        parts.append(f"work_items={len(work_items)}")
+
     orders = record.get("orders")
     if isinstance(orders, Sequence) and not isinstance(orders, str | bytes | bytearray):
         parts.append(f"orders={len(orders)}")

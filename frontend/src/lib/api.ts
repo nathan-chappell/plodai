@@ -1,4 +1,5 @@
 import { publishPaymentRequiredToast } from "../app/toasts";
+import type { PreferredOutputLanguage } from "./chat-language";
 import type { PlodaiEntitySearchResponse } from "../types/chat-entities";
 import type {
   FarmDeleteResponse,
@@ -16,6 +17,7 @@ const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce222
 
 let clerkTokenGetter: (() => Promise<string | null>) | null = null;
 let chatKitMetadataGetter: (() => Record<string, unknown> | null) | null = null;
+let chatKitOutputLanguageGetter: (() => PreferredOutputLanguage | null) | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -35,6 +37,12 @@ export function setChatKitMetadataGetter(getter: (() => Record<string, unknown> 
   chatKitMetadataGetter = getter;
 }
 
+export function setChatKitOutputLanguageGetter(
+  getter: (() => PreferredOutputLanguage | null) | null,
+): void {
+  chatKitOutputLanguageGetter = getter;
+}
+
 export function getChatKitConfig(farmId: string) {
   return {
     url: `${API_BASE_URL}/farms/${encodeURIComponent(farmId)}/chatkit`,
@@ -49,10 +57,11 @@ export async function authenticatedFetch(input: RequestInfo | URL, init?: Reques
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(input, {
-    ...maybeAttachChatKitMetadata(input, init),
+  const preparedRequest = prepareChatKitRequest(input, {
+    ...init,
     headers,
   });
+  const response = await fetch(preparedRequest.input, preparedRequest.init);
 
   if (response.status === 402) {
     void notifyPaymentRequired(response.clone());
@@ -253,6 +262,56 @@ function maybeAttachChatKitMetadata(input: RequestInfo | URL, init?: RequestInit
     };
   } catch {
     return init;
+  }
+}
+
+function prepareChatKitRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): {
+  input: RequestInfo | URL;
+  init: RequestInit | undefined;
+} {
+  const nextInit = maybeAttachChatKitMetadata(input, init);
+  const preferredOutputLanguage = chatKitOutputLanguageGetter?.() ?? null;
+  return {
+    input: withChatKitOutputLanguage(input, preferredOutputLanguage),
+    init: nextInit,
+  };
+}
+
+function withChatKitOutputLanguage(
+  input: RequestInfo | URL,
+  preferredOutputLanguage: PreferredOutputLanguage | null,
+): RequestInfo | URL {
+  if (!isChatKitRequest(input) || !preferredOutputLanguage) {
+    return input;
+  }
+
+  const url = toRequestUrl(input);
+  url.searchParams.set("preferred_output_language", preferredOutputLanguage);
+
+  if (input instanceof Request) {
+    return new Request(url.toString(), input);
+  }
+  return url.toString();
+}
+
+function toRequestUrl(input: RequestInfo | URL): URL {
+  const requestUrl =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+  try {
+    return new URL(requestUrl);
+  } catch {
+    const baseUrl =
+      typeof window !== "undefined" && typeof window.location?.origin === "string"
+        ? window.location.origin
+        : "http://localhost";
+    return new URL(requestUrl, baseUrl);
   }
 }
 

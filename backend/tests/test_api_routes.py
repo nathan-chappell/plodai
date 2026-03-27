@@ -48,6 +48,8 @@ def test_farm_routes_support_create_get_and_save_record() -> None:
         record_response = client.get(f"/api/farms/{farm_id}/record")
         assert record_response.status_code == 200
         assert record_response.json()["record"]["farm_name"] == "API farm"
+        assert record_response.json()["record"]["areas"] == []
+        assert record_response.json()["record"]["work_items"] == []
 
         save_response = client.put(
             f"/api/farms/{farm_id}/record",
@@ -57,13 +59,36 @@ def test_farm_routes_support_create_get_and_save_record() -> None:
                     "farm_name": "API farm updated",
                     "description": "Saved through the API",
                     "location": "North lot",
-                    "crops": [],
+                    "areas": [
+                        {
+                            "id": "area_1",
+                            "name": "North orchard",
+                        }
+                    ],
+                    "crops": [
+                        {
+                            "id": "crop_1",
+                            "name": "Walnut block",
+                            "area_ids": ["area_1"],
+                        }
+                    ],
+                    "work_items": [
+                        {
+                            "id": "work_1",
+                            "kind": "task",
+                            "title": "Check sprayer",
+                            "related_crop_ids": [],
+                            "related_area_ids": ["area_1"],
+                            "related_image_ids": [],
+                        }
+                    ],
                     "orders": [],
                 }
             },
         )
         assert save_response.status_code == 200
         assert save_response.json()["record"]["farm_name"] == "API farm updated"
+        assert save_response.json()["record"]["work_items"][0]["title"] == "Check sprayer"
 
         detail_response = client.get(f"/api/farms/{farm_id}")
         assert detail_response.status_code == 200
@@ -106,7 +131,16 @@ def test_farm_routes_bootstrap_a_blank_default_farm() -> None:
 
         record_response = client.get(f"/api/farms/{farm['id']}/record")
         assert record_response.status_code == 200
-        assert record_response.json()["record"]["farm_name"] == ""
+        assert record_response.json()["record"] == {
+            "version": "v1",
+            "farm_name": "",
+            "description": None,
+            "location": None,
+            "areas": [],
+            "crops": [],
+            "work_items": [],
+            "orders": [],
+        }
 
         second_list_response = client.get("/api/farms")
         assert second_list_response.status_code == 200

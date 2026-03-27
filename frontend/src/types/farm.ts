@@ -1,12 +1,28 @@
-export type FarmCropIssueSeverity = "low" | "medium" | "high";
+export type FarmWorkItemSeverity = "low" | "medium" | "high";
+export type FarmCropStatus = "planned" | "active" | "harvested" | "inactive";
+export type FarmWorkItemKind = "issue" | "task" | "observation";
+export type FarmWorkItemStatus = "open" | "monitoring" | "resolved";
 
-export type FarmCropIssue = {
+export type FarmArea = {
   id: string;
+  name: string;
+  kind?: string | null;
+  description?: string | null;
+};
+
+export type FarmWorkItem = {
+  id: string;
+  kind: FarmWorkItemKind;
   title: string;
   description?: string | null;
-  severity: FarmCropIssueSeverity;
-  deadline?: string | null;
+  status?: FarmWorkItemStatus | null;
+  severity?: FarmWorkItemSeverity | null;
+  observed_at?: string | null;
+  due_at?: string | null;
   recommended_follow_up?: string | null;
+  related_crop_ids: string[];
+  related_area_ids: string[];
+  related_image_ids: string[];
 };
 
 export type FarmCrop = {
@@ -15,7 +31,9 @@ export type FarmCrop = {
   type?: string | null;
   quantity?: string | null;
   expected_yield?: string | null;
-  issues: FarmCropIssue[];
+  area_ids: string[];
+  status?: FarmCropStatus | null;
+  notes?: string | null;
 };
 
 export type FarmOrderItem = {
@@ -46,8 +64,10 @@ export type FarmRecordPayload = {
   farm_name: string;
   description?: string | null;
   location?: string | null;
+  areas: FarmArea[];
   crops: FarmCrop[];
-  orders?: FarmOrder[];
+  work_items: FarmWorkItem[];
+  orders: FarmOrder[];
 };
 
 export type FarmImageSourceKind = "upload" | "chat_attachment";

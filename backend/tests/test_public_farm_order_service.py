@@ -45,7 +45,9 @@ def test_public_farm_order_service_reads_live_order_and_hero_image() -> None:
                     farm_name="West walnuts",
                     description="Market-ready crop",
                     location="West field",
+                    areas=[],
                     crops=[],
+                    work_items=[],
                     orders=[
                         {
                             "id": "order_live",

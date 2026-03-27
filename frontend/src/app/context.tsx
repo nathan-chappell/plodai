@@ -1,5 +1,6 @@
 import { createContext, useContext, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
+import type { PreferredOutputLanguage } from "../lib/chat-language";
 import type { AuthUser } from "../types/auth";
 
 type AppState = {
@@ -7,6 +8,8 @@ type AppState = {
   setUser: Dispatch<SetStateAction<AuthUser | null>>;
   authError: string | null;
   setAuthError: Dispatch<SetStateAction<string | null>>;
+  preferredOutputLanguage: PreferredOutputLanguage;
+  setPreferredOutputLanguage: Dispatch<SetStateAction<PreferredOutputLanguage>>;
 };
 
 const AppStateContext = createContext<AppState | null>(null);

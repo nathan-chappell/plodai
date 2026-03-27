@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.farm import FarmImage
-from backend.app.schemas.farm import FarmCrop, FarmRecordPayload
+from backend.app.schemas.farm import FarmArea, FarmCrop, FarmRecordPayload, FarmWorkItem
 from backend.app.schemas.plodai_entities import (
     PlodaiComposerEntity,
     PlodaiEntitySearchResponse,
@@ -114,17 +114,24 @@ class PlodaiEntityService:
         normalized_query: str,
     ) -> list[PlodaiComposerEntity]:
         entities: list[PlodaiComposerEntity] = []
+        areas_by_id = {area.id: area for area in record.areas}
+        crops_by_id = {crop.id: crop for crop in record.crops}
 
         for crop in record.crops:
-            issue_terms: list[str | None] = []
-            for issue in crop.issues:
-                issue_terms.extend(
+            linked_work_items = _linked_work_items_for_crop(record, crop.id)
+            area_names = _area_names_for_ids(areas_by_id, crop.area_ids)
+            work_item_terms: list[str | None] = []
+            for work_item in linked_work_items:
+                work_item_terms.extend(
                     [
-                        issue.title,
-                        issue.description,
-                        issue.severity,
-                        issue.deadline,
-                        issue.recommended_follow_up,
+                        work_item.title,
+                        work_item.description,
+                        work_item.kind,
+                        work_item.status,
+                        work_item.severity,
+                        work_item.observed_at,
+                        work_item.due_at,
+                        work_item.recommended_follow_up,
                     ]
                 )
             if not _matches_query(
@@ -137,11 +144,14 @@ class PlodaiEntityService:
                 _humanize_crop_type(crop.type),
                 crop.quantity,
                 crop.expected_yield,
-                *issue_terms,
+                crop.status,
+                crop.notes,
+                *area_names,
+                *work_item_terms,
             ):
                 continue
-            highest_severity = _highest_crop_issue_severity(crop)
-            next_deadline = _next_crop_issue_deadline(crop)
+            highest_severity = _highest_work_item_severity(linked_work_items)
+            next_due_at = _next_work_item_due_at(linked_work_items)
             entities.append(
                 PlodaiComposerEntity(
                     id=f"farm-crop:{farm_id}:{crop.id}",
@@ -157,9 +167,57 @@ class PlodaiEntityService:
                         "type": _humanize_crop_type(crop.type) or "",
                         "quantity": crop.quantity or "",
                         "expected_yield": crop.expected_yield or "",
-                        "issue_count": str(len(crop.issues)),
+                        "area_names": ", ".join(area_names),
+                        "status": crop.status or "",
+                        "notes": crop.notes or "",
+                        "work_item_count": str(len(linked_work_items)),
                         "highest_severity": highest_severity or "",
-                        "next_deadline": next_deadline or "",
+                        "next_due_at": next_due_at or "",
+                    },
+                )
+            )
+
+        for work_item in record.work_items:
+            related_crop_names = _crop_names_for_ids(crops_by_id, work_item.related_crop_ids)
+            related_area_names = _area_names_for_ids(areas_by_id, work_item.related_area_ids)
+            if not _matches_query(
+                normalized_query,
+                record.farm_name,
+                record.description,
+                record.location,
+                work_item.title,
+                work_item.kind,
+                work_item.description,
+                work_item.status,
+                work_item.severity,
+                work_item.observed_at,
+                work_item.due_at,
+                work_item.recommended_follow_up,
+                *related_crop_names,
+                *related_area_names,
+            ):
+                continue
+            entities.append(
+                PlodaiComposerEntity(
+                    id=f"farm-work-item:{farm_id}:{work_item.id}",
+                    title=work_item.title,
+                    icon="flag",
+                    interactive=True,
+                    group="Farm work items",
+                    data={
+                        "entity_type": "farm_work_item",
+                        "farm_id": farm_id,
+                        "farm_name": record.farm_name,
+                        "item_id": work_item.id,
+                        "kind": work_item.kind,
+                        "status": work_item.status or "",
+                        "severity": work_item.severity or "",
+                        "observed_at": work_item.observed_at or "",
+                        "due_at": work_item.due_at or "",
+                        "description": work_item.description or "",
+                        "recommended_follow_up": work_item.recommended_follow_up or "",
+                        "related_crop_names": ", ".join(related_crop_names),
+                        "related_area_names": ", ".join(related_area_names),
                     },
                 )
             )
@@ -227,22 +285,55 @@ def _humanize_crop_type(value: str | None) -> str | None:
     return normalized[0].upper() + normalized[1:]
 
 
-def _highest_crop_issue_severity(crop: FarmCrop) -> str | None:
+def _linked_work_items_for_crop(
+    record: FarmRecordPayload,
+    crop_id: str,
+) -> list[FarmWorkItem]:
+    return [
+        work_item
+        for work_item in record.work_items
+        if crop_id in work_item.related_crop_ids
+    ]
+
+
+def _crop_names_for_ids(crops_by_id: dict[str, FarmCrop], crop_ids: list[str]) -> list[str]:
+    names: list[str] = []
+    for crop_id in crop_ids:
+        crop = crops_by_id.get(crop_id)
+        name = getattr(crop, "name", None)
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+def _area_names_for_ids(areas_by_id: dict[str, FarmArea], area_ids: list[str]) -> list[str]:
+    names: list[str] = []
+    for area_id in area_ids:
+        area = areas_by_id.get(area_id)
+        name = getattr(area, "name", None)
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+def _highest_work_item_severity(work_items: list[FarmWorkItem]) -> str | None:
     severity_order = {"low": 1, "medium": 2, "high": 3}
     highest = None
     highest_rank = -1
-    for issue in crop.issues:
-        rank = severity_order.get(issue.severity, 0)
+    for work_item in work_items:
+        if work_item.severity is None:
+            continue
+        rank = severity_order.get(work_item.severity, 0)
         if rank > highest_rank:
-            highest = issue.severity
+            highest = work_item.severity
             highest_rank = rank
     return highest
 
 
-def _next_crop_issue_deadline(crop: FarmCrop) -> str | None:
-    deadlines = [
-        issue.deadline.strip()
-        for issue in crop.issues
-        if issue.deadline and issue.deadline.strip()
+def _next_work_item_due_at(work_items: list[FarmWorkItem]) -> str | None:
+    due_dates = [
+        work_item.due_at.strip()
+        for work_item in work_items
+        if work_item.due_at and work_item.due_at.strip()
     ]
-    return sorted(deadlines)[0] if deadlines else None
+    return sorted(due_dates)[0] if due_dates else None

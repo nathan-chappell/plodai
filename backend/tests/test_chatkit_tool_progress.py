@@ -79,12 +79,14 @@ def test_format_tool_call_progress_summary_uses_safe_shapes() -> None:
                 "record": {
                     "farm_name": "North Orchard",
                     "description": "Do not leak this whole payload.",
+                    "areas": [{"id": "area_1"}],
                     "crops": [{"id": "crop_1"}, {"id": "crop_2"}],
+                    "work_items": [{"id": "work_1"}],
                     "orders": [{"id": "order_1"}],
                 }
             },
         )
-        == 'save_farm_record(farm_name="North Orchard", crops=2, orders=1)'
+        == 'save_farm_record(farm_name="North Orchard", crops=2, areas=1, work_items=1, orders=1)'
     )
 
 

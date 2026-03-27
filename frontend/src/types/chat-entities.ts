@@ -1,6 +1,7 @@
 export type PlodaiEntityType =
   | "farm_image"
   | "farm_crop"
+  | "farm_work_item"
   | "farm_order";
 
 export type PlodaiComposerEntity = {
