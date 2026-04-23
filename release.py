@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -6,11 +6,12 @@ from pathlib import Path
 import typer
 
 
-app = typer.Typer(help="Version bump and release checklist helper for AI Portfolio.")
+app = typer.Typer(help="Version bump and release checklist helper for PlodAI.")
 PACKAGE_JSON = Path() / "package.json"
 PACKAGE_LOCK_JSON = Path() / "package-lock.json"
+PYPROJECT_TOML = Path() / "pyproject.toml"
 BACKEND_MAIN = Path() / "backend" / "app" / "main.py"
-DEFAULT_IMAGE = "nathanschappell/ai-portfolio"
+DEFAULT_IMAGE = "nathanschappell/plodai"
 
 
 @app.command()
@@ -82,6 +83,8 @@ def update_all_versions(version: str) -> None:
     update_package_version(PACKAGE_JSON, version)
     if PACKAGE_LOCK_JSON.exists():
         update_package_lock_version(PACKAGE_LOCK_JSON, version)
+    if PYPROJECT_TOML.exists():
+        update_pyproject_version(PYPROJECT_TOML, version)
     update_backend_version(BACKEND_MAIN, version)
 
 
@@ -164,6 +167,14 @@ def update_package_lock_version(path: Path, version: str) -> None:
         if isinstance(root_package, dict):
             root_package["version"] = version
     path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def update_pyproject_version(path: Path, version: str) -> None:
+    content = path.read_text()
+    updated = re.sub(r'^version = "[^"]+"$', f'version = "{version}"', content, count=1, flags=re.MULTILINE)
+    if updated == content:
+        raise typer.BadParameter("Could not find pyproject version assignment to update.")
+    path.write_text(updated)
 
 
 def update_backend_version(path: Path, version: str) -> None:

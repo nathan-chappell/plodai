@@ -1,71 +1,65 @@
 # PlodAI
 
-PlodAI is an AI-assisted farm operations workspace for image review, structured record-keeping, and simple order publishing. Users can create farms, upload orchard or field images, maintain a canonical farm record, chat with an assistant about visible conditions and operational next steps, and publish public-facing order pages from the saved data.
+PlodAI (from the Croatian `plod`, meaning "fruit" or "harvest") is an AI-assisted farm operations workspace for image review, structured farm records, and practical follow-up planning. Users can create farms, upload orchard or field images, maintain a canonical farm record, and chat with an assistant about visible conditions and next steps.
 
-This repository is intended as both a product demo and a portfolio project. Its main technical goal is to show how a frontend agent experience can be exposed to a reusable runtime using FastAPI, ChatKit, the OpenAI Agents SDK, the Conversations API, and strict typed backend contracts.
+The project grew out of a real local use case. I own a small walnut grove near Tenje, and after a season affected by blight I found myself piecing together answers from photos, ChatGPT, and advice from a local agricultural pharmacy. PlodAI is an attempt to turn that fragmented troubleshooting workflow into something more durable: collect evidence, interpret it with an AI assistant, and save the result as reusable farm data instead of leaving it in a one-off chat.
 
-> Live app: `https://YOUR-DEPLOYED-URL`
+This repository is both a portfolio project and a product demo. Its main technical goal is to show how a frontend-defined agent experience can be exposed through a reusable runtime built with FastAPI, ChatKit, the OpenAI Agents SDK, the Conversations API, and typed backend contracts. The current domain focus is orchard and small-farm operations in Croatia. The documentation is written in English for a public portfolio audience, while the product itself supports English and Croatian chat output.
+
+> Live app: [plodai.up.railway.app](https://plodai.up.railway.app)
 >
-> Access note: signing up creates a Clerk account, but it does not automatically unlock the app. After signing up, email `YOUR_EMAIL_HERE` so I can activate the account and grant initial usage credit.
+> Access note: signing up creates a Clerk account, but access to the live demo is granted manually. If you would like access or a walkthrough, please reach out via [GitHub](https://github.com/nathan-chappell).
 
-PlodAI is built around one core product idea: the assistant should not only answer questions, it should help maintain a durable and reusable farm record. Each farm has a persistent chat, uploaded images become part of the working context, and the assistant is expected to turn durable facts and image evidence into structured application state rather than leaving everything as loose conversation.
+The live deployment intentionally keeps infrastructure simple: Railway hosting, Railway object storage, and SQLite by default. The application is already structured around SQLAlchemy and typed service boundaries, so moving to a production database is mostly an infrastructure decision rather than a product rewrite.
 
-The current domain direction is orchard and small-farm operations. The documentation is written in English for a public portfolio audience, but the product was shaped with local use cases in mind and could be adapted for local farmers, including around Nemetin in eastern Croatia.
+## Technical overview
 
-## AI runtime and architecture
+- Frontend stack: React 19, Vite, TypeScript, styled-components, Clerk, `@openai/chatkit`, and `@openai/chatkit-react`
+- Backend stack: FastAPI, the OpenAI Agents SDK, OpenAI ChatKit server integration, async SQLAlchemy, and Pydantic
+- Persistence: farm data and ChatKit memory are stored in the application database, while uploaded farm images and chat attachments are stored in S3-compatible object storage
+- Runtime shape: the assistant uses tools to read and update persisted farm information through typed Pydantic models and structured outputs rather than treating the conversation as unstructured text alone
+- Streaming behavior: ChatKit and the Agents SDK stream tool progress, intermediate status updates, and final assistant responses back into the UI as the run is happening
+- Image workflow: uploaded images are verified, saved as farm-linked records, and sent back to the model as image inputs when visual context is needed
+- Search behavior: the assistant can use OpenAI hosted web search when current public references would materially improve the answer
+- Model mapping: `lightweight` -> `gpt-5.4-nano`, `balanced` -> `gpt-5.4-mini`, `powerful` -> `gpt-5.4`
 
-The AI layer is explicit, typed, and integrated into the product model rather than bolted on as a standalone chatbot.
+## Demonstration
 
-- `@openai/chatkit` and `@openai/chatkit-react` power the browser chat experience, attachments, starter prompts, and thread interaction.
-- The FastAPI backend exposes a ChatKit entrypoint at `/api/farms/{farm_id}/chatkit`.
-- Each request builds a request-scoped ChatKit server and memory store so the runtime can attach to the same async SQLAlchemy session used by the rest of the request.
-- The OpenAI Agents SDK constructs the `PlodAI` agent and wires in tools, instructions, and model settings.
-- The OpenAI Conversations API is used to keep server-side conversation state aligned with local thread state and to recover incomplete tool calls more safely.
-- The agent is grounded in strict typed backend structures, especially `FarmRecordPayload`, `FarmArea`, `FarmCrop`, `FarmWorkItem`, `FarmOrder`, and the related response models.
-- The frontend owns the user-facing workspace and ChatKit interaction, while the backend owns auth, persistence, credit checks, and agent runtime plumbing.
+The screenshots below tell a simple user story: a user starts with a mostly empty farm, uploads walnut-orchard photos, lets the assistant inspect them, and ends up with a structured farm record plus a practical assessment.
 
-### Model routing
+### 1. The user starts with photos, not a finished dataset
 
-The runtime routes user-facing model choices to the GPT-5.4 family:
+In the first screenshot, the farm record on the left is still almost empty. On the right, the user has attached several walnut-orchard images in the chat composer and is about to ask PlodAI to analyze them. This matters because the workflow does not require the user to prepare a finished spreadsheet or form in advance; they can begin with natural inputs.
 
-- `lightweight` -> `gpt-5.4-nano`
-- `balanced` -> `gpt-5.4-mini`
-- `powerful` -> `gpt-5.4`
+<p align="center">
+  <img src="screenshots/just-attached-walnut-images.png" alt="PlodAI with walnut orchard images attached in the chat composer before analysis begins." width="88%" />
+</p>
 
-### Image attachments
+### 2. The assistant inspects the images and uses tools to gather context
 
-Farm images are stored in an S3-compatible Railway bucket rather than directly in the database.
+In the second screenshot, the assistant is already reasoning over the uploaded images. It is also using a backend tool to fetch the current farm record before deciding what to save. For a non-technical reader, this is the core agent behavior: the system is not only generating text, it is deciding what information it needs, calling a tool, and continuing with more context.
 
-- The app creates presigned upload URLs for chat attachments and uploads the file bytes to object storage.
-- After upload, the backend verifies the uploaded object, creates a `FarmImage` record, and stores canonical attachment metadata for the chat thread.
-- Image previews in the UI are served through presigned download URLs.
-- When the model needs image context, the backend loads the image bytes from the bucket and sends them to OpenAI as high-detail image inputs.
-- This keeps large binary files out of the main relational data model while still making them available to both the UI and the agent runtime.
+<p align="center">
+  <img src="screenshots/thinking-and-showing-tool-call.png" alt="PlodAI reviewing walnut orchard images and showing a get_farm_record tool call in progress." width="88%" />
+</p>
 
-### Agentic capabilities
+### 3. The assistant turns observations into structured farm data
 
-The assistant uses a small toolset deliberately rather than relying on free-form chat alone.
+In the third screenshot, the left-hand panel is no longer blank. The assistant has created a usable farm record with a farm name, description, an orchard area, a walnut crop entry, a rough quantity estimate, an expected yield note, and initial work items. The key point is that image observations and chat context have been converted into typed application data that the rest of the product can reuse.
 
-- It can read the latest saved farm record before making structured updates.
-- It can save a complete updated farm record back into the canonical data model.
-- It can rename the active thread when the conversation becomes specific enough to deserve a stable title.
-- It can use OpenAI hosted web search when fresh public information would materially improve an answer, such as extension guidance, treatment options, or current references.
+<p align="center">
+  <img src="screenshots/farm-record-created.png" alt="A saved Walnut Orchard farm record with area, crop, quantity estimate, expected yield, and work items." width="88%" />
+</p>
 
-In practice, this means the assistant can inspect uploaded images, retrieve the current farm record, reason about what should be added or corrected, write those changes back into typed structures, and then continue the conversation with the updated state available to the rest of the application.
+### 4. The user gets a practical assessment, not just a vague summary
 
-## Stack
+In the final screenshot, the user sees a clearer operational result: saved work items on the left and a practical assessment on the right, including likely issues, suggested follow-up actions, and linked public references. The intended outcome is to move from raw photos to actionable farm information that can be reviewed, updated, and reused.
 
-- Frontend: React 19, Vite, TypeScript, styled-components, Clerk, ChatKit React
-- Backend: FastAPI, OpenAI Agents SDK, OpenAI ChatKit server integration, async SQLAlchemy, Pydantic
-- Persistence: SQLite by default for application data and ChatKit memory
-- Storage: S3-compatible object storage for farm images and chat attachments
-- Deployment: currently proven out on Railway
+<p align="center">
+  <img src="screenshots/finished-with-assessment.png" alt="A finished walnut assessment with structured work items and linked public references in the chat response." width="88%" />
+</p>
 
-## Key routes
-
-- `/plodai` for the signed-in farm workspace
-- `/farms/{farm_id}/orders/{order_id}` for public order pages
-- `/admin/users` for activation and credit administration
+The sample images used during development are available in [`walnut_test_images/`](./walnut_test_images).
 
 ## Local setup
 
@@ -91,7 +85,7 @@ VITE_API_BASE_URL=/api
 PUBLIC_BASE_URL=http://localhost:8000
 CORS_ORIGINS=["http://localhost:8000","http://127.0.0.1:8000","http://localhost:5173","http://127.0.0.1:5173"]
 
-database_url=sqlite:///./ai_portfolio.db
+database_url=sqlite:///./plodai.db
 
 # Use your own storage values in a real deployment or fork.
 storage_bucket_endpoint=https://your-bucket-endpoint
@@ -146,50 +140,17 @@ pytest
 npm test
 ```
 
-## Demonstration
+## Blockers
 
-The screenshots below tell a simple user story: a user starts with a mostly empty farm, uploads walnut-orchard photos, lets the assistant inspect them, and ends up with a structured farm record plus a practical assessment.
+- Move the live deployment from SQLite to a production-ready database setup
+- Finalize user and account management for a real public launch
+- Finalize monetization, billing, and payments
 
-### 1. The user starts with photos, not a finished dataset
+## Future ideas
 
-In the first screenshot, the farm record on the left is still almost empty. On the right, the user has attached several walnut-orchard images in the chat composer and is about to ask PlodAI to analyze them. This is important because the workflow does not require the user to prepare a perfect spreadsheet or form in advance; they can begin with natural inputs.
-
-<p align="center">
-  <img src="screenshots/just-attached-walnut-images.png" alt="PlodAI with walnut orchard images attached in the chat composer before analysis begins." width="88%" />
-</p>
-
-### 2. The assistant inspects the images and uses tools to gather context
-
-In the second screenshot, the assistant is already reasoning over the uploaded images. It is also using a backend tool to fetch the current farm record before deciding what to save. For a non-technical reader, this is the main "agentic" behavior: the system is not only generating text, it is deciding what information it needs, calling a tool, and continuing with more context.
-
-<p align="center">
-  <img src="screenshots/thinking-and-showing-tool-call.png" alt="PlodAI reviewing walnut orchard images and showing a get_farm_record tool call in progress." width="88%" />
-</p>
-
-### 3. The assistant turns observations into structured farm data
-
-In the third screenshot, the left-hand panel is no longer blank. The assistant has created a usable farm record with a farm name, description, an orchard area, a walnut crop entry, a rough quantity estimate, an expected yield note, and initial work items. The key point is that image observations and chat context have been converted into typed application data that the rest of the product can reuse.
-
-<p align="center">
-  <img src="screenshots/farm-record-created.png" alt="A saved Walnut Orchard farm record with area, crop, quantity estimate, expected yield, and work items." width="88%" />
-</p>
-
-### 4. The user gets a practical assessment, not just a vague summary
-
-In the final screenshot, the user sees a clearer operational result: saved work items on the left and a practical assessment on the right, including likely issues, suggested follow-up actions, and linked public references. This is the intended outcome of the product: move from raw photos to actionable farm information that can be reviewed, updated, and reused.
-
-<p align="center">
-  <img src="screenshots/finished-with-assessment.png" alt="A finished walnut assessment with structured work items and linked public references in the chat response." width="88%" />
-</p>
-
-The sample images used during development are available in [`walnut_test_images/`](./walnut_test_images).
-
-## Notes for reviewers
-
-- This is intentionally a light backend. The most interesting engineering work is the runtime wiring between ChatKit, the OpenAI Agents SDK, the Conversations API, and the farm data model.
-- Auth and monetization are intentionally simple at this stage: controlled access, manual approval, and usage credit instead of a polished self-serve billing flow.
-- The README is in English, while the product itself supports English and Croatian chat output.
+- Bring farm-order publishing and public order pages into the main product workflow
+- Expand the public-facing order and sales flow once the launch fundamentals are in place
 
 ## Documentation note
 
-This README was drafted and refined in Codex using GPT-5.4, then reviewed against the repository implementation.
+This README was written with AI assistance in Codex using GPT-5.4, then manually reviewed and revised against the repository implementation.

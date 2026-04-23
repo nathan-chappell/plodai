@@ -51,7 +51,7 @@ def _existing_dirs(paths: list[Path]) -> list[str]:
 
 if __name__ == "__main__":
     version = _read_version()
-    print(f"ai-portfolio version={version}")
+    print(f"plodai version={version}")
     print(f"python={platform.python_version()} cwd={Path.cwd()}")
     print(f"frontend_dist={DIST_DIR} exists={DIST_DIR.exists()}")
 
