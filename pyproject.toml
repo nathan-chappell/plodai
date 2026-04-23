@@ -1,6 +1,6 @@
 [project]
 name = "plodai-backend"
-version = "1.1.1"
+version = "1.1.2"
 description = "FastAPI backend for the PlodAI farm operations workspace."
 requires-python = ">=3.14"
 dependencies = [

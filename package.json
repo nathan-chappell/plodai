@@ -1,11 +1,12 @@
 {
   "name": "plodai-frontend",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
   "scripts": {
+    "check:frontend-env": "node frontend/check-required-env.mjs",
     "dev": "vite --config frontend/vite.config.ts",
-    "build": "tsc -p frontend/tsconfig.json && vite build --config frontend/vite.config.ts && node -e \"console.log('Build finished at', new Date().toISOString())\"",
+    "build": "npm run check:frontend-env && tsc -p frontend/tsconfig.json && vite build --config frontend/vite.config.ts && node -e \"console.log('Build finished at', new Date().toISOString())\"",
     "preview": "vite preview --config frontend/vite.config.ts",
     "test": "vitest run --config frontend/vite.config.ts",
     "test:integration-live": "vitest run --config frontend/vite.config.ts frontend/src/lib/__tests__/chatkit-live.test.ts",
