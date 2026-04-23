@@ -47,9 +47,9 @@ const SIGN_IN_COPY: Record<
 > = {
   hr: {
     accessBody:
-      "Prijava ide kroz Clerk, a aplikacija se otvara odmah nakon što backend potvrdi pristup ovom računu.",
+      "Prijava ide kroz Clerk, ali sama registracija ne otključava aplikaciju. PlodAI se otvara tek nakon što backend odobri ovaj račun za pristup.",
     accessErrorBody:
-      "Clerk je prihvatio prijavu, ali backend nije uspio otvoriti sesiju aplikacije za ovaj račun.",
+      "Clerk je prihvatio prijavu, ali ovaj račun još nema odobren pristup aplikaciji. Nakon registracije javite se vlasniku aplikacije e-poštom kako bi aktivirao račun.",
     accessErrorTitle: "Prijava je uspjela, ali pristup aplikaciji nije",
     accessTitle: "Pristup preko Clerka",
     createAccountLabel: "Registracija",
@@ -64,9 +64,9 @@ const SIGN_IN_COPY: Record<
   },
   en: {
     accessBody:
-      "Clerk handles authentication first, and the app opens as soon as the backend approves access for this account.",
+      "Clerk handles authentication first, but creating an account does not automatically unlock the app. PlodAI opens only after the backend approves this account for access.",
     accessErrorBody:
-      "Clerk accepted the sign-in, but the backend could not open an app session for this account.",
+      "Clerk accepted the sign-in, but this account does not have app access yet. After signing up, email the app owner so the account can be activated.",
     accessErrorTitle: "Sign-in worked, but app access did not",
     accessTitle: "Clerk-backed access",
     createAccountLabel: "Create account",
