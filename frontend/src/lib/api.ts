@@ -13,7 +13,7 @@ import type {
 } from "../types/farm";
 
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
-const CHATKIT_DOMAIN_KEY = "domain_pk_69b2a0ec9ebc8196b1893307126bc3940346bce2224e586b";
+const CHATKIT_DOMAIN_KEY = "domain_pk_69ea3fd1be08819098782d5a22ca589201053bea45511d76";
 
 let clerkTokenGetter: (() => Promise<string | null>) | null = null;
 let chatKitMetadataGetter: (() => Record<string, unknown> | null) | null = null;
