@@ -120,7 +120,7 @@ if settings.OPENAI_API_KEY:
 
 app = FastAPI(
     title="PlodAI API",
-    version="1.1.2",
+    version="1.1.3",
     description="Farm-first PlodAI backend.",
     lifespan=lifespan,
 )
