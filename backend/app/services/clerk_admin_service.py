@@ -4,10 +4,8 @@ from clerk_backend_api import models
 from clerk_backend_api.sdk import Clerk
 
 from backend.app.core.clerk_metadata import (
-    CREDIT_FLOOR_METADATA_KEY,
-    DEFAULT_CREDIT_FLOOR_USD,
+    active_public_metadata,
     as_public_metadata,
-    has_explicit_credit_floor,
     resolve_credit_floor_usd,
 )
 from backend.app.core.config import get_settings
@@ -100,12 +98,8 @@ async def set_user_active_state(
 ) -> UserSummaryMapping:
     client = _client()
     user = await client.users.get_async(user_id=user_id)
-    public_metadata = dict(as_public_metadata(user.public_metadata))
-    public_metadata["active"] = active
-    if active and not has_explicit_credit_floor(public_metadata):
-        public_metadata[CREDIT_FLOOR_METADATA_KEY] = DEFAULT_CREDIT_FLOOR_USD
     updated_user = await client.users.update_async(
         user_id=user_id,
-        public_metadata=public_metadata,
+        public_metadata=active_public_metadata(user.public_metadata, active=active),
     )
     return map_user_summary(updated_user)

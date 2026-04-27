@@ -1,3 +1,3 @@
-from typing import Literal
+from ai_portfolio_admin.contracts import UserRole
 
-UserRole = Literal["admin", "user"]
+__all__ = ["UserRole"]

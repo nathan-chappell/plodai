@@ -1,11 +1,14 @@
-export type GrantCreditPayload = {
-  user_id: string;
-  credit_amount_usd: number;
+import type {
+  CreditGrantRecord,
+  ManualCreditGrantRequest,
+  UserRole,
+} from "../../../vendor/ai-portfolio-admin/frontend/types";
+
+export type GrantCreditPayload = Pick<ManualCreditGrantRequest, "user_id" | "credit_amount_usd"> & {
   note?: string;
 };
 
-export type GrantCreditResponse = {
-  user_id: string;
+export type GrantCreditResponse = Pick<CreditGrantRecord, "user_id"> & {
   current_credit_usd: number;
 };
 
@@ -26,7 +29,7 @@ export type AdminUserSummary = {
   email: string | null;
   full_name: string | null;
   image_url?: string | null;
-  role: "admin" | "user";
+  role: UserRole;
   is_active: boolean;
   current_credit_usd: number;
   credit_floor_usd: number;

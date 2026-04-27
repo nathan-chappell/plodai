@@ -1,3 +1,4 @@
+./vendor/ai-portfolio-admin
 aiosqlite
 clerk-backend-api
 colorlog

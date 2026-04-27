@@ -1,54 +1,31 @@
-import math
+from __future__ import annotations
+
 from collections.abc import Mapping
 
+from ai_portfolio_admin.clerk_metadata import (
+    ClerkMetadataKeys,
+    has_explicit_credit_floor_usd,
+    metadata_with_active_state,
+    public_metadata,
+    resolve_credit_floor_usd as shared_resolve_credit_floor_usd,
+)
 
 CREDIT_FLOOR_METADATA_KEY = "credit_floor_usd"
 DEFAULT_CREDIT_FLOOR_USD = -1.0
+PLODAI_METADATA_KEYS = ClerkMetadataKeys(default_credit_floor_usd=DEFAULT_CREDIT_FLOOR_USD)
 
 
 def as_public_metadata(raw_metadata: object | None) -> Mapping[str, object]:
-    if isinstance(raw_metadata, Mapping):
-        return raw_metadata
-    return {}
+    return public_metadata(raw_metadata)
 
 
-def _coerce_credit_floor_usd(raw_value: object) -> float | None:
-    if isinstance(raw_value, bool):
-        return None
-
-    if isinstance(raw_value, (int, float)):
-        value = float(raw_value)
-    elif isinstance(raw_value, str):
-        normalized = raw_value.strip()
-        if not normalized:
-            return None
-        try:
-            value = float(normalized)
-        except ValueError:
-            return None
-    else:
-        return None
-
-    if not math.isfinite(value):
-        return None
-    return round(value, 8)
+def has_explicit_credit_floor(metadata: Mapping[str, object] | None) -> bool:
+    return has_explicit_credit_floor_usd(metadata, PLODAI_METADATA_KEYS)
 
 
-def has_explicit_credit_floor(public_metadata: Mapping[str, object] | None) -> bool:
-    if public_metadata is None:
-        return False
-    return _coerce_credit_floor_usd(
-        public_metadata.get(CREDIT_FLOOR_METADATA_KEY)
-    ) is not None
+def resolve_credit_floor_usd(metadata: Mapping[str, object] | None) -> float:
+    return shared_resolve_credit_floor_usd(metadata, PLODAI_METADATA_KEYS)
 
 
-def resolve_credit_floor_usd(public_metadata: Mapping[str, object] | None) -> float:
-    if public_metadata is None:
-        return DEFAULT_CREDIT_FLOOR_USD
-
-    resolved_value = _coerce_credit_floor_usd(
-        public_metadata.get(CREDIT_FLOOR_METADATA_KEY)
-    )
-    if resolved_value is None:
-        return DEFAULT_CREDIT_FLOOR_USD
-    return resolved_value
+def active_public_metadata(metadata: Mapping[str, object] | None, *, active: bool) -> dict[str, object]:
+    return metadata_with_active_state(metadata, active=active, keys=PLODAI_METADATA_KEYS)
