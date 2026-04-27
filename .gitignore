@@ -1,6 +1,6 @@
 !.env.example
 !frontend/.env.example
-
+plodai_backend.egg-info
 __pycache__/
 .DS_Store
 .env

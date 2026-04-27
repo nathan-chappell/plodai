@@ -249,7 +249,7 @@ describe("PlodaiFarmPane", () => {
       expect(rootElement.textContent).toContain("Farm");
       expect(rootElement.textContent).toContain("Overview");
       expect(rootElement.textContent).toContain("Chat");
-      expect(rootElement.textContent).toContain("Admin");
+      expect(rootElement.querySelector("[aria-label='Open settings']")).not.toBeNull();
       expect(rootElement.textContent).toContain("HR");
       expect(rootElement.textContent).toContain("EN");
       expect(rootElement.textContent).toContain("Auth");

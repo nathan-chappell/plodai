@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 export const PLODAI_PATH = "/plodai";
-export const ADMIN_USERS_PATH = "/admin/users";
+export const ADMIN_PATH = "/admin";
+export const ADMIN_USERS_PATH = ADMIN_PATH;
 const FARM_ORDER_PATH_PREFIX = "/farms/";
 
 function currentPathname(): string {
@@ -43,7 +44,7 @@ export function isPlodaiPath(pathname: string): boolean {
 }
 
 export function isAdminUsersPath(pathname: string): boolean {
-  return pathname === ADMIN_USERS_PATH;
+  return pathname === ADMIN_PATH;
 }
 
 export function isFarmOrderPath(pathname: string): boolean {

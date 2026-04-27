@@ -48,10 +48,12 @@ export function PlatformShell({
                     {canViewAdmin ? (
                       <NavButton
                         $active={activePath === ADMIN_USERS_PATH}
+                        aria-label="Open settings"
                         onClick={() => navigate(ADMIN_USERS_PATH)}
+                        title="Settings"
                         type="button"
                       >
-                        Admin
+                        {"\u2699"}
                       </NavButton>
                     ) : null}
                   </NavRow>

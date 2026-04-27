@@ -482,10 +482,12 @@ export function PlodaiFarmPane() {
           {user?.role === "admin" ? (
             <CompactUtilityButton
               $active={false}
+              aria-label="Open settings"
               onClick={() => navigate(ADMIN_USERS_PATH)}
+              title="Settings"
               type="button"
             >
-              Admin
+              {"\u2699"}
             </CompactUtilityButton>
           ) : null}
         </CompactUtilityRow>
