@@ -20,8 +20,7 @@ from backend.app.chatkit.server import (
 from backend.app.core.auth import AuthenticatedUser, require_paid_user
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging, get_logger, log_event
-from backend.app.db.session import Base, engine
-from backend.app.models.registry import import_models
+from backend.app.db.session import ensure_database_ready
 from backend.app.services.bucket_storage import RailwayBucketService
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -37,9 +36,7 @@ def _read_version() -> str:
     return version if isinstance(version, str) and version else "unknown"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    import_models()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await ensure_database_ready()
 
     bucket_service = RailwayBucketService(settings)
     if bucket_service.is_configured():
@@ -120,7 +117,7 @@ if settings.OPENAI_API_KEY:
 
 app = FastAPI(
     title="PlodAI API",
-    version="1.1.3",
+    version="2.0.0",
     description="Farm-first PlodAI backend.",
     lifespan=lifespan,
 )

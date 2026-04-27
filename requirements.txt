@@ -1,5 +1,7 @@
 ./vendor/ai-portfolio-admin
+alembic
 aiosqlite
+asyncpg
 clerk-backend-api
 colorlog
 email-validator
@@ -11,6 +13,7 @@ openai-chatkit
 pillow
 pydantic-settings
 python-multipart
+psycopg[binary]
 sqlalchemy
 typer
 uvicorn[standard]

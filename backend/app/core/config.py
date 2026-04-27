@@ -1,7 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -12,6 +16,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "sqlite:///./ai_portfolio.db"
+    database_schema_mode: Literal["create_all", "migrations"] = "migrations"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
     plodai_chat_attachment_max_bytes: int = 10 * 1024 * 1024
@@ -38,9 +43,20 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
+        if self.database_url.startswith("postgresql://"):
+            return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         if self.database_url.startswith("sqlite:///"):
             return self.database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
         return self.database_url
+
+    @property
+    def sync_database_url(self) -> str:
+        database_url = self.async_database_url
+        if database_url.startswith("postgresql+asyncpg://"):
+            return database_url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+        if database_url.startswith("sqlite+aiosqlite://"):
+            return database_url.replace("sqlite+aiosqlite://", "sqlite://", 1)
+        return database_url
 
 
 @lru_cache
