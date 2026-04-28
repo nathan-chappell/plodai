@@ -110,6 +110,10 @@ For deployed PostgreSQL, keep `database_schema_mode=migrations` and set
 app tables from `public` into `plodai` when needed, and runs Alembic with its
 version table in the app schema.
 
+For Railway public networking, leave `HOST` unset or set it to `0.0.0.0`, and
+let Railway provide `PORT`. A conflicting host/port can make the deployment
+look healthy while Railway's edge proxy returns 502.
+
 ### Install and run
 
 Run both the Python and npm toolchains from the repository root.
