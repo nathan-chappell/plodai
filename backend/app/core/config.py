@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     database_schema_mode: Literal["create_all", "migrations"] = "migrations"
     database_app_schema: str = "plodai"
     database_shared_schema: str = "public"
+    database_startup_retry_attempts: int = Field(default=5, ge=1)
+    database_startup_retry_delay_seconds: float = Field(default=1.0, ge=0.0)
     static_dir: str = "./dist"
     openai_max_retries: int = 5
     plodai_chat_attachment_max_bytes: int = 10 * 1024 * 1024

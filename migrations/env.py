@@ -7,10 +7,12 @@ import re
 
 from alembic import context
 from sqlalchemy import engine_from_config, make_url, pool, text
+from sqlalchemy.engine import Engine
 
 from backend.app.core.config import Settings
 from backend.app.db.session import Base
 from backend.app.db.schemas import APP_SCHEMA_KEY, SHARED_SCHEMA_KEY
+from backend.app.db.startup_retry import run_with_postgresql_startup_retries
 from backend.app.models.registry import import_models
 
 config = context.config
@@ -68,6 +70,14 @@ def _known_revision_ids() -> set[str]:
     return revision_ids
 
 
+def _app_table_names() -> set[str]:
+    return {
+        table.name
+        for table in target_metadata.tables.values()
+        if table.schema == APP_SCHEMA_KEY
+    }
+
+
 def _table_exists(connection, *, schema_name: str, table_name: str) -> bool:
     return bool(
         connection.execute(
@@ -86,6 +96,25 @@ def _table_exists(connection, *, schema_name: str, table_name: str) -> bool:
     )
 
 
+def _move_legacy_public_app_tables(connection, settings: Settings) -> None:
+    if settings.database_app_schema == "public":
+        return
+
+    app_schema = _quote_identifier(settings.database_app_schema)
+    for table_name in sorted(_app_table_names()):
+        if _table_exists(
+            connection,
+            schema_name=settings.database_app_schema,
+            table_name=table_name,
+        ):
+            continue
+        if not _table_exists(connection, schema_name="public", table_name=table_name):
+            continue
+        connection.execute(
+            text(f"ALTER TABLE public.{_quote_identifier(table_name)} SET SCHEMA {app_schema}")
+        )
+
+
 def _copy_legacy_public_version_table(connection, settings: Settings) -> None:
     if settings.database_app_schema == "public":
         return
@@ -96,6 +125,16 @@ def _copy_legacy_public_version_table(connection, settings: Settings) -> None:
     ):
         return
     if not _table_exists(connection, schema_name="public", table_name="alembic_version"):
+        return
+    app_table_names = _app_table_names()
+    if app_table_names and any(
+        not _table_exists(
+            connection,
+            schema_name=settings.database_app_schema,
+            table_name=table_name,
+        )
+        for table_name in app_table_names
+    ):
         return
 
     legacy_version = connection.execute(
@@ -145,16 +184,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    settings = Settings()
-    configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = _database_url()
-    connectable = engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
+def _run_migrations_online_once(settings: Settings, connectable: Engine) -> None:
     with connectable.connect() as connection:
         uses_postgresql = connection.dialect.name == "postgresql"
         if uses_postgresql:
@@ -169,6 +199,7 @@ def run_migrations_online() -> None:
                 f'"{schema_name}"' for schema_name in settings.database_search_path
             )
             connection.exec_driver_sql(f"SET search_path TO {search_path}")
+            _move_legacy_public_app_tables(connection, settings)
             _copy_legacy_public_version_table(connection, settings)
             connection.commit()
 
@@ -188,6 +219,24 @@ def run_migrations_online() -> None:
         )
         with context.begin_transaction():
             context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    settings = Settings()
+    configuration = config.get_section(config.config_ini_section, {})
+    configuration["sqlalchemy.url"] = _database_url()
+    connectable = engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    run_with_postgresql_startup_retries(
+        lambda: _run_migrations_online_once(settings, connectable),
+        operation_name="alembic.upgrade",
+        max_attempts=settings.database_startup_retry_attempts,
+        delay_seconds=settings.database_startup_retry_delay_seconds,
+    )
 
 
 if context.is_offline_mode():

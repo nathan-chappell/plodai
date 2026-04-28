@@ -1,6 +1,6 @@
 [project]
 name = "plodai-backend"
-version = "2.1.0"
+version = "2.1.1"
 description = "FastAPI backend for the PlodAI farm operations workspace."
 requires-python = ">=3.14"
 dependencies = [
@@ -45,6 +45,9 @@ fixable = ["F401"]
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 pythonpath = [".", "vendor/ai-portfolio-admin/src"]
+markers = [
+  "no_db: test does not need the autouse database reset fixture",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

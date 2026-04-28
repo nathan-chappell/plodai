@@ -86,6 +86,9 @@ PUBLIC_BASE_URL=http://localhost:8000
 CORS_ORIGINS=["http://localhost:8000","http://127.0.0.1:8000","http://localhost:5173","http://127.0.0.1:5173"]
 
 database_url=sqlite:///./plodai.db
+database_schema_mode=migrations
+database_app_schema=plodai
+database_shared_schema=public
 
 # Use your own storage values in a real deployment or fork.
 storage_bucket_endpoint=https://your-bucket-endpoint
@@ -101,6 +104,11 @@ VITE_CHATKIT_LIGHTWEIGHT_MODEL_LABEL=Lightweight
 VITE_CHATKIT_BALANCED_MODEL_LABEL=Balanced
 VITE_CHATKIT_POWERFUL_MODEL_LABEL=Powerful
 ```
+
+For deployed PostgreSQL, keep `database_schema_mode=migrations` and set
+`database_app_schema=plodai`. Startup creates the app schema, moves legacy PlodAI
+app tables from `public` into `plodai` when needed, and runs Alembic with its
+version table in the app schema.
 
 ### Install and run
 

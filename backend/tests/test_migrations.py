@@ -31,3 +31,11 @@ def test_alembic_head_matches_orm_tables_and_columns(tmp_path: Path) -> None:
             assert actual_columns == expected_columns, table.name
     finally:
         engine.dispose()
+
+
+def test_postgresql_migrations_move_legacy_public_app_tables_before_copying_version() -> None:
+    migration_env = (PROJECT_ROOT / "migrations" / "env.py").read_text(encoding="utf-8")
+
+    assert "ALTER TABLE public." in migration_env
+    assert "_move_legacy_public_app_tables(connection, settings)" in migration_env
+    assert "version_table_schema=_version_table_schema(" in migration_env

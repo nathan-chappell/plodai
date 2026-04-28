@@ -10,6 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
 
 from backend.app.core.config import PROJECT_ROOT, get_settings
 from backend.app.db.schemas import APP_SCHEMA_KEY, SHARED_SCHEMA_KEY
+from backend.app.db.startup_retry import run_async_with_postgresql_startup_retries
 
 
 class Base(AsyncAttrs, MappedAsDataclass, DeclarativeBase):
@@ -94,5 +95,14 @@ async def ensure_database_ready() -> None:
     if settings.database_schema_mode == "migrations":
         await asyncio.to_thread(_upgrade_to_head)
         return
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+
+    async def _create_all() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    await run_async_with_postgresql_startup_retries(
+        _create_all,
+        operation_name="database.create_all",
+        max_attempts=settings.database_startup_retry_attempts,
+        delay_seconds=settings.database_startup_retry_delay_seconds,
+    )
