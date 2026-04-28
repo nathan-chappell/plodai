@@ -22,12 +22,12 @@ def test_alembic_head_matches_orm_tables_and_columns(tmp_path: Path) -> None:
     try:
         inspector = inspect(engine)
         actual_tables = set(inspector.get_table_names()) - {"alembic_version"}
-        expected_tables = set(Base.metadata.tables)
+        expected_tables = {table.name for table in Base.metadata.tables.values()}
         assert actual_tables == expected_tables
 
-        for table_name, table in Base.metadata.tables.items():
-            actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        for table in Base.metadata.tables.values():
+            actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
             expected_columns = set(table.columns.keys())
-            assert actual_columns == expected_columns, table_name
+            assert actual_columns == expected_columns, table.name
     finally:
         engine.dispose()

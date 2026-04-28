@@ -194,8 +194,10 @@ class FarmService:
         for chat in chats:
             await self.db.delete(chat)
 
-        await self.db.delete(record)
-        await self.db.delete(farm)
+        await self.db.execute(
+            delete(FarmRecord).where(FarmRecord.farm_id == record.farm_id)
+        )
+        await self.db.execute(delete(Farm).where(Farm.id == farm.id))
         await self.db.commit()
 
     async def require_farm(

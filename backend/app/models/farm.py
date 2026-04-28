@@ -4,10 +4,12 @@ from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.session import Base
+from backend.app.db.schemas import APP_SCHEMA_KEY
 
 
 class Farm(Base, kw_only=True):
     __tablename__ = "farms"
+    __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[str] = mapped_column(Text, index=True)
@@ -27,9 +29,10 @@ class Farm(Base, kw_only=True):
 
 class FarmRecord(Base, kw_only=True):
     __tablename__ = "farm_records"
+    __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     farm_id: Mapped[str] = mapped_column(
-        ForeignKey("farms.id"),
+        ForeignKey(f"{APP_SCHEMA_KEY}.farms.id"),
         primary_key=True,
     )
     payload_json: Mapped[dict] = mapped_column(JSON, default_factory=dict)
@@ -48,12 +51,16 @@ class FarmRecord(Base, kw_only=True):
 
 class FarmImage(Base, kw_only=True):
     __tablename__ = "farm_images"
+    __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    farm_id: Mapped[str] = mapped_column(ForeignKey("farms.id"), index=True)
+    farm_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA_KEY}.farms.id"),
+        index=True,
+    )
     user_id: Mapped[str] = mapped_column(Text, index=True)
     chat_id: Mapped[str | None] = mapped_column(
-        ForeignKey("farm_chats.id"),
+        ForeignKey(f"{APP_SCHEMA_KEY}.farm_chats.id"),
         index=True,
         default=None,
     )
@@ -82,10 +89,11 @@ class FarmImage(Base, kw_only=True):
 
 class FarmChat(Base, kw_only=True):
     __tablename__ = "farm_chats"
+    __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
     farm_id: Mapped[str] = mapped_column(
-        ForeignKey("farms.id"),
+        ForeignKey(f"{APP_SCHEMA_KEY}.farms.id"),
         index=True,
         unique=True,
     )
@@ -116,9 +124,13 @@ class FarmChat(Base, kw_only=True):
 
 class FarmChatEntry(Base, kw_only=True):
     __tablename__ = "farm_chat_entries"
+    __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    chat_id: Mapped[str] = mapped_column(ForeignKey("farm_chats.id"), index=True)
+    chat_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA_KEY}.farm_chats.id"),
+        index=True,
+    )
     kind: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSON, default_factory=dict)
     sequence: Mapped[int] = mapped_column(Integer, index=True, default=0)
@@ -131,6 +143,7 @@ class FarmChatEntry(Base, kw_only=True):
 
 class FarmChatAttachment(Base, kw_only=True):
     __tablename__ = "farm_chat_attachments"
+    __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(Text)

@@ -1,11 +1,13 @@
 from functools import lru_cache
 from pathlib import Path
+import re
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATABASE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class Settings(BaseSettings):
@@ -17,6 +19,8 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./ai_portfolio.db"
     database_schema_mode: Literal["create_all", "migrations"] = "migrations"
+    database_app_schema: str = "plodai"
+    database_shared_schema: str = "public"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
     plodai_chat_attachment_max_bytes: int = 10 * 1024 * 1024
@@ -41,6 +45,16 @@ class Settings(BaseSettings):
     CLERK_SECRET_KEY: str | None = None
     CLERK_JWT_KEY: str | None = None
 
+    @field_validator("database_app_schema", "database_shared_schema")
+    @classmethod
+    def validate_database_identifier(cls, value: str) -> str:
+        cleaned_value = value.strip()
+        if DATABASE_IDENTIFIER_PATTERN.fullmatch(cleaned_value) is None:
+            raise ValueError(
+                "database schema names must be valid PostgreSQL identifiers"
+            )
+        return cleaned_value
+
     @property
     def async_database_url(self) -> str:
         if self.database_url.startswith("postgresql://"):
@@ -57,6 +71,15 @@ class Settings(BaseSettings):
         if database_url.startswith("sqlite+aiosqlite://"):
             return database_url.replace("sqlite+aiosqlite://", "sqlite://", 1)
         return database_url
+
+    @property
+    def database_search_path(self) -> tuple[str, ...]:
+        schema_names = [self.database_app_schema, self.database_shared_schema, "public"]
+        return tuple(dict.fromkeys(schema_names))
+
+    @property
+    def uses_postgresql(self) -> bool:
+        return self.sync_database_url.startswith("postgresql")
 
 
 @lru_cache

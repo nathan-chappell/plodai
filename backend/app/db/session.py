@@ -3,11 +3,13 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
 
 from backend.app.core.config import PROJECT_ROOT, get_settings
+from backend.app.db.schemas import APP_SCHEMA_KEY, SHARED_SCHEMA_KEY
 
 
 class Base(AsyncAttrs, MappedAsDataclass, DeclarativeBase):
@@ -15,10 +17,48 @@ class Base(AsyncAttrs, MappedAsDataclass, DeclarativeBase):
 
 
 settings = get_settings()
-engine = create_async_engine(settings.async_database_url, future=True)
+
+
+def _schema_translate_map() -> dict[str, str | None]:
+    if settings.uses_postgresql:
+        return {
+            APP_SCHEMA_KEY: settings.database_app_schema,
+            SHARED_SCHEMA_KEY: settings.database_shared_schema,
+        }
+    return {APP_SCHEMA_KEY: None, SHARED_SCHEMA_KEY: None}
+
+
+engine = create_async_engine(
+    settings.async_database_url,
+    execution_options={"schema_translate_map": _schema_translate_map()},
+    future=True,
+)
 AsyncSessionLocal = async_sessionmaker(
     bind=engine, autoflush=False, expire_on_commit=False
 )
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _configure_postgresql_schema_search_path(dbapi_connection, _connection_record) -> None:
+    if not settings.uses_postgresql:
+        return
+
+    async def _configure_connection(driver_connection) -> None:
+        schema_statements = [
+            f'CREATE SCHEMA IF NOT EXISTS "{settings.database_app_schema}"'
+        ]
+        if settings.database_shared_schema != "public":
+            schema_statements.append(
+                f'CREATE SCHEMA IF NOT EXISTS "{settings.database_shared_schema}"'
+            )
+        search_path = ", ".join(
+            f'"{schema_name}"' for schema_name in settings.database_search_path
+        )
+        schema_statements.append(f"SET search_path TO {search_path}")
+        for statement in schema_statements:
+            await driver_connection.execute(statement)
+
+    dbapi_connection.run_async(_configure_connection)
 
 
 async def get_db():

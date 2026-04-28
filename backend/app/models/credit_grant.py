@@ -5,10 +5,12 @@ from sqlalchemy import DateTime, Float, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.session import Base
+from backend.app.db.schemas import SHARED_SCHEMA_KEY
 
 
 class CreditGrant(Base):
     __tablename__ = "credit_grants"
+    __table_args__ = {"schema": SHARED_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(
         Text,
