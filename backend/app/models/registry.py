@@ -6,6 +6,7 @@ def import_models() -> tuple[type[Base], ...]:
     from backend.app.models.cost import CostEvent
     from backend.app.models.credit import UserCreditBalance
     from backend.app.models.credit_grant import CreditGrant
+    from backend.app.models.free_credit_request import FreeCreditRequest
     from backend.app.models.farm import (
         Farm,
         FarmChat,
@@ -14,11 +15,14 @@ def import_models() -> tuple[type[Base], ...]:
         FarmImage,
         FarmRecord,
     )
+    from backend.app.models.payment_attempt import PaymentAttempt
 
     return (
         CostEvent,
         UserCreditBalance,
         CreditGrant,
+        PaymentAttempt,
+        FreeCreditRequest,
         Farm,
         FarmRecord,
         FarmImage,

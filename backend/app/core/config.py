@@ -4,7 +4,7 @@ import re
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import Field, field_validator
+from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     storage_bucket_download_url_ttl_seconds: int = 5 * 60
     clerk_authorized_parties: list[str] = []
     clerk_clock_skew_ms: int = 5000
+    paypal_recipient_email: str | None = None
+    paypal_payment_url: AnyHttpUrl | None = None
+    paypal_min_payment_usd: float = 5.0
+    paypal_max_payment_usd: float = 250.0
     USE_COLORLOG: bool = False
     LOG_LEVEL: str = "INFO"
 

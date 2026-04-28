@@ -2,6 +2,19 @@ import { publishPaymentRequiredToast } from "../app/toasts";
 import type { PreferredOutputLanguage } from "./chat-language";
 import type { PlodaiEntitySearchResponse } from "../types/chat-entities";
 import type {
+  AdminFreeCreditDecisionRequest,
+  AdminPaymentAttemptDecisionRequest,
+  FreeCreditRequestCreate,
+  FreeCreditRequestListResponse,
+  FreeCreditRequestSummary,
+  PaymentAttemptListResponse,
+  PaymentAttemptStatus,
+  PaymentAttemptSummary,
+  PaymentIntegrationResponse,
+  PayPalPaymentAttemptCreateRequest,
+  FreeCreditRequestStatus,
+} from "../types/credits";
+import type {
   FarmDeleteResponse,
   FarmDetail,
   FarmImageDeleteResponse,
@@ -190,6 +203,78 @@ export async function fetchPublicFarmOrder(
   return publicApiRequest<PublicFarmOrderResponse>(
     `/public/farms/${encodeURIComponent(farmId)}/orders/${encodeURIComponent(orderId)}`,
   );
+}
+
+export async function getPaymentIntegrationStatus(): Promise<PaymentIntegrationResponse> {
+  return apiRequest<PaymentIntegrationResponse>("/billing/payment-status");
+}
+
+export async function listPayPalPaymentAttempts(): Promise<PaymentAttemptListResponse> {
+  return apiRequest<PaymentAttemptListResponse>("/billing/paypal/attempts");
+}
+
+export async function createPayPalPaymentAttempt(
+  payload: PayPalPaymentAttemptCreateRequest,
+): Promise<PaymentAttemptSummary> {
+  return apiRequest<PaymentAttemptSummary>("/billing/paypal/attempts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function uploadPayPalReceipt(attemptId: string, file: File): Promise<PaymentAttemptSummary> {
+  const formData = new FormData();
+  formData.set("file", file, file.name);
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}/billing/paypal/attempts/${encodeURIComponent(attemptId)}/receipt`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+  if (!response.ok) {
+    throw await buildApiError(response);
+  }
+  return (await response.json()) as PaymentAttemptSummary;
+}
+
+export async function listFreeCreditRequests(): Promise<FreeCreditRequestListResponse> {
+  return apiRequest<FreeCreditRequestListResponse>("/billing/free-credit-requests");
+}
+
+export async function createFreeCreditRequest(payload: FreeCreditRequestCreate): Promise<FreeCreditRequestSummary> {
+  return apiRequest<FreeCreditRequestSummary>("/billing/free-credit-requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listAdminPaymentAttempts(status: PaymentAttemptStatus): Promise<PaymentAttemptListResponse> {
+  return apiRequest<PaymentAttemptListResponse>(`/admin/payments?status=${encodeURIComponent(status)}`);
+}
+
+export async function decideAdminPaymentAttempt(
+  payload: AdminPaymentAttemptDecisionRequest,
+): Promise<PaymentAttemptSummary> {
+  return apiRequest<PaymentAttemptSummary>("/admin/payments/decide", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listAdminFreeCreditRequests(
+  status: FreeCreditRequestStatus,
+): Promise<FreeCreditRequestListResponse> {
+  return apiRequest<FreeCreditRequestListResponse>(`/admin/free-credit-requests?status=${encodeURIComponent(status)}`);
+}
+
+export async function decideAdminFreeCreditRequest(
+  payload: AdminFreeCreditDecisionRequest,
+): Promise<FreeCreditRequestSummary> {
+  return apiRequest<FreeCreditRequestSummary>("/admin/free-credit-requests/decide", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 async function buildApiError(response: Response): Promise<ApiError> {

@@ -21,13 +21,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-COPY requirements.txt ./
+COPY pyproject.toml ./
 COPY vendor ./vendor
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend ./backend
+RUN pip install --no-cache-dir .
 
 COPY alembic.ini ./
 COPY migrations ./migrations
-COPY backend ./backend
 COPY main.py package.json ./
 COPY --from=frontend-build /app/dist ./dist
 

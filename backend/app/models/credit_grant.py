@@ -26,7 +26,10 @@ class CreditGrant(Base):
         kw_only=True,
     )
     credit_amount_usd: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(Text, default="admin_manual", kw_only=True)
     note: Mapped[str | None] = mapped_column(Text, default=None, kw_only=True)
+    payment_provider: Mapped[str | None] = mapped_column(Text, default=None, kw_only=True)
+    payment_reference: Mapped[str | None] = mapped_column(Text, index=True, default=None, kw_only=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         init=False,

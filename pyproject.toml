@@ -4,7 +4,7 @@ version = "2.1.0"
 description = "FastAPI backend for the PlodAI farm operations workspace."
 requires-python = ">=3.14"
 dependencies = [
-  "ai-portfolio-admin @ file:vendor/ai-portfolio-admin",
+  "ai-portfolio-admin @ file:./vendor/ai-portfolio-admin",
   "alembic",
   "aiosqlite",
   "asyncpg",
@@ -17,6 +17,7 @@ dependencies = [
   "openai-agents",
   "openai-chatkit",
   "pillow",
+  "pypdf",
   "colorlog",
   "pydantic-settings",
   "python-multipart",
@@ -43,6 +44,7 @@ fixable = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
+pythonpath = [".", "vendor/ai-portfolio-admin/src"]
 
 [tool.setuptools.packages.find]
 where = ["."]

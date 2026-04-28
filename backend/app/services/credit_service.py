@@ -51,15 +51,85 @@ class CreditService:
         note: str | None = None,
         admin_user_id: str | None = None,
     ) -> UserCreditBalance:
-        balance = await self.get_or_create_balance(user_id)
-        self.db.add(
-            CreditGrant(
-                user_id=user_id,
-                admin_user_id=admin_user_id,
-                credit_amount_usd=round(float(credit_amount_usd), 8),
-                note=note.strip() if note else None,
-            )
+        balance, _ = await self.grant_credit_record(
+            user_id,
+            credit_amount_usd,
+            note=note,
+            admin_user_id=admin_user_id,
+            source="admin_manual",
         )
+        return balance
+
+    async def grant_credit_record(
+        self,
+        user_id: str,
+        credit_amount_usd: float,
+        *,
+        note: str | None = None,
+        admin_user_id: str | None = None,
+        source: str = "admin_manual",
+        payment_provider: str | None = None,
+        payment_reference: str | None = None,
+    ) -> tuple[UserCreditBalance, CreditGrant]:
+        amount = round(float(credit_amount_usd), 8)
+        if amount <= 0:
+            raise ValueError("Credit amount must be positive.")
+        return await self._record_credit_adjustment(
+            user_id,
+            amount,
+            note=note,
+            admin_user_id=admin_user_id,
+            source=source,
+            payment_provider=payment_provider,
+            payment_reference=payment_reference,
+        )
+
+    async def adjust_credit_record(
+        self,
+        user_id: str,
+        credit_amount_usd: float,
+        *,
+        note: str | None,
+        admin_user_id: str | None,
+        source: str,
+        payment_provider: str | None = None,
+        payment_reference: str | None = None,
+    ) -> tuple[UserCreditBalance, CreditGrant]:
+        amount = round(float(credit_amount_usd), 8)
+        if amount == 0:
+            raise ValueError("Credit adjustment amount must be nonzero.")
+        return await self._record_credit_adjustment(
+            user_id,
+            amount,
+            note=note,
+            admin_user_id=admin_user_id,
+            source=source,
+            payment_provider=payment_provider,
+            payment_reference=payment_reference,
+        )
+
+    async def _record_credit_adjustment(
+        self,
+        user_id: str,
+        credit_amount_usd: float,
+        *,
+        note: str | None,
+        admin_user_id: str | None,
+        source: str,
+        payment_provider: str | None,
+        payment_reference: str | None,
+    ) -> tuple[UserCreditBalance, CreditGrant]:
+        balance = await self.get_or_create_balance(user_id)
+        grant = CreditGrant(
+            user_id=user_id,
+            admin_user_id=admin_user_id,
+            credit_amount_usd=credit_amount_usd,
+            source=source,
+            note=note.strip() if note else None,
+            payment_provider=payment_provider.strip() if payment_provider else None,
+            payment_reference=payment_reference.strip() if payment_reference else None,
+        )
+        self.db.add(grant)
         balance.current_credit_usd = round(
             float(balance.current_credit_usd) + float(credit_amount_usd),
             8,
@@ -67,7 +137,8 @@ class CreditService:
         balance.updated_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(balance)
-        return balance
+        await self.db.refresh(grant)
+        return balance, grant
 
     @staticmethod
     async def record_cost_event(

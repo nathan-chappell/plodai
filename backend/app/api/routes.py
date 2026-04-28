@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import (
@@ -10,12 +10,23 @@ from backend.app.core.config import resolve_public_base_url
 from backend.app.db.session import get_db
 from backend.app.schemas.auth import UserResponse
 from backend.app.schemas.credits import (
+    AdminFreeCreditDecisionRequest,
     AdminGrantCreditRequest,
     AdminGrantCreditResponse,
+    AdminPaymentAttemptDecisionRequest,
     AdminSetUserActiveRequest,
     AdminSetUserActiveResponse,
     AdminUserListResponse,
     AdminUserSummary,
+    FreeCreditRequestCreate,
+    FreeCreditRequestListResponse,
+    FreeCreditRequestStatus,
+    FreeCreditRequestSummary,
+    PaymentAttemptListResponse,
+    PaymentAttemptStatus,
+    PaymentAttemptSummary,
+    PaymentIntegrationResponse,
+    PayPalPaymentAttemptCreateRequest,
 )
 from backend.app.schemas.farm import (
     FarmCreateRequest,
@@ -41,6 +52,8 @@ from backend.app.services.clerk_admin_service import (
 from backend.app.services.credit_service import CreditService
 from backend.app.services.farm_image_service import FarmImageService
 from backend.app.services.farm_service import FarmService
+from backend.app.services.free_credits import FreeCreditService
+from backend.app.services.payments import PaymentService
 from backend.app.services.plodai_entity_service import PlodaiEntityService
 from backend.app.services.public_farm_order_service import PublicFarmOrderService
 
@@ -62,6 +75,103 @@ async def me(
         current_credit_usd=balance.current_credit_usd,
         credit_floor_usd=user.credit_floor_usd,
     )
+
+
+@router.get("/billing/payment-status", response_model=PaymentIntegrationResponse)
+async def payment_status(
+    _: AuthenticatedUser = Depends(require_current_user),
+):
+    from backend.app.core.config import get_settings
+
+    settings = get_settings()
+    paypal_recipient_email = settings.paypal_recipient_email.strip() if settings.paypal_recipient_email else None
+    return PaymentIntegrationResponse(
+        provider="paypal" if paypal_recipient_email else "none",
+        checkout_enabled=False,
+        receipt_upload_enabled=paypal_recipient_email is not None,
+        reason=(
+            "Send a PayPal payment, include the generated reference code, then upload the receipt for receipt-backed credit."
+            if paypal_recipient_email
+            else "Payment receipt uploads are not configured."
+        ),
+        paypal_recipient_email=paypal_recipient_email,
+        paypal_payment_url=str(settings.paypal_payment_url) if settings.paypal_payment_url else None,
+        min_payment_usd=settings.paypal_min_payment_usd,
+        max_payment_usd=settings.paypal_max_payment_usd,
+    )
+
+
+@router.get("/billing/paypal/attempts", response_model=PaymentAttemptListResponse)
+async def list_paypal_attempts(
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    attempts = await PaymentService(db).list_user_attempts(user_id=user.id)
+    return PaymentAttemptListResponse(attempts=attempts)
+
+
+@router.post("/billing/paypal/attempts", response_model=PaymentAttemptSummary)
+async def create_paypal_attempt(
+    payload: PayPalPaymentAttemptCreateRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await PaymentService(db).create_paypal_attempt(
+            user_id=user.id,
+            expected_amount_usd=payload.expected_amount_usd,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/billing/paypal/attempts/{attempt_id}/receipt", response_model=PaymentAttemptSummary)
+async def upload_paypal_receipt(
+    attempt_id: str,
+    file: UploadFile = File(...),
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = await file.read()
+    if len(payload) > 5_000_000:
+        raise HTTPException(status_code=413, detail="Receipt upload is too large.")
+    try:
+        return await PaymentService(db).review_receipt_upload(
+            user_id=user.id,
+            attempt_id=attempt_id,
+            filename=file.filename or "receipt",
+            media_type=file.content_type,
+            payload=payload,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/billing/free-credit-requests", response_model=FreeCreditRequestListResponse)
+async def list_free_credit_requests(
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    requests = await FreeCreditService(db).list_user_requests(user_id=user.id)
+    return FreeCreditRequestListResponse(requests=requests)
+
+
+@router.post("/billing/free-credit-requests", response_model=FreeCreditRequestSummary)
+async def create_free_credit_request(
+    payload: FreeCreditRequestCreate,
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await FreeCreditService(db).create_request(user_id=user.id, payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/admin/credits/grant", response_model=AdminGrantCreditResponse)
@@ -125,6 +235,63 @@ async def set_user_active(
         current_credit_usd=balance.current_credit_usd,
         credit_floor_usd=user_summary["credit_floor_usd"],
     )
+
+
+@router.get("/admin/payments", response_model=PaymentAttemptListResponse)
+async def list_admin_payment_attempts(
+    status_filter: PaymentAttemptStatus | None = Query(default=None, alias="status"),
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    attempts = await PaymentService(db).list_admin_attempts(status=status_filter)
+    return PaymentAttemptListResponse(attempts=attempts)
+
+
+@router.post("/admin/payments/decide", response_model=PaymentAttemptSummary)
+async def decide_admin_payment_attempt(
+    payload: AdminPaymentAttemptDecisionRequest,
+    admin: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await PaymentService(db).decide_admin_attempt(
+            attempt_id=payload.attempt_id,
+            admin_user_id=admin.id,
+            status=payload.status,
+            decision_note=payload.decision_note,
+            credit_amount_usd=payload.credit_amount_usd,
+            provider_reference=payload.provider_reference,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/admin/free-credit-requests", response_model=FreeCreditRequestListResponse)
+async def list_admin_free_credit_requests(
+    status_filter: FreeCreditRequestStatus | None = Query(default=None, alias="status"),
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    requests = await FreeCreditService(db).list_admin_requests(status=status_filter)
+    return FreeCreditRequestListResponse(requests=requests)
+
+
+@router.post("/admin/free-credit-requests/decide", response_model=FreeCreditRequestSummary)
+async def decide_admin_free_credit_request(
+    payload: AdminFreeCreditDecisionRequest,
+    admin: AuthenticatedUser = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await FreeCreditService(db).decide_admin_request(
+            request_id=payload.request_id,
+            admin_user_id=admin.id,
+            status=payload.status,
+            decision_note=payload.decision_note,
+            credit_amount_usd=payload.credit_amount_usd,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/farms", response_model=list[FarmSummary])

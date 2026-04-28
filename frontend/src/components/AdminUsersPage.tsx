@@ -1,19 +1,29 @@
 import { useMemo } from "react";
 
 import { useAppState } from "../app/context";
-import { apiRequest } from "../lib/api";
+import {
+  apiRequest,
+  decideAdminFreeCreditRequest,
+  decideAdminPaymentAttempt,
+  listAdminFreeCreditRequests,
+  listAdminPaymentAttempts,
+} from "../lib/api";
 import { AdminPortfolioPanel } from "../../../vendor/ai-portfolio-admin/frontend";
 import type {
   AdminPortfolioPanelCallbacks,
   AdminUserSummary as SharedAdminUserSummary,
   CreditGrantRecord,
+  FreeCreditRequestRecord as SharedFreeCreditRequestRecord,
   ManualCreditGrantRequest,
+  PaymentAttemptRecord as SharedPaymentAttemptRecord,
 } from "../../../vendor/ai-portfolio-admin/frontend";
 import type {
   AdminUserListResponse,
   AdminUserSummary as LocalAdminUserSummary,
+  FreeCreditRequestSummary,
   GrantCreditPayload,
   GrantCreditResponse,
+  PaymentAttemptSummary,
   SetUserActivePayload,
   SetUserActiveResponse,
 } from "../types/credits";
@@ -66,6 +76,43 @@ function toSharedGrant(payload: ManualCreditGrantRequest, response: GrantCreditR
     payment_reference: payload.payment_reference ?? null,
     resulting_balance_usd: response.current_credit_usd,
     created_at: new Date().toISOString(),
+  };
+}
+
+function toSharedPaymentAttempt(attempt: PaymentAttemptSummary): SharedPaymentAttemptRecord {
+  return {
+    id: attempt.id,
+    user_id: attempt.user_id,
+    provider: "paypal",
+    expected_amount_usd: attempt.expected_amount_usd,
+    expected_currency: attempt.expected_currency,
+    reference_code: attempt.reference_code,
+    status: attempt.status,
+    temporary_access_expires_at: attempt.temporary_access_expires_at,
+    provider_reference: attempt.provider_reference,
+    created_at: attempt.created_at,
+  };
+}
+
+function toSharedFreeCreditRequest(request: FreeCreditRequestSummary): SharedFreeCreditRequestRecord {
+  return {
+    id: request.id,
+    user_id: request.user_id,
+    requested_amount_usd: request.requested_amount_usd,
+    source: request.source,
+    reason: request.reason,
+    linkedin_profile_url: request.linkedin_profile_url,
+    relationship_note: request.relationship_note,
+    intended_use: request.intended_use,
+    evidence_verified: request.evidence_verified,
+    idempotency_key: request.idempotency_key,
+    status: request.status,
+    decided_amount_usd: request.decided_amount_usd,
+    decision_note: request.decision_note,
+    reviewer_user_id: request.reviewer_user_id,
+    credit_grant_id: request.credit_grant_id,
+    created_at: request.created_at,
+    decided_at: request.decided_at,
   };
 }
 
@@ -129,6 +176,33 @@ export function AdminUsersPage() {
           );
         }
         return toSharedGrant(payload, response);
+      },
+      async listFreeCreditRequests(status) {
+        const response = await listAdminFreeCreditRequests(status);
+        return response.requests.map(toSharedFreeCreditRequest);
+      },
+      async decideFreeCreditRequest(payload) {
+        const response = await decideAdminFreeCreditRequest({
+          request_id: payload.request_id,
+          status: payload.status,
+          credit_amount_usd: payload.credit_amount_usd,
+          decision_note: payload.decision_note,
+        });
+        return toSharedFreeCreditRequest(response);
+      },
+      async listPaymentAttempts(status) {
+        const response = await listAdminPaymentAttempts(status);
+        return response.attempts.map(toSharedPaymentAttempt);
+      },
+      async decidePaymentAttempt(payload) {
+        const response = await decideAdminPaymentAttempt({
+          attempt_id: payload.attempt_id,
+          status: payload.status,
+          decision_note: payload.decision_note,
+          credit_amount_usd: payload.credit_amount_usd,
+          provider_reference: payload.provider_reference,
+        });
+        return toSharedPaymentAttempt(response);
       },
     };
   }, [setUser, user?.id]);

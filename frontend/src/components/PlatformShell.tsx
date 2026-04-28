@@ -7,7 +7,7 @@ import { AuthPanel } from "./AuthPanel";
 import { BRAND_MARK_URL } from "../lib/brand";
 import { PlatformThemeProvider } from "./platformTheme";
 import { COMPACT_WORKSPACE_MEDIA_QUERY } from "../lib/responsive";
-import { ADMIN_USERS_PATH, PLODAI_PATH, navigate } from "../lib/router";
+import { ACCOUNT_PATH, ADMIN_USERS_PATH, PLODAI_PATH, navigate } from "../lib/router";
 import { PlatformMain, PlatformPage } from "./styles";
 
 export function PlatformShell({
@@ -56,6 +56,13 @@ export function PlatformShell({
                         {"\u2699"}
                       </NavButton>
                     ) : null}
+                    <NavButton
+                      $active={activePath === ACCOUNT_PATH}
+                      onClick={() => navigate(ACCOUNT_PATH)}
+                      type="button"
+                    >
+                      Account
+                    </NavButton>
                   </NavRow>
                 ) : null}
               </BrandCluster>

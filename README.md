@@ -109,8 +109,7 @@ Run both the Python and npm toolchains from the repository root.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+pip install -e '.[dev]'
 npm install
 npm run build
 python main.py
