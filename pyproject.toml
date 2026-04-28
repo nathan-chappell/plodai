@@ -4,7 +4,7 @@ version = "2.1.0"
 description = "FastAPI backend for the PlodAI farm operations workspace."
 requires-python = ">=3.14"
 dependencies = [
-  "ai-portfolio-admin @ file:./vendor/ai-portfolio-admin",
+  "ai-portfolio-admin @ file:./vendor/ai-portfolio-admin/",
   "alembic",
   "aiosqlite",
   "asyncpg",

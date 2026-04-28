@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from logging.config import fileConfig
+from pathlib import Path
+import re
 
 from alembic import context
-from sqlalchemy import engine_from_config, make_url, pool
+from sqlalchemy import engine_from_config, make_url, pool, text
 
 from backend.app.core.config import Settings
 from backend.app.db.session import Base
@@ -18,6 +20,7 @@ if config.config_file_name is not None and not logging.getLogger().handlers:
 
 import_models()
 target_metadata = Base.metadata
+REVISION_PATTERN = re.compile(r'^revision\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 
 
 def _database_url() -> str:
@@ -40,6 +43,84 @@ def _schema_translate_map(
     return {APP_SCHEMA_KEY: None, SHARED_SCHEMA_KEY: None}
 
 
+def _version_table_schema(
+    settings: Settings,
+    *,
+    uses_postgresql: bool,
+) -> str | None:
+    if uses_postgresql:
+        return settings.database_app_schema
+    return None
+
+
+def _quote_identifier(identifier: str) -> str:
+    escaped_identifier = identifier.replace('"', '""')
+    return f'"{escaped_identifier}"'
+
+
+def _known_revision_ids() -> set[str]:
+    versions_dir = Path(__file__).parent / "versions"
+    revision_ids: set[str] = set()
+    for migration_path in versions_dir.glob("*.py"):
+        match = REVISION_PATTERN.search(migration_path.read_text(encoding="utf-8"))
+        if match is not None:
+            revision_ids.add(match.group(1))
+    return revision_ids
+
+
+def _table_exists(connection, *, schema_name: str, table_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = :schema_name
+                      AND table_name = :table_name
+                )
+                """
+            ),
+            {"schema_name": schema_name, "table_name": table_name},
+        ).scalar()
+    )
+
+
+def _copy_legacy_public_version_table(connection, settings: Settings) -> None:
+    if settings.database_app_schema == "public":
+        return
+    if _table_exists(
+        connection,
+        schema_name=settings.database_app_schema,
+        table_name="alembic_version",
+    ):
+        return
+    if not _table_exists(connection, schema_name="public", table_name="alembic_version"):
+        return
+
+    legacy_version = connection.execute(
+        text("SELECT version_num FROM public.alembic_version LIMIT 1")
+    ).scalar()
+    if not isinstance(legacy_version, str) or legacy_version not in _known_revision_ids():
+        return
+
+    app_schema = _quote_identifier(settings.database_app_schema)
+    connection.execute(
+        text(
+            f"""
+            CREATE TABLE IF NOT EXISTS {app_schema}.alembic_version (
+                version_num VARCHAR(32) NOT NULL,
+                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(f"INSERT INTO {app_schema}.alembic_version (version_num) VALUES (:version_num)"),
+        {"version_num": legacy_version},
+    )
+
+
 def run_migrations_offline() -> None:
     settings = Settings()
     database_url = _database_url()
@@ -51,6 +132,10 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
         schema_translate_map=_schema_translate_map(
+            settings,
+            uses_postgresql=uses_postgresql,
+        ),
+        version_table_schema=_version_table_schema(
             settings,
             uses_postgresql=uses_postgresql,
         ),
@@ -84,6 +169,8 @@ def run_migrations_online() -> None:
                 f'"{schema_name}"' for schema_name in settings.database_search_path
             )
             connection.exec_driver_sql(f"SET search_path TO {search_path}")
+            _copy_legacy_public_version_table(connection, settings)
+            connection.commit()
 
         context.configure(
             connection=connection.execution_options(
@@ -94,6 +181,10 @@ def run_migrations_online() -> None:
             ),
             target_metadata=target_metadata,
             include_schemas=True,
+            version_table_schema=_version_table_schema(
+                settings,
+                uses_postgresql=uses_postgresql,
+            ),
         )
         with context.begin_transaction():
             context.run_migrations()
