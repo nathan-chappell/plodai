@@ -3,6 +3,7 @@
 plodai_backend.egg-info
 __pycache__/
 .DS_Store
+.codex
 .env
 .env.*
 .pytest_cache/

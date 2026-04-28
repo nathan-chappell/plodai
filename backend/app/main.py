@@ -18,7 +18,7 @@ from backend.app.chatkit.server import (
     build_chatkit_server,
 )
 from backend.app.core.auth import AuthenticatedUser, require_paid_user
-from backend.app.core.config import get_settings
+from backend.app.core.config import get_settings, summarize_database_url_for_log
 from backend.app.core.logging import configure_logging, get_logger, log_event
 from backend.app.db.session import ensure_database_ready
 from backend.app.services.bucket_storage import RailwayBucketService
@@ -74,7 +74,7 @@ async def lifespan(_: FastAPI):
         logger,
         logging.INFO,
         "startup.complete",
-        database_url=settings.database_url,
+        database_url=summarize_database_url_for_log(settings.database_url),
         openai_max_retries=settings.openai_max_retries,
     )
     yield
@@ -117,7 +117,7 @@ if settings.OPENAI_API_KEY:
 
 app = FastAPI(
     title="PlodAI API",
-    version="2.0.0",
+    version="2.1.0",
     description="Farm-first PlodAI backend.",
     lifespan=lifespan,
 )

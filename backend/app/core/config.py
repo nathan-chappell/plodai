@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 import re
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -55,6 +56,13 @@ class Settings(BaseSettings):
             )
         return cleaned_value
 
+    @field_validator("USE_COLORLOG", mode="before")
+    @classmethod
+    def normalize_quoted_bool(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().strip("\"'")
+        return value
+
     @property
     def async_database_url(self) -> str:
         if self.database_url.startswith("postgresql://"):
@@ -85,6 +93,24 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def summarize_database_url_for_log(database_url: str) -> str:
+    parsed_url = urlsplit(database_url)
+    if not parsed_url.scheme or not parsed_url.netloc or "@" not in parsed_url.netloc:
+        return database_url
+
+    _, host = parsed_url.netloc.rsplit("@", 1)
+    redacted_netloc = f"<credentials>@{host}"
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            redacted_netloc,
+            parsed_url.path,
+            "",
+            "",
+        )
+    )
 
 
 def resolve_public_base_url(
