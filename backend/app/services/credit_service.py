@@ -1,12 +1,16 @@
 from datetime import UTC, datetime
+import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db.session import AsyncSessionLocal
 from backend.app.models.cost import CostEvent
 from backend.app.models.credit import UserCreditBalance
 from backend.app.models.credit_grant import CreditGrant
+
+logger = logging.getLogger(__name__)
 
 
 class CreditService:
@@ -22,7 +26,14 @@ class CreditService:
         if balance is None:
             balance = UserCreditBalance(user_id=user_id, current_credit_usd=0.0)
             db.add(balance)
-            await db.flush()
+            try:
+                await db.flush()
+            except IntegrityError:
+                await db.rollback()
+                balance = await db.get(UserCreditBalance, user_id)
+                if balance is None:
+                    raise
+                logger.info("credit_balance_concurrent_create_recovered user_id=%s", user_id)
         return balance
 
     async def get_or_create_balance(self, user_id: str) -> UserCreditBalance:
