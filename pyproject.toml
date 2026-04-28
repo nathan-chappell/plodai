@@ -41,6 +41,9 @@ fix = true
 [tool.ruff.lint]
 fixable = ["F401"]
 
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["backend*"]
