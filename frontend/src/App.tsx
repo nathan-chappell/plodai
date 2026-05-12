@@ -155,7 +155,7 @@ export function App() {
       <PlatformShell
         activePath={activePath}
         canViewAdmin={currentUser.role === "admin"}
-        title={showingAdmin ? "PlodAI admin" : showingAccount ? "PlodAI account" : "PlodAI"}
+        title={showingAdmin ? "PlodAI admin" : showingAccount ? "PlodAI account" : "PlodAI field desk"}
       >
         <Suspense fallback={<RouteLoadingState label={showingAdmin ? "admin" : showingAccount ? "account" : "farms"} />}>
           {showingAdmin ? <AdminUsersPage /> : showingAccount ? <AccountBillingPage /> : <PlodaiFarmPane />}

@@ -70,7 +70,7 @@ describe("FarmRecordPanel", () => {
 
     expect(markup).toContain("Areas");
     expect(markup).toContain("Crops");
-    expect(markup).toContain("Work Items");
+    expect(markup).toContain("Issues &amp; Tasks");
     expect(markup).toContain("Quantity");
     expect(markup).toContain("Expected yield");
     expect(markup).toContain("40 heads");

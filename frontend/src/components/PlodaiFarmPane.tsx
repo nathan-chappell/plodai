@@ -38,7 +38,7 @@ const COMPACT_PANES: ReadonlyArray<{
 }> = [
   {
     id: "farm",
-    label: "Farm",
+    label: "Record",
   },
   {
     id: "overview",
@@ -422,7 +422,7 @@ export function PlodaiFarmPane() {
   const farmToolbar = (
     <FarmToolbar>
       <FarmToolbarInputGroup>
-        <FarmFieldLabel htmlFor="farm-select">Farm</FarmFieldLabel>
+        <FarmFieldLabel htmlFor="farm-select">Farm record</FarmFieldLabel>
         <FarmSelect
           id="farm-select"
           onChange={(event) => setSelectedFarmId(event.target.value || null)}
@@ -526,12 +526,12 @@ export function PlodaiFarmPane() {
   const farmSummaryContent = loading ? (
     <FarmEmptyState>
       <strong>Loading farm</strong>
-      <MetaText>Pulling the current farm record, field-photo context, and chat state.</MetaText>
+      <MetaText>Pulling the current farm record, field-report context, and chat state.</MetaText>
     </FarmEmptyState>
   ) : !state.farm || !state.record ? (
     <FarmEmptyState>
       <strong>No farm selected</strong>
-      <MetaText>Create a farm or choose one from the farm pane to open PlodAI.</MetaText>
+      <MetaText>Create a farm record or choose one from the record pane to open PlodAI.</MetaText>
     </FarmEmptyState>
   ) : (
     <FarmRecordPanel
@@ -550,12 +550,12 @@ export function PlodaiFarmPane() {
   const overviewContent = loading ? (
     <FarmEmptyState>
       <strong>Loading farm</strong>
-      <MetaText>Pulling the current farm record, field-photo context, and chat state.</MetaText>
+      <MetaText>Pulling the current farm record, field-report context, and chat state.</MetaText>
     </FarmEmptyState>
   ) : !state.farm || !state.record ? (
     <FarmEmptyState>
       <strong>No farm selected</strong>
-      <MetaText>Create a farm or choose one from the farm pane to open PlodAI.</MetaText>
+      <MetaText>Create a farm record or choose one from the record pane to open PlodAI.</MetaText>
     </FarmEmptyState>
   ) : (
     <FarmRecordPanel

@@ -155,7 +155,7 @@ describe("PlodaiFarmPane", () => {
   it("renders farm-scoped controls without orders, JSON editing, or upload chrome", () => {
     const markup = renderToStaticMarkup(renderWithAppState(<PlodaiFarmPane />));
 
-    expect(markup).toContain("Farm");
+    expect(markup).toContain("Farm record");
     expect(markup).toContain("Rename");
     expect(markup).toContain("Delete farm");
     expect(markup).toContain("New farm");
@@ -169,7 +169,7 @@ describe("PlodaiFarmPane", () => {
     expect(markup).not.toContain("Optional investigation brief");
   });
 
-  it("renders compact Farm/Overview/Chat panes and updates the active tab when selected", async () => {
+  it("renders compact Record/Overview/Chat panes and updates the active tab when selected", async () => {
     const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>");
     const rootElement = dom.window.document.getElementById("root");
     const scrollIntoViewMock = vi.fn();
@@ -246,7 +246,7 @@ describe("PlodaiFarmPane", () => {
         await Promise.resolve();
       });
 
-      expect(rootElement.textContent).toContain("Farm");
+      expect(rootElement.textContent).toContain("Record");
       expect(rootElement.textContent).toContain("Overview");
       expect(rootElement.textContent).toContain("Chat");
       expect(rootElement.querySelector("[aria-label='Open settings']")).not.toBeNull();

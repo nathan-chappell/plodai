@@ -1,10 +1,10 @@
 # PlodAI
 
-PlodAI (from the Croatian `plod`, meaning "fruit" or "harvest") is an AI-assisted farm operations workspace for image review, structured farm records, and practical follow-up planning. Users can create farms, upload orchard or field images, maintain a canonical farm record, and chat with an assistant about visible conditions and next steps.
+PlodAI (from the Croatian `plod`, meaning "fruit" or "harvest") is an AI-assisted field advisory and reporting workspace for farm evidence, structured issue reports, official-source guidance, and practical follow-up planning. Users can create farm records, upload orchard or field images, report production problems, ask agricultural questions, and preserve the resulting context as reusable farm data.
 
-The project grew out of a real local use case. I own a small walnut grove near Tenje, and after a season affected by blight I found myself piecing together answers from photos, ChatGPT, and advice from a local agricultural pharmacy. PlodAI is an attempt to turn that fragmented troubleshooting workflow into something more durable: collect evidence, interpret it with an AI assistant, and save the result as reusable farm data instead of leaving it in a one-off chat.
+The project grew out of a real local use case. I own a small walnut grove near Tenje, and after a season affected by blight I found myself piecing together answers from photos, ChatGPT, and advice from a local agricultural pharmacy. PlodAI is an attempt to turn that fragmented troubleshooting workflow into something more durable: collect evidence, interpret it with an AI assistant, cite official or institutionally reliable sources where possible, and save the result as reusable farm data instead of leaving it in a one-off chat.
 
-This repository is both a portfolio project and a product demo. Its main technical goal is to show how a frontend-defined agent experience can be exposed through a reusable runtime built with FastAPI, ChatKit, the OpenAI Agents SDK, the Conversations API, and typed backend contracts. The current domain focus is orchard and small-farm operations in Croatia. The documentation is written in English for a public portfolio audience, while the product itself supports English and Croatian chat output.
+This repository is both a portfolio project and a product demo. Its product framing is a small, fundable digital AKIS-style pilot for Osijek-Baranja County: farmers can request guidance or report field problems, while advisors, researchers, cooperatives, and local institutions could eventually use anonymized patterns to understand pest pressure, crop stress, input shortages, subsidy bottlenecks, and procurement needs. Its main technical goal is to show how a frontend-defined agent experience can be exposed through a reusable runtime built with FastAPI, ChatKit, the OpenAI Agents SDK, the Conversations API, and typed backend contracts. The current domain focus is orchard and small-farm operations in Croatia. The documentation is written in English for a public portfolio audience, while the product itself supports English and Croatian chat output.
 
 > Live app: [plodai.up.railway.app](https://plodai.up.railway.app)
 >
@@ -17,15 +17,15 @@ The live deployment intentionally keeps infrastructure simple: Railway hosting, 
 - Frontend stack: React 19, Vite, TypeScript, styled-components, Clerk, `@openai/chatkit`, and `@openai/chatkit-react`
 - Backend stack: FastAPI, the OpenAI Agents SDK, OpenAI ChatKit server integration, async SQLAlchemy, and Pydantic
 - Persistence: farm data and ChatKit memory are stored in the application database, while uploaded farm images and chat attachments are stored in S3-compatible object storage
-- Runtime shape: the assistant uses tools to read and update persisted farm information through typed Pydantic models and structured outputs rather than treating the conversation as unstructured text alone
+- Runtime shape: the assistant uses tools to read and update persisted farm information through typed Pydantic models and structured outputs rather than treating guidance requests and issue reports as unstructured text alone
 - Streaming behavior: ChatKit and the Agents SDK stream tool progress, intermediate status updates, and final assistant responses back into the UI as the run is happening
 - Image workflow: uploaded images are verified, saved as farm-linked records, and sent back to the model as image inputs when visual context is needed
-- Search behavior: the assistant can use OpenAI hosted web search when current public references would materially improve the answer
+- Search behavior: the assistant can use OpenAI hosted web search when current public references would materially improve the answer, especially official guidance, approved-input context, regulations, and procurement leads
 - Model mapping: `lightweight` -> `gpt-5.4-nano`, `balanced` -> `gpt-5.4-mini`, `powerful` -> `gpt-5.4`
 
 ## Demonstration
 
-The screenshots below tell a simple user story: a user starts with a mostly empty farm, uploads walnut-orchard photos, lets the assistant inspect them, and ends up with a structured farm record plus a practical assessment.
+The screenshots below tell a simple user story: a user starts with a mostly empty farm record, uploads walnut-orchard photos, lets the assistant inspect them, and ends up with a structured farm record plus a practical assessment.
 
 ### 1. The user starts with photos, not a finished dataset
 
@@ -43,7 +43,7 @@ In the second screenshot, the assistant is already reasoning over the uploaded i
   <img src="screenshots/thinking-and-showing-tool-call.png" alt="PlodAI reviewing walnut orchard images and showing a get_farm_record tool call in progress." width="88%" />
 </p>
 
-### 3. The assistant turns observations into structured farm data
+### 3. The assistant turns observations into structured field data
 
 In the third screenshot, the left-hand panel is no longer blank. The assistant has created a usable farm record with a farm name, description, an orchard area, a walnut crop entry, a rough quantity estimate, an expected yield note, and initial work items. The key point is that image observations and chat context have been converted into typed application data that the rest of the product can reuse.
 

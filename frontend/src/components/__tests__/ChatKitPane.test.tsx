@@ -69,10 +69,10 @@ describe("ChatKitPane", () => {
     expect(header.enabled).toBe(true);
     expect(composer.attachments?.enabled).toBe(true);
     expect(composer.placeholder).toBe(
-      "Zatraži od PlodAI-ja da pregleda slike, objasni zapis farme ili spremi promjene.",
+      "Zatraži savjet, prijavi simptome ili štetu, ili pitaj gdje nabaviti materijal.",
     );
-    expect(startScreen.greeting).toContain("Pregledaj slike farme");
-    expect(startScreen.prompts?.[0]?.label).toBe("Procijeni slike polja");
+    expect(startScreen.greeting).toContain("Zatraži provjerene smjernice");
+    expect(startScreen.prompts?.[0]?.label).toBe("Zatraži smjernice");
   });
 
   it("switches the greeting, starter prompts, and placeholder when English is selected", () => {
@@ -89,11 +89,11 @@ describe("ChatKitPane", () => {
     };
 
     expect(options.startScreen?.greeting).toBe(
-      "Review farm images, inspect the saved record, and decide the next step.",
+      "Request verified guidance, report a field issue, or find the next practical step.",
     );
-    expect(options.startScreen?.prompts?.[0]?.label).toBe("Assess field images");
+    expect(options.startScreen?.prompts?.[0]?.label).toBe("Request guidance");
     expect(options.composer?.placeholder).toBe(
-      "Ask PlodAI to inspect images, explain the farm record, or save updates.",
+      "Ask for advice, report symptoms or damage, or ask where to source materials.",
     );
   });
 

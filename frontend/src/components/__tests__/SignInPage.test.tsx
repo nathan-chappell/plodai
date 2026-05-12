@@ -29,7 +29,7 @@ describe("SignInPage", () => {
     );
 
     expect(markup).toContain("Sign in to PlodAI");
-    expect(markup).toContain("One sign-in, one screen");
+    expect(markup).toContain("Field advisory, issue reporting");
     expect(markup).toContain("Sign in");
     expect(markup).toContain("Create account");
     expect(markup).toContain("Language");

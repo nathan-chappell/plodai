@@ -107,7 +107,7 @@ export function FarmRecordPanel({
         <FarmHero>
           <FarmHeroHeader>
             <FarmHeroMain>
-              <FarmEyebrow>Farm</FarmEyebrow>
+              <FarmEyebrow>Field record</FarmEyebrow>
               {farmEditor ? (
                 <FarmEditorWrap>{farmEditor}</FarmEditorWrap>
               ) : (
@@ -132,7 +132,7 @@ export function FarmRecordPanel({
                     </FarmMetric>
                     <FarmMetric>
                       <strong>{normalizedFarm.work_items.length}</strong>
-                      <span>Work items</span>
+                      <span>Reports</span>
                     </FarmMetric>
                     {showOrderMetric ? (
                       <FarmMetric>
@@ -298,7 +298,7 @@ export function FarmRecordPanel({
 
       {showWorkItemsSection ? (
         <FarmSection>
-          <FarmSectionTitle>Work Items</FarmSectionTitle>
+          <FarmSectionTitle>Issues & Tasks</FarmSectionTitle>
           {normalizedFarm.work_items.length ? (
             <WorkItemList>
               {normalizedFarm.work_items.map((workItem) => {
@@ -380,7 +380,7 @@ export function FarmRecordPanel({
               })}
             </WorkItemList>
           ) : (
-            <MetaText>No work items saved yet.</MetaText>
+            <MetaText>No field issues or tasks saved yet.</MetaText>
           )}
         </FarmSection>
       ) : null}

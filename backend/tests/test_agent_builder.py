@@ -83,6 +83,8 @@ def test_base_instructions_describe_tools_and_eager_record_updates() -> None:
     assert "`get_farm_record`" in BASE_INSTRUCTIONS
     assert "`save_farm_record`" in BASE_INSTRUCTIONS
     assert "`name_current_thread`" in BASE_INSTRUCTIONS
+    assert "farmer support and field intelligence assistant" in BASE_INSTRUCTIONS
+    assert "digital AKIS-style workspace" in BASE_INSTRUCTIONS
     assert "Shoot first with the farm data model." in BASE_INSTRUCTIONS
     assert "treat that as permission to update the farm record immediately" in BASE_INSTRUCTIONS
     assert "inspect them thoroughly and at full detail" in BASE_INSTRUCTIONS
@@ -92,6 +94,7 @@ def test_base_instructions_describe_tools_and_eager_record_updates() -> None:
     assert "Translate conversational facts into structured fields." in BASE_INSTRUCTIONS
     assert "fill every supported field you can justify from the current evidence" in BASE_INSTRUCTIONS
     assert "`farm_name`, `description`, `location`, area `kind`, crop `type`, `quantity`, `expected_yield`" in BASE_INSTRUCTIONS
+    assert "input shortages, market bottlenecks, infrastructure damage" in BASE_INSTRUCTIONS
     assert "make a best-effort estimate from the available evidence and save it instead of leaving it blank" in BASE_INSTRUCTIONS
     assert "Mark inferred values explicitly as approximate." in BASE_INSTRUCTIONS
     assert "Prefer numeric-plus-unit estimates when inferable" in BASE_INSTRUCTIONS
@@ -100,12 +103,15 @@ def test_base_instructions_describe_tools_and_eager_record_updates() -> None:
     assert "Within 1-2 weeks, inspect 10-20 leaves per tree" in BASE_INSTRUCTIONS
     assert "If suspected mildew/leaf spot, note humidity periods and consider targeted fungicide based on local extension guidance" in BASE_INSTRUCTIONS
     assert "do not stop at diagnosis and monitoring alone" in BASE_INSTRUCTIONS
-    assert "find likely treatment approaches and 1-3 practical material or product links" in BASE_INSTRUCTIONS
+    assert "find likely treatment approaches and 1-3 practical material or supplier links" in BASE_INSTRUCTIONS
+    assert "Prefer official or institutionally reliable sources" in BASE_INSTRUCTIONS
+    assert "pesticide, fertilizer, veterinary, plant-health, food-safety" in BASE_INSTRUCTIONS
     assert "current or public facts would materially improve the answer" in BASE_INSTRUCTIONS
     assert "use hosted web search when appropriate, summarize cautiously, and include short inline markdown links to supporting sources in your reply" in BASE_INSTRUCTIONS
     assert "end with a short `References:` block" in BASE_INSTRUCTIONS
     assert "Clearly distinguish observed evidence from sourced treatment suggestions." in BASE_INSTRUCTIONS
     assert "treatments depend on local labels and extension guidance" in BASE_INSTRUCTIONS
+    assert "Label confidence in practical language when useful" in BASE_INSTRUCTIONS
     assert "do not internalize it as built-in knowledge and do not hard-code it into your recommendations" in BASE_INSTRUCTIONS
 
 

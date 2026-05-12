@@ -68,49 +68,49 @@ const CHATKIT_COPY: Record<
   }
 > = {
   hr: {
-    greeting: "Pregledaj slike farme, provjeri spremljeni zapis i predloži sljedeći najbolji korak.",
-    placeholder: "Zatraži od PlodAI-ja da pregleda slike, objasni zapis farme ili spremi promjene.",
+    greeting: "Zatraži provjerene smjernice, prijavi problem s terena ili pronađi sljedeći praktičan korak.",
+    placeholder: "Zatraži savjet, prijavi simptome ili štetu, ili pitaj gdje nabaviti materijal.",
     starterPrompts: [
       {
-        label: "Procijeni slike polja",
+        label: "Zatraži smjernice",
         prompt:
-          "Pregledaj trenutačne slike farme, sažmi što se vizualno najviše ističe i izdvoji najvažnija dodatna pitanja.",
+          "Pomozi mi razjasniti poljoprivredno pitanje. Ako je potrebna javna ili službena informacija, pronađi izvore i jasno odvoji sigurne činjenice od pretpostavki.",
         icon: "document",
       },
       {
-        label: "Ažuriraj zapis farme",
+        label: "Prijavi problem",
         prompt:
-          "Pregledaj spremljeni zapis farme i najnovije slike polja, pa predloži najvažnija ažuriranja zapisa prije bilo kakve promjene.",
+          "Pomozi mi zabilježiti problem s terena kao strukturiranu prijavu: kultura ili stoka, lokacija, datum, ozbiljnost, opis, fotografije i što je već poduzeto.",
         icon: "check-circle",
       },
       {
-        label: "Pripremi narudžbe kupaca",
+        label: "Pronađi materijale",
         prompt:
-          "Pogledaj spremljene kulture i sastavi praktičan skup narudžbi farme koje bi se mogle sljedeće objaviti.",
+          "Na temelju spremljenog zapisa i trenutnog problema, predloži koje materijale treba provjeriti i gdje tražiti službeno odobrene ili lokalno dostupne opcije.",
         icon: "bolt",
       },
     ] as const,
   },
   en: {
-    greeting: "Review farm images, inspect the saved record, and decide the next step.",
-    placeholder: "Ask PlodAI to inspect images, explain the farm record, or save updates.",
+    greeting: "Request verified guidance, report a field issue, or find the next practical step.",
+    placeholder: "Ask for advice, report symptoms or damage, or ask where to source materials.",
     starterPrompts: [
       {
-        label: "Assess field images",
+        label: "Request guidance",
         prompt:
-          "Review the current farm images, summarize what stands out visually, and identify the most important follow-up questions.",
+          "Help me clarify an agricultural question. If public or official information is needed, find sources and clearly separate known facts from assumptions.",
         icon: "document",
       },
       {
-        label: "Update the farm record",
+        label: "Report an issue",
         prompt:
-          "Inspect the saved farm record and latest field images, then suggest the most important record updates before changing anything.",
+          "Help me record a field problem as a structured report: crop or livestock, location, date, severity, description, photos, and what has already been tried.",
         icon: "check-circle",
       },
       {
-        label: "Draft customer orders",
+        label: "Find materials",
         prompt:
-          "Look at the saved crops and produce a practical set of farm orders that could be published next.",
+          "Based on the saved record and current problem, suggest which materials to check and where to look for officially approved or locally available options.",
         icon: "bolt",
       },
     ] as const,
