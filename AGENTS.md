@@ -17,7 +17,7 @@ This repo is primarily a demo of frontend agents being exposed to the runtime in
 - The Python baseline for this repo is `python3.14` or newer.
 
 ## Backend posture
-- Keep the backend light. This is intentionally a portfolio project with minimal infrastructure.
+- Keep the backend light. This is intentionally a compact demo project with minimal infrastructure.
 - The most important backend responsibility is correctly wiring the Agents SDK, ChatKit, and Conversations API together - it provides the agentic engine, the frontend declares the agents and provides callbacks for tool calls.
 - Changes in this area must be made in consultation with the actual code, including checking the installed SDK code in the local venv when behavior is unclear.
 

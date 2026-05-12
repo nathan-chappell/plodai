@@ -51,7 +51,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./ai_portfolio.db"
+    database_url: str = "sqlite:///./report_foundry.db"
     database_schema_mode: Literal["create_all", "migrations"] = "migrations"
     database_app_schema: str = "plodai"
     database_shared_schema: str = "public"
