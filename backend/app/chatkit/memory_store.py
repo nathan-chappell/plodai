@@ -20,31 +20,31 @@ from chatkit.types import (
     ThreadStatus,
 )
 
-from backend.app.agents.context import FarmAgentContext
+from backend.app.agents.context import AdvisoryAgentContext
 from backend.app.chatkit.attachment_payloads import (
     build_canonical_attachment,
     build_display_attachment,
     normalize_attachment_for_storage,
 )
 from backend.app.core.config import Settings, get_settings, resolve_public_base_url
-from backend.app.models.farm import (
-    Farm,
-    FarmChat,
-    FarmChatAttachment,
-    FarmChatEntry,
-    FarmImage,
+from backend.app.models.advisory import (
+    AdvisoryCase,
+    AdvisoryChat,
+    AdvisoryChatAttachment,
+    AdvisoryChatEntry,
+    AdvisoryImage,
 )
 from backend.app.services.bucket_storage import BucketStorageService, RailwayBucketService
-from backend.app.services.farm_image_service import FarmImageService
-from backend.app.services.upload_rules import validate_farm_image_upload
+from backend.app.services.advisory_image_service import AdvisoryImageService
+from backend.app.services.upload_rules import validate_advisory_image_upload
 
 THREAD_ITEM_ADAPTER = TypeAdapter(ThreadItem)
 ATTACHMENT_ADAPTER = TypeAdapter(Attachment)
 
 
-class FarmMemoryStore(
-    Store[FarmAgentContext],
-    AttachmentStore[FarmAgentContext],
+class AdvisoryMemoryStore(
+    Store[AdvisoryAgentContext],
+    AttachmentStore[AdvisoryAgentContext],
 ):
     def __init__(
         self,
@@ -61,13 +61,13 @@ class FarmMemoryStore(
             settings=self.settings,
         )
         self.bucket_service = bucket_service or RailwayBucketService(self.settings)
-        self.image_service = FarmImageService(
+        self.image_service = AdvisoryImageService(
             db,
             settings=self.settings,
             bucket_service=self.bucket_service,
         )
 
-    def generate_thread_id(self, context: FarmAgentContext) -> str:
+    def generate_thread_id(self, context: AdvisoryAgentContext) -> str:
         if context.chat_id and context.chat_id != "pending_chat":
             return context.chat_id
         return f"chat_{uuid4().hex}"
@@ -75,10 +75,10 @@ class FarmMemoryStore(
     async def create_attachment(
         self,
         input: AttachmentCreateParams,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> Attachment:
-        await self._require_farm(context)
-        validate_farm_image_upload(
+        await self._require_case(context)
+        validate_advisory_image_upload(
             settings=self.settings,
             file_name=input.name,
             mime_type=input.mime_type,
@@ -106,7 +106,7 @@ class FarmMemoryStore(
             thread_id=None,
             metadata={
                 "user_id": context.user_id,
-                "farm_id": context.farm_id,
+                "case_id": context.case_id,
                 "declared_size": input.size,
                 "storage_provider": self.bucket_service.storage_provider,
                 "storage_key": storage_key,
@@ -120,7 +120,7 @@ class FarmMemoryStore(
     async def load_thread(
         self,
         thread_id: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> ThreadMetadata:
         chat = await self._get_chat(thread_id, context)
         return self._to_thread_metadata(chat)
@@ -128,15 +128,15 @@ class FarmMemoryStore(
     async def save_thread(
         self,
         thread: ThreadMetadata,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
-        existing = await self.db.get(FarmChat, thread.id)
-        next_sequence = await self._next_sequence(FarmChat.updated_sequence)
+        existing = await self.db.get(AdvisoryChat, thread.id)
+        next_sequence = await self._next_sequence(AdvisoryChat.updated_sequence)
         if existing is None:
             self.db.add(
-                FarmChat(
+                AdvisoryChat(
                     id=thread.id,
-                    farm_id=context.farm_id,
+                    case_id=context.case_id,
                     user_id=context.user_id,
                     title=thread.title,
                     metadata_json=thread.metadata,
@@ -152,7 +152,7 @@ class FarmMemoryStore(
             existing.allowed_image_domains_json = thread.allowed_image_domains
             existing.updated_sequence = next_sequence
             existing.updated_at = datetime.now(UTC)
-            existing.farm_id = context.farm_id
+            existing.case_id = context.case_id
             existing.user_id = context.user_id
         await self.db.commit()
 
@@ -162,15 +162,15 @@ class FarmMemoryStore(
         after: str | None,
         limit: int,
         order: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> Page[ThreadItem]:
         await self._get_chat(thread_id, context)
-        query = select(FarmChatEntry).where(FarmChatEntry.chat_id == thread_id)
+        query = select(AdvisoryChatEntry).where(AdvisoryChatEntry.chat_id == thread_id)
         query = await self._apply_item_cursor(query, after, order)
         query = query.order_by(
-            FarmChatEntry.sequence.desc()
+            AdvisoryChatEntry.sequence.desc()
             if order == "desc"
-            else FarmChatEntry.sequence.asc()
+            else AdvisoryChatEntry.sequence.asc()
         )
         query = query.limit(limit + 1)
         result = await self.db.execute(query)
@@ -187,14 +187,14 @@ class FarmMemoryStore(
     async def save_attachment(
         self,
         attachment: Attachment,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
         canonical_attachment = normalize_attachment_for_storage(attachment)
         payload = canonical_attachment.model_dump(mode="json")
-        existing = await self.db.get(FarmChatAttachment, canonical_attachment.id)
+        existing = await self.db.get(AdvisoryChatAttachment, canonical_attachment.id)
         if existing is None:
             self.db.add(
-                FarmChatAttachment(
+                AdvisoryChatAttachment(
                     id=canonical_attachment.id,
                     kind=canonical_attachment.type,
                     payload=payload,
@@ -208,11 +208,11 @@ class FarmMemoryStore(
     async def load_attachment(
         self,
         attachment_id: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
         *,
         hydrate_preview: bool = False,
     ) -> Attachment:
-        record = await self.db.get(FarmChatAttachment, attachment_id)
+        record = await self.db.get(AdvisoryChatAttachment, attachment_id)
         if record is None:
             raise NotFoundError(f"Attachment {attachment_id} was not found")
         attachment = ATTACHMENT_ADAPTER.validate_python(record.payload)
@@ -226,7 +226,7 @@ class FarmMemoryStore(
         attachment_id: str,
         thread_id: str,
     ) -> None:
-        record = await self.db.get(FarmChatAttachment, attachment_id)
+        record = await self.db.get(AdvisoryChatAttachment, attachment_id)
         if record is None:
             raise NotFoundError(f"Attachment {attachment_id} was not found")
         attachment = ATTACHMENT_ADAPTER.validate_python(record.payload)
@@ -242,7 +242,7 @@ class FarmMemoryStore(
         )
         image_id = metadata.get("image_id")
         if isinstance(image_id, str) and image_id.strip():
-            image = await self.db.get(FarmImage, image_id.strip())
+            image = await self.db.get(AdvisoryImage, image_id.strip())
             if image is not None:
                 image.chat_id = thread_id
                 image.attachment_id = attachment_id
@@ -251,16 +251,16 @@ class FarmMemoryStore(
     async def delete_attachment(
         self,
         attachment_id: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
-        record = await self.db.get(FarmChatAttachment, attachment_id)
+        record = await self.db.get(AdvisoryChatAttachment, attachment_id)
         if record is None:
             return
         attachment = ATTACHMENT_ADAPTER.validate_python(record.payload)
         metadata = attachment.metadata if isinstance(attachment.metadata, dict) else {}
         image_id = metadata.get("image_id")
         if isinstance(image_id, str) and image_id.strip():
-            image = await self.db.get(FarmImage, image_id.strip())
+            image = await self.db.get(AdvisoryImage, image_id.strip())
             if image is not None:
                 image.status = "deleted"
                 try:
@@ -282,14 +282,14 @@ class FarmMemoryStore(
                 attachment.model_copy(update={"thread_id": thread_id})
             )
         user_id = metadata.get("user_id")
-        farm_id = metadata.get("farm_id")
+        case_id = metadata.get("case_id")
         declared_size = metadata.get("declared_size")
         storage_key = metadata.get("storage_key")
         if (
             not isinstance(user_id, str)
             or not user_id.strip()
-            or not isinstance(farm_id, str)
-            or not farm_id.strip()
+            or not isinstance(case_id, str)
+            or not case_id.strip()
             or not isinstance(declared_size, int)
             or declared_size < 0
             or not isinstance(storage_key, str)
@@ -301,7 +301,7 @@ class FarmMemoryStore(
             )
         image = await self.image_service.finalize_pending_attachment(
             user_id=user_id.strip(),
-            farm_id=farm_id.strip(),
+            case_id=case_id.strip(),
             chat_id=thread_id,
             attachment_id=attachment.id,
             file_name=attachment.name,
@@ -322,17 +322,17 @@ class FarmMemoryStore(
         limit: int,
         after: str | None,
         order: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> Page[ThreadMetadata]:
-        query = select(FarmChat).where(
-            FarmChat.user_id == context.user_id,
-            FarmChat.farm_id == context.farm_id,
+        query = select(AdvisoryChat).where(
+            AdvisoryChat.user_id == context.user_id,
+            AdvisoryChat.case_id == context.case_id,
         )
         query = await self._apply_thread_cursor(query, after, order)
         query = query.order_by(
-            FarmChat.updated_sequence.desc()
+            AdvisoryChat.updated_sequence.desc()
             if order == "desc"
-            else FarmChat.updated_sequence.asc()
+            else AdvisoryChat.updated_sequence.asc()
         )
         query = query.limit(limit + 1)
         result = await self.db.execute(query)
@@ -350,9 +350,9 @@ class FarmMemoryStore(
         self,
         thread_id: str,
         item: ThreadItem,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
-        existing = await self.db.get(FarmChatEntry, item.id)
+        existing = await self.db.get(AdvisoryChatEntry, item.id)
         attachments = getattr(item, "attachments", None)
         if isinstance(attachments, list) and attachments:
             item = item.model_copy(
@@ -366,12 +366,12 @@ class FarmMemoryStore(
         payload = item.model_dump(mode="json")
         if existing is None:
             self.db.add(
-                FarmChatEntry(
+                AdvisoryChatEntry(
                     id=item.id,
                     chat_id=thread_id,
                     kind=item.type,
                     payload=payload,
-                    sequence=await self._next_sequence(FarmChatEntry.sequence),
+                    sequence=await self._next_sequence(AdvisoryChatEntry.sequence),
                 )
             )
         else:
@@ -385,7 +385,7 @@ class FarmMemoryStore(
         self,
         thread_id: str,
         item: ThreadItem,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
         await self.add_thread_item(thread_id, item, context)
 
@@ -393,9 +393,9 @@ class FarmMemoryStore(
         self,
         thread_id: str,
         item_id: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> ThreadItem:
-        record = await self.db.get(FarmChatEntry, item_id)
+        record = await self.db.get(AdvisoryChatEntry, item_id)
         if record is None or record.chat_id != thread_id:
             raise NotFoundError(f"Thread item {item_id} was not found")
         return await self._to_thread_item(record)
@@ -403,12 +403,12 @@ class FarmMemoryStore(
     async def delete_thread(
         self,
         thread_id: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
-        chat = await self.db.get(FarmChat, thread_id)
+        chat = await self.db.get(AdvisoryChat, thread_id)
         if chat is None:
             return
-        await self.db.execute(delete(FarmChatEntry).where(FarmChatEntry.chat_id == thread_id))
+        await self.db.execute(delete(AdvisoryChatEntry).where(AdvisoryChatEntry.chat_id == thread_id))
         await self.db.delete(chat)
         await self.db.commit()
 
@@ -416,21 +416,21 @@ class FarmMemoryStore(
         self,
         thread_id: str,
         item_id: str,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
-        record = await self.db.get(FarmChatEntry, item_id)
+        record = await self.db.get(AdvisoryChatEntry, item_id)
         if record is None or record.chat_id != thread_id:
             return
         await self.db.delete(record)
         await self._touch_chat(thread_id)
         await self.db.commit()
 
-    async def _get_chat(self, thread_id: str, context: FarmAgentContext) -> FarmChat:
+    async def _get_chat(self, thread_id: str, context: AdvisoryAgentContext) -> AdvisoryChat:
         result = await self.db.execute(
-            select(FarmChat).where(
-                FarmChat.id == thread_id,
-                FarmChat.user_id == context.user_id,
-                FarmChat.farm_id == context.farm_id,
+            select(AdvisoryChat).where(
+                AdvisoryChat.id == thread_id,
+                AdvisoryChat.user_id == context.user_id,
+                AdvisoryChat.case_id == context.case_id,
             )
         )
         chat = result.scalar_one_or_none()
@@ -439,45 +439,45 @@ class FarmMemoryStore(
         return chat
 
     async def _touch_chat(self, thread_id: str) -> None:
-        chat = await self.db.get(FarmChat, thread_id)
+        chat = await self.db.get(AdvisoryChat, thread_id)
         if chat is not None:
-            chat.updated_sequence = await self._next_sequence(FarmChat.updated_sequence)
+            chat.updated_sequence = await self._next_sequence(AdvisoryChat.updated_sequence)
             chat.updated_at = datetime.now(UTC)
 
     async def _apply_thread_cursor(self, query, after: str | None, order: str):
         if after is None:
             return query
-        cursor = await self.db.get(FarmChat, after)
+        cursor = await self.db.get(AdvisoryChat, after)
         if cursor is None:
             return query
         if order == "desc":
-            return query.where(FarmChat.updated_sequence < cursor.updated_sequence)
-        return query.where(FarmChat.updated_sequence > cursor.updated_sequence)
+            return query.where(AdvisoryChat.updated_sequence < cursor.updated_sequence)
+        return query.where(AdvisoryChat.updated_sequence > cursor.updated_sequence)
 
     async def _apply_item_cursor(self, query, after: str | None, order: str):
         if after is None:
             return query
-        cursor = await self.db.get(FarmChatEntry, after)
+        cursor = await self.db.get(AdvisoryChatEntry, after)
         if cursor is None:
             return query
         if order == "desc":
-            return query.where(FarmChatEntry.sequence < cursor.sequence)
-        return query.where(FarmChatEntry.sequence > cursor.sequence)
+            return query.where(AdvisoryChatEntry.sequence < cursor.sequence)
+        return query.where(AdvisoryChatEntry.sequence > cursor.sequence)
 
     async def _next_sequence(self, column) -> int:
         result = await self.db.execute(select(func.max(column)))
         return int(result.scalar_one() or 0) + 1
 
-    async def _require_farm(self, context: FarmAgentContext) -> Farm:
-        farm = await self.db.get(Farm, context.farm_id)
-        if farm is None or farm.user_id != context.user_id:
+    async def _require_case(self, context: AdvisoryAgentContext) -> AdvisoryCase:
+        advisory_case = await self.db.get(AdvisoryCase, context.case_id)
+        if advisory_case is None or advisory_case.user_id != context.user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Farm not found.",
+                detail="Advisory case not found.",
             )
-        return farm
+        return advisory_case
 
-    def _to_thread_metadata(self, chat: FarmChat) -> ThreadMetadata:
+    def _to_thread_metadata(self, chat: AdvisoryChat) -> ThreadMetadata:
         return ThreadMetadata(
             id=chat.id,
             title=chat.title,
@@ -487,7 +487,7 @@ class FarmMemoryStore(
             metadata=dict(chat.metadata_json),
         )
 
-    async def _to_thread_item(self, item: FarmChatEntry) -> ThreadItem:
+    async def _to_thread_item(self, item: AdvisoryChatEntry) -> ThreadItem:
         parsed_item = THREAD_ITEM_ADAPTER.validate_python(item.payload)
         attachments = getattr(parsed_item, "attachments", None)
         if not isinstance(attachments, list) or not attachments:
@@ -511,7 +511,7 @@ class FarmMemoryStore(
         image_id = metadata.get("image_id")
         if not isinstance(image_id, str) or not image_id.strip():
             return attachment
-        image = await self.db.get(FarmImage, image_id.strip())
+        image = await self.db.get(AdvisoryImage, image_id.strip())
         if image is None or image.status == "deleted":
             return attachment
         return build_display_attachment(

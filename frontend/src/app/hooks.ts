@@ -3,7 +3,7 @@ import { useAuth } from "@clerk/react";
 
 import { DEFAULT_AUTHENTICATED_PATH, SIGN_IN_PATH } from "../lib/auth";
 import { ApiError, apiRequest, setClerkTokenGetter } from "../lib/api";
-import { isFarmOrderPath, navigate } from "../lib/router";
+import { navigate } from "../lib/router";
 import type { AuthUser } from "../types/auth";
 import { subscribeToToasts, type AppToast } from "./toasts";
 
@@ -86,7 +86,7 @@ export function useAppRouteGuards({
   }, [hydrating, pathname, user]);
 
   useEffect(() => {
-    const isPublicRoute = isFarmOrderPath(pathname) || pathname === SIGN_IN_PATH;
+    const isPublicRoute = pathname === SIGN_IN_PATH;
 
     if (hydrating) {
       return;

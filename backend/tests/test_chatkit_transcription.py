@@ -5,8 +5,8 @@ from typing import Any
 import pytest
 from chatkit.types import AudioInput
 
-from backend.app.agents.context import FarmAgentContext
-from backend.app.chatkit.server import FarmChatKitServer
+from backend.app.agents.context import AdvisoryAgentContext
+from backend.app.chatkit.server import AdvisoryChatKitServer
 from backend.app.chatkit.usage import (
     accumulate_transcription_usage,
     calculate_transcription_cost_usd,
@@ -201,8 +201,8 @@ def test_transcribe_logs_and_reraises_failures_without_mutating_metadata(
     asyncio.run(_run())
 
 
-def _build_server(transcription_client: FakeTranscriptionsClient) -> FarmChatKitServer:
-    server = object.__new__(FarmChatKitServer)
+def _build_server(transcription_client: FakeTranscriptionsClient) -> AdvisoryChatKitServer:
+    server = object.__new__(AdvisoryChatKitServer)
     server.openai_client = SimpleNamespace(
         audio=SimpleNamespace(transcriptions=transcription_client)
     )
@@ -212,14 +212,14 @@ def _build_server(transcription_client: FakeTranscriptionsClient) -> FarmChatKit
 def _build_context(
     *,
     thread_metadata: dict[str, object] | None = None,
-) -> FarmAgentContext:
-    return FarmAgentContext(
+) -> AdvisoryAgentContext:
+    return AdvisoryAgentContext(
         chat_id="chat_123",
         user_id="user_123",
         user_email="user@example.com",
         db=SimpleNamespace(),
-        farm_id="farm_123",
-        farm_name="Walnut orchard",
+        case_id="case_123",
+        case_title="Walnut orchard",
         thread_metadata=dict(thread_metadata or {}),
     )
 

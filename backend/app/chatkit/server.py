@@ -51,11 +51,11 @@ from typing_extensions import assert_never
 
 from backend.app.agents.agent_builder import build_plodai_agent
 from backend.app.agents.context import (
-    FarmAgentContext,
+    AdvisoryAgentContext,
     resolve_preferred_output_language,
 )
 from backend.app.chatkit.agent_stream import stream_agent_response_with_tool_progress
-from backend.app.chatkit.memory_store import FarmMemoryStore
+from backend.app.chatkit.memory_store import AdvisoryMemoryStore
 from backend.app.chatkit.metadata import (
     AppChatMetadata,
     ChatMetadataPatch,
@@ -74,8 +74,8 @@ from backend.app.core.logging import get_logger, log_event, summarize_pairs_for_
 from backend.app.db.session import get_db
 from backend.app.services.bucket_storage import BucketStorageService, RailwayBucketService
 from backend.app.services.credit_service import CreditService
-from backend.app.services.farm_image_service import FarmImageService
-from backend.app.services.farm_service import FarmService
+from backend.app.services.advisory_image_service import AdvisoryImageService
+from backend.app.services.advisory_service import AdvisoryService
 
 logger = get_logger("chatkit.server")
 
@@ -164,13 +164,13 @@ def _context_line(
     *,
     user_id: str | None = None,
     thread_id: str | None = None,
-    farm_id: str | None = None,
+    case_id: str | None = None,
 ) -> str | None:
     return summarize_pairs_for_log(
         (
             ("user", user_id),
             ("thread", thread_id),
-            ("farm", farm_id),
+            ("case", case_id),
         )
     )
 
@@ -204,7 +204,7 @@ def _usage_line(usage: object, *, model: str | None = None) -> str | None:
     return summarize_pairs_for_log(fields)
 
 
-class FarmThreadItemConverter(ThreadItemConverter):
+class AdvisoryThreadItemConverter(ThreadItemConverter):
     def __init__(
         self,
         db: AsyncSession,
@@ -213,19 +213,19 @@ class FarmThreadItemConverter(ThreadItemConverter):
     ):
         self.db = db
         self.bucket_service = bucket_service or RailwayBucketService(get_settings())
-        self.image_service = FarmImageService(
+        self.image_service = AdvisoryImageService(
             db,
             settings=get_settings(),
             bucket_service=self.bucket_service,
         )
         self.current_thread: ThreadMetadata | None = None
-        self.current_context: FarmAgentContext | None = None
+        self.current_context: AdvisoryAgentContext | None = None
 
     def bind_request(
         self,
         *,
         thread: ThreadMetadata,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> None:
         self.current_thread = thread
         self.current_context = context
@@ -239,14 +239,14 @@ class FarmThreadItemConverter(ThreadItemConverter):
         if not isinstance(image_id, str) or not image_id.strip():
             return {
                 "type": "input_text",
-                "text": f"Attachment '{attachment.name}' could not be resolved as a farm image.",
+                "text": f"Attachment '{attachment.name}' could not be resolved as an advisory image.",
             }
         context = self.current_context
         if context is None:
-            raise RuntimeError("Farm thread converter is not bound to a request.")
+            raise RuntimeError("Advisory thread converter is not bound to a request.")
         image = await self.image_service.get_image(
             user_id=context.user_id,
-            farm_id=context.farm_id,
+            case_id=context.case_id,
             image_id=image_id.strip(),
         )
         image_bytes = await self.image_service.load_image_bytes(image)
@@ -370,14 +370,20 @@ class FarmThreadItemConverter(ThreadItemConverter):
     ) -> list[ResponseInputContentParam]:
         tag_data = tag.data if isinstance(tag.data, dict) else {}
         entity_type = tag_data.get("entity_type")
-        if entity_type == "farm_image":
-            return await self._farm_image_tag_to_message_contents(
+        if entity_type == "advisory_image":
+            return await self._advisory_image_tag_to_message_contents(
                 tag,
                 tag_data=tag_data,
                 current_attachment_image_ids=current_attachment_image_ids,
             )
-        if entity_type in {"farm_crop", "farm_work_item", "farm_order"}:
-            return [self._farm_entity_text(tag.text, tag_data)]
+        if entity_type in {
+            "advisory_subject",
+            "advisory_report",
+            "advisory_query",
+            "advisory_measurement",
+            "advisory_material",
+        }:
+            return [self._advisory_entity_text(tag.text, tag_data)]
         return [
             {
                 "type": "input_text",
@@ -385,7 +391,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
             }
         ]
 
-    async def _farm_image_tag_to_message_contents(
+    async def _advisory_image_tag_to_message_contents(
         self,
         tag: UserMessageTagContent,
         *,
@@ -398,7 +404,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
             return [
                 {
                     "type": "input_text",
-                    "text": f"Tagged farm image '{tag.text}' could not be resolved.",
+                    "text": f"Tagged advisory image '{tag.text}' could not be resolved.",
                 }
             ]
         image_id = image_id.strip()
@@ -407,13 +413,13 @@ class FarmThreadItemConverter(ThreadItemConverter):
                 {
                     "type": "input_text",
                     "text": (
-                        f"The tagged farm image '{tag.text.strip() or image_id}' is already attached in this message."
+                        f"The tagged advisory image '{tag.text.strip() or image_id}' is already attached in this message."
                     ),
                 }
             ]
         image = await self.image_service.get_image(
             user_id=context.user_id,
-            farm_id=context.farm_id,
+            case_id=context.case_id,
             image_id=image_id,
         )
         image_bytes = await self.image_service.load_image_bytes(image)
@@ -421,7 +427,7 @@ class FarmThreadItemConverter(ThreadItemConverter):
             {
                 "type": "input_text",
                 "text": (
-                    f"Tagged farm image '{image.name}' was explicitly referenced by the user."
+                    f"Tagged advisory image '{image.name}' was explicitly referenced by the user."
                 ),
             },
             ResponseInputImageParam(
@@ -434,94 +440,75 @@ class FarmThreadItemConverter(ThreadItemConverter):
             ),
         ]
 
-    def _farm_entity_text(
+    def _advisory_entity_text(
         self,
         label: str,
         tag_data: dict[str, Any],
     ) -> ResponseInputContentParam:
-        entity_type = tag_data.get("entity_type")
-        parts: list[str] = [f"Tagged farm context: {label.strip()}."]
-        if entity_type == "farm_crop":
-            for key, prefix in (
-                ("farm_name", "Farm"),
-                ("type", "Type"),
-                ("quantity", "Quantity"),
-                ("expected_yield", "Expected yield"),
-                ("area_names", "Areas"),
-                ("status", "Status"),
-                ("work_item_count", "Work item count"),
-                ("highest_severity", "Highest severity"),
-                ("next_due_at", "Next due"),
-                ("notes", "Notes"),
-            ):
-                value = tag_data.get(key)
-                if isinstance(value, str) and value.strip():
-                    parts.append(f"{prefix}: {value.strip()}.")
-        elif entity_type == "farm_work_item":
-            for key, prefix in (
-                ("farm_name", "Farm"),
-                ("kind", "Kind"),
-                ("status", "Status"),
-                ("severity", "Severity"),
-                ("observed_at", "Observed"),
-                ("due_at", "Due"),
-                ("related_crop_names", "Related crops"),
-                ("related_area_names", "Related areas"),
-                ("description", "Description"),
-                ("recommended_follow_up", "Follow-up"),
-            ):
-                value = tag_data.get(key)
-                if isinstance(value, str) and value.strip():
-                    parts.append(f"{prefix}: {value.strip()}.")
-        elif entity_type == "farm_order":
-            for key, prefix in (
-                ("farm_name", "Farm"),
-                ("status", "Status"),
-                ("price_label", "Price"),
-                ("summary", "Summary"),
-                ("notes", "Notes"),
-                ("order_url", "Order link"),
-            ):
-                value = tag_data.get(key)
-                if isinstance(value, str) and value.strip():
-                    parts.append(f"{prefix}: {value.strip()}.")
+        parts: list[str] = [f"Tagged advisory context: {label.strip()}."]
+        for key, prefix in (
+            ("kind", "Kind"),
+            ("category", "Category"),
+            ("type", "Type"),
+            ("status", "Status"),
+            ("severity", "Severity"),
+            ("location", "Location"),
+            ("quantity", "Quantity"),
+            ("value", "Value"),
+            ("unit", "Unit"),
+            ("measured_at", "Measured"),
+            ("observed_at", "Observed"),
+            ("reported_at", "Reported"),
+            ("asked_at", "Asked"),
+            ("subject_names", "Subjects"),
+            ("supplier_name", "Supplier"),
+            ("description", "Description"),
+            ("answer_summary", "Answer summary"),
+            ("recommended_follow_up", "Follow-up"),
+            ("purpose", "Purpose"),
+            ("notes", "Notes"),
+            ("supplier_url", "Supplier link"),
+        ):
+            value = tag_data.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(f"{prefix}: {value.strip()}.")
         return {
             "type": "input_text",
             "text": " ".join(parts),
         }
 
 
-class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
+class AdvisoryChatKitServer(ChatKitServer[AdvisoryAgentContext]):
     def __init__(
         self,
         db: AsyncSession,
         *,
-        farm_id: str,
+        case_id: str,
         public_base_url: str | None = None,
         bucket_service: BucketStorageService | None = None,
     ):
         self.settings = get_settings()
         self.db = db
-        self.farm_id = farm_id
+        self.case_id = case_id
         self.public_base_url = public_base_url
         self.openai_client = AsyncOpenAI(
             api_key=self.settings.OPENAI_API_KEY or None,
             max_retries=self.settings.openai_max_retries,
         )
         self.bucket_service = bucket_service or RailwayBucketService(self.settings)
-        self.farm_service = FarmService(db)
-        self.image_service = FarmImageService(
+        self.advisory_service = AdvisoryService(db)
+        self.image_service = AdvisoryImageService(
             db,
             settings=self.settings,
             bucket_service=self.bucket_service,
         )
-        store = FarmMemoryStore(
+        store = AdvisoryMemoryStore(
             db,
             public_base_url=public_base_url,
             bucket_service=self.bucket_service,
         )
         super().__init__(store=store, attachment_store=store)
-        self.converter = FarmThreadItemConverter(
+        self.converter = AdvisoryThreadItemConverter(
             db,
             bucket_service=self.bucket_service,
         )
@@ -532,7 +519,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         user_id: str,
         user_email: str | None,
         preferred_output_language: str | None = None,
-    ) -> FarmAgentContext:
+    ) -> AdvisoryAgentContext:
         parsed_request = TypeAdapter(ChatKitReq).validate_json(raw_request)
         try:
             metadata = parse_chat_metadata(parsed_request.metadata)
@@ -542,39 +529,39 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                 detail=str(exc),
             ) from exc
         thread_id = getattr(parsed_request.params, "thread_id", None)
-        farm = await self.farm_service.require_farm(user_id=user_id, farm_id=self.farm_id)
-        record = await self.farm_service.get_record(user_id=user_id, farm_id=self.farm_id)
+        advisory_case = await self.advisory_service.require_case(user_id=user_id, case_id=self.case_id)
+        record = await self.advisory_service.get_record(user_id=user_id, case_id=self.case_id)
         images = await self.image_service.list_images(
             user_id=user_id,
-            farm_id=self.farm_id,
+            case_id=self.case_id,
             public_base_url=self.public_base_url,
         )
-        chat_id = thread_id or await self.farm_service.get_chat_id(
+        chat_id = thread_id or await self.advisory_service.get_chat_id(
             user_id=user_id,
-            farm_id=self.farm_id,
+            case_id=self.case_id,
         )
         resolved_output_language = resolve_preferred_output_language(
             preferred_output_language
         )
-        context = FarmAgentContext(
+        context = AdvisoryAgentContext(
             chat_id=chat_id or "pending_chat",
             user_id=user_id,
             user_email=user_email,
             db=self.db,
-            farm_id=farm.id,
-            farm_name=record.farm_name or farm.name,
+            case_id=advisory_case.id,
+            case_title=record.title or advisory_case.title,
             thread_title=metadata.get("title"),
             request_metadata=metadata,
             thread_metadata=metadata,
             preferred_output_language=resolved_output_language,
             current_record=record,
-            farm_images=images,
+            advisory_images=images,
         )
         log_event(
             logger,
             logging.INFO,
             "request_context.build",
-            context=_context_line(user_id=user_id, thread_id=thread_id, farm_id=self.farm_id),
+            context=_context_line(user_id=user_id, thread_id=thread_id, case_id=self.case_id),
             request=summarize_pairs_for_log(
                 (
                     ("op", parsed_request.type),
@@ -589,7 +576,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         self,
         thread: ThreadMetadata,
         item: UserMessageItem,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
         item = await self._finalize_new_item_attachments(item, thread_id=thread.id)
         for attachment in item.attachments:
@@ -636,7 +623,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         self,
         attachments: list[Attachment],
         *,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> list[Attachment]:
         display_attachments: list[Attachment] = []
         for attachment in attachments:
@@ -652,7 +639,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
     def _apply_metadata_patch(
         self,
         thread: ThreadMetadata,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
         patch: ChatMetadataPatch,
     ) -> AppChatMetadata:
         merged_metadata = merge_chat_metadata(_current_thread_metadata(thread), patch)
@@ -665,7 +652,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         self,
         thread: ThreadMetadata,
         input_user_message: UserMessageItem | None,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
         typed_metadata = _current_thread_metadata(thread)
         recent_items = await self.store.load_thread_items(
@@ -710,7 +697,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             context=_context_line(
                 user_id=context.user_id,
                 thread_id=thread.id,
-                farm_id=context.farm_id,
+                case_id=context.case_id,
             ),
             run=summarize_pairs_for_log(
                 (
@@ -726,7 +713,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             model=requested_model,
             model_settings_override=_model_settings_override_for_model(requested_model),
         )
-        agent_context = ChatKitAgentContext[FarmAgentContext](
+        agent_context = ChatKitAgentContext[AdvisoryAgentContext](
             thread=thread,
             store=self.store,
             request_context=context,
@@ -776,7 +763,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                         context=_context_line(
                             user_id=context.user_id,
                             thread_id=thread.id,
-                            farm_id=context.farm_id,
+                            case_id=context.case_id,
                         ),
                         logs=_logs_link(previous_response_id, conversation_id),
                     )
@@ -791,7 +778,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                     context=_context_line(
                         user_id=context.user_id,
                         thread_id=thread.id,
-                        farm_id=context.farm_id,
+                        case_id=context.case_id,
                     ),
                     retry=summarize_pairs_for_log(
                         (
@@ -866,7 +853,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             context=_context_line(
                 user_id=context.user_id,
                 thread_id=thread.id,
-                farm_id=context.farm_id,
+                case_id=context.case_id,
             ),
             usage=_usage_line(updated_usage, model=requested_model),
         )
@@ -893,13 +880,13 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
     async def _ensure_openai_conversation(
         self,
         thread: ThreadMetadata,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> str:
         conversation = await self.openai_client.conversations.create(
             metadata={
                 "app": "plodai",
                 "thread_id": thread.id,
-                "farm_id": context.farm_id,
+                "case_id": context.case_id,
                 "user_id": context.user_id,
                 **(
                     {"thread_title": thread.title[:512]}
@@ -916,7 +903,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             context=_context_line(
                 user_id=context.user_id,
                 thread_id=thread.id,
-                farm_id=context.farm_id,
+                case_id=context.case_id,
             ),
         )
         return conversation.id
@@ -1038,7 +1025,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         thread: ThreadMetadata,
         action: Action[str, Any],
         sender: WidgetItem | None,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> AsyncIterator[ThreadStreamEvent]:
         if action.type == "update_chat_metadata" and isinstance(action.payload, dict):
             patch = cast(ChatMetadataPatch, action.payload)
@@ -1055,7 +1042,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
         thread: ThreadMetadata,
         action: Action[str, Any],
         sender: WidgetItem | None,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> SyncCustomActionResponse:
         if action.type == "update_chat_metadata" and isinstance(action.payload, dict):
             patch = cast(ChatMetadataPatch, action.payload)
@@ -1068,7 +1055,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
     async def transcribe(
         self,
         audio_input: AudioInput,
-        context: FarmAgentContext,
+        context: AdvisoryAgentContext,
     ) -> TranscriptionResult:
         model = "gpt-4o-mini-transcribe"
         upload_filename = _transcription_upload_filename(audio_input.media_type)
@@ -1079,7 +1066,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             context=_context_line(
                 user_id=context.user_id,
                 thread_id=context.chat_id,
-                farm_id=context.farm_id,
+                case_id=context.case_id,
             ),
             audio=summarize_pairs_for_log(
                 (
@@ -1104,7 +1091,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
                 context=_context_line(
                     user_id=context.user_id,
                     thread_id=context.chat_id,
-                    farm_id=context.farm_id,
+                    case_id=context.case_id,
                 ),
                 audio=summarize_pairs_for_log(
                     (
@@ -1148,7 +1135,7 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
             context=_context_line(
                 user_id=context.user_id,
                 thread_id=context.chat_id,
-                farm_id=context.farm_id,
+                case_id=context.case_id,
             ),
             result=summarize_pairs_for_log(
                 (
@@ -1166,12 +1153,12 @@ class FarmChatKitServer(ChatKitServer[FarmAgentContext]):
 
 
 async def build_chatkit_server(
-    farm_id: str,
+    case_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-) -> FarmChatKitServer:
-    return FarmChatKitServer(
+) -> AdvisoryChatKitServer:
+    return AdvisoryChatKitServer(
         db,
-        farm_id=farm_id,
+        case_id=case_id,
         public_base_url=resolve_public_base_url(str(request.base_url)),
     )

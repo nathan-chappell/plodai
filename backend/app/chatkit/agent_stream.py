@@ -60,8 +60,8 @@ def format_tool_call_progress_summary(name: str, arguments: object | None = None
         return "tool_call(...)"
 
     parsed_arguments = _coerce_mapping(arguments)
-    if normalized_name == "get_farm_record":
-        return "get_farm_record()"
+    if normalized_name == "get_advisory_record":
+        return "get_advisory_record()"
     if normalized_name == "name_current_thread":
         if parsed_arguments is None:
             return "name_current_thread()"
@@ -69,8 +69,8 @@ def format_tool_call_progress_summary(name: str, arguments: object | None = None
         if title is None:
             return "name_current_thread(...)"
         return f'name_current_thread("{_truncate_text(title)}")'
-    if normalized_name == "save_farm_record":
-        return _format_save_farm_record_summary(parsed_arguments)
+    if normalized_name == "save_advisory_record":
+        return _format_save_advisory_record_summary(parsed_arguments)
 
     if parsed_arguments is None:
         return f"{normalized_name}()"
@@ -87,38 +87,38 @@ def format_tool_search_progress_summary(arguments: object | None = None) -> str:
     return f'web_search("{_truncate_text(query)}")'
 
 
-def _format_save_farm_record_summary(arguments: Mapping[str, object] | None) -> str:
+def _format_save_advisory_record_summary(arguments: Mapping[str, object] | None) -> str:
     if arguments is None:
-        return "save_farm_record()"
+        return "save_advisory_record()"
 
     record = _coerce_mapping(arguments.get("record"))
     if record is None:
-        return "save_farm_record(...)"
+        return "save_advisory_record(...)"
 
     parts: list[str] = []
-    farm_name = _normalize_text(record.get("farm_name"))
-    if farm_name is not None:
-        parts.append(f'farm_name="{_truncate_text(farm_name)}"')
+    title = _normalize_text(record.get("title"))
+    if title is not None:
+        parts.append(f'title="{_truncate_text(title)}"')
 
-    crops = record.get("crops")
-    if isinstance(crops, Sequence) and not isinstance(crops, str | bytes | bytearray):
-        parts.append(f"crops={len(crops)}")
+    reports = record.get("reports")
+    if isinstance(reports, Sequence) and not isinstance(reports, str | bytes | bytearray):
+        parts.append(f"reports={len(reports)}")
 
-    areas = record.get("areas")
-    if isinstance(areas, Sequence) and not isinstance(areas, str | bytes | bytearray):
-        parts.append(f"areas={len(areas)}")
+    queries = record.get("queries")
+    if isinstance(queries, Sequence) and not isinstance(queries, str | bytes | bytearray):
+        parts.append(f"queries={len(queries)}")
 
-    work_items = record.get("work_items")
-    if isinstance(work_items, Sequence) and not isinstance(work_items, str | bytes | bytearray):
-        parts.append(f"work_items={len(work_items)}")
+    measurements = record.get("measurements")
+    if isinstance(measurements, Sequence) and not isinstance(measurements, str | bytes | bytearray):
+        parts.append(f"measurements={len(measurements)}")
 
-    orders = record.get("orders")
-    if isinstance(orders, Sequence) and not isinstance(orders, str | bytes | bytearray):
-        parts.append(f"orders={len(orders)}")
+    materials = record.get("materials")
+    if isinstance(materials, Sequence) and not isinstance(materials, str | bytes | bytearray):
+        parts.append(f"materials={len(materials)}")
 
     if parts:
-        return f"save_farm_record({', '.join(parts)})"
-    return "save_farm_record(...)"
+        return f"save_advisory_record({', '.join(parts)})"
+    return "save_advisory_record(...)"
 
 
 def _compact_argument_parts(arguments: Mapping[str, object]) -> list[str]:

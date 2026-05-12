@@ -8,37 +8,40 @@ from backend.app.agents.agent_builder import (
     _build_model_settings,
     build_plodai_agent,
 )
-from backend.app.agents.context import FarmAgentContext, resolve_preferred_output_language
-from backend.app.schemas.farm import FarmImageSummary, FarmRecordPayload
+from backend.app.agents.context import AdvisoryAgentContext, resolve_preferred_output_language
+from backend.app.schemas.advisory import AdvisoryImageSummary, AdvisoryRecordPayload
 
 pytestmark = pytest.mark.no_db
 
 
 def test_build_plodai_agent_uses_static_instructions() -> None:
-    context = FarmAgentContext(
+    context = AdvisoryAgentContext(
         chat_id="chat-123",
         user_id="user-123",
         user_email="farmer@example.com",
         db=SimpleNamespace(),
-        farm_id="farm-123",
-        farm_name="North Orchard",
+        case_id="case-123",
+        case_title="North Orchard",
         thread_title="Blight check",
         assistant_turn_count=7,
         thread_metadata={"title": "Blight check"},
-        current_record=FarmRecordPayload(
-            version="v1",
-            farm_name="North Orchard",
-            description="Scout twice weekly.",
-            location="Parcel 4",
-            areas=[],
-            crops=[],
-            work_items=[],
-            orders=[],
+        current_record=AdvisoryRecordPayload(
+            version="v2",
+            title="North Orchard",
+            profile_description="Scout twice weekly.",
+            default_location="Parcel 4",
+            subjects=[],
+            reports=[],
+            queries=[],
+            measurements=[],
+            materials=[],
         ),
-        farm_images=[
-            FarmImageSummary(
+        advisory_images=[
+            AdvisoryImageSummary(
                 id="img-123",
-                farm_id="farm-123",
+                case_id="case-123",
+                chat_id=None,
+                attachment_id=None,
                 source_kind="upload",
                 name="Leaf closeup",
                 mime_type="image/jpeg",
@@ -64,13 +67,13 @@ def test_build_plodai_agent_uses_static_instructions() -> None:
 
 
 def test_build_plodai_agent_supports_english_output_preference() -> None:
-    context = FarmAgentContext(
+    context = AdvisoryAgentContext(
         chat_id="chat-123",
         user_id="user-123",
         user_email="farmer@example.com",
         db=SimpleNamespace(),
-        farm_id="farm-123",
-        farm_name="North Orchard",
+        case_id="case-123",
+        case_title="North Orchard",
         preferred_output_language="en",
     )
 
@@ -83,31 +86,35 @@ def test_build_plodai_agent_supports_english_output_preference() -> None:
 
 
 def test_base_instructions_describe_tools_and_eager_record_updates() -> None:
-    assert "`get_farm_record`" in BASE_INSTRUCTIONS
-    assert "`save_farm_record`" in BASE_INSTRUCTIONS
+    assert "`get_advisory_record`" in BASE_INSTRUCTIONS
+    assert "`save_advisory_record`" in BASE_INSTRUCTIONS
     assert "`name_current_thread`" in BASE_INSTRUCTIONS
     assert "farmer support and field intelligence assistant" in BASE_INSTRUCTIONS
     assert "digital AKIS-style workspace" in BASE_INSTRUCTIONS
-    assert "Shoot first with the farm data model." in BASE_INSTRUCTIONS
-    assert "treat that as permission to update the farm record immediately" in BASE_INSTRUCTIONS
+    assert "Shoot first with the advisory data model." in BASE_INSTRUCTIONS
+    assert "treat that as permission to update the advisory record immediately" in BASE_INSTRUCTIONS
     assert "inspect them thoroughly and at full detail" in BASE_INSTRUCTIONS
     assert 'Do not default to "no issues"' in BASE_INSTRUCTIONS
-    assert "`areas`, `crops`, `work_items`, and `orders`" in BASE_INSTRUCTIONS
+    assert "`subjects`, `reports`, `queries`, `measurements`, and `materials`" in BASE_INSTRUCTIONS
     assert "Prefer a richly filled valid record over a sparse one." in BASE_INSTRUCTIONS
     assert "Translate conversational facts into structured fields." in BASE_INSTRUCTIONS
     assert "fill every supported field you can justify from the current evidence" in BASE_INSTRUCTIONS
-    assert "`farm_name`, `description`, `location`, area `kind`, crop `type`, `quantity`, `expected_yield`" in BASE_INSTRUCTIONS
+    assert "subjects, reports, queries, measurements, and materials" in BASE_INSTRUCTIONS
     assert "input shortages, market bottlenecks, infrastructure damage" in BASE_INSTRUCTIONS
-    assert "make a best-effort estimate from the available evidence and save it instead of leaving it blank" in BASE_INSTRUCTIONS
+    assert "save them instead of leaving them implicit in the chat" in BASE_INSTRUCTIONS
     assert "Mark inferred values explicitly as approximate." in BASE_INSTRUCTIONS
     assert "Prefer numeric-plus-unit estimates when inferable" in BASE_INSTRUCTIONS
-    assert "If `farm_name` is blank, generic, or a placeholder such as `Unnamed Farm`" in BASE_INSTRUCTIONS
-    assert 'record at least one concrete `work_item` with `kind="issue"`' in BASE_INSTRUCTIONS
+    assert "If `title` is blank, generic, or a placeholder such as `New advisory case`" in BASE_INSTRUCTIONS
+    assert "record at least one concrete `report`" in BASE_INSTRUCTIONS
     assert "Within 1-2 weeks, inspect 10-20 leaves per tree" in BASE_INSTRUCTIONS
     assert "If suspected mildew/leaf spot, note humidity periods and consider targeted fungicide based on local extension guidance" in BASE_INSTRUCTIONS
     assert "do not stop at diagnosis and monitoring alone" in BASE_INSTRUCTIONS
     assert "find likely treatment approaches and 1-3 practical material or supplier links" in BASE_INSTRUCTIONS
-    assert "Prefer official or institutionally reliable sources" in BASE_INSTRUCTIONS
+    assert "Prefer official or institutionally reliable Croatian sources" in BASE_INSTRUCTIONS
+    assert "poljoprivreda.gov.hr" in BASE_INSTRUCTIONS
+    assert "HAPIH" in BASE_INSTRUCTIONS
+    assert "APPRRR" in BASE_INSTRUCTIONS
+    assert "vendor, retailer, cooperative, producer, and manufacturer pages only after the official or institutional check" in BASE_INSTRUCTIONS
     assert "pesticide, fertilizer, veterinary, plant-health, food-safety" in BASE_INSTRUCTIONS
     assert "current or public facts would materially improve the answer" in BASE_INSTRUCTIONS
     assert "use hosted web search when appropriate, summarize cautiously, and include short inline markdown links to supporting sources in your reply" in BASE_INSTRUCTIONS
@@ -119,13 +126,13 @@ def test_base_instructions_describe_tools_and_eager_record_updates() -> None:
 
 
 def test_build_plodai_agent_exposes_hosted_web_search_tool() -> None:
-    context = FarmAgentContext(
+    context = AdvisoryAgentContext(
         chat_id="chat-123",
         user_id="user-123",
         user_email="farmer@example.com",
         db=SimpleNamespace(),
-        farm_id="farm-123",
-        farm_name="North Orchard",
+        case_id="case-123",
+        case_title="North Orchard",
     )
 
     agent = build_plodai_agent(context, model="gpt-5.4-mini")
@@ -134,13 +141,13 @@ def test_build_plodai_agent_exposes_hosted_web_search_tool() -> None:
 
 
 def test_build_model_settings_requests_web_search_sources() -> None:
-    context = FarmAgentContext(
+    context = AdvisoryAgentContext(
         chat_id="chat-123",
         user_id="user-123",
         user_email="farmer@example.com",
         db=SimpleNamespace(),
-        farm_id="farm-123",
-        farm_name="North Orchard",
+        case_id="case-123",
+        case_title="North Orchard",
     )
 
     settings = _build_model_settings(context)

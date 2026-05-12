@@ -64,7 +64,7 @@ class FakeRunResult:
 
 
 def test_format_tool_call_progress_summary_uses_safe_shapes() -> None:
-    assert format_tool_call_progress_summary("get_farm_record", {}) == "get_farm_record()"
+    assert format_tool_call_progress_summary("get_advisory_record", {}) == "get_advisory_record()"
     assert (
         format_tool_call_progress_summary(
             "name_current_thread",
@@ -74,19 +74,19 @@ def test_format_tool_call_progress_summary_uses_safe_shapes() -> None:
     )
     assert (
         format_tool_call_progress_summary(
-            "save_farm_record",
+            "save_advisory_record",
             {
                 "record": {
-                    "farm_name": "North Orchard",
-                    "description": "Do not leak this whole payload.",
-                    "areas": [{"id": "area_1"}],
-                    "crops": [{"id": "crop_1"}, {"id": "crop_2"}],
-                    "work_items": [{"id": "work_1"}],
-                    "orders": [{"id": "order_1"}],
+                    "title": "North Orchard",
+                    "profile_description": "Do not leak this whole payload.",
+                    "reports": [{"id": "report_1"}],
+                    "queries": [{"id": "query_1"}, {"id": "query_2"}],
+                    "measurements": [{"id": "measurement_1"}],
+                    "materials": [{"id": "material_1"}],
                 }
             },
         )
-        == 'save_farm_record(farm_name="North Orchard", crops=2, areas=1, work_items=1, orders=1)'
+        == 'save_advisory_record(title="North Orchard", reports=1, queries=2, measurements=1, materials=1)'
     )
 
 
@@ -122,7 +122,7 @@ def test_stream_adapter_emits_progress_for_function_tools_and_preserves_message_
                         {
                             "id": "tool_item_1",
                             "call_id": "call_1",
-                            "name": "get_farm_record",
+                            "name": "get_advisory_record",
                             "arguments": "{}",
                             "type": "function_call",
                             "status": "completed",
@@ -165,7 +165,7 @@ def test_stream_adapter_emits_progress_for_function_tools_and_preserves_message_
             "thread.item.added",
             "thread.item.done",
         ]
-        assert streamed_events[0].text == "Using get_farm_record()."
+        assert streamed_events[0].text == "Using get_advisory_record()."
         assert streamed_events[1].item.type == "assistant_message"
         assert streamed_events[2].item.type == "assistant_message"
 

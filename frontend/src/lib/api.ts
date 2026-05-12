@@ -15,15 +15,14 @@ import type {
   FreeCreditRequestStatus,
 } from "../types/credits";
 import type {
-  FarmDeleteResponse,
-  FarmDetail,
-  FarmImageDeleteResponse,
-  FarmImageUploadResponse,
-  FarmRecordPayload,
-  FarmRecordResponse,
-  FarmSummary,
-  PublicFarmOrderResponse,
-} from "../types/farm";
+  AdvisoryCaseDeleteResponse,
+  AdvisoryCaseDetail,
+  AdvisoryImageDeleteResponse,
+  AdvisoryImageUploadResponse,
+  AdvisoryRecordPayload,
+  AdvisoryRecordResponse,
+  AdvisoryCaseSummary,
+} from "../types/advisory";
 
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const CHATKIT_DOMAIN_KEY = "domain_pk_69ea3fd1be08819098782d5a22ca589201053bea45511d76";
@@ -56,9 +55,9 @@ export function setChatKitOutputLanguageGetter(
   chatKitOutputLanguageGetter = getter;
 }
 
-export function getChatKitConfig(farmId: string) {
+export function getChatKitConfig(caseId: string) {
   return {
-    url: `${API_BASE_URL}/farms/${encodeURIComponent(farmId)}/chatkit`,
+    url: `${API_BASE_URL}/advisory/cases/${encodeURIComponent(caseId)}/chatkit`,
     domainKey: CHATKIT_DOMAIN_KEY,
   };
 }
@@ -114,67 +113,67 @@ export async function publicApiRequest<T>(path: string, init?: RequestInit): Pro
   return (await response.json()) as T;
 }
 
-export async function listFarms(): Promise<FarmSummary[]> {
-  return apiRequest<FarmSummary[]>("/farms");
+export async function listCases(): Promise<AdvisoryCaseSummary[]> {
+  return apiRequest<AdvisoryCaseSummary[]>("/advisory/cases");
 }
 
-export async function createFarm(name: string): Promise<FarmDetail> {
-  return apiRequest<FarmDetail>("/farms", {
+export async function createCase(title: string): Promise<AdvisoryCaseDetail> {
+  return apiRequest<AdvisoryCaseDetail>("/advisory/cases", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ title }),
   });
 }
 
-export async function getFarm(farmId: string): Promise<FarmDetail> {
-  return apiRequest<FarmDetail>(`/farms/${encodeURIComponent(farmId)}`);
+export async function getCase(caseId: string): Promise<AdvisoryCaseDetail> {
+  return apiRequest<AdvisoryCaseDetail>(`/advisory/cases/${encodeURIComponent(caseId)}`);
 }
 
-export async function deleteFarm(farmId: string): Promise<FarmDeleteResponse> {
-  return apiRequest<FarmDeleteResponse>(`/farms/${encodeURIComponent(farmId)}`, {
+export async function deleteCase(caseId: string): Promise<AdvisoryCaseDeleteResponse> {
+  return apiRequest<AdvisoryCaseDeleteResponse>(`/advisory/cases/${encodeURIComponent(caseId)}`, {
     method: "DELETE",
   });
 }
 
-export async function updateFarm(farmId: string, payload: { name?: string | null }): Promise<FarmDetail> {
-  return apiRequest<FarmDetail>(`/farms/${encodeURIComponent(farmId)}`, {
+export async function updateCase(caseId: string, payload: { title?: string | null }): Promise<AdvisoryCaseDetail> {
+  return apiRequest<AdvisoryCaseDetail>(`/advisory/cases/${encodeURIComponent(caseId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
-export async function getFarmRecord(farmId: string): Promise<FarmRecordResponse> {
-  return apiRequest<FarmRecordResponse>(`/farms/${encodeURIComponent(farmId)}/record`);
+export async function getAdvisoryRecord(caseId: string): Promise<AdvisoryRecordResponse> {
+  return apiRequest<AdvisoryRecordResponse>(`/advisory/cases/${encodeURIComponent(caseId)}/record`);
 }
 
-export async function saveFarmRecord(farmId: string, record: FarmRecordPayload): Promise<FarmRecordResponse> {
-  return apiRequest<FarmRecordResponse>(`/farms/${encodeURIComponent(farmId)}/record`, {
+export async function saveAdvisoryRecord(caseId: string, record: AdvisoryRecordPayload): Promise<AdvisoryRecordResponse> {
+  return apiRequest<AdvisoryRecordResponse>(`/advisory/cases/${encodeURIComponent(caseId)}/record`, {
     method: "PUT",
     body: JSON.stringify({ record }),
   });
 }
 
-export async function uploadFarmImage(
-  farmId: string,
+export async function uploadAdvisoryImage(
+  caseId: string,
   file: File,
-): Promise<FarmImageUploadResponse> {
+): Promise<AdvisoryImageUploadResponse> {
   const formData = new FormData();
   formData.set("file", file, file.name);
-  const response = await authenticatedFetch(`${API_BASE_URL}/farms/${encodeURIComponent(farmId)}/images`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/advisory/cases/${encodeURIComponent(caseId)}/images`, {
     method: "POST",
     body: formData,
   });
   if (!response.ok) {
     throw await buildApiError(response);
   }
-  return (await response.json()) as FarmImageUploadResponse;
+  return (await response.json()) as AdvisoryImageUploadResponse;
 }
 
-export async function deleteFarmImage(
-  farmId: string,
+export async function deleteCaseImage(
+  caseId: string,
   imageId: string,
-): Promise<FarmImageDeleteResponse> {
-  return apiRequest<FarmImageDeleteResponse>(
-    `/farms/${encodeURIComponent(farmId)}/images/${encodeURIComponent(imageId)}`,
+): Promise<AdvisoryImageDeleteResponse> {
+  return apiRequest<AdvisoryImageDeleteResponse>(
+    `/advisory/cases/${encodeURIComponent(caseId)}/images/${encodeURIComponent(imageId)}`,
     {
       method: "DELETE",
     },
@@ -182,26 +181,17 @@ export async function deleteFarmImage(
 }
 
 export async function searchPlodaiEntities(params: {
-  farmId: string;
+  caseId: string;
   query: string;
 }): Promise<PlodaiEntitySearchResponse> {
   return apiRequest<PlodaiEntitySearchResponse>(
-    `/farms/${encodeURIComponent(params.farmId)}/entities/search`,
+    `/advisory/cases/${encodeURIComponent(params.caseId)}/entities/search`,
     {
       method: "POST",
       body: JSON.stringify({
         query: params.query,
       }),
     },
-  );
-}
-
-export async function fetchPublicFarmOrder(
-  farmId: string,
-  orderId: string,
-): Promise<PublicFarmOrderResponse> {
-  return publicApiRequest<PublicFarmOrderResponse>(
-    `/public/farms/${encodeURIComponent(farmId)}/orders/${encodeURIComponent(orderId)}`,
   );
 }
 

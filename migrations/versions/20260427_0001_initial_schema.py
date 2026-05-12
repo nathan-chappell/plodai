@@ -60,18 +60,18 @@ def upgrade() -> None:
     shared_schema = _shared_schema()
 
     op.create_table(
-        "farms",
+        "advisory_cases",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("user_id", sa.Text(), nullable=False),
-        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("title", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farms_user_id"),
-        "farms",
+        op.f("ix_advisory_cases_user_id"),
+        "advisory_cases",
         ["user_id"],
         unique=False,
         schema=app_schema,
@@ -148,9 +148,9 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "farm_chats",
+        "advisory_chats",
         sa.Column("id", sa.String(), nullable=False),
-        sa.Column("farm_id", sa.String(), nullable=False),
+        sa.Column("case_id", sa.String(), nullable=False),
         sa.Column("user_id", sa.Text(), nullable=False),
         sa.Column("title", sa.Text(), nullable=True),
         sa.Column("metadata_json", sa.JSON(), nullable=False),
@@ -159,46 +159,46 @@ def upgrade() -> None:
         sa.Column("updated_sequence", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["farm_id"], [_app_fk("farms")]),
+        sa.ForeignKeyConstraint(["case_id"], [_app_fk("advisory_cases")]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("farm_id"),
+        sa.UniqueConstraint("case_id"),
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_chats_farm_id"),
-        "farm_chats",
-        ["farm_id"],
+        op.f("ix_advisory_chats_case_id"),
+        "advisory_chats",
+        ["case_id"],
         unique=True,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_chats_updated_sequence"),
-        "farm_chats",
+        op.f("ix_advisory_chats_updated_sequence"),
+        "advisory_chats",
         ["updated_sequence"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_chats_user_id"),
-        "farm_chats",
+        op.f("ix_advisory_chats_user_id"),
+        "advisory_chats",
         ["user_id"],
         unique=False,
         schema=app_schema,
     )
 
     op.create_table(
-        "farm_records",
-        sa.Column("farm_id", sa.String(), nullable=False),
+        "advisory_records",
+        sa.Column("case_id", sa.String(), nullable=False),
         sa.Column("payload_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["farm_id"], [_app_fk("farms")]),
-        sa.PrimaryKeyConstraint("farm_id"),
+        sa.ForeignKeyConstraint(["case_id"], [_app_fk("advisory_cases")]),
+        sa.PrimaryKeyConstraint("case_id"),
         schema=app_schema,
     )
 
     op.create_table(
-        "farm_chat_attachments",
+        "advisory_chat_attachments",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=False),
@@ -208,36 +208,36 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "farm_chat_entries",
+        "advisory_chat_entries",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("chat_id", sa.String(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("sequence", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["chat_id"], [_app_fk("farm_chats")]),
+        sa.ForeignKeyConstraint(["chat_id"], [_app_fk("advisory_chats")]),
         sa.PrimaryKeyConstraint("id"),
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_chat_entries_chat_id"),
-        "farm_chat_entries",
+        op.f("ix_advisory_chat_entries_chat_id"),
+        "advisory_chat_entries",
         ["chat_id"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_chat_entries_sequence"),
-        "farm_chat_entries",
+        op.f("ix_advisory_chat_entries_sequence"),
+        "advisory_chat_entries",
         ["sequence"],
         unique=False,
         schema=app_schema,
     )
 
     op.create_table(
-        "farm_images",
+        "advisory_images",
         sa.Column("id", sa.String(), nullable=False),
-        sa.Column("farm_id", sa.String(), nullable=False),
+        sa.Column("case_id", sa.String(), nullable=False),
         sa.Column("user_id", sa.Text(), nullable=False),
         sa.Column("chat_id", sa.String(), nullable=True),
         sa.Column("attachment_id", sa.Text(), nullable=True),
@@ -252,63 +252,63 @@ def upgrade() -> None:
         sa.Column("status", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["chat_id"], [_app_fk("farm_chats")]),
-        sa.ForeignKeyConstraint(["farm_id"], [_app_fk("farms")]),
+        sa.ForeignKeyConstraint(["chat_id"], [_app_fk("advisory_chats")]),
+        sa.ForeignKeyConstraint(["case_id"], [_app_fk("advisory_cases")]),
         sa.PrimaryKeyConstraint("id"),
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_attachment_id"),
-        "farm_images",
+        op.f("ix_advisory_images_attachment_id"),
+        "advisory_images",
         ["attachment_id"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_chat_id"),
-        "farm_images",
+        op.f("ix_advisory_images_chat_id"),
+        "advisory_images",
         ["chat_id"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_farm_id"),
-        "farm_images",
-        ["farm_id"],
+        op.f("ix_advisory_images_case_id"),
+        "advisory_images",
+        ["case_id"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_source_kind"),
-        "farm_images",
+        op.f("ix_advisory_images_source_kind"),
+        "advisory_images",
         ["source_kind"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_status"),
-        "farm_images",
+        op.f("ix_advisory_images_status"),
+        "advisory_images",
         ["status"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_storage_key"),
-        "farm_images",
+        op.f("ix_advisory_images_storage_key"),
+        "advisory_images",
         ["storage_key"],
         unique=True,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_storage_provider"),
-        "farm_images",
+        op.f("ix_advisory_images_storage_provider"),
+        "advisory_images",
         ["storage_provider"],
         unique=False,
         schema=app_schema,
     )
     op.create_index(
-        op.f("ix_farm_images_user_id"),
-        "farm_images",
+        op.f("ix_advisory_images_user_id"),
+        "advisory_images",
         ["user_id"],
         unique=False,
         schema=app_schema,
@@ -320,75 +320,75 @@ def downgrade() -> None:
     shared_schema = _shared_schema()
 
     op.drop_index(
-        op.f("ix_farm_images_user_id"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_user_id"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_storage_provider"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_storage_provider"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_storage_key"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_storage_key"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_status"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_status"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_source_kind"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_source_kind"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_farm_id"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_case_id"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_chat_id"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_chat_id"),
+        table_name="advisory_images",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_images_attachment_id"),
-        table_name="farm_images",
+        op.f("ix_advisory_images_attachment_id"),
+        table_name="advisory_images",
         schema=app_schema,
     )
-    op.drop_table("farm_images", schema=app_schema)
+    op.drop_table("advisory_images", schema=app_schema)
     op.drop_index(
-        op.f("ix_farm_chat_entries_sequence"),
-        table_name="farm_chat_entries",
-        schema=app_schema,
-    )
-    op.drop_index(
-        op.f("ix_farm_chat_entries_chat_id"),
-        table_name="farm_chat_entries",
-        schema=app_schema,
-    )
-    op.drop_table("farm_chat_entries", schema=app_schema)
-    op.drop_table("farm_chat_attachments", schema=app_schema)
-    op.drop_table("farm_records", schema=app_schema)
-    op.drop_index(
-        op.f("ix_farm_chats_user_id"),
-        table_name="farm_chats",
+        op.f("ix_advisory_chat_entries_sequence"),
+        table_name="advisory_chat_entries",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_chats_updated_sequence"),
-        table_name="farm_chats",
+        op.f("ix_advisory_chat_entries_chat_id"),
+        table_name="advisory_chat_entries",
+        schema=app_schema,
+    )
+    op.drop_table("advisory_chat_entries", schema=app_schema)
+    op.drop_table("advisory_chat_attachments", schema=app_schema)
+    op.drop_table("advisory_records", schema=app_schema)
+    op.drop_index(
+        op.f("ix_advisory_chats_user_id"),
+        table_name="advisory_chats",
         schema=app_schema,
     )
     op.drop_index(
-        op.f("ix_farm_chats_farm_id"),
-        table_name="farm_chats",
+        op.f("ix_advisory_chats_updated_sequence"),
+        table_name="advisory_chats",
         schema=app_schema,
     )
-    op.drop_table("farm_chats", schema=app_schema)
+    op.drop_index(
+        op.f("ix_advisory_chats_case_id"),
+        table_name="advisory_chats",
+        schema=app_schema,
+    )
+    op.drop_table("advisory_chats", schema=app_schema)
     op.drop_index(
         op.f("ix_credit_grants_user_id"),
         table_name="credit_grants",
@@ -417,5 +417,5 @@ def downgrade() -> None:
     )
     op.drop_table("cost_events", schema=shared_schema)
     op.drop_table("user_credit_balances", schema=shared_schema)
-    op.drop_index(op.f("ix_farms_user_id"), table_name="farms", schema=app_schema)
-    op.drop_table("farms", schema=app_schema)
+    op.drop_index(op.f("ix_advisory_cases_user_id"), table_name="advisory_cases", schema=app_schema)
+    op.drop_table("advisory_cases", schema=app_schema)

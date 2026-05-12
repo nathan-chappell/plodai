@@ -6,12 +6,12 @@ from chatkit.types import AttachmentCreateParams
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from backend.app.agents.context import FarmAgentContext
-from backend.app.chatkit.memory_store import FarmMemoryStore
+from backend.app.agents.context import AdvisoryAgentContext
+from backend.app.chatkit.memory_store import AdvisoryMemoryStore
 from backend.app.db.session import AsyncSessionLocal
-from backend.app.models.farm import FarmChatAttachment, FarmImage
-from backend.app.schemas.farm import FarmCreateRequest
-from backend.app.services.farm_service import FarmService
+from backend.app.models.advisory import AdvisoryChatAttachment, AdvisoryImage
+from backend.app.schemas.advisory import AdvisoryCaseCreateRequest
+from backend.app.services.advisory_service import AdvisoryService
 from backend.tests.fake_bucket_storage import FakeBucketStorage
 
 ONE_PIXEL_PNG = base64.b64decode(
@@ -19,23 +19,23 @@ ONE_PIXEL_PNG = base64.b64decode(
 )
 
 
-def test_chatkit_attachment_roundtrip_promotes_pending_upload_to_farm_image() -> None:
+def test_chatkit_attachment_roundtrip_promotes_pending_upload_to_advisory_image() -> None:
     async def _run() -> None:
         bucket = FakeBucketStorage()
         async with AsyncSessionLocal() as db:
-            farm_service = FarmService(db)
-            farm = await farm_service.create_farm(
+            advisory_service = AdvisoryService(db)
+            advisory_case = await advisory_service.create_case(
                 user_id="user_123",
-                request=FarmCreateRequest(name="Walnut south"),
+                request=AdvisoryCaseCreateRequest(title="Walnut south"),
             )
-            store = FarmMemoryStore(db, bucket_service=bucket)
-            context = FarmAgentContext(
+            store = AdvisoryMemoryStore(db, bucket_service=bucket)
+            context = AdvisoryAgentContext(
                 chat_id="pending_chat",
                 user_id="user_123",
                 user_email="user@example.com",
                 db=db,
-                farm_id=farm.id,
-                farm_name=farm.name,
+                case_id=advisory_case.id,
+                case_title=advisory_case.title,
             )
 
             attachment = await store.create_attachment(
@@ -73,7 +73,7 @@ def test_chatkit_attachment_roundtrip_promotes_pending_upload_to_farm_image() ->
             assert finalized_metadata["source_kind"] == "chat_attachment"
             assert finalized_metadata["storage_key"] == uploaded_key
 
-            image = await db.get(FarmImage, image_id)
+            image = await db.get(AdvisoryImage, image_id)
             assert image is not None
             assert image.attachment_id == attachment.id
             assert image.source_kind == "chat_attachment"
@@ -82,16 +82,16 @@ def test_chatkit_attachment_roundtrip_promotes_pending_upload_to_farm_image() ->
             assert image.width == 1
             assert image.height == 1
 
-            saved_attachment = await db.get(FarmChatAttachment, attachment.id)
+            saved_attachment = await db.get(AdvisoryChatAttachment, attachment.id)
             assert saved_attachment is not None
 
             await store.delete_attachment(attachment.id, context)
 
-            deleted_image = await db.get(FarmImage, image_id)
+            deleted_image = await db.get(AdvisoryImage, image_id)
             assert deleted_image is not None
             assert deleted_image.status == "deleted"
             assert uploaded_key not in bucket.objects
-            assert await db.get(FarmChatAttachment, attachment.id) is None
+            assert await db.get(AdvisoryChatAttachment, attachment.id) is None
 
     asyncio.run(_run())
 
@@ -100,19 +100,19 @@ def test_chatkit_attachment_finalize_rejects_size_mismatch() -> None:
     async def _run() -> None:
         bucket = FakeBucketStorage()
         async with AsyncSessionLocal() as db:
-            farm_service = FarmService(db)
-            farm = await farm_service.create_farm(
+            advisory_service = AdvisoryService(db)
+            advisory_case = await advisory_service.create_case(
                 user_id="user_123",
-                request=FarmCreateRequest(name="Walnut south"),
+                request=AdvisoryCaseCreateRequest(title="Walnut south"),
             )
-            store = FarmMemoryStore(db, bucket_service=bucket)
-            context = FarmAgentContext(
+            store = AdvisoryMemoryStore(db, bucket_service=bucket)
+            context = AdvisoryAgentContext(
                 chat_id="pending_chat",
                 user_id="user_123",
                 user_email="user@example.com",
                 db=db,
-                farm_id=farm.id,
-                farm_name=farm.name,
+                case_id=advisory_case.id,
+                case_title=advisory_case.title,
             )
 
             attachment = await store.create_attachment(
@@ -141,10 +141,10 @@ def test_chatkit_attachment_finalize_rejects_size_mismatch() -> None:
             assert exc_info.value.status_code == 400
             assert "size did not match" in exc_info.value.detail
             assert metadata["storage_key"] in bucket.objects
-            assert await db.get(FarmChatAttachment, attachment.id) is not None
+            assert await db.get(AdvisoryChatAttachment, attachment.id) is not None
 
             image_result = await db.execute(
-                select(FarmImage).where(FarmImage.attachment_id == attachment.id)
+                select(AdvisoryImage).where(AdvisoryImage.attachment_id == attachment.id)
             )
             assert image_result.scalar_one_or_none() is None
 

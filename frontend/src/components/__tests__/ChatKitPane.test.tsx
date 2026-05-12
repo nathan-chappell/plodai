@@ -31,7 +31,7 @@ describe("ChatKitPane", () => {
     });
   });
 
-  it("builds farm-first request metadata with origin only", () => {
+  it("builds advisory request metadata with origin only", () => {
     expect(
       buildChatKitRequestMetadata({
         threadOrigin: "interactive",
@@ -42,15 +42,15 @@ describe("ChatKitPane", () => {
   });
 
   it("renders the empty state without custom outer header chrome", () => {
-    const markup = renderToStaticMarkup(<ChatKitPane farmId={null} />);
+    const markup = renderToStaticMarkup(<ChatKitPane caseId={null} />);
 
-    expect(markup).toContain("Select or create a farm to start chatting with PlodAI.");
+    expect(markup).toContain("Select or create an advisory case to start chatting with PlodAI.");
     expect(markup).not.toContain("Farm chat");
     expect(markup).not.toContain("Start a new farm chat.");
   });
 
   it("renders the embedded chat surface and keeps attachments enabled", () => {
-    const markup = renderToStaticMarkup(<ChatKitPane farmId="farm_123" />);
+    const markup = renderToStaticMarkup(<ChatKitPane caseId="case_123" />);
     const options = useChatKitMock.mock.calls[0]?.[0] as Record<string, unknown>;
     const composer = options.composer as {
       attachments?: { enabled?: boolean };
@@ -76,7 +76,7 @@ describe("ChatKitPane", () => {
   });
 
   it("switches the greeting, starter prompts, and placeholder when English is selected", () => {
-    renderToStaticMarkup(<ChatKitPane farmId="farm_123" preferredOutputLanguage="en" />);
+    renderToStaticMarkup(<ChatKitPane caseId="case_123" preferredOutputLanguage="en" />);
 
     const options = useChatKitMock.mock.calls[0]?.[0] as {
       composer?: {
@@ -98,7 +98,7 @@ describe("ChatKitPane", () => {
   });
 
   it("clears stale draft attachments when ChatKit reports the attachment limit error", async () => {
-    renderToStaticMarkup(<ChatKitPane farmId="farm_123" />);
+    renderToStaticMarkup(<ChatKitPane caseId="case_123" />);
 
     const options = useChatKitMock.mock.calls[0]?.[0] as {
       onError?: (event: { error: Error }) => void;
@@ -121,14 +121,14 @@ describe("ChatKitPane", () => {
 
   it("forwards client effects to the caller", () => {
     const onClientEffect = vi.fn();
-    renderToStaticMarkup(<ChatKitPane farmId="farm_123" onClientEffect={onClientEffect} />);
+    renderToStaticMarkup(<ChatKitPane caseId="case_123" onClientEffect={onClientEffect} />);
 
     const options = useChatKitMock.mock.calls[0]?.[0] as {
       onEffect?: (effect: { name: string; data?: Record<string, unknown> }) => void;
     };
     const effect = {
-      name: "farm_record_updated",
-      data: { farm_id: "farm_123" },
+      name: "advisory_record_updated",
+      data: { case_id: "case_123" },
     };
 
     options.onEffect?.(effect);
@@ -136,7 +136,7 @@ describe("ChatKitPane", () => {
     expect(onClientEffect).toHaveBeenCalledWith(effect);
   });
 
-  it("keeps the initial thread stable for same-farm rerenders", async () => {
+  it("keeps the initial thread stable for same-case rerenders", async () => {
     const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>");
     const rootElement = dom.window.document.getElementById("root");
     const globalsToOverride = {
@@ -170,11 +170,11 @@ describe("ChatKitPane", () => {
 
     try {
       await act(async () => {
-        root.render(<ChatKitPane activeChatId={null} farmId="farm_123" />);
+        root.render(<ChatKitPane activeChatId={null} caseId="case_123" />);
       });
 
       await act(async () => {
-        root.render(<ChatKitPane activeChatId="chat_123" farmId="farm_123" />);
+        root.render(<ChatKitPane activeChatId="chat_123" caseId="case_123" />);
       });
     } finally {
       await act(async () => {

@@ -1,7 +1,7 @@
 [project]
 name = "plodai-backend"
 version = "2.1.1"
-description = "FastAPI backend for the PlodAI farm operations workspace."
+description = "FastAPI backend for the PlodAI field advisory workspace."
 requires-python = ">=3.14"
 dependencies = [
   "ai-portfolio-admin @ file:./vendor/ai-portfolio-admin/",

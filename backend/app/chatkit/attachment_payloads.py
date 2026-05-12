@@ -4,13 +4,13 @@ from typing import TypedDict
 
 from chatkit.types import Attachment, FileAttachment, ImageAttachment
 
-from backend.app.models.farm import FarmImage
+from backend.app.models.advisory import AdvisoryImage
 
 
-class FarmAttachmentMetadata(TypedDict, total=False):
+class AdvisoryAttachmentMetadata(TypedDict, total=False):
     image_id: str
     user_id: str
-    farm_id: str
+    case_id: str
     storage_provider: str
     storage_key: str
     source_kind: str
@@ -19,11 +19,11 @@ class FarmAttachmentMetadata(TypedDict, total=False):
     upload_state: str
 
 
-def build_attachment_metadata(image: FarmImage) -> FarmAttachmentMetadata:
+def build_attachment_metadata(image: AdvisoryImage) -> AdvisoryAttachmentMetadata:
     return {
         "image_id": image.id,
         "user_id": image.user_id,
-        "farm_id": image.farm_id,
+        "case_id": image.case_id,
         "storage_provider": image.storage_provider,
         "storage_key": image.storage_key,
         "source_kind": image.source_kind,
@@ -33,7 +33,7 @@ def build_attachment_metadata(image: FarmImage) -> FarmAttachmentMetadata:
 
 def build_canonical_attachment(
     *,
-    image: FarmImage,
+    image: AdvisoryImage,
     attachment_id: str,
     thread_id: str | None,
 ) -> FileAttachment:

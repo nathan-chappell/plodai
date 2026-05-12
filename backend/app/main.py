@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 
 from backend.app.api.routes import router
 from backend.app.chatkit.server import (
-    FarmChatKitServer,
+    AdvisoryChatKitServer,
     build_chatkit_server,
 )
 from backend.app.core.auth import AuthenticatedUser, require_paid_user
@@ -118,7 +118,7 @@ if settings.OPENAI_API_KEY:
 app = FastAPI(
     title="PlodAI API",
     version="2.1.1",
-    description="Farm-first PlodAI backend.",
+    description="AdvisoryCase-first PlodAI backend.",
     lifespan=lifespan,
 )
 
@@ -172,12 +172,12 @@ async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/farms/{farm_id}/chatkit")
-async def farm_chatkit_entrypoint(
-    farm_id: str,
+@app.post("/api/advisory/cases/{case_id}/chatkit")
+async def advisory_chatkit_entrypoint(
+    case_id: str,
     request: Request,
     user: AuthenticatedUser = Depends(require_paid_user),
-    chatkit_server: FarmChatKitServer = Depends(build_chatkit_server),
+    chatkit_server: AdvisoryChatKitServer = Depends(build_chatkit_server),
 ):
     raw_request = await request.body()
     context = await chatkit_server.build_request_context(

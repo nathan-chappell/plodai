@@ -43,7 +43,7 @@ export function PlatformShell({
                       onClick={() => navigate(PLODAI_PATH)}
                       type="button"
                     >
-                      Farms
+                      Cases
                     </NavButton>
                     {canViewAdmin ? (
                       <NavButton

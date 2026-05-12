@@ -3,14 +3,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.farm import FarmImage
-from backend.app.schemas.farm import FarmArea, FarmCrop, FarmRecordPayload, FarmWorkItem
+from backend.app.models.advisory import AdvisoryImage
+from backend.app.schemas.advisory import AdvisoryRecordPayload
 from backend.app.schemas.plodai_entities import (
     PlodaiComposerEntity,
     PlodaiEntitySearchResponse,
 )
-from backend.app.services.farm_image_service import FarmImageService
-from backend.app.services.farm_service import FarmService
+from backend.app.services.advisory_image_service import AdvisoryImageService
+from backend.app.services.advisory_service import AdvisoryService
 
 
 class PlodaiEntityService:
@@ -18,33 +18,33 @@ class PlodaiEntityService:
         self,
         db: AsyncSession,
         *,
-        image_service: FarmImageService | None = None,
-        farm_service: FarmService | None = None,
+        image_service: AdvisoryImageService | None = None,
+        advisory_service: AdvisoryService | None = None,
     ):
         self.db = db
-        self.image_service = image_service or FarmImageService(db)
-        self.farm_service = farm_service or FarmService(db)
+        self.image_service = image_service or AdvisoryImageService(db)
+        self.advisory_service = advisory_service or AdvisoryService(db)
 
     async def search_entities(
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         query: str,
         public_base_url: str | None = None,
     ) -> PlodaiEntitySearchResponse:
-        await self.farm_service.require_farm(user_id=user_id, farm_id=farm_id)
-        record = await self.farm_service.get_record(user_id=user_id, farm_id=farm_id)
+        await self.advisory_service.require_case(user_id=user_id, case_id=case_id)
+        record = await self.advisory_service.get_record(user_id=user_id, case_id=case_id)
         normalized_query = query.strip().lower()
         entities = [
             *await self._search_images(
                 user_id=user_id,
-                farm_id=farm_id,
+                case_id=case_id,
                 normalized_query=normalized_query,
                 public_base_url=public_base_url,
             ),
             *self._search_record(
-                farm_id=farm_id,
+                case_id=case_id,
                 record=record,
                 normalized_query=normalized_query,
             ),
@@ -55,18 +55,18 @@ class PlodaiEntityService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         normalized_query: str,
         public_base_url: str | None,
     ) -> list[PlodaiComposerEntity]:
         result = await self.db.execute(
-            select(FarmImage)
+            select(AdvisoryImage)
             .where(
-                FarmImage.user_id == user_id,
-                FarmImage.farm_id == farm_id,
-                FarmImage.status != "deleted",
+                AdvisoryImage.user_id == user_id,
+                AdvisoryImage.case_id == case_id,
+                AdvisoryImage.status != "deleted",
             )
-            .order_by(FarmImage.created_at.desc())
+            .order_by(AdvisoryImage.created_at.desc())
         )
         entities: list[PlodaiComposerEntity] = []
         for record in result.scalars().all():
@@ -86,14 +86,14 @@ class PlodaiEntityService:
             )
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"farm-image:{record.id}",
+                    id=f"advisory-image:{record.id}",
                     title=record.name,
                     icon="images",
                     interactive=True,
-                    group="Farm images",
+                    group="Evidence images",
                     data={
-                        "entity_type": "farm_image",
-                        "farm_id": farm_id,
+                        "entity_type": "advisory_image",
+                        "case_id": case_id,
                         "image_id": record.id,
                         "chat_id": record.chat_id or "",
                         "attachment_id": record.attachment_id or "",
@@ -109,159 +109,193 @@ class PlodaiEntityService:
     def _search_record(
         self,
         *,
-        farm_id: str,
-        record: FarmRecordPayload,
+        case_id: str,
+        record: AdvisoryRecordPayload,
         normalized_query: str,
     ) -> list[PlodaiComposerEntity]:
         entities: list[PlodaiComposerEntity] = []
-        areas_by_id = {area.id: area for area in record.areas}
-        crops_by_id = {crop.id: crop for crop in record.crops}
+        subjects_by_id = {subject.id: subject for subject in record.subjects}
 
-        for crop in record.crops:
-            linked_work_items = _linked_work_items_for_crop(record, crop.id)
-            area_names = _area_names_for_ids(areas_by_id, crop.area_ids)
-            work_item_terms: list[str | None] = []
-            for work_item in linked_work_items:
-                work_item_terms.extend(
-                    [
-                        work_item.title,
-                        work_item.description,
-                        work_item.kind,
-                        work_item.status,
-                        work_item.severity,
-                        work_item.observed_at,
-                        work_item.due_at,
-                        work_item.recommended_follow_up,
-                    ]
-                )
+        for subject in record.subjects:
             if not _matches_query(
                 normalized_query,
-                record.farm_name,
-                record.description,
-                record.location,
-                crop.name,
-                crop.type,
-                _humanize_crop_type(crop.type),
-                crop.quantity,
-                crop.expected_yield,
-                crop.status,
-                crop.notes,
-                *area_names,
-                *work_item_terms,
+                record.title,
+                record.profile_description,
+                record.default_location,
+                subject.name,
+                subject.kind,
+                subject.type,
+                subject.location,
+                subject.description,
+                subject.quantity,
+                subject.status,
+                subject.notes,
             ):
                 continue
-            highest_severity = _highest_work_item_severity(linked_work_items)
-            next_due_at = _next_work_item_due_at(linked_work_items)
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"farm-crop:{farm_id}:{crop.id}",
-                    title=crop.name,
+                    id=f"advisory-subject:{case_id}:{subject.id}",
+                    title=subject.name,
                     icon="notebook",
                     interactive=True,
-                    group="Farm crops",
+                    group="Subjects",
                     data={
-                        "entity_type": "farm_crop",
-                        "farm_id": farm_id,
-                        "farm_name": record.farm_name,
-                        "item_id": crop.id,
-                        "type": _humanize_crop_type(crop.type) or "",
-                        "quantity": crop.quantity or "",
-                        "expected_yield": crop.expected_yield or "",
-                        "area_names": ", ".join(area_names),
-                        "status": crop.status or "",
-                        "notes": crop.notes or "",
-                        "work_item_count": str(len(linked_work_items)),
-                        "highest_severity": highest_severity or "",
-                        "next_due_at": next_due_at or "",
+                        "entity_type": "advisory_subject",
+                        "case_id": case_id,
+                        "item_id": subject.id,
+                        "kind": subject.kind,
+                        "type": subject.type or "",
+                        "location": subject.location or "",
+                        "quantity": subject.quantity or "",
+                        "status": subject.status or "",
+                        "notes": subject.notes or "",
                     },
                 )
             )
 
-        for work_item in record.work_items:
-            related_crop_names = _crop_names_for_ids(crops_by_id, work_item.related_crop_ids)
-            related_area_names = _area_names_for_ids(areas_by_id, work_item.related_area_ids)
+        for report in record.reports:
+            subject_names = _subject_names_for_ids(subjects_by_id, report.subject_ids)
             if not _matches_query(
                 normalized_query,
-                record.farm_name,
-                record.description,
-                record.location,
-                work_item.title,
-                work_item.kind,
-                work_item.description,
-                work_item.status,
-                work_item.severity,
-                work_item.observed_at,
-                work_item.due_at,
-                work_item.recommended_follow_up,
-                *related_crop_names,
-                *related_area_names,
+                record.title,
+                report.title,
+                report.category,
+                report.description,
+                report.status,
+                report.severity,
+                report.reported_at,
+                report.observed_at,
+                report.location,
+                report.recommended_follow_up,
+                *subject_names,
             ):
                 continue
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"farm-work-item:{farm_id}:{work_item.id}",
-                    title=work_item.title,
+                    id=f"advisory-report:{case_id}:{report.id}",
+                    title=report.title,
                     icon="flag",
                     interactive=True,
-                    group="Farm work items",
+                    group="Reports",
                     data={
-                        "entity_type": "farm_work_item",
-                        "farm_id": farm_id,
-                        "farm_name": record.farm_name,
-                        "item_id": work_item.id,
-                        "kind": work_item.kind,
-                        "status": work_item.status or "",
-                        "severity": work_item.severity or "",
-                        "observed_at": work_item.observed_at or "",
-                        "due_at": work_item.due_at or "",
-                        "description": work_item.description or "",
-                        "recommended_follow_up": work_item.recommended_follow_up or "",
-                        "related_crop_names": ", ".join(related_crop_names),
-                        "related_area_names": ", ".join(related_area_names),
+                        "entity_type": "advisory_report",
+                        "case_id": case_id,
+                        "item_id": report.id,
+                        "category": report.category,
+                        "status": report.status or "",
+                        "severity": report.severity or "",
+                        "observed_at": report.observed_at or "",
+                        "reported_at": report.reported_at or "",
+                        "location": report.location or "",
+                        "description": report.description or "",
+                        "recommended_follow_up": report.recommended_follow_up or "",
+                        "subject_names": ", ".join(subject_names),
                     },
                 )
             )
 
-        for order in record.orders:
-            order_item_terms: list[str | None] = []
-            for order_item in order.items:
-                order_item_terms.extend(
-                    [
-                        order_item.label,
-                        order_item.quantity,
-                        order_item.notes,
-                    ]
-                )
+        for query in record.queries:
+            subject_names = _subject_names_for_ids(subjects_by_id, query.subject_ids)
             if not _matches_query(
                 normalized_query,
-                record.farm_name,
-                record.location,
-                order.title,
-                order.status,
-                order.summary,
-                order.price_label,
-                order.notes,
-                order.order_url,
-                *order_item_terms,
+                record.title,
+                query.question,
+                query.category,
+                query.status,
+                query.asked_at,
+                query.answer_summary,
+                query.notes,
+                *query.source_urls,
+                *subject_names,
             ):
                 continue
             entities.append(
                 PlodaiComposerEntity(
-                    id=f"farm-order:{farm_id}:{order.id}",
-                    title=order.title,
+                    id=f"advisory-query:{case_id}:{query.id}",
+                    title=query.question,
+                    icon="search",
+                    interactive=True,
+                    group="Queries",
+                    data={
+                        "entity_type": "advisory_query",
+                        "case_id": case_id,
+                        "item_id": query.id,
+                        "category": query.category,
+                        "status": query.status,
+                        "asked_at": query.asked_at or "",
+                        "answer_summary": query.answer_summary or "",
+                        "source_urls": ", ".join(query.source_urls),
+                        "subject_names": ", ".join(subject_names),
+                    },
+                )
+            )
+
+        for measurement in record.measurements:
+            subject_names = _subject_names_for_ids(subjects_by_id, measurement.subject_ids)
+            if not _matches_query(
+                normalized_query,
+                record.title,
+                measurement.label,
+                measurement.value,
+                measurement.unit,
+                measurement.measured_at,
+                measurement.method,
+                measurement.location,
+                measurement.notes,
+                *subject_names,
+            ):
+                continue
+            entities.append(
+                PlodaiComposerEntity(
+                    id=f"advisory-measurement:{case_id}:{measurement.id}",
+                    title=measurement.label,
+                    icon="ruler",
+                    interactive=True,
+                    group="Measurements",
+                    data={
+                        "entity_type": "advisory_measurement",
+                        "case_id": case_id,
+                        "item_id": measurement.id,
+                        "value": measurement.value,
+                        "unit": measurement.unit or "",
+                        "measured_at": measurement.measured_at or "",
+                        "method": measurement.method or "",
+                        "location": measurement.location or "",
+                        "subject_names": ", ".join(subject_names),
+                    },
+                )
+            )
+
+        for material in record.materials:
+            if not _matches_query(
+                normalized_query,
+                record.title,
+                material.name,
+                material.purpose,
+                material.category,
+                material.status,
+                material.supplier_name,
+                material.supplier_url,
+                material.notes,
+            ):
+                continue
+            entities.append(
+                PlodaiComposerEntity(
+                    id=f"advisory-material:{case_id}:{material.id}",
+                    title=material.name,
                     icon="cart",
                     interactive=True,
-                    group="Farm orders",
+                    group="Materials",
                     data={
-                        "entity_type": "farm_order",
-                        "farm_id": farm_id,
-                        "farm_name": record.farm_name,
-                        "item_id": order.id,
-                        "status": order.status,
-                        "price_label": order.price_label or "",
-                        "summary": order.summary or "",
-                        "notes": order.notes or "",
-                        "order_url": order.order_url or "",
+                        "entity_type": "advisory_material",
+                        "case_id": case_id,
+                        "item_id": material.id,
+                        "purpose": material.purpose or "",
+                        "category": material.category or "",
+                        "status": material.status,
+                        "supplier_name": material.supplier_name or "",
+                        "supplier_url": material.supplier_url or "",
+                        "notes": material.notes or "",
                     },
                 )
             )
@@ -276,64 +310,11 @@ def _matches_query(normalized_query: str, *values: str | None) -> bool:
     return normalized_query in haystack
 
 
-def _humanize_crop_type(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = " ".join(value.replace("_", " ").replace("-", " ").split())
-    if not normalized:
-        return None
-    return normalized[0].upper() + normalized[1:]
-
-
-def _linked_work_items_for_crop(
-    record: FarmRecordPayload,
-    crop_id: str,
-) -> list[FarmWorkItem]:
-    return [
-        work_item
-        for work_item in record.work_items
-        if crop_id in work_item.related_crop_ids
-    ]
-
-
-def _crop_names_for_ids(crops_by_id: dict[str, FarmCrop], crop_ids: list[str]) -> list[str]:
+def _subject_names_for_ids(subjects_by_id: dict[str, object], subject_ids: list[str]) -> list[str]:
     names: list[str] = []
-    for crop_id in crop_ids:
-        crop = crops_by_id.get(crop_id)
-        name = getattr(crop, "name", None)
+    for subject_id in subject_ids:
+        subject = subjects_by_id.get(subject_id)
+        name = getattr(subject, "name", None)
         if isinstance(name, str) and name.strip():
             names.append(name.strip())
     return names
-
-
-def _area_names_for_ids(areas_by_id: dict[str, FarmArea], area_ids: list[str]) -> list[str]:
-    names: list[str] = []
-    for area_id in area_ids:
-        area = areas_by_id.get(area_id)
-        name = getattr(area, "name", None)
-        if isinstance(name, str) and name.strip():
-            names.append(name.strip())
-    return names
-
-
-def _highest_work_item_severity(work_items: list[FarmWorkItem]) -> str | None:
-    severity_order = {"low": 1, "medium": 2, "high": 3}
-    highest = None
-    highest_rank = -1
-    for work_item in work_items:
-        if work_item.severity is None:
-            continue
-        rank = severity_order.get(work_item.severity, 0)
-        if rank > highest_rank:
-            highest = work_item.severity
-            highest_rank = rank
-    return highest
-
-
-def _next_work_item_due_at(work_items: list[FarmWorkItem]) -> str | None:
-    due_dates = [
-        work_item.due_at.strip()
-        for work_item in work_items
-        if work_item.due_at and work_item.due_at.strip()
-    ]
-    return sorted(due_dates)[0] if due_dates else None

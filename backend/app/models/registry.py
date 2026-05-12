@@ -7,13 +7,13 @@ def import_models() -> tuple[type[Base], ...]:
     from backend.app.models.credit import UserCreditBalance
     from backend.app.models.credit_grant import CreditGrant
     from backend.app.models.free_credit_request import FreeCreditRequest
-    from backend.app.models.farm import (
-        Farm,
-        FarmChat,
-        FarmChatAttachment,
-        FarmChatEntry,
-        FarmImage,
-        FarmRecord,
+    from backend.app.models.advisory import (
+        AdvisoryCase,
+        AdvisoryChat,
+        AdvisoryChatAttachment,
+        AdvisoryChatEntry,
+        AdvisoryImage,
+        AdvisoryRecord,
     )
     from backend.app.models.payment_attempt import PaymentAttempt
 
@@ -23,10 +23,10 @@ def import_models() -> tuple[type[Base], ...]:
         CreditGrant,
         PaymentAttempt,
         FreeCreditRequest,
-        Farm,
-        FarmRecord,
-        FarmImage,
-        FarmChat,
-        FarmChatEntry,
-        FarmChatAttachment,
+        AdvisoryCase,
+        AdvisoryRecord,
+        AdvisoryImage,
+        AdvisoryChat,
+        AdvisoryChatEntry,
+        AdvisoryChatAttachment,
     )

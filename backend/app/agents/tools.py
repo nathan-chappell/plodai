@@ -9,22 +9,22 @@ from chatkit.agents import AgentContext as ChatKitAgentContext
 from chatkit.types import ClientEffectEvent, ProgressUpdateEvent
 from pydantic import BaseModel, ConfigDict
 
-from backend.app.agents.context import FarmAgentContext
+from backend.app.agents.context import AdvisoryAgentContext
 from backend.app.chatkit.metadata import merge_chat_metadata
-from backend.app.schemas.farm import FarmRecordPayload
-from backend.app.services.farm_service import FarmService
+from backend.app.schemas.advisory import AdvisoryRecordPayload
+from backend.app.services.advisory_service import AdvisoryService
 
-ChatKitToolContext = ToolContext[ChatKitAgentContext[FarmAgentContext]]
+ChatKitToolContext = ToolContext[ChatKitAgentContext[AdvisoryAgentContext]]
 
 
-class SaveFarmRecordArgs(BaseModel):
+class SaveAdvisoryRecordArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    record: FarmRecordPayload
+    record: AdvisoryRecordPayload
 
 
-def build_plodai_tools(context: FarmAgentContext) -> list[Tool]:
-    farm_service = FarmService(context.db)
+def build_plodai_tools(context: AdvisoryAgentContext) -> list[Tool]:
+    advisory_service = AdvisoryService(context.db)
 
     @function_tool(name_override="name_current_thread")
     async def name_current_thread_tool(
@@ -51,56 +51,56 @@ def build_plodai_tools(context: FarmAgentContext) -> list[Tool]:
             "title": cleaned_title,
         }
 
-    @function_tool(name_override="get_farm_record")
-    async def get_farm_record_tool(
+    @function_tool(name_override="get_advisory_record")
+    async def get_advisory_record_tool(
         ctx: ChatKitToolContext,
     ) -> dict[str, Any]:
         request_context = ctx.context.request_context
-        record = await farm_service.get_record(
+        record = await advisory_service.get_record(
             user_id=request_context.user_id,
-            farm_id=request_context.farm_id,
+            case_id=request_context.case_id,
         )
         request_context.current_record = record
         return {
-            "farm_id": request_context.farm_id,
+            "case_id": request_context.case_id,
             "record": record.model_dump(mode="json"),
         }
 
-    @function_tool(name_override="save_farm_record")
-    async def save_farm_record_tool(
+    @function_tool(name_override="save_advisory_record")
+    async def save_advisory_record_tool(
         ctx: ChatKitToolContext,
-        record: FarmRecordPayload,
+        record: AdvisoryRecordPayload,
     ) -> dict[str, Any]:
         request_context = ctx.context.request_context
-        saved_record = await farm_service.save_record(
+        saved_record = await advisory_service.save_record(
             user_id=request_context.user_id,
-            farm_id=request_context.farm_id,
+            case_id=request_context.case_id,
             record=record,
         )
         request_context.current_record = saved_record
-        request_context.farm_name = saved_record.farm_name
+        request_context.case_title = saved_record.title
         await ctx.context.stream(
             ProgressUpdateEvent(
-                text=f"Saved farm record for {saved_record.farm_name or 'this farm'}."
+                text=f"Saved advisory record for {saved_record.title or 'this conversation'}."
             )
         )
         await ctx.context.stream(
             ClientEffectEvent(
-                name="farm_record_updated",
+                name="advisory_record_updated",
                 data={
-                    "farm_id": request_context.farm_id,
-                    "farm_name": saved_record.farm_name,
+                    "case_id": request_context.case_id,
+                    "case_title": saved_record.title,
                 },
             )
         )
         return {
-            "farm_id": request_context.farm_id,
+            "case_id": request_context.case_id,
             "record": saved_record.model_dump(mode="json"),
         }
 
     return [
         name_current_thread_tool,
-        get_farm_record_tool,
-        save_farm_record_tool,
+        get_advisory_record_tool,
+        save_advisory_record_tool,
         WebSearchTool(search_context_size="medium"),
     ]

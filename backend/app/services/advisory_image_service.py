@@ -10,18 +10,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import Settings, get_settings
-from backend.app.models.farm import FarmImage
-from backend.app.schemas.farm import FarmImageSummary
+from backend.app.models.advisory import AdvisoryImage
+from backend.app.schemas.advisory import AdvisoryImageSummary
 from backend.app.services.bucket_storage import (
     DEFAULT_STORAGE_PROVIDER,
     BucketStorageService,
     RailwayBucketService,
 )
-from backend.app.services.farm_service import FarmService
-from backend.app.services.upload_rules import validate_farm_image_upload
+from backend.app.services.advisory_service import AdvisoryService
+from backend.app.services.upload_rules import validate_advisory_image_upload
 
 
-class FarmImageService:
+class AdvisoryImageService:
     def __init__(
         self,
         db: AsyncSession,
@@ -32,24 +32,24 @@ class FarmImageService:
         self.db = db
         self.settings = settings or get_settings()
         self.bucket_service = bucket_service or RailwayBucketService(self.settings)
-        self.farm_service = FarmService(db)
+        self.advisory_service = AdvisoryService(db)
 
     async def list_images(
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         public_base_url: str | None = None,
-    ) -> list[FarmImageSummary]:
-        await self.farm_service.require_farm(user_id=user_id, farm_id=farm_id)
+    ) -> list[AdvisoryImageSummary]:
+        await self.advisory_service.require_case(user_id=user_id, case_id=case_id)
         result = await self.db.execute(
-            select(FarmImage)
+            select(AdvisoryImage)
             .where(
-                FarmImage.farm_id == farm_id,
-                FarmImage.user_id == user_id,
-                FarmImage.status != "deleted",
+                AdvisoryImage.case_id == case_id,
+                AdvisoryImage.user_id == user_id,
+                AdvisoryImage.status != "deleted",
             )
-            .order_by(FarmImage.created_at.desc())
+            .order_by(AdvisoryImage.created_at.desc())
         )
         return [
             self.serialize_image(record, public_base_url=public_base_url)
@@ -60,7 +60,7 @@ class FarmImageService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         file_name: str,
         mime_type: str | None,
         file_bytes: bytes,
@@ -68,11 +68,11 @@ class FarmImageService:
         chat_id: str | None = None,
         attachment_id: str | None = None,
         public_base_url: str | None = None,
-    ) -> FarmImageSummary:
-        await self.farm_service.require_farm(user_id=user_id, farm_id=farm_id)
+    ) -> AdvisoryImageSummary:
+        await self.advisory_service.require_case(user_id=user_id, case_id=case_id)
         record = await self._store_image(
             user_id=user_id,
-            farm_id=farm_id,
+            case_id=case_id,
             file_name=file_name,
             mime_type=mime_type,
             file_bytes=file_bytes,
@@ -87,16 +87,16 @@ class FarmImageService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         chat_id: str | None,
         attachment_id: str,
         file_name: str,
         mime_type: str | None,
         declared_size: int,
         storage_key: str,
-    ) -> FarmImage:
-        await self.farm_service.require_farm(user_id=user_id, farm_id=farm_id)
-        validate_farm_image_upload(
+    ) -> AdvisoryImage:
+        await self.advisory_service.require_case(user_id=user_id, case_id=case_id)
+        validate_advisory_image_upload(
             settings=self.settings,
             file_name=file_name,
             mime_type=mime_type,
@@ -111,7 +111,7 @@ class FarmImageService:
         file_bytes = await self.bucket_service.get_object_bytes(key=storage_key)
         return await self._store_image(
             user_id=user_id,
-            farm_id=farm_id,
+            case_id=case_id,
             file_name=file_name,
             mime_type=mime_type,
             file_bytes=file_bytes,
@@ -125,20 +125,20 @@ class FarmImageService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         image_id: str,
-    ) -> FarmImage:
-        await self.farm_service.require_farm(user_id=user_id, farm_id=farm_id)
-        record = await self.db.get(FarmImage, image_id)
+    ) -> AdvisoryImage:
+        await self.advisory_service.require_case(user_id=user_id, case_id=case_id)
+        record = await self.db.get(AdvisoryImage, image_id)
         if (
             record is None
             or record.user_id != user_id
-            or record.farm_id != farm_id
+            or record.case_id != case_id
             or record.status == "deleted"
         ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Farm image not found.",
+                detail="Advisory image not found.",
             )
         return record
 
@@ -146,10 +146,10 @@ class FarmImageService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         image_id: str,
     ) -> None:
-        record = await self.get_image(user_id=user_id, farm_id=farm_id, image_id=image_id)
+        record = await self.get_image(user_id=user_id, case_id=case_id, image_id=image_id)
         try:
             await self.bucket_service.delete_object(key=record.storage_key)
         except Exception:
@@ -157,18 +157,18 @@ class FarmImageService:
         record.status = "deleted"
         await self.db.commit()
 
-    async def load_image_bytes(self, record: FarmImage) -> bytes:
+    async def load_image_bytes(self, record: AdvisoryImage) -> bytes:
         return await self.bucket_service.get_object_bytes(key=record.storage_key)
 
     def serialize_image(
         self,
-        record: FarmImage,
+        record: AdvisoryImage,
         *,
         public_base_url: str | None = None,
-    ) -> FarmImageSummary:
-        return FarmImageSummary(
+    ) -> AdvisoryImageSummary:
+        return AdvisoryImageSummary(
             id=record.id,
-            farm_id=record.farm_id,
+            case_id=record.case_id,
             chat_id=record.chat_id,
             attachment_id=record.attachment_id,
             source_kind=record.source_kind,  # type: ignore[arg-type]
@@ -187,7 +187,7 @@ class FarmImageService:
 
     def build_public_preview_url(
         self,
-        record: FarmImage,
+        record: AdvisoryImage,
         *,
         public_base_url: str | None = None,
     ) -> str:
@@ -203,7 +203,7 @@ class FarmImageService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         file_name: str,
         mime_type: str | None,
         file_bytes: bytes,
@@ -211,9 +211,9 @@ class FarmImageService:
         chat_id: str | None,
         attachment_id: str | None,
         storage_key: str | None,
-    ) -> FarmImage:
+    ) -> AdvisoryImage:
         resolved_mime_type = mime_type or mimetypes.guess_type(file_name)[0]
-        validate_farm_image_upload(
+        validate_advisory_image_upload(
             settings=self.settings,
             file_name=file_name,
             mime_type=resolved_mime_type,
@@ -222,7 +222,7 @@ class FarmImageService:
         with ImageProbe(file_bytes) as probe:
             width, height = probe.size
         resolved_storage_key = storage_key or self.bucket_service.build_object_key(
-            scope="farm_image",
+            scope="advisory_image",
             attachment_id=attachment_id,
         )
         if storage_key is None:
@@ -231,9 +231,9 @@ class FarmImageService:
                 file_bytes=file_bytes,
                 mime_type=resolved_mime_type,
             )
-        record = FarmImage(
+        record = AdvisoryImage(
             id=f"image_{uuid4().hex}",
-            farm_id=farm_id,
+            case_id=case_id,
             user_id=user_id,
             chat_id=chat_id,
             attachment_id=attachment_id,

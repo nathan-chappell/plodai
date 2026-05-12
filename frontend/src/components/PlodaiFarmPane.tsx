@@ -10,25 +10,25 @@ import { AuthPanel } from "./AuthPanel";
 import { ChatKitPane } from "./ChatKitPane";
 import { FarmRecordPanel } from "./FarmRecordPanel";
 import {
-  createFarm,
-  deleteFarm,
-  getFarm,
-  getFarmRecord,
-  listFarms,
-  saveFarmRecord,
+  createCase,
+  deleteCase,
+  getCase,
+  getAdvisoryRecord,
+  listCases,
+  saveAdvisoryRecord,
   searchPlodaiEntities,
-  updateFarm,
+  updateCase,
 } from "../lib/api";
 import { COMPACT_CHAT_SURFACE_MIN_HEIGHT, COMPACT_WORKSPACE_MEDIA_QUERY } from "../lib/responsive";
-import { UNNAMED_FARM_LABEL, getFarmDisplayName, normalizeFarmPayload } from "../lib/farm";
+import { UNNAMED_ADVISORY_CASE_LABEL, getAdvisoryCaseDisplayTitle, normalizeAdvisoryPayload } from "../lib/advisory";
 import { buildPlodaiEntityPreview } from "../lib/plodai-entities";
 import { ADMIN_USERS_PATH, PLODAI_PATH, navigate } from "../lib/router";
-import type { FarmDetail, FarmRecordPayload, FarmSummary } from "../types/farm";
+import type { AdvisoryCaseDetail, AdvisoryRecordPayload, AdvisoryCaseSummary } from "../types/advisory";
 
 type LoadState = {
-  farms: FarmSummary[];
-  farm: FarmDetail | null;
-  record: FarmRecordPayload | null;
+  farms: AdvisoryCaseSummary[];
+  farm: AdvisoryCaseDetail | null;
+  record: AdvisoryRecordPayload | null;
 };
 
 type FarmWorkspacePane = "farm" | "overview" | "chat";
@@ -109,7 +109,7 @@ export function PlodaiFarmPane() {
     async function hydrate() {
       setLoading(true);
       try {
-        const farms = await listFarms();
+        const farms = await listCases();
         if (cancelled) {
           return;
         }
@@ -122,9 +122,9 @@ export function PlodaiFarmPane() {
       } catch (error) {
         if (!cancelled) {
           publishToast({
-            title: "Unable to load farms",
+            title: "Unable to load cases",
             message:
-              error instanceof Error ? error.message : "The farm list could not be loaded.",
+              error instanceof Error ? error.message : "The advisory case list could not be loaded.",
             tone: "error",
           });
         }
@@ -141,31 +141,31 @@ export function PlodaiFarmPane() {
     };
   }, [selectedFarmId]);
 
-  async function loadFarmState(farmId: string): Promise<LoadState> {
+  async function loadFarmState(caseId: string): Promise<LoadState> {
     const [farms, farm, recordResponse] = await Promise.all([
-      listFarms(),
-      getFarm(farmId),
-      getFarmRecord(farmId),
+      listCases(),
+      getCase(caseId),
+      getAdvisoryRecord(caseId),
     ]);
 
     return {
       farms,
       farm,
-      record: normalizeFarmPayload(recordResponse.record),
+      record: normalizeAdvisoryPayload(recordResponse.record),
     };
   }
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadFarm(farmId: string) {
+    async function loadFarm(caseId: string) {
       const requestId = ++farmLoadRequestIdRef.current;
       setLoading(true);
       try {
-        const nextState = await loadFarmState(farmId);
+        const nextState = await loadFarmState(caseId);
         if (
           cancelled ||
-          selectedFarmIdRef.current !== farmId ||
+          selectedFarmIdRef.current !== caseId ||
           farmLoadRequestIdRef.current !== requestId
         ) {
           return;
@@ -174,16 +174,16 @@ export function PlodaiFarmPane() {
       } catch (error) {
         if (!cancelled) {
           publishToast({
-            title: "Unable to load farm",
+            title: "Unable to load advisory case",
             message:
-              error instanceof Error ? error.message : "The farm details could not be loaded.",
+              error instanceof Error ? error.message : "The advisory case details could not be loaded.",
             tone: "error",
           });
         }
       } finally {
         if (
           !cancelled &&
-          selectedFarmIdRef.current === farmId &&
+          selectedFarmIdRef.current === caseId &&
           farmLoadRequestIdRef.current === requestId
         ) {
           setLoading(false);
@@ -207,15 +207,15 @@ export function PlodaiFarmPane() {
   }, [selectedFarmId]);
 
   async function refreshSelectedFarm(): Promise<void> {
-    const farmId = selectedFarmIdRef.current;
-    if (!farmId) {
+    const caseId = selectedFarmIdRef.current;
+    if (!caseId) {
       return;
     }
     try {
       const requestId = ++farmLoadRequestIdRef.current;
-      const nextState = await loadFarmState(farmId);
+      const nextState = await loadFarmState(caseId);
       if (
-        selectedFarmIdRef.current !== farmId ||
+        selectedFarmIdRef.current !== caseId ||
         farmLoadRequestIdRef.current !== requestId
       ) {
         return;
@@ -223,9 +223,9 @@ export function PlodaiFarmPane() {
       setState(nextState);
     } catch (error) {
       publishToast({
-        title: "Unable to refresh farm",
+        title: "Unable to refresh advisory case",
         message:
-          error instanceof Error ? error.message : "The latest farm updates could not be loaded.",
+          error instanceof Error ? error.message : "The latest advisory updates could not be loaded.",
         tone: "error",
       });
     }
@@ -234,15 +234,15 @@ export function PlodaiFarmPane() {
   async function handleCreateFarm() {
     setMutating(true);
     try {
-      const farm = await createFarm(buildUntitledFarmName(state.farms));
+      const farm = await createCase(buildUntitledFarmName(state.farms));
       setSelectedFarmId(farm.id);
       selectedFarmIdRef.current = farm.id;
       const nextState = await loadFarmState(farm.id);
       setState(nextState);
     } catch (error) {
       publishToast({
-        title: "Unable to create farm",
-        message: error instanceof Error ? error.message : "The farm could not be created.",
+        title: "Unable to create advisory case",
+        message: error instanceof Error ? error.message : "The advisory case could not be created.",
         tone: "error",
       });
     } finally {
@@ -255,8 +255,8 @@ export function PlodaiFarmPane() {
       return;
     }
 
-    const currentName = state.record.farm_name.trim() || state.farm.name || "";
-    const nextName = window.prompt("Rename farm", currentName);
+    const currentName = state.record.title.trim() || state.farm.title || "";
+    const nextName = window.prompt("Rename advisory case", currentName);
     if (nextName === null) {
       return;
     }
@@ -264,8 +264,8 @@ export function PlodaiFarmPane() {
     const cleanedName = nextName.trim();
     if (!cleanedName) {
       publishToast({
-        title: "Farm name required",
-        message: "Enter a farm name before saving it.",
+        title: "Case title required",
+        message: "Enter a case title before saving it.",
         tone: "warning",
       });
       return;
@@ -277,59 +277,21 @@ export function PlodaiFarmPane() {
     setMutating(true);
     try {
       await Promise.all([
-        updateFarm(state.farm.id, { name: cleanedName }),
-        saveFarmRecord(state.farm.id, {
+        updateCase(state.farm.id, { title: cleanedName }),
+        saveAdvisoryRecord(state.farm.id, {
           ...state.record,
-          farm_name: cleanedName,
+          title: cleanedName,
         }),
       ]);
       await refreshSelectedFarm();
       publishToast({
-        title: "Farm name updated",
-        message: `Renamed the farm to ${cleanedName}.`,
+        title: "Case title updated",
+        message: `Renamed the advisory case to ${cleanedName}.`,
       });
     } catch (error) {
       publishToast({
-        title: "Unable to update farm name",
-        message: error instanceof Error ? error.message : "The farm name could not be updated.",
-        tone: "error",
-      });
-    } finally {
-      setMutating(false);
-    }
-  }
-
-  async function handleDeleteCrop(cropId: string) {
-    if (!state.farm || !state.record) {
-      return;
-    }
-
-    const crop = state.record.crops.find((candidate) => candidate.id === cropId);
-    if (!crop) {
-      return;
-    }
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm(`Delete crop "${crop.name}"?`);
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    setMutating(true);
-    try {
-      await saveFarmRecord(state.farm.id, {
-        ...state.record,
-        crops: state.record.crops.filter((candidate) => candidate.id !== cropId),
-      });
-      await refreshSelectedFarm();
-      publishToast({
-        title: "Crop deleted",
-        message: `Removed ${crop.name} from ${getFarmDisplayName(state.record.farm_name)}.`,
-      });
-    } catch (error) {
-      publishToast({
-        title: "Unable to delete crop",
-        message: error instanceof Error ? error.message : "The crop could not be removed.",
+        title: "Unable to update case title",
+        message: error instanceof Error ? error.message : "The case title could not be updated.",
         tone: "error",
       });
     } finally {
@@ -343,7 +305,7 @@ export function PlodaiFarmPane() {
     }
 
     const deletedFarmId = state.farm.id;
-    const farmName = getFarmDisplayName(state.record?.farm_name ?? state.farm.name);
+    const farmName = getAdvisoryCaseDisplayTitle(state.record?.title ?? state.farm.title);
     const confirmed = window.confirm(
       `Delete ${farmName}? This will remove its saved record, images, and chat history.`,
     );
@@ -353,8 +315,8 @@ export function PlodaiFarmPane() {
 
     setMutating(true);
     try {
-      await deleteFarm(deletedFarmId);
-      const farms = await listFarms();
+      await deleteCase(deletedFarmId);
+      const farms = await listCases();
       const nextSelectedFarmId =
         farms.find((farm) => farm.id !== deletedFarmId)?.id ?? farms[0]?.id ?? null;
       selectedFarmIdRef.current = nextSelectedFarmId;
@@ -367,13 +329,13 @@ export function PlodaiFarmPane() {
         record: null,
       }));
       publishToast({
-        title: "Farm deleted",
+        title: "Case deleted",
         message: `Deleted ${farmName}.`,
       });
     } catch (error) {
       publishToast({
-        title: "Unable to delete farm",
-        message: error instanceof Error ? error.message : "The farm could not be deleted.",
+        title: "Unable to delete advisory case",
+        message: error instanceof Error ? error.message : "The advisory case could not be deleted.",
         tone: "error",
       });
     } finally {
@@ -422,7 +384,7 @@ export function PlodaiFarmPane() {
   const farmToolbar = (
     <FarmToolbar>
       <FarmToolbarInputGroup>
-        <FarmFieldLabel htmlFor="farm-select">Farm record</FarmFieldLabel>
+        <FarmFieldLabel htmlFor="farm-select">Case record</FarmFieldLabel>
         <FarmSelect
           id="farm-select"
           onChange={(event) => setSelectedFarmId(event.target.value || null)}
@@ -430,12 +392,12 @@ export function PlodaiFarmPane() {
         >
           {state.farms.length ? null : (
             <option value="" disabled>
-              No farms yet
+              No cases yet
             </option>
           )}
           {state.farms.map((farm) => (
             <option key={farm.id} value={farm.id}>
-              {getFarmDisplayName(farm.name)}
+              {getAdvisoryCaseDisplayTitle(farm.title)}
             </option>
           ))}
         </FarmSelect>
@@ -454,14 +416,14 @@ export function PlodaiFarmPane() {
           onClick={() => void handleDeleteFarm()}
           type="button"
         >
-          Delete farm
+          Delete case
         </FarmDangerButton>
         <FarmPrimaryButton
           disabled={mutating}
           onClick={() => void handleCreateFarm()}
           type="button"
         >
-          New farm
+          New case
         </FarmPrimaryButton>
       </FarmToolbarActions>
     </FarmToolbar>
@@ -477,7 +439,7 @@ export function PlodaiFarmPane() {
             onClick={() => navigate(PLODAI_PATH)}
             type="button"
           >
-            Farms
+            Cases
           </CompactUtilityButton>
           {user?.role === "admin" ? (
             <CompactUtilityButton
@@ -525,13 +487,13 @@ export function PlodaiFarmPane() {
 
   const farmSummaryContent = loading ? (
     <FarmEmptyState>
-      <strong>Loading farm</strong>
-      <MetaText>Pulling the current farm record, field-report context, and chat state.</MetaText>
+      <strong>Loading advisory case</strong>
+      <MetaText>Pulling the current advisory record, field-report context, and chat state.</MetaText>
     </FarmEmptyState>
   ) : !state.farm || !state.record ? (
     <FarmEmptyState>
-      <strong>No farm selected</strong>
-      <MetaText>Create a farm record or choose one from the record pane to open PlodAI.</MetaText>
+      <strong>No advisory case selected</strong>
+      <MetaText>Create an advisory record or choose one from the case pane to open PlodAI.</MetaText>
     </FarmEmptyState>
   ) : (
     <FarmRecordPanel
@@ -549,19 +511,18 @@ export function PlodaiFarmPane() {
 
   const overviewContent = loading ? (
     <FarmEmptyState>
-      <strong>Loading farm</strong>
-      <MetaText>Pulling the current farm record, field-report context, and chat state.</MetaText>
+      <strong>Loading advisory case</strong>
+      <MetaText>Pulling the current advisory record, field-report context, and chat state.</MetaText>
     </FarmEmptyState>
   ) : !state.farm || !state.record ? (
     <FarmEmptyState>
-      <strong>No farm selected</strong>
-      <MetaText>Create a farm record or choose one from the record pane to open PlodAI.</MetaText>
+      <strong>No advisory case selected</strong>
+      <MetaText>Create an advisory record or choose one from the case pane to open PlodAI.</MetaText>
     </FarmEmptyState>
   ) : (
     <FarmRecordPanel
       farm={state.record}
       isMutating={mutating}
-      onDeleteCrop={(cropId) => void handleDeleteCrop(cropId)}
       showDescriptionSection={isCompactLayout}
       showOrderMetric={false}
       showOrdersSection={false}
@@ -579,14 +540,14 @@ export function PlodaiFarmPane() {
             return [];
           }
           const response = await searchPlodaiEntities({
-            farmId: state.farm.id,
+            caseId: state.farm.id,
             query,
           });
           return response.entities as Entity[];
         },
         onRequestPreview: async (entity) => buildPlodaiEntityPreview(entity),
       }}
-      farmId={state.farm?.id ?? null}
+      caseId={state.farm?.id ?? null}
       onActiveChatChange={(chatId) => {
         setState((current) =>
           current.farm
@@ -601,7 +562,7 @@ export function PlodaiFarmPane() {
         );
       }}
       onClientEffect={(effect) => {
-        if (effect.name !== "farm_record_updated") {
+        if (effect.name !== "advisory_record_updated") {
           return;
         }
         void refreshSelectedFarm();
@@ -617,14 +578,14 @@ export function PlodaiFarmPane() {
       <FarmMain>
         <FarmSectionCard>
           {isCompactLayout ? (
-            <CompactWorkspace data-testid="compact-farm-workspace">
-              <CompactPaneTabs aria-label="Farm workspace panes" role="tablist">
+            <CompactWorkspace data-testid="compact-advisory-workspace">
+              <CompactPaneTabs aria-label="Advisory workspace panes" role="tablist">
                 {COMPACT_PANES.map((pane) => (
                   <CompactPaneTabButton
                     key={pane.id}
-                    aria-controls={`farm-workspace-pane-${pane.id}`}
+                    aria-controls={`advisory-workspace-pane-${pane.id}`}
                     aria-selected={activeCompactPane === pane.id}
-                    id={`farm-workspace-tab-${pane.id}`}
+                    id={`advisory-workspace-tab-${pane.id}`}
                     onClick={() => handleCompactPaneSelect(pane.id)}
                     role="tab"
                     type="button"
@@ -636,15 +597,15 @@ export function PlodaiFarmPane() {
 
               <CompactPaneTrack
                 ref={compactTrackRef}
-                data-testid="compact-farm-pane-track"
+                data-testid="compact-advisory-pane-track"
                 onScroll={handleCompactTrackScroll}
               >
                 <CompactPaneSlide
                   ref={(node) => {
                     compactPaneRefs.current.farm = node;
                   }}
-                  aria-labelledby="farm-workspace-tab-farm"
-                  id="farm-workspace-pane-farm"
+                  aria-labelledby="advisory-workspace-tab-farm"
+                  id="advisory-workspace-pane-farm"
                   role="tabpanel"
                 >
                   <CompactFarmPaneCard>
@@ -658,8 +619,8 @@ export function PlodaiFarmPane() {
                   ref={(node) => {
                     compactPaneRefs.current.overview = node;
                   }}
-                  aria-labelledby="farm-workspace-tab-overview"
-                  id="farm-workspace-pane-overview"
+                  aria-labelledby="advisory-workspace-tab-overview"
+                  id="advisory-workspace-pane-overview"
                   role="tabpanel"
                 >
                   {overviewContent}
@@ -669,8 +630,8 @@ export function PlodaiFarmPane() {
                   ref={(node) => {
                     compactPaneRefs.current.chat = node;
                   }}
-                  aria-labelledby="farm-workspace-tab-chat"
-                  id="farm-workspace-pane-chat"
+                  aria-labelledby="advisory-workspace-tab-chat"
+                  id="advisory-workspace-pane-chat"
                   role="tabpanel"
                 >
                   {chatPane}
@@ -679,10 +640,10 @@ export function PlodaiFarmPane() {
             </CompactWorkspace>
           ) : (
             <FarmPaneGrid>
-              <FarmDetailPane>
+              <AdvisoryDetailPane>
                 {farmToolbar}
-                <FarmDetailBody>{overviewContent}</FarmDetailBody>
-              </FarmDetailPane>
+                <AdvisoryDetailBody>{overviewContent}</AdvisoryDetailBody>
+              </AdvisoryDetailPane>
 
               {chatPane}
             </FarmPaneGrid>
@@ -693,15 +654,15 @@ export function PlodaiFarmPane() {
   );
 }
 
-function buildUntitledFarmName(farms: FarmSummary[]): string {
+function buildUntitledFarmName(farms: AdvisoryCaseSummary[]): string {
   const unnamedCount = farms.filter((farm) => {
-    const displayName = getFarmDisplayName(farm.name);
+    const displayName = getAdvisoryCaseDisplayTitle(farm.title);
     return (
-      displayName === UNNAMED_FARM_LABEL ||
-      displayName.startsWith(`${UNNAMED_FARM_LABEL} `)
+      displayName === UNNAMED_ADVISORY_CASE_LABEL ||
+      displayName.startsWith(`${UNNAMED_ADVISORY_CASE_LABEL} `)
     );
   }).length;
-  return unnamedCount ? `${UNNAMED_FARM_LABEL} ${unnamedCount + 1}` : UNNAMED_FARM_LABEL;
+  return unnamedCount ? `${UNNAMED_ADVISORY_CASE_LABEL} ${unnamedCount + 1}` : UNNAMED_ADVISORY_CASE_LABEL;
 }
 
 const FarmWorkspaceGrid = styled.div`
@@ -952,7 +913,7 @@ const FarmPaneGrid = styled.div`
   align-items: stretch;
 `;
 
-const FarmDetailPane = styled.section`
+const AdvisoryDetailPane = styled.section`
   ${sectionPanelCss("0.72rem", "0.72rem")};
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -961,7 +922,7 @@ const FarmDetailPane = styled.section`
   overflow: hidden;
 `;
 
-const FarmDetailBody = styled.div`
+const AdvisoryDetailBody = styled.div`
   min-height: 0;
   min-width: 0;
   display: block;

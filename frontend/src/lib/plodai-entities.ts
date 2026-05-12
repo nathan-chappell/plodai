@@ -1,19 +1,16 @@
 import type { Entity, Widgets } from "@openai/chatkit";
 
-import {
-  formatFarmCropStatus,
-  formatFarmCropType,
-  formatFarmWorkItemKind,
-  formatFarmWorkItemStatus,
-} from "./farm";
+import { humanizeToken } from "./advisory";
 import type { PlodaiComposerEntity, PlodaiEntityType } from "../types/chat-entities";
 
 function getEntityType(entity: Entity): PlodaiEntityType | null {
   const entityType = entity.data?.entity_type;
-  return entityType === "farm_image" ||
-    entityType === "farm_crop" ||
-    entityType === "farm_work_item" ||
-    entityType === "farm_order"
+  return entityType === "advisory_image" ||
+    entityType === "advisory_subject" ||
+    entityType === "advisory_report" ||
+    entityType === "advisory_query" ||
+    entityType === "advisory_measurement" ||
+    entityType === "advisory_material"
     ? entityType
     : null;
 }
@@ -34,7 +31,7 @@ export function buildPlodaiEntityPreview(
     return { preview: null };
   }
 
-  if (entityType === "farm_image") {
+  if (entityType === "advisory_image") {
     const previewUrl = entity.data.preview_url;
     if (!previewUrl) {
       return { preview: null };
@@ -65,7 +62,7 @@ export function buildPlodaiEntityPreview(
               },
               {
                 type: "Caption",
-                value: sizeLabel || "Farm image",
+                value: sizeLabel || "Evidence image",
               },
             ],
           },
@@ -74,43 +71,26 @@ export function buildPlodaiEntityPreview(
     };
   }
 
-  const badgeLabel =
-    entityType === "farm_crop"
-      ? "Farm crop"
-      : entityType === "farm_work_item"
-        ? "Work item"
-        : "Farm order";
-  const summary = entityType === "farm_crop"
-    ? [
-        formatFarmCropType(entity.data.type),
-        formatFarmCropStatus(entity.data.status),
-        entity.data.area_names && `Areas: ${entity.data.area_names}`,
-        entity.data.quantity && `Quantity: ${entity.data.quantity}`,
-        entity.data.expected_yield && `Expected yield: ${entity.data.expected_yield}`,
-        entity.data.work_item_count &&
-          `${entity.data.work_item_count} work item${entity.data.work_item_count === "1" ? "" : "s"}`,
-        entity.data.highest_severity && `${entity.data.highest_severity} severity`,
-      ]
-        .filter(Boolean)
-        .join(" | ")
-    : entityType === "farm_work_item"
-      ? [
-          formatFarmWorkItemKind(entity.data.kind),
-          formatFarmWorkItemStatus(entity.data.status),
-          entity.data.severity && `${entity.data.severity} severity`,
-          entity.data.related_crop_names && `Crops: ${entity.data.related_crop_names}`,
-          entity.data.related_area_names && `Areas: ${entity.data.related_area_names}`,
-        ]
-          .filter(Boolean)
-          .join(" | ")
-      : [entity.data.status, entity.data.price_label].filter(Boolean).join(" | ");
-  const notes = entityType === "farm_order"
-    ? entity.data.summary || entity.data.notes || ""
-    : entityType === "farm_work_item"
-      ? entity.data.description || entity.data.recommended_follow_up || ""
-      : entity.data.next_due_at
-        ? `Next due: ${entity.data.next_due_at}`
-        : entity.data.notes || "";
+  const badgeLabel = humanizeToken(entityType.replace("advisory_", "")) ?? "Advisory item";
+  const summary = [
+    humanizeToken(entity.data.kind),
+    humanizeToken(entity.data.category),
+    humanizeToken(entity.data.status),
+    entity.data.severity && `${entity.data.severity} severity`,
+    entity.data.location && `Location: ${entity.data.location}`,
+    entity.data.subject_names && `Subjects: ${entity.data.subject_names}`,
+    entity.data.value && `Value: ${[entity.data.value, entity.data.unit].filter(Boolean).join(" ")}`,
+    entity.data.supplier_name && `Supplier: ${entity.data.supplier_name}`,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const notes =
+    entity.data.description ||
+    entity.data.answer_summary ||
+    entity.data.recommended_follow_up ||
+    entity.data.notes ||
+    entity.data.purpose ||
+    "";
 
   return {
     preview: {

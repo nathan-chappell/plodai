@@ -7,15 +7,15 @@ import {
   setChatKitOutputLanguageGetter,
 } from "../api";
 
-describe("farm api helpers", () => {
+describe("advisory api helpers", () => {
   afterEach(() => {
     setChatKitMetadataGetter(null);
     setChatKitOutputLanguageGetter(null);
     vi.unstubAllGlobals();
   });
 
-  it("builds farm-scoped ChatKit URLs", () => {
-    expect(getChatKitConfig("farm_abc").url).toContain("/api/farms/farm_abc/chatkit");
+  it("builds advisory-case ChatKit URLs", () => {
+    expect(getChatKitConfig("case_abc").url).toContain("/api/advisory/cases/case_abc/chatkit");
   });
 
   it("attaches chat metadata and output language to ChatKit requests", async () => {
@@ -26,7 +26,7 @@ describe("farm api helpers", () => {
     }));
     setChatKitOutputLanguageGetter(() => "en");
 
-    await authenticatedFetch(getChatKitConfig("farm_abc").url, {
+    await authenticatedFetch(getChatKitConfig("case_abc").url, {
       method: "POST",
       body: JSON.stringify({
         type: "thread.new",

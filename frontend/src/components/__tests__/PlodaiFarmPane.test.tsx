@@ -7,23 +7,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppStateProvider } from "../../app/context";
 
 const {
-  createFarmMock,
-  deleteFarmMock,
-  getFarmMock,
-  getFarmRecordMock,
-  listFarmsMock,
-  saveFarmRecordMock,
+  createCaseMock,
+  deleteCaseMock,
+  getAdvisoryRecordMock,
+  getCaseMock,
+  listCasesMock,
+  saveAdvisoryRecordMock,
   searchPlodaiEntitiesMock,
-  updateFarmMock,
+  updateCaseMock,
 } = vi.hoisted(() => ({
-  createFarmMock: vi.fn(),
-  deleteFarmMock: vi.fn(),
-  getFarmMock: vi.fn(),
-  getFarmRecordMock: vi.fn(),
-  listFarmsMock: vi.fn(),
-  saveFarmRecordMock: vi.fn(),
+  createCaseMock: vi.fn(),
+  deleteCaseMock: vi.fn(),
+  getAdvisoryRecordMock: vi.fn(),
+  getCaseMock: vi.fn(),
+  listCasesMock: vi.fn(),
+  saveAdvisoryRecordMock: vi.fn(),
   searchPlodaiEntitiesMock: vi.fn(),
-  updateFarmMock: vi.fn(),
+  updateCaseMock: vi.fn(),
 }));
 
 vi.mock("../ChatKitPane", () => ({
@@ -59,21 +59,21 @@ vi.mock("../FarmRecordPanel", () => ({
 }));
 
 vi.mock("../../lib/api", () => ({
-  createFarm: createFarmMock,
-  deleteFarm: deleteFarmMock,
-  getFarm: getFarmMock,
-  getFarmRecord: getFarmRecordMock,
-  listFarms: listFarmsMock,
-  saveFarmRecord: saveFarmRecordMock,
+  createCase: createCaseMock,
+  deleteCase: deleteCaseMock,
+  getAdvisoryRecord: getAdvisoryRecordMock,
+  getCase: getCaseMock,
+  listCases: listCasesMock,
+  saveAdvisoryRecord: saveAdvisoryRecordMock,
   searchPlodaiEntities: searchPlodaiEntitiesMock,
-  updateFarm: updateFarmMock,
+  updateCase: updateCaseMock,
 }));
 
 import { PlodaiFarmPane } from "../PlodaiFarmPane";
 
 const SAMPLE_FARM = {
-  id: "farm_1",
-  name: "North Field",
+  id: "case_1",
+  title: "North Field",
   chat_id: "chat_1",
   image_count: 0,
   created_at: "2026-03-27T00:00:00Z",
@@ -82,27 +82,32 @@ const SAMPLE_FARM = {
 
 const SAMPLE_FARM_DETAIL = {
   ...SAMPLE_FARM,
-  location: "River Road",
-  description: "Mixed vegetables for the spring CSA.",
+  default_location: "River Road",
+  profile_description: "Mixed vegetables for the spring CSA.",
   images: [],
 };
 
 const SAMPLE_FARM_RECORD = {
-  version: "v1" as const,
-  farm_name: "North Field",
-  description: "Mixed vegetables for the spring CSA.",
-  location: "River Road",
-  areas: [],
-  crops: [],
-  work_items: [],
-  orders: [
+  version: "v2" as const,
+  title: "North Field",
+  profile_description: "Mixed vegetables for the spring CSA.",
+  default_location: "River Road",
+  subjects: [],
+  reports: [],
+  queries: [
     {
-      id: "order_1",
-      title: "CSA box",
-      status: "draft" as const,
-      items: [],
+      id: "query_1",
+      category: "input_sourcing" as const,
+      question: "Where can I source CSA box materials?",
+      status: "open" as const,
+      source_urls: [],
+      subject_ids: [],
+      report_ids: [],
+      measurement_ids: [],
     },
   ],
+  measurements: [],
+  materials: [],
 };
 
 function renderWithAppState(node: ReactNode) {
@@ -132,19 +137,19 @@ function renderWithAppState(node: ReactNode) {
 
 describe("PlodaiFarmPane", () => {
   beforeEach(() => {
-    createFarmMock.mockReset();
-    deleteFarmMock.mockReset();
-    getFarmMock.mockReset();
-    getFarmRecordMock.mockReset();
-    listFarmsMock.mockReset();
-    saveFarmRecordMock.mockReset();
+    createCaseMock.mockReset();
+    deleteCaseMock.mockReset();
+    getAdvisoryRecordMock.mockReset();
+    getCaseMock.mockReset();
+    listCasesMock.mockReset();
+    saveAdvisoryRecordMock.mockReset();
     searchPlodaiEntitiesMock.mockReset();
-    updateFarmMock.mockReset();
+    updateCaseMock.mockReset();
 
-    listFarmsMock.mockResolvedValue([SAMPLE_FARM]);
-    getFarmMock.mockResolvedValue(SAMPLE_FARM_DETAIL);
-    getFarmRecordMock.mockResolvedValue({
-      farm_id: SAMPLE_FARM.id,
+    listCasesMock.mockResolvedValue([SAMPLE_FARM]);
+    getCaseMock.mockResolvedValue(SAMPLE_FARM_DETAIL);
+    getAdvisoryRecordMock.mockResolvedValue({
+      case_id: SAMPLE_FARM.id,
       record: SAMPLE_FARM_RECORD,
     });
     searchPlodaiEntitiesMock.mockResolvedValue({
@@ -152,13 +157,13 @@ describe("PlodaiFarmPane", () => {
     });
   });
 
-  it("renders farm-scoped controls without orders, JSON editing, or upload chrome", () => {
+  it("renders advisory-case controls without orders, JSON editing, or upload chrome", () => {
     const markup = renderToStaticMarkup(renderWithAppState(<PlodaiFarmPane />));
 
-    expect(markup).toContain("Farm record");
+    expect(markup).toContain("Case record");
     expect(markup).toContain("Rename");
-    expect(markup).toContain("Delete farm");
-    expect(markup).toContain("New farm");
+    expect(markup).toContain("Delete case");
+    expect(markup).toContain("New case");
     expect(markup).not.toContain("Orders");
     expect(markup).not.toContain("Search");
     expect(markup).not.toContain("Edit JSON");
@@ -231,7 +236,7 @@ describe("PlodaiFarmPane", () => {
     });
 
     if (!rootElement) {
-      throw new Error("Expected a farm workspace test root.");
+      throw new Error("Expected an advisory workspace test root.");
     }
 
     const root = createRoot(rootElement);
@@ -255,12 +260,12 @@ describe("PlodaiFarmPane", () => {
       expect(rootElement.textContent).toContain("Auth");
       expect(rootElement.textContent).not.toContain("Orders");
 
-      const overviewTab = rootElement.querySelector("#farm-workspace-tab-overview");
-      const farmTab = rootElement.querySelector("#farm-workspace-tab-farm");
-      const chatTab = rootElement.querySelector("#farm-workspace-tab-chat");
+      const overviewTab = rootElement.querySelector("#advisory-workspace-tab-overview");
+      const farmTab = rootElement.querySelector("#advisory-workspace-tab-farm");
+      const chatTab = rootElement.querySelector("#advisory-workspace-tab-chat");
 
       expect(overviewTab?.getAttribute("aria-selected")).toBe("true");
-      expect(rootElement.querySelector("[data-testid='compact-farm-pane-track']")).not.toBeNull();
+      expect(rootElement.querySelector("[data-testid='compact-advisory-pane-track']")).not.toBeNull();
       expect(rootElement.querySelector("[data-testid='farm-management-summary']")).not.toBeNull();
       expect(rootElement.querySelector("[data-testid='mock-auth-panel']")).not.toBeNull();
       expect(rootElement.querySelector("[data-testid='mock-chat-pane']")?.getAttribute("data-surface-min-height")).toBe("500");

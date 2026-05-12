@@ -1,8 +1,8 @@
 # PlodAI
 
-PlodAI (from the Croatian `plod`, meaning "fruit" or "harvest") is an AI-assisted field advisory and reporting workspace for farm evidence, structured issue reports, official-source guidance, and practical follow-up planning. Users can create farm records, upload orchard or field images, report production problems, ask agricultural questions, and preserve the resulting context as reusable farm data.
+PlodAI (from the Croatian `plod`, meaning "fruit" or "harvest") is an AI-assisted field advisory and reporting workspace for field evidence, structured issue reports, official-source guidance, and practical follow-up planning. Users can create advisory cases, upload orchard or field images, report production problems, ask agricultural questions, and preserve the resulting context as reusable advisory data.
 
-The project grew out of a real local use case. I own a small walnut grove near Tenje, and after a season affected by blight I found myself piecing together answers from photos, ChatGPT, and advice from a local agricultural pharmacy. PlodAI is an attempt to turn that fragmented troubleshooting workflow into something more durable: collect evidence, interpret it with an AI assistant, cite official or institutionally reliable sources where possible, and save the result as reusable farm data instead of leaving it in a one-off chat.
+The project grew out of a real local use case. I own a small walnut grove near Tenje, and after a season affected by blight I found myself piecing together answers from photos, ChatGPT, and advice from a local agricultural pharmacy. PlodAI is an attempt to turn that fragmented troubleshooting workflow into something more durable: collect evidence, interpret it with an AI assistant, cite official or institutionally reliable sources where possible, and save the result as reusable case data instead of leaving it in a one-off chat.
 
 This repository is both a portfolio project and a product demo. Its product framing is a small, fundable digital AKIS-style pilot for Osijek-Baranja County: farmers can request guidance or report field problems, while advisors, researchers, cooperatives, and local institutions could eventually use anonymized patterns to understand pest pressure, crop stress, input shortages, subsidy bottlenecks, and procurement needs. Its main technical goal is to show how a frontend-defined agent experience can be exposed through a reusable runtime built with FastAPI, ChatKit, the OpenAI Agents SDK, the Conversations API, and typed backend contracts. The current domain focus is orchard and small-farm operations in Croatia. The documentation is written in English for a public portfolio audience, while the product itself supports English and Croatian chat output.
 
@@ -16,20 +16,20 @@ The live deployment intentionally keeps infrastructure simple: Railway hosting, 
 
 - Frontend stack: React 19, Vite, TypeScript, styled-components, Clerk, `@openai/chatkit`, and `@openai/chatkit-react`
 - Backend stack: FastAPI, the OpenAI Agents SDK, OpenAI ChatKit server integration, async SQLAlchemy, and Pydantic
-- Persistence: farm data and ChatKit memory are stored in the application database, while uploaded farm images and chat attachments are stored in S3-compatible object storage
-- Runtime shape: the assistant uses tools to read and update persisted farm information through typed Pydantic models and structured outputs rather than treating guidance requests and issue reports as unstructured text alone
+- Persistence: advisory cases, structured records, evidence images, and ChatKit memory are stored in the application database, while uploaded images and chat attachments are stored in S3-compatible object storage
+- Runtime shape: the assistant uses tools to read and update persisted advisory information through typed Pydantic models and structured outputs rather than treating guidance requests and issue reports as unstructured text alone
 - Streaming behavior: ChatKit and the Agents SDK stream tool progress, intermediate status updates, and final assistant responses back into the UI as the run is happening
-- Image workflow: uploaded images are verified, saved as farm-linked records, and sent back to the model as image inputs when visual context is needed
-- Search behavior: the assistant can use OpenAI hosted web search when current public references would materially improve the answer, especially official guidance, approved-input context, regulations, and procurement leads
+- Image workflow: uploaded images are verified, saved as advisory evidence records, and sent back to the model as image inputs when visual context is needed
+- Search behavior: the assistant can use OpenAI hosted web search when current public references would materially improve the answer, prioritizing Croatian Ministry of Agriculture, HAPIH, APPRRR, official registries, and institutional guidance before using vendor or retailer pages for sourcing leads
 - Model mapping: `lightweight` -> `gpt-5.4-nano`, `balanced` -> `gpt-5.4-mini`, `powerful` -> `gpt-5.4`
 
 ## Demonstration
 
-The screenshots below tell a simple user story: a user starts with a mostly empty farm record, uploads walnut-orchard photos, lets the assistant inspect them, and ends up with a structured farm record plus a practical assessment.
+The screenshots below tell a simple user story: a user starts with a mostly empty advisory record, uploads walnut-orchard photos, lets the assistant inspect them, and ends up with structured case data plus a practical assessment.
 
 ### 1. The user starts with photos, not a finished dataset
 
-In the first screenshot, the farm record on the left is still almost empty. On the right, the user has attached several walnut-orchard images in the chat composer and is about to ask PlodAI to analyze them. This matters because the workflow does not require the user to prepare a finished spreadsheet or form in advance; they can begin with natural inputs.
+In the first screenshot, the advisory record on the left is still almost empty. On the right, the user has attached several walnut-orchard images in the chat composer and is about to ask PlodAI to analyze them. This matters because the workflow does not require the user to prepare a finished spreadsheet or form in advance; they can begin with natural inputs.
 
 <p align="center">
   <img src="screenshots/just-attached-walnut-images.png" alt="PlodAI with walnut orchard images attached in the chat composer before analysis begins." width="88%" />
@@ -37,26 +37,26 @@ In the first screenshot, the farm record on the left is still almost empty. On t
 
 ### 2. The assistant inspects the images and uses tools to gather context
 
-In the second screenshot, the assistant is already reasoning over the uploaded images. It is also using a backend tool to fetch the current farm record before deciding what to save. For a non-technical reader, this is the core agent behavior: the system is not only generating text, it is deciding what information it needs, calling a tool, and continuing with more context.
+In the second screenshot, the assistant is already reasoning over the uploaded images. It is also using a backend tool to fetch the current advisory record before deciding what to save. For a non-technical reader, this is the core agent behavior: the system is not only generating text, it is deciding what information it needs, calling a tool, and continuing with more context.
 
 <p align="center">
-  <img src="screenshots/thinking-and-showing-tool-call.png" alt="PlodAI reviewing walnut orchard images and showing a get_farm_record tool call in progress." width="88%" />
+  <img src="screenshots/thinking-and-showing-tool-call.png" alt="PlodAI reviewing walnut orchard images and showing a get_advisory_record tool call in progress." width="88%" />
 </p>
 
 ### 3. The assistant turns observations into structured field data
 
-In the third screenshot, the left-hand panel is no longer blank. The assistant has created a usable farm record with a farm name, description, an orchard area, a walnut crop entry, a rough quantity estimate, an expected yield note, and initial work items. The key point is that image observations and chat context have been converted into typed application data that the rest of the product can reuse.
+In the third screenshot, the left-hand panel is no longer blank. The assistant has created a usable advisory record with a case title, profile description, crop subject, rough quantity estimate, initial report, and follow-up context. The key point is that image observations and chat context have been converted into typed application data that the rest of the product can reuse.
 
 <p align="center">
-  <img src="screenshots/farm-record-created.png" alt="A saved Walnut Orchard farm record with area, crop, quantity estimate, expected yield, and work items." width="88%" />
+  <img src="screenshots/farm-record-created.png" alt="A saved Walnut Orchard advisory record with subject, quantity estimate, reports, and follow-up context." width="88%" />
 </p>
 
 ### 4. The user gets a practical assessment, not just a vague summary
 
-In the final screenshot, the user sees a clearer operational result: saved work items on the left and a practical assessment on the right, including likely issues, suggested follow-up actions, and linked public references. The intended outcome is to move from raw photos to actionable farm information that can be reviewed, updated, and reused.
+In the final screenshot, the user sees a clearer operational result: saved reports on the left and a practical assessment on the right, including likely issues, suggested follow-up actions, and linked public references. The intended outcome is to move from raw photos to actionable advisory information that can be reviewed, updated, and reused.
 
 <p align="center">
-  <img src="screenshots/finished-with-assessment.png" alt="A finished walnut assessment with structured work items and linked public references in the chat response." width="88%" />
+  <img src="screenshots/finished-with-assessment.png" alt="A finished walnut assessment with structured reports and linked public references in the chat response." width="88%" />
 </p>
 
 The sample images used during development are available in [`walnut_test_images/`](./walnut_test_images).
@@ -106,9 +106,8 @@ VITE_CHATKIT_POWERFUL_MODEL_LABEL=Powerful
 ```
 
 For deployed PostgreSQL, keep `database_schema_mode=migrations` and set
-`database_app_schema=plodai`. Startup creates the app schema, moves legacy PlodAI
-app tables from `public` into `plodai` when needed, and runs Alembic with its
-version table in the app schema.
+`database_app_schema=plodai`. Startup creates the app schema and runs Alembic
+with its version table in the app schema.
 
 For Railway public networking, leave `HOST` unset or set it to `0.0.0.0`, and
 let Railway provide `PORT`. A conflicting host/port can make the deployment
@@ -159,8 +158,8 @@ npm test
 
 ## Future ideas
 
-- Bring farm-order publishing and public order pages into the main product workflow
-- Expand the public-facing order and sales flow once the launch fundamentals are in place
+- Add more structured reporting templates for common Croatian crop, livestock, subsidy, and input-sourcing cases
+- Add advisor-facing summaries once the core farmer case workflow is stable
 
 ## Documentation note
 

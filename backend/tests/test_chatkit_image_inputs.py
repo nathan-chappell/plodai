@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from chatkit.types import ImageAttachment, ThreadMetadata, UserMessageTagContent
 
-from backend.app.agents.context import FarmAgentContext
-from backend.app.chatkit.server import FarmThreadItemConverter
+from backend.app.agents.context import AdvisoryAgentContext
+from backend.app.chatkit.server import AdvisoryThreadItemConverter
 
 
 class FakeImageService:
@@ -13,7 +13,7 @@ class FakeImageService:
         self,
         *,
         user_id: str,
-        farm_id: str,
+        case_id: str,
         image_id: str,
     ) -> SimpleNamespace:
         return SimpleNamespace(
@@ -52,10 +52,10 @@ def test_tagged_image_inputs_use_high_detail() -> None:
         tag = UserMessageTagContent(
             id="image_1",
             text="Leaf closeup",
-            data={"entity_type": "farm_image", "image_id": "image_1"},
+            data={"entity_type": "advisory_image", "image_id": "image_1"},
         )
 
-        contents = await converter._farm_image_tag_to_message_contents(
+        contents = await converter._advisory_image_tag_to_message_contents(
             tag,
             tag_data=tag.data,
             current_attachment_image_ids=set(),
@@ -70,8 +70,8 @@ def test_tagged_image_inputs_use_high_detail() -> None:
     asyncio.run(_run())
 
 
-def _build_converter() -> FarmThreadItemConverter:
-    converter = FarmThreadItemConverter(
+def _build_converter() -> AdvisoryThreadItemConverter:
+    converter = AdvisoryThreadItemConverter(
         db=SimpleNamespace(),
         bucket_service=SimpleNamespace(),
     )
@@ -82,13 +82,13 @@ def _build_converter() -> FarmThreadItemConverter:
             created_at=datetime.now(),
             metadata={},
         ),
-        context=FarmAgentContext(
+        context=AdvisoryAgentContext(
             chat_id="chat_1",
             user_id="user_1",
             user_email="farmer@example.com",
             db=SimpleNamespace(),
-            farm_id="farm_1",
-            farm_name="Walnut Orchard",
+            case_id="case_1",
+            case_title="Walnut Orchard",
         ),
     )
     return converter

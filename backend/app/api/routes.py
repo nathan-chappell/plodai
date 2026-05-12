@@ -28,17 +28,16 @@ from backend.app.schemas.credits import (
     PaymentIntegrationResponse,
     PayPalPaymentAttemptCreateRequest,
 )
-from backend.app.schemas.farm import (
-    FarmCreateRequest,
-    FarmDeleteResponse,
-    FarmDetail,
-    FarmImageDeleteResponse,
-    FarmImageUploadResponse,
-    FarmRecordResponse,
-    FarmRecordUpdateRequest,
-    FarmSummary,
-    FarmUpdateRequest,
-    PublicFarmOrderResponse,
+from backend.app.schemas.advisory import (
+    AdvisoryCaseCreateRequest,
+    AdvisoryCaseDeleteResponse,
+    AdvisoryCaseDetail,
+    AdvisoryImageDeleteResponse,
+    AdvisoryImageUploadResponse,
+    AdvisoryRecordResponse,
+    AdvisoryRecordUpdateRequest,
+    AdvisoryCaseSummary,
+    AdvisoryCaseUpdateRequest,
 )
 from backend.app.schemas.plodai_entities import (
     PlodaiEntitySearchRequest,
@@ -50,12 +49,11 @@ from backend.app.services.clerk_admin_service import (
     set_user_active_state,
 )
 from backend.app.services.credit_service import CreditService
-from backend.app.services.farm_image_service import FarmImageService
-from backend.app.services.farm_service import FarmService
+from backend.app.services.advisory_image_service import AdvisoryImageService
+from backend.app.services.advisory_service import AdvisoryService
 from backend.app.services.free_credits import FreeCreditService
 from backend.app.services.payments import PaymentService
 from backend.app.services.plodai_entity_service import PlodaiEntityService
-from backend.app.services.public_farm_order_service import PublicFarmOrderService
 
 router = APIRouter(prefix="/api")
 
@@ -294,161 +292,161 @@ async def decide_admin_free_credit_request(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/farms", response_model=list[FarmSummary])
-async def list_farms(
+@router.get("/advisory/cases", response_model=list[AdvisoryCaseSummary])
+async def list_advisory_cases(
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await FarmService(db).list_farms(user_id=user.id)
+    return await AdvisoryService(db).list_cases(user_id=user.id)
 
 
-@router.post("/farms", response_model=FarmDetail)
-async def create_farm(
-    payload: FarmCreateRequest,
+@router.post("/advisory/cases", response_model=AdvisoryCaseDetail)
+async def create_advisory_case(
+    payload: AdvisoryCaseCreateRequest,
     request: Request,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    farm_service = FarmService(db)
-    image_service = FarmImageService(db)
-    farm = await farm_service.create_farm(user_id=user.id, request=payload)
-    return farm.model_copy(
+    advisory_service = AdvisoryService(db)
+    image_service = AdvisoryImageService(db)
+    advisory_case = await advisory_service.create_case(user_id=user.id, request=payload)
+    return advisory_case.model_copy(
         update={
             "images": await image_service.list_images(
                 user_id=user.id,
-                farm_id=farm.id,
+                case_id=advisory_case.id,
                 public_base_url=resolve_public_base_url(str(request.base_url)),
             )
         }
     )
 
 
-@router.get("/farms/{farm_id}", response_model=FarmDetail)
-async def get_farm(
-    farm_id: str,
+@router.get("/advisory/cases/{case_id}", response_model=AdvisoryCaseDetail)
+async def get_advisory_case(
+    case_id: str,
     request: Request,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    farm_service = FarmService(db)
-    image_service = FarmImageService(db)
-    farm = await farm_service.get_farm(user_id=user.id, farm_id=farm_id)
-    return farm.model_copy(
+    advisory_service = AdvisoryService(db)
+    image_service = AdvisoryImageService(db)
+    advisory_case = await advisory_service.get_case(user_id=user.id, case_id=case_id)
+    return advisory_case.model_copy(
         update={
             "images": await image_service.list_images(
                 user_id=user.id,
-                farm_id=farm_id,
+                case_id=case_id,
                 public_base_url=resolve_public_base_url(str(request.base_url)),
             )
         }
     )
 
 
-@router.patch("/farms/{farm_id}", response_model=FarmDetail)
-async def patch_farm(
-    farm_id: str,
-    payload: FarmUpdateRequest,
+@router.patch("/advisory/cases/{case_id}", response_model=AdvisoryCaseDetail)
+async def patch_advisory_case(
+    case_id: str,
+    payload: AdvisoryCaseUpdateRequest,
     request: Request,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    farm_service = FarmService(db)
-    image_service = FarmImageService(db)
-    farm = await farm_service.update_farm(
+    advisory_service = AdvisoryService(db)
+    image_service = AdvisoryImageService(db)
+    advisory_case = await advisory_service.update_case(
         user_id=user.id,
-        farm_id=farm_id,
+        case_id=case_id,
         request=payload,
     )
-    return farm.model_copy(
+    return advisory_case.model_copy(
         update={
             "images": await image_service.list_images(
                 user_id=user.id,
-                farm_id=farm_id,
+                case_id=case_id,
                 public_base_url=resolve_public_base_url(str(request.base_url)),
             )
         }
     )
 
 
-@router.delete("/farms/{farm_id}", response_model=FarmDeleteResponse)
-async def delete_farm(
-    farm_id: str,
+@router.delete("/advisory/cases/{case_id}", response_model=AdvisoryCaseDeleteResponse)
+async def delete_advisory_case(
+    case_id: str,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await FarmService(db).delete_farm(user_id=user.id, farm_id=farm_id)
-    return FarmDeleteResponse(farm_id=farm_id, deleted=True)
+    await AdvisoryService(db).delete_case(user_id=user.id, case_id=case_id)
+    return AdvisoryCaseDeleteResponse(case_id=case_id, deleted=True)
 
 
-@router.get("/farms/{farm_id}/record", response_model=FarmRecordResponse)
-async def get_farm_record(
-    farm_id: str,
+@router.get("/advisory/cases/{case_id}/record", response_model=AdvisoryRecordResponse)
+async def get_case_record(
+    case_id: str,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    record = await FarmService(db).get_record(user_id=user.id, farm_id=farm_id)
-    return FarmRecordResponse(farm_id=farm_id, record=record)
+    record = await AdvisoryService(db).get_record(user_id=user.id, case_id=case_id)
+    return AdvisoryRecordResponse(case_id=case_id, record=record)
 
 
-@router.put("/farms/{farm_id}/record", response_model=FarmRecordResponse)
-async def put_farm_record(
-    farm_id: str,
-    payload: FarmRecordUpdateRequest,
+@router.put("/advisory/cases/{case_id}/record", response_model=AdvisoryRecordResponse)
+async def put_advisory_record(
+    case_id: str,
+    payload: AdvisoryRecordUpdateRequest,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    record = await FarmService(db).save_record(
+    record = await AdvisoryService(db).save_record(
         user_id=user.id,
-        farm_id=farm_id,
+        case_id=case_id,
         record=payload.record,
     )
-    return FarmRecordResponse(farm_id=farm_id, record=record)
+    return AdvisoryRecordResponse(case_id=case_id, record=record)
 
 
-@router.post("/farms/{farm_id}/images", response_model=FarmImageUploadResponse)
-async def upload_farm_image(
-    farm_id: str,
+@router.post("/advisory/cases/{case_id}/images", response_model=AdvisoryImageUploadResponse)
+async def upload_advisory_image(
+    case_id: str,
     request: Request,
     file: UploadFile = File(...),
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     file_bytes = await file.read()
-    image = await FarmImageService(db).upload_image(
+    image = await AdvisoryImageService(db).upload_image(
         user_id=user.id,
-        farm_id=farm_id,
-        file_name=file.filename or "farm-image",
+        case_id=case_id,
+        file_name=file.filename or "advisory-image",
         mime_type=file.content_type,
         file_bytes=file_bytes,
         public_base_url=resolve_public_base_url(str(request.base_url)),
     )
-    return FarmImageUploadResponse(image=image)
+    return AdvisoryImageUploadResponse(image=image)
 
 
 @router.delete(
-    "/farms/{farm_id}/images/{image_id}",
-    response_model=FarmImageDeleteResponse,
+    "/advisory/cases/{case_id}/images/{image_id}",
+    response_model=AdvisoryImageDeleteResponse,
 )
-async def delete_farm_image(
-    farm_id: str,
+async def delete_advisory_image(
+    case_id: str,
     image_id: str,
     user: AuthenticatedUser = Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await FarmImageService(db).delete_image(
+    await AdvisoryImageService(db).delete_image(
         user_id=user.id,
-        farm_id=farm_id,
+        case_id=case_id,
         image_id=image_id,
     )
-    return FarmImageDeleteResponse(farm_id=farm_id, image_id=image_id, deleted=True)
+    return AdvisoryImageDeleteResponse(case_id=case_id, image_id=image_id, deleted=True)
 
 
 @router.post(
-    "/farms/{farm_id}/entities/search",
+    "/advisory/cases/{case_id}/entities/search",
     response_model=PlodaiEntitySearchResponse,
 )
-async def search_farm_entities(
-    farm_id: str,
+async def search_advisory_entities(
+    case_id: str,
     payload: PlodaiEntitySearchRequest,
     request: Request,
     user: AuthenticatedUser = Depends(require_current_user),
@@ -456,24 +454,7 @@ async def search_farm_entities(
 ):
     return await PlodaiEntityService(db).search_entities(
         user_id=user.id,
-        farm_id=farm_id,
+        case_id=case_id,
         query=payload.query,
-        public_base_url=resolve_public_base_url(str(request.base_url)),
-    )
-
-
-@router.get(
-    "/public/farms/{farm_id}/orders/{order_id}",
-    response_model=PublicFarmOrderResponse,
-)
-async def get_public_farm_order(
-    farm_id: str,
-    order_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    return await PublicFarmOrderService(db).get_public_order(
-        farm_id=farm_id,
-        order_id=order_id,
         public_base_url=resolve_public_base_url(str(request.base_url)),
     )

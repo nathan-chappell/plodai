@@ -23,16 +23,10 @@ import {
   ADMIN_USERS_PATH,
   isAccountPath,
   isAdminUsersPath,
-  isFarmOrderPath,
   navigate,
   PLODAI_PATH,
   usePathname,
 } from "./lib/router";
-
-const FarmOrderPage = lazy(async () => {
-  const module = await import("./components/FarmOrderPage");
-  return { default: module.FarmOrderPage };
-});
 
 const PlodaiFarmPane = lazy(async () => {
   const module = await import("./components/PlodaiFarmPane");
@@ -83,7 +77,6 @@ export function App() {
   const pathname = usePathname();
   const { authError, hydrating, isSignedIn, reloadSession, setAuthError, user, setUser } = useAppSessionState();
   const toastState = useToastState();
-  const viewingPublicFarmOrder = isFarmOrderPath(pathname);
   const [preferredOutputLanguage, setPreferredOutputLanguage] = useState<PreferredOutputLanguage>(() =>
     loadPreferredOutputLanguage(),
   );
@@ -102,17 +95,6 @@ export function App() {
   if (pathname === "/") {
     navigate(PLODAI_PATH);
     return null;
-  }
-
-  if (viewingPublicFarmOrder) {
-    return (
-      <>
-        <Suspense fallback={<RouteLoadingState label="farm order" />}>
-          <FarmOrderPage />
-        </Suspense>
-        <ToastLayer {...toastState} />
-      </>
-    );
   }
 
   if (hydrating) {
@@ -157,7 +139,7 @@ export function App() {
         canViewAdmin={currentUser.role === "admin"}
         title={showingAdmin ? "PlodAI admin" : showingAccount ? "PlodAI account" : "PlodAI field desk"}
       >
-        <Suspense fallback={<RouteLoadingState label={showingAdmin ? "admin" : showingAccount ? "account" : "farms"} />}>
+        <Suspense fallback={<RouteLoadingState label={showingAdmin ? "admin" : showingAccount ? "account" : "cases"} />}>
           {showingAdmin ? <AdminUsersPage /> : showingAccount ? <AccountBillingPage /> : <PlodaiFarmPane />}
         </Suspense>
       </PlatformShell>

@@ -130,7 +130,7 @@ export function buildChatKitRequestMetadata(options: {
 }
 
 export function ChatKitPane({
-  farmId,
+  caseId,
   activeChatId,
   onActiveChatChange,
   onClientEffect,
@@ -143,7 +143,7 @@ export function ChatKitPane({
   fillAvailableHeight = false,
   threadOrigin = "interactive",
 }: {
-  farmId: string | null;
+  caseId: string | null;
   activeChatId?: string | null;
   onActiveChatChange?: (chatId: string | null) => Promise<void> | void;
   onClientEffect?: (effect: ChatKitClientEffect) => Promise<void> | void;
@@ -177,20 +177,20 @@ export function ChatKitPane({
   return (
     <ChatKitPaneCard $fillHeight={fillAvailableHeight}>
       <ChatKitPaneHarness $fillHeight={fillAvailableHeight}>
-        {!farmId ? (
+        {!caseId ? (
           <ChatKitPaneSurface
             $fillHeight={fillAvailableHeight}
             $light
             $minHeight={surfaceMinHeight}
             data-testid="chatkit-surface"
           >
-            <ChatKitPaneEmpty>Select or create a farm to start chatting with PlodAI.</ChatKitPaneEmpty>
+            <ChatKitPaneEmpty>Select or create an advisory case to start chatting with PlodAI.</ChatKitPaneEmpty>
           </ChatKitPaneSurface>
         ) : (
-          <ActiveFarmChatKit
+          <ActiveCaseChatKit
             activeChatId={activeChatId}
             entitiesConfig={entitiesConfig}
-            farmId={farmId}
+            caseId={caseId}
             greeting={greeting}
             headerTitle={headerTitle}
             onActiveChatChange={onActiveChatChange}
@@ -206,8 +206,8 @@ export function ChatKitPane({
   );
 }
 
-function ActiveFarmChatKit({
-  farmId,
+function ActiveCaseChatKit({
+  caseId,
   activeChatId,
   onActiveChatChange,
   onClientEffect,
@@ -219,7 +219,7 @@ function ActiveFarmChatKit({
   surfaceMinHeight,
   fillAvailableHeight,
 }: {
-  farmId: string;
+  caseId: string;
   activeChatId?: string | null;
   onActiveChatChange?: (chatId: string | null) => Promise<void> | void;
   onClientEffect?: (effect: ChatKitClientEffect) => Promise<void> | void;
@@ -233,19 +233,19 @@ function ActiveFarmChatKit({
 }) {
   const threadIdRef = useRef<string | null>(activeChatId ?? null);
   const initialThreadRef = useRef<{
-    farmId: string;
+    caseId: string;
     threadId: string | null;
   }>({
-    farmId,
+    caseId,
     threadId: activeChatId ?? null,
   });
   const onActiveChatChangeRef = useRef(onActiveChatChange);
   const onClientEffectRef = useRef(onClientEffect);
   const chatKitRef = useRef<ReturnType<typeof useChatKit> | null>(null);
 
-  if (initialThreadRef.current.farmId !== farmId) {
+  if (initialThreadRef.current.caseId !== caseId) {
     initialThreadRef.current = {
-      farmId,
+      caseId,
       threadId: activeChatId ?? null,
     };
   }
@@ -265,7 +265,7 @@ function ActiveFarmChatKit({
   );
   const resolvedGreeting = greeting ?? localizedCopy.greeting;
   const composerPlaceholder = localizedCopy.placeholder;
-  const chatKitConfig = useMemo(() => getChatKitConfig(farmId), [farmId]);
+  const chatKitConfig = useMemo(() => getChatKitConfig(caseId), [caseId]);
   const options = useMemo<UseChatKitOptions>(() => {
     return {
       api: {
@@ -276,7 +276,7 @@ function ActiveFarmChatKit({
           type: "two_phase",
         },
       },
-      // Keep the initial thread stable for a farm instance. Later thread changes
+      // Keep the initial thread stable for an advisory case instance. Later thread changes
       // should go through setThreadId so ChatKit does not reconfigure itself.
       initialThread: initialThreadRef.current.threadId,
       theme: {
@@ -359,7 +359,7 @@ function ActiveFarmChatKit({
     };
   }, [
     entitiesConfig,
-    farmId,
+    caseId,
     chatKitConfig,
     composerPlaceholder,
     headerTitle,

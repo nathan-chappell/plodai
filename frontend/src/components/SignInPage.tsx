@@ -59,7 +59,7 @@ const SIGN_IN_COPY: Record<
     signInLabel: "Prijava",
     signOutLabel: "Odjava",
     subtitle:
-      "Terensko savjetovanje, prijave problema i dokazi s farme u jednom radnom prostoru.",
+      "Terensko savjetovanje, prijave problema i dokazi s terena u jednom radnom prostoru.",
     title: "Prijavite se u PlodAI",
   },
   en: {
@@ -76,7 +76,7 @@ const SIGN_IN_COPY: Record<
     signInLabel: "Sign in",
     signOutLabel: "Sign out",
     subtitle:
-      "Field advisory, issue reporting, and farm evidence in one workspace.",
+      "Field advisory, issue reporting, and field evidence in one workspace.",
     title: "Sign in to PlodAI",
   },
 };

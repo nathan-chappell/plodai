@@ -34,115 +34,111 @@ def build_test_app() -> FastAPI:
     return app
 
 
-def test_farm_routes_support_create_get_and_save_record() -> None:
+def test_advisory_routes_support_create_get_and_save_record() -> None:
     app = build_test_app()
 
     with TestClient(app) as client:
-        create_response = client.post("/api/farms", json={"name": "API farm"})
+        create_response = client.post("/api/advisory/cases", json={"title": "API case"})
         assert create_response.status_code == 200
-        farm = create_response.json()
-        farm_id = farm["id"]
-        assert farm["name"] == "API farm"
-        assert farm["images"] == []
+        advisory_case = create_response.json()
+        case_id = advisory_case["id"]
+        assert advisory_case["title"] == "API case"
+        assert advisory_case["images"] == []
 
-        record_response = client.get(f"/api/farms/{farm_id}/record")
+        record_response = client.get(f"/api/advisory/cases/{case_id}/record")
         assert record_response.status_code == 200
-        assert record_response.json()["record"]["farm_name"] == "API farm"
-        assert record_response.json()["record"]["areas"] == []
-        assert record_response.json()["record"]["work_items"] == []
+        assert record_response.json()["record"]["title"] == "API case"
+        assert record_response.json()["record"]["subjects"] == []
+        assert record_response.json()["record"]["reports"] == []
 
         save_response = client.put(
-            f"/api/farms/{farm_id}/record",
+            f"/api/advisory/cases/{case_id}/record",
             json={
                 "record": {
-                    "version": "v1",
-                    "farm_name": "API farm updated",
-                    "description": "Saved through the API",
-                    "location": "North lot",
-                    "areas": [
+                    "version": "v2",
+                    "title": "API case updated",
+                    "profile_description": "Saved through the API",
+                    "default_location": "North lot",
+                    "subjects": [
                         {
-                            "id": "area_1",
-                            "name": "North orchard",
-                        }
-                    ],
-                    "crops": [
-                        {
-                            "id": "crop_1",
+                            "id": "subject_1",
                             "name": "Walnut block",
-                            "area_ids": ["area_1"],
+                            "kind": "crop",
+                            "location": "North orchard",
                         }
                     ],
-                    "work_items": [
+                    "reports": [
                         {
-                            "id": "work_1",
-                            "kind": "task",
+                            "id": "report_1",
+                            "category": "other",
                             "title": "Check sprayer",
-                            "related_crop_ids": [],
-                            "related_area_ids": ["area_1"],
-                            "related_image_ids": [],
+                            "subject_ids": ["subject_1"],
                         }
                     ],
-                    "orders": [],
+                    "queries": [],
+                    "measurements": [],
+                    "materials": [],
                 }
             },
         )
         assert save_response.status_code == 200
-        assert save_response.json()["record"]["farm_name"] == "API farm updated"
-        assert save_response.json()["record"]["work_items"][0]["title"] == "Check sprayer"
+        assert save_response.json()["record"]["title"] == "API case updated"
+        assert save_response.json()["record"]["reports"][0]["title"] == "Check sprayer"
 
-        detail_response = client.get(f"/api/farms/{farm_id}")
+        detail_response = client.get(f"/api/advisory/cases/{case_id}")
         assert detail_response.status_code == 200
-        assert detail_response.json()["name"] == "API farm updated"
-        assert detail_response.json()["description"] == "Saved through the API"
+        assert detail_response.json()["title"] == "API case updated"
+        assert detail_response.json()["profile_description"] == "Saved through the API"
 
 
-def test_farm_routes_support_delete() -> None:
+def test_advisory_routes_support_delete() -> None:
     app = build_test_app()
 
     with TestClient(app) as client:
-        create_response = client.post("/api/farms", json={"name": "Delete API farm"})
+        create_response = client.post("/api/advisory/cases", json={"title": "Delete API case"})
         assert create_response.status_code == 200
-        farm_id = create_response.json()["id"]
+        case_id = create_response.json()["id"]
 
-        delete_response = client.delete(f"/api/farms/{farm_id}")
+        delete_response = client.delete(f"/api/advisory/cases/{case_id}")
         assert delete_response.status_code == 200
         assert delete_response.json() == {
-            "farm_id": farm_id,
+            "case_id": case_id,
             "deleted": True,
         }
 
-        list_response = client.get("/api/farms")
+        list_response = client.get("/api/advisory/cases")
         assert list_response.status_code == 200
-        farms = list_response.json()
-        assert all(item["id"] != farm_id for item in farms)
+        cases = list_response.json()
+        assert all(item["id"] != case_id for item in cases)
 
 
-def test_farm_routes_bootstrap_a_blank_default_farm() -> None:
+def test_advisory_routes_bootstrap_a_blank_default_case() -> None:
     app = build_test_app()
 
     with TestClient(app) as client:
-        list_response = client.get("/api/farms")
+        list_response = client.get("/api/advisory/cases")
         assert list_response.status_code == 200
-        farms = list_response.json()
-        assert len(farms) == 1
+        cases = list_response.json()
+        assert len(cases) == 1
 
-        farm = farms[0]
-        assert farm["name"] == ""
+        advisory_case = cases[0]
+        assert advisory_case["title"] == ""
 
-        record_response = client.get(f"/api/farms/{farm['id']}/record")
+        record_response = client.get(f"/api/advisory/cases/{advisory_case['id']}/record")
         assert record_response.status_code == 200
         assert record_response.json()["record"] == {
-            "version": "v1",
-            "farm_name": "",
-            "description": None,
-            "location": None,
-            "areas": [],
-            "crops": [],
-            "work_items": [],
-            "orders": [],
+            "version": "v2",
+            "title": "",
+            "profile_description": None,
+            "default_location": None,
+            "subjects": [],
+            "reports": [],
+            "queries": [],
+            "measurements": [],
+            "materials": [],
         }
 
-        second_list_response = client.get("/api/farms")
+        second_list_response = client.get("/api/advisory/cases")
         assert second_list_response.status_code == 200
-        second_farms = second_list_response.json()
-        assert [item["id"] for item in second_farms] == [farm["id"]]
+        second_cases = second_list_response.json()
+        assert [item["id"] for item in second_cases] == [advisory_case["id"]]

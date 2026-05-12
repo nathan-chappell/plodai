@@ -21,7 +21,7 @@ def is_image_file(
     return bool(mime_type and mime_type.startswith("image/"))
 
 
-def validate_farm_image_upload(
+def validate_advisory_image_upload(
     *,
     settings: Settings,
     file_name: str,

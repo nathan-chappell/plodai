@@ -7,13 +7,13 @@ from backend.app.db.session import Base
 from backend.app.db.schemas import APP_SCHEMA_KEY
 
 
-class Farm(Base, kw_only=True):
-    __tablename__ = "farms"
+class AdvisoryCase(Base, kw_only=True):
+    __tablename__ = "advisory_cases"
     __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[str] = mapped_column(Text, index=True)
-    name: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         init=False,
@@ -27,12 +27,12 @@ class Farm(Base, kw_only=True):
     )
 
 
-class FarmRecord(Base, kw_only=True):
-    __tablename__ = "farm_records"
+class AdvisoryRecord(Base, kw_only=True):
+    __tablename__ = "advisory_records"
     __table_args__ = {"schema": APP_SCHEMA_KEY}
 
-    farm_id: Mapped[str] = mapped_column(
-        ForeignKey(f"{APP_SCHEMA_KEY}.farms.id"),
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA_KEY}.advisory_cases.id"),
         primary_key=True,
     )
     payload_json: Mapped[dict] = mapped_column(JSON, default_factory=dict)
@@ -49,18 +49,18 @@ class FarmRecord(Base, kw_only=True):
     )
 
 
-class FarmImage(Base, kw_only=True):
-    __tablename__ = "farm_images"
+class AdvisoryImage(Base, kw_only=True):
+    __tablename__ = "advisory_images"
     __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    farm_id: Mapped[str] = mapped_column(
-        ForeignKey(f"{APP_SCHEMA_KEY}.farms.id"),
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA_KEY}.advisory_cases.id"),
         index=True,
     )
     user_id: Mapped[str] = mapped_column(Text, index=True)
     chat_id: Mapped[str | None] = mapped_column(
-        ForeignKey(f"{APP_SCHEMA_KEY}.farm_chats.id"),
+        ForeignKey(f"{APP_SCHEMA_KEY}.advisory_chats.id"),
         index=True,
         default=None,
     )
@@ -87,13 +87,13 @@ class FarmImage(Base, kw_only=True):
     )
 
 
-class FarmChat(Base, kw_only=True):
-    __tablename__ = "farm_chats"
+class AdvisoryChat(Base, kw_only=True):
+    __tablename__ = "advisory_chats"
     __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    farm_id: Mapped[str] = mapped_column(
-        ForeignKey(f"{APP_SCHEMA_KEY}.farms.id"),
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA_KEY}.advisory_cases.id"),
         index=True,
         unique=True,
     )
@@ -122,13 +122,13 @@ class FarmChat(Base, kw_only=True):
     )
 
 
-class FarmChatEntry(Base, kw_only=True):
-    __tablename__ = "farm_chat_entries"
+class AdvisoryChatEntry(Base, kw_only=True):
+    __tablename__ = "advisory_chat_entries"
     __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)
     chat_id: Mapped[str] = mapped_column(
-        ForeignKey(f"{APP_SCHEMA_KEY}.farm_chats.id"),
+        ForeignKey(f"{APP_SCHEMA_KEY}.advisory_chats.id"),
         index=True,
     )
     kind: Mapped[str] = mapped_column(Text)
@@ -141,8 +141,8 @@ class FarmChatEntry(Base, kw_only=True):
     )
 
 
-class FarmChatAttachment(Base, kw_only=True):
-    __tablename__ = "farm_chat_attachments"
+class AdvisoryChatAttachment(Base, kw_only=True):
+    __tablename__ = "advisory_chat_attachments"
     __table_args__ = {"schema": APP_SCHEMA_KEY}
 
     id: Mapped[str] = mapped_column(primary_key=True)

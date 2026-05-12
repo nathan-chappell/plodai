@@ -4,7 +4,6 @@ export const PLODAI_PATH = "/plodai";
 export const ACCOUNT_PATH = "/account";
 export const ADMIN_PATH = "/admin";
 export const ADMIN_USERS_PATH = ADMIN_PATH;
-const FARM_ORDER_PATH_PREFIX = "/farms/";
 
 function currentPathname(): string {
   if (typeof window === "undefined") {
@@ -50,28 +49,4 @@ export function isAdminUsersPath(pathname: string): boolean {
 
 export function isAccountPath(pathname: string): boolean {
   return pathname === ACCOUNT_PATH;
-}
-
-export function isFarmOrderPath(pathname: string): boolean {
-  return /^\/farms\/[^/]+\/orders\/[^/]+$/.test(pathname);
-}
-
-export function parseFarmOrderPath(
-  pathname: string,
-): { farmId: string; orderId: string } | null {
-  if (!isFarmOrderPath(pathname)) {
-    return null;
-  }
-  const [, , farmId = "", , orderId = ""] = pathname.split("/");
-  if (!farmId || !orderId) {
-    return null;
-  }
-  return {
-    farmId: decodeURIComponent(farmId),
-    orderId: decodeURIComponent(orderId),
-  };
-}
-
-export function buildFarmOrderPath(farmId: string, orderId: string): string {
-  return `${FARM_ORDER_PATH_PREFIX}${encodeURIComponent(farmId)}/orders/${encodeURIComponent(orderId)}`;
 }

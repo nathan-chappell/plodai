@@ -6,7 +6,7 @@ from typing import Literal, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.chatkit.metadata import AppChatMetadata
-from backend.app.schemas.farm import FarmImageSummary, FarmRecordPayload
+from backend.app.schemas.advisory import AdvisoryImageSummary, AdvisoryRecordPayload
 
 PreferredOutputLanguage = Literal["hr", "en"]
 DEFAULT_PREFERRED_OUTPUT_LANGUAGE: PreferredOutputLanguage = "hr"
@@ -21,13 +21,13 @@ def resolve_preferred_output_language(value: object) -> PreferredOutputLanguage:
 
 
 @dataclass(kw_only=True)
-class FarmAgentContext:
+class AdvisoryAgentContext:
     chat_id: str
     user_id: str
     user_email: str | None
     db: AsyncSession
-    farm_id: str
-    farm_name: str
+    case_id: str
+    case_title: str
     thread_title: str | None = None
     assistant_turn_count: int = 0
     request_metadata: AppChatMetadata = field(default_factory=dict)
@@ -35,5 +35,5 @@ class FarmAgentContext:
     preferred_output_language: PreferredOutputLanguage = (
         DEFAULT_PREFERRED_OUTPUT_LANGUAGE
     )
-    current_record: FarmRecordPayload | None = None
-    farm_images: list[FarmImageSummary] = field(default_factory=list)
+    current_record: AdvisoryRecordPayload | None = None
+    advisory_images: list[AdvisoryImageSummary] = field(default_factory=list)
