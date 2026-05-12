@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from agents import WebSearchTool
 
 from backend.app.agents.agent_builder import (
@@ -9,6 +10,8 @@ from backend.app.agents.agent_builder import (
 )
 from backend.app.agents.context import FarmAgentContext, resolve_preferred_output_language
 from backend.app.schemas.farm import FarmImageSummary, FarmRecordPayload
+
+pytestmark = pytest.mark.no_db
 
 
 def test_build_plodai_agent_uses_static_instructions() -> None:

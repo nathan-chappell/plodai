@@ -1,4 +1,8 @@
-from backend.app.core.config import summarize_database_url_for_log
+import pytest
+
+from backend.app.core.config import parse_cors_origins, summarize_database_url_for_log
+
+pytestmark = pytest.mark.no_db
 
 
 def test_summarize_database_url_for_log_redacts_credentials() -> None:
@@ -15,3 +19,21 @@ def test_summarize_database_url_for_log_leaves_sqlite_path() -> None:
         summarize_database_url_for_log("sqlite:///./plodai.db")
         == "sqlite:///./plodai.db"
     )
+
+
+def test_parse_cors_origins_accepts_json_list() -> None:
+    assert parse_cors_origins(
+        '["http://localhost:5173","http://127.0.0.1:5173"]'
+    ) == ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def test_parse_cors_origins_accepts_unquoted_bracket_list() -> None:
+    assert parse_cors_origins(
+        "[http://localhost:5173,http://127.0.0.1:5173]"
+    ) == ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def test_parse_cors_origins_accepts_comma_separated_list() -> None:
+    assert parse_cors_origins(
+        "http://localhost:5173, http://127.0.0.1:5173"
+    ) == ["http://localhost:5173", "http://127.0.0.1:5173"]

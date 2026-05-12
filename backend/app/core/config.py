@@ -1,4 +1,5 @@
 from functools import lru_cache
+import json
 from pathlib import Path
 import re
 from typing import Literal
@@ -9,6 +10,38 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATABASE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def parse_cors_origins(value: list[str] | str) -> list[str]:
+    if isinstance(value, list):
+        return value
+
+    stripped_value = value.strip()
+    if not stripped_value:
+        return []
+
+    if stripped_value.startswith("[") and stripped_value.endswith("]"):
+        try:
+            parsed_value = json.loads(stripped_value)
+        except json.JSONDecodeError:
+            parsed_value = [
+                item.strip().strip("\"'")
+                for item in stripped_value[1:-1].split(",")
+                if item.strip()
+            ]
+    else:
+        parsed_value = [
+            item.strip().strip("\"'")
+            for item in stripped_value.split(",")
+            if item.strip()
+        ]
+
+    if not isinstance(parsed_value, list) or not all(
+        isinstance(item, str) for item in parsed_value
+    ):
+        raise ValueError("CORS_ORIGINS must be a list of origin strings")
+
+    return parsed_value
 
 
 class Settings(BaseSettings):
@@ -48,7 +81,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     OPENAI_API_KEY: str = Field(init=False)
-    CORS_ORIGINS: list[str] = Field(init=False)
+    CORS_ORIGINS: list[str] | str = Field(init=False)
     CLERK_SECRET_KEY: str | None = None
     CLERK_JWT_KEY: str | None = None
 
@@ -68,6 +101,11 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.strip().strip("\"'")
         return value
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def normalize_cors_origins(cls, value: list[str] | str) -> list[str]:
+        return parse_cors_origins(value)
 
     @property
     def async_database_url(self) -> str:
