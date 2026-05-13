@@ -51,7 +51,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./report_foundry.db"
+    database_url: str = "sqlite:///./plodai.db"
     database_schema_mode: Literal["create_all", "migrations"] = "migrations"
     database_app_schema: str = "plodai"
     database_shared_schema: str = "public"
@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     plodai_chat_attachment_max_bytes: int = 10 * 1024 * 1024
     PUBLIC_BASE_URL: str | None = None
     storage_bucket_endpoint: str = "https://t3.storageapi.dev"
-    storage_bucket_name: str = "report-foundry-bucket-9n-mxk"
+    storage_bucket_name: str = "plodai-bucket"
     storage_bucket_access_key_id: str = (
         "tid_MIHyCBnGUWcYKySahNMlhnNWJfCyHwDWKSEgeYycDLpRTSRZFz"
     )

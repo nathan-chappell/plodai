@@ -1,32 +1,32 @@
-# Report Foundry
+# plodai
 
-Report Foundry is a demo runtime for packaging frontend-declared agent workspaces in a conventional, reusable shape. The goal is to make a useful TypeScript agent module easy to expose to ChatKit, wire into the OpenAI Agents SDK, and reuse across demos without burying the behavior inside one-off backend code.
+plodai is an agriculture assistant and information-gathering application for field evidence, structured issue reports, official-source guidance, and practical follow-up planning. Users can create advisory cases, upload orchard or field images, report production problems, ask agricultural questions, and preserve the resulting context as reusable advisory data.
 
-The current demo scenario is PlodAI: an agricultural field-advisory workspace where a user can create cases, attach field images, chat with an assistant, and preserve the result as structured advisory records. That scenario is intentionally still present because it exercises the runtime with real state, image context, hosted web search, tool calls, authenticated access, credits, and persisted ChatKit memory.
+The current workflow is built around field advisory cases. A user can start with photos or a rough problem description, then the assistant helps inspect the available evidence, asks for or searches for missing context when useful, and saves durable facts into a structured record. The goal is to turn one-off agricultural troubleshooting into information that can be reviewed, updated, and reused.
 
-## What This Repo Demonstrates
+The app currently focuses on orchard and small-farm operations in Croatia, with English and Croatian chat output. It is designed to support agriculture information gathering without pretending to replace local advisors, inspectors, veterinarians, official registries, or label-specific compliance checks.
 
-- A React and TypeScript frontend that owns the product workflow and declares the context the assistant can use.
-- A light FastAPI backend that exposes the frontend-provided agent behavior to ChatKit and the OpenAI Agents SDK.
-- Request-scoped ChatKit server and memory-store construction so each request can use the active async SQLAlchemy session.
-- Typed Pydantic contracts at API, tool-call, and structured-record boundaries.
-- A client-side image workflow where uploaded evidence is stored, attached to the advisory case, and sent back to the model when visual context matters.
-- Hosted web search for current public references when the saved record, chat, and uploaded evidence are not enough.
-- Clerk bearer-token auth, credit checks, and shared admin/payment contracts wired through narrow adapters.
+## What The App Does
 
-The architectural direction is broader than the PlodAI demo: frontend agent modules should be packageable, inspectable, and reusable by other agents or demo scenarios with minimal ceremony.
+- Collects field reports, questions, measurements, materials, and crop or livestock subjects into advisory cases.
+- Accepts uploaded evidence images and sends relevant visual context back to the assistant when analysis needs it.
+- Saves assistant-discovered or user-provided facts through typed tools instead of leaving everything in chat history.
+- Uses hosted web search when current public references materially improve an answer.
+- Prioritizes official or institutionally reliable Croatian agricultural sources for guidance, subsidy, regulatory, pesticide, fertilizer, veterinary, and food-safety context.
+- Keeps authenticated access, credit checks, account state, advisory records, uploaded evidence, and ChatKit memory connected in one application flow.
 
 ## Architecture
 
 - Frontend stack: React 19, Vite, TypeScript, styled-components, Clerk, `@openai/chatkit`, and `@openai/chatkit-react`.
 - Backend stack: FastAPI, OpenAI Agents SDK, OpenAI ChatKit server integration, async SQLAlchemy, Alembic, and Pydantic.
 - Persistence: advisory cases, structured records, evidence images, account/credit state, and ChatKit memory live in the application database; uploaded images and chat attachments live in S3-compatible object storage.
-- Runtime shape: ChatKit receives authenticated requests, the backend builds a request-scoped agent context, the Agents SDK runs the active agent with typed tools, and frontend-visible progress streams back through ChatKit events.
+- Runtime shape: ChatKit receives authenticated requests, the backend builds a request-scoped agent context, the Agents SDK runs the PlodAI assistant with typed tools, and frontend-visible progress streams back through ChatKit events.
+- Product shape: the frontend owns the advisory workspace and local context, while the backend stays focused on auth, persistence, ChatKit/Agents SDK wiring, and bookkeeping.
 - Model mapping: `lightweight` -> `gpt-5.4-nano`, `balanced` -> `gpt-5.4-mini`, `powerful` -> `gpt-5.4`.
 
 ## Demo Flow
 
-The included screenshots show the current PlodAI scenario:
+The included screenshots show a walnut-orchard advisory case:
 
 1. A user starts with a mostly empty advisory case and attaches walnut-orchard photos.
 2. The assistant inspects the images and calls backend tools to fetch the current saved record.
@@ -75,7 +75,7 @@ VITE_API_BASE_URL=/api
 PUBLIC_BASE_URL=http://localhost:8000
 CORS_ORIGINS=["http://localhost:8000","http://127.0.0.1:8000","http://localhost:5173","http://127.0.0.1:5173"]
 
-database_url=sqlite:///./report_foundry.db
+database_url=sqlite:///./plodai.db
 database_schema_mode=migrations
 database_app_schema=plodai
 database_shared_schema=public
@@ -138,6 +138,6 @@ npm test
 
 ## Current Boundaries
 
-- The PlodAI advisory workspace is the active demo module and still owns many app-domain names in code.
+- The advisory workspace is the active product surface and still owns many app-domain names in code.
 - The vendored shared admin package still uses its historical package name because renaming it requires a coordinated submodule and import migration.
-- The backend should stay mostly plumbing: expose the active frontend-declared agent, attach request-scoped persistence, stream progress, and enforce auth/credit gates.
+- The backend should stay mostly plumbing: expose the assistant to ChatKit, attach request-scoped persistence, stream progress, and enforce auth/credit gates.

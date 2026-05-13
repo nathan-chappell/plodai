@@ -16,8 +16,8 @@ def test_summarize_database_url_for_log_redacts_credentials() -> None:
 
 def test_summarize_database_url_for_log_leaves_sqlite_path() -> None:
     assert (
-        summarize_database_url_for_log("sqlite:///./report_foundry.db")
-        == "sqlite:///./report_foundry.db"
+        summarize_database_url_for_log("sqlite:///./plodai.db")
+        == "sqlite:///./plodai.db"
     )
 
 

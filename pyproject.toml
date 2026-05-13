@@ -1,7 +1,7 @@
 [project]
 name = "plodai-backend"
 version = "2.1.1"
-description = "FastAPI runtime for Report Foundry agent demos."
+description = "FastAPI backend for the plodai agriculture assistant."
 requires-python = ">=3.14"
 dependencies = [
   "ai-portfolio-admin @ file:./vendor/ai-portfolio-admin/",
