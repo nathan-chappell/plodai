@@ -9,6 +9,7 @@
     "build": "npm run check:frontend-env && tsc -p frontend/tsconfig.json && vite build --config frontend/vite.config.ts && node -e \"console.log('Build finished at', new Date().toISOString())\"",
     "preview": "vite preview --config frontend/vite.config.ts",
     "test": "vitest run --config frontend/vite.config.ts",
+    "test:playwright": "playwright test",
     "test:integration-live": "vitest run --config frontend/vite.config.ts frontend/src/lib/__tests__/chatkit-live.test.ts",
     "build:watch": "vite build --watch --config frontend/vite.config.ts"
   },
@@ -23,6 +24,7 @@
     "styled-components": "^6.1.18"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^5.0.0",

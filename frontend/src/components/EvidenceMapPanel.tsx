@@ -94,7 +94,7 @@ export function EvidenceMapPanel({ caseId, images }: EvidenceMapPanelProps) {
       </EvidenceSearch>
 
       {geotaggedImages.length ? (
-        <MapCanvas aria-label="Geotagged advisory image map">
+        <MapCanvas aria-label="Geotagged advisory image map" data-testid="evidence-map-canvas">
           <MapGrid />
           {geotaggedImages.map((image) => {
             const point = projection(image);
@@ -103,6 +103,9 @@ export function EvidenceMapPanel({ caseId, images }: EvidenceMapPanelProps) {
               <MapMarker
                 key={image.id}
                 $highlighted={highlighted}
+                data-highlighted={highlighted ? "true" : "false"}
+                data-image-id={image.id}
+                data-testid="evidence-map-marker"
                 style={{
                   left: `${point.x}%`,
                   top: `${point.y}%`,
@@ -140,6 +143,9 @@ export function EvidenceMapPanel({ caseId, images }: EvidenceMapPanelProps) {
             <ImageListItem
               key={image.id}
               $highlighted={highlightedImageIds.has(image.id)}
+              data-highlighted={highlightedImageIds.has(image.id) ? "true" : "false"}
+              data-image-id={image.id}
+              data-testid="evidence-map-image"
             >
               {image.preview_url ? (
                 <ImageThumb alt="" src={image.preview_url} />
