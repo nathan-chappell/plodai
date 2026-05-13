@@ -14,8 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import Settings, get_settings
-from backend.app.models.advisory import AdvisorySemanticSource
-from backend.app.schemas.advisory import AdvisoryRecordPayload
+from backend.app.models.advisory import AdvisoryImage, AdvisorySemanticSource
+from backend.app.schemas.advisory import AdvisoryImageSummary, AdvisoryRecordPayload
 from backend.app.schemas.advisory_semantic import (
     AdvisorySemanticItemType,
     AdvisorySemanticSearchHit,
@@ -127,7 +127,8 @@ class AdvisorySemanticService:
             )
 
         record = await self.advisory_service.get_record(user_id=user_id, case_id=case_id)
-        items = build_semantic_items(record)
+        images = await self._list_described_images(user_id=user_id, case_id=case_id)
+        items = build_semantic_items(record, advisory_images=images)
         if not items:
             await self._delete_removed_mappings(user_id=user_id, case_id=case_id, desired_items={})
             return AdvisorySemanticSearchResponse(query=normalized_query, indexed_item_count=0)
@@ -194,7 +195,7 @@ class AdvisorySemanticService:
             select(AdvisorySemanticSource).where(
                 AdvisorySemanticSource.user_id == user_id,
                 AdvisorySemanticSource.case_id == case_id,
-                AdvisorySemanticSource.item_type.in_(["report", "query"]),
+                AdvisorySemanticSource.item_type.in_(["report", "query", "image"]),
             )
         )
         existing = list(result.scalars().all())
@@ -264,7 +265,7 @@ class AdvisorySemanticService:
                 select(AdvisorySemanticSource).where(
                     AdvisorySemanticSource.user_id == user_id,
                     AdvisorySemanticSource.case_id == case_id,
-                    AdvisorySemanticSource.item_type.in_(["report", "query"]),
+                    AdvisorySemanticSource.item_type.in_(["report", "query", "image"]),
                 )
             )
             existing = list(result.scalars().all())
@@ -300,8 +301,55 @@ class AdvisorySemanticService:
         ) as rag:
             yield rag
 
+    async def _list_described_images(
+        self,
+        *,
+        user_id: str,
+        case_id: str,
+    ) -> list[AdvisoryImageSummary]:
+        result = await self.db.execute(
+            select(AdvisoryImage)
+            .where(
+                AdvisoryImage.case_id == case_id,
+                AdvisoryImage.user_id == user_id,
+                AdvisoryImage.status != "deleted",
+                AdvisoryImage.detailed_description.is_not(None),
+            )
+            .order_by(AdvisoryImage.created_at.desc())
+        )
+        images: list[AdvisoryImageSummary] = []
+        for image in result.scalars().all():
+            if not image.detailed_description or not image.detailed_description.strip():
+                continue
+            images.append(
+                AdvisoryImageSummary(
+                    id=image.id,
+                    case_id=image.case_id,
+                    chat_id=image.chat_id,
+                    attachment_id=image.attachment_id,
+                    source_kind=image.source_kind,  # type: ignore[arg-type]
+                    name=image.name,
+                    mime_type=image.mime_type,
+                    byte_size=image.byte_size,
+                    width=image.width,
+                    height=image.height,
+                    detailed_description=image.detailed_description,
+                    location_label=image.location_label,
+                    latitude=image.latitude,
+                    longitude=image.longitude,
+                    preview_url=None,
+                    created_at=image.created_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+                    updated_at=image.updated_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+                )
+            )
+        return images
 
-def build_semantic_items(record: AdvisoryRecordPayload) -> list[SemanticItem]:
+
+def build_semantic_items(
+    record: AdvisoryRecordPayload,
+    *,
+    advisory_images: list[AdvisoryImageSummary] | None = None,
+) -> list[SemanticItem]:
     subjects_by_id = {subject.id: subject for subject in record.subjects}
     items: list[SemanticItem] = []
     for report in record.reports:
@@ -349,6 +397,22 @@ def build_semantic_items(record: AdvisoryRecordPayload) -> list[SemanticItem]:
             f"Notes: {inquiry.notes}",
         )
         items.append(_semantic_item("query", inquiry.id, inquiry.question, text))
+    for image in advisory_images or []:
+        if not image.detailed_description or not image.detailed_description.strip():
+            continue
+        text = _lines(
+            "PlodAI advisory image",
+            f"Case: {record.title}",
+            f"Profile: {record.profile_description}",
+            f"Default location: {record.default_location}",
+            f"Image name: {image.name}",
+            f"Image ID: {image.id}",
+            f"Location label: {image.location_label}",
+            f"Latitude: {image.latitude}",
+            f"Longitude: {image.longitude}",
+            f"Detailed description: {image.detailed_description}",
+        )
+        items.append(_semantic_item("image", image.id, image.name, text))
     return items
 
 
@@ -394,4 +458,6 @@ def _excerpt(summary: str, text: str) -> str:
 def _item_type(value: str) -> AdvisorySemanticItemType:
     if value == "report":
         return "report"
+    if value == "image":
+        return "image"
     return "query"

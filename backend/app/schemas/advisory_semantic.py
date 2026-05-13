@@ -9,7 +9,7 @@ class AdvisorySemanticSchemaBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-AdvisorySemanticItemType = Literal["report", "query"]
+AdvisorySemanticItemType = Literal["report", "query", "image"]
 
 
 class AdvisorySemanticSearchHit(AdvisorySemanticSchemaBase):

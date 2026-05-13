@@ -8,6 +8,7 @@ import { useAppState } from "../app/context";
 import { publishToast } from "../app/toasts";
 import { AuthPanel } from "./AuthPanel";
 import { ChatKitPane } from "./ChatKitPane";
+import { EvidenceMapPanel } from "./EvidenceMapPanel";
 import { FarmRecordPanel } from "./FarmRecordPanel";
 import {
   createCase,
@@ -520,14 +521,17 @@ export function PlodaiFarmPane() {
       <MetaText>Create an advisory record or choose one from the case pane to open PlodAI.</MetaText>
     </FarmEmptyState>
   ) : (
-    <FarmRecordPanel
-      farm={state.record}
-      isMutating={mutating}
-      showDescriptionSection={isCompactLayout}
-      showOrderMetric={false}
-      showOrdersSection={false}
-      showSummarySection={!isCompactLayout}
-    />
+    <OverviewStack>
+      <EvidenceMapPanel caseId={state.farm.id} images={state.farm.images} />
+      <FarmRecordPanel
+        farm={state.record}
+        isMutating={mutating}
+        showDescriptionSection={isCompactLayout}
+        showOrderMetric={false}
+        showOrdersSection={false}
+        showSummarySection={!isCompactLayout}
+      />
+    </OverviewStack>
   );
 
   const chatPane = (
@@ -562,7 +566,10 @@ export function PlodaiFarmPane() {
         );
       }}
       onClientEffect={(effect) => {
-        if (effect.name !== "advisory_record_updated") {
+        if (
+          effect.name !== "advisory_record_updated" &&
+          effect.name !== "advisory_images_updated"
+        ) {
           return;
         }
         void refreshSelectedFarm();
@@ -705,6 +712,12 @@ const FarmSectionCard = styled.section`
     height: auto;
     overflow: visible;
   }
+`;
+
+const OverviewStack = styled.div`
+  display: grid;
+  gap: 0.72rem;
+  min-width: 0;
 `;
 
 const FarmToolbar = styled.div`

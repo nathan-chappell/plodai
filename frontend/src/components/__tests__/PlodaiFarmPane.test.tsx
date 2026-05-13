@@ -13,6 +13,7 @@ const {
   getCaseMock,
   listCasesMock,
   saveAdvisoryRecordMock,
+  searchAdvisoryMemoryMock,
   searchPlodaiEntitiesMock,
   updateCaseMock,
 } = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const {
   getCaseMock: vi.fn(),
   listCasesMock: vi.fn(),
   saveAdvisoryRecordMock: vi.fn(),
+  searchAdvisoryMemoryMock: vi.fn(),
   searchPlodaiEntitiesMock: vi.fn(),
   updateCaseMock: vi.fn(),
 }));
@@ -65,6 +67,7 @@ vi.mock("../../lib/api", () => ({
   getCase: getCaseMock,
   listCases: listCasesMock,
   saveAdvisoryRecord: saveAdvisoryRecordMock,
+  searchAdvisoryMemory: searchAdvisoryMemoryMock,
   searchPlodaiEntities: searchPlodaiEntitiesMock,
   updateCase: updateCaseMock,
 }));
@@ -143,6 +146,7 @@ describe("PlodaiFarmPane", () => {
     getCaseMock.mockReset();
     listCasesMock.mockReset();
     saveAdvisoryRecordMock.mockReset();
+    searchAdvisoryMemoryMock.mockReset();
     searchPlodaiEntitiesMock.mockReset();
     updateCaseMock.mockReset();
 
@@ -154,6 +158,11 @@ describe("PlodaiFarmPane", () => {
     });
     searchPlodaiEntitiesMock.mockResolvedValue({
       entities: [],
+    });
+    searchAdvisoryMemoryMock.mockResolvedValue({
+      query: "",
+      indexed_item_count: 0,
+      hits: [],
     });
   });
 
