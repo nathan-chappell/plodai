@@ -131,9 +131,31 @@ export type AdvisoryImageSummary = {
   byte_size: number;
   width: number;
   height: number;
+  detailed_description?: string | null;
+  location_label?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   preview_url?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type AdvisorySemanticItemType = "report" | "query" | "image";
+
+export type AdvisorySemanticSearchHit = {
+  item_type: AdvisorySemanticItemType;
+  item_id: string;
+  title: string;
+  excerpt: string;
+  score: number;
+  source_id: string;
+};
+
+export type AdvisorySemanticSearchResponse = {
+  query: string;
+  indexed_item_count: number;
+  hits: AdvisorySemanticSearchHit[];
+  skipped_reason?: string | null;
 };
 
 export type AdvisoryCaseSummary = {

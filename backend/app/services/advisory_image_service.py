@@ -157,6 +157,51 @@ class AdvisoryImageService:
         record.status = "deleted"
         await self.db.commit()
 
+    async def save_image_observation(
+        self,
+        *,
+        user_id: str,
+        case_id: str,
+        image_id: str,
+        detailed_description: str,
+        location_label: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        public_base_url: str | None = None,
+    ) -> AdvisoryImageSummary:
+        record = await self.get_image(user_id=user_id, case_id=case_id, image_id=image_id)
+        cleaned_description = detailed_description.strip()
+        if not cleaned_description:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Image description must be a non-empty string.",
+            )
+        if (latitude is None) != (longitude is None):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Latitude and longitude must be saved together.",
+            )
+        if latitude is not None and not -90 <= latitude <= 90:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Latitude must be between -90 and 90.",
+            )
+        if longitude is not None and not -180 <= longitude <= 180:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Longitude must be between -180 and 180.",
+            )
+
+        record.detailed_description = cleaned_description
+        if location_label is not None:
+            record.location_label = _clean_optional_text(location_label)
+        if latitude is not None and longitude is not None:
+            record.latitude = float(latitude)
+            record.longitude = float(longitude)
+        await self.db.commit()
+        await self.db.refresh(record)
+        return self.serialize_image(record, public_base_url=public_base_url)
+
     async def load_image_bytes(self, record: AdvisoryImage) -> bytes:
         return await self.bucket_service.get_object_bytes(key=record.storage_key)
 
@@ -177,6 +222,10 @@ class AdvisoryImageService:
             byte_size=record.byte_size,
             width=record.width,
             height=record.height,
+            detailed_description=record.detailed_description,
+            location_label=record.location_label,
+            latitude=record.latitude,
+            longitude=record.longitude,
             preview_url=self.build_public_preview_url(
                 record,
                 public_base_url=public_base_url,
@@ -231,6 +280,7 @@ class AdvisoryImageService:
                 file_bytes=file_bytes,
                 mime_type=resolved_mime_type,
             )
+        gps_location = extract_image_gps_location(file_bytes)
         record = AdvisoryImage(
             id=f"image_{uuid4().hex}",
             case_id=case_id,
@@ -245,6 +295,8 @@ class AdvisoryImageService:
             byte_size=len(file_bytes),
             width=width,
             height=height,
+            latitude=gps_location[0] if gps_location is not None else None,
+            longitude=gps_location[1] if gps_location is not None else None,
             status="available",
         )
         self.db.add(record)
@@ -277,3 +329,63 @@ class ImageProbe:
             raise RuntimeError("Image probe is not open.")
         width, height = self._image.size
         return int(width), int(height)
+
+
+def extract_image_gps_location(file_bytes: bytes) -> tuple[float, float] | None:
+    try:
+        from PIL import ExifTags, Image
+
+        with Image.open(BytesIO(file_bytes)) as image:
+            exif = image.getexif()
+            if not exif:
+                return None
+            gps_tag = next(
+                tag for tag, name in ExifTags.TAGS.items() if name == "GPSInfo"
+            )
+            raw_gps = exif.get_ifd(gps_tag)
+    except Exception:
+        return None
+
+    if not raw_gps:
+        return None
+    gps = {
+        ExifTags.GPSTAGS.get(key, key): value
+        for key, value in raw_gps.items()
+    }
+    latitude = _gps_coordinate(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef"))
+    longitude = _gps_coordinate(gps.get("GPSLongitude"), gps.get("GPSLongitudeRef"))
+    if latitude is None or longitude is None:
+        return None
+    return latitude, longitude
+
+
+def _gps_coordinate(value: object, reference: object) -> float | None:
+    if not isinstance(value, (tuple, list)) or len(value) != 3:
+        return None
+    decimal = (
+        _rational_float(value[0])
+        + (_rational_float(value[1]) / 60)
+        + (_rational_float(value[2]) / 3600)
+    )
+    ref = str(reference or "").upper()
+    if ref in {"S", "W"}:
+        decimal *= -1
+    return decimal
+
+
+def _rational_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        numerator = getattr(value, "numerator", None)
+        denominator = getattr(value, "denominator", None)
+        if isinstance(numerator, int) and isinstance(denominator, int) and denominator:
+            return numerator / denominator
+    return 0.0
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None

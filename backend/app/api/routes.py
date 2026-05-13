@@ -39,6 +39,10 @@ from backend.app.schemas.advisory import (
     AdvisoryCaseSummary,
     AdvisoryCaseUpdateRequest,
 )
+from backend.app.schemas.advisory_semantic import (
+    AdvisorySemanticSearchRequest,
+    AdvisorySemanticSearchResponse,
+)
 from backend.app.schemas.plodai_entities import (
     PlodaiEntitySearchRequest,
     PlodaiEntitySearchResponse,
@@ -50,6 +54,7 @@ from backend.app.services.clerk_admin_service import (
 )
 from backend.app.services.credit_service import CreditService
 from backend.app.services.advisory_image_service import AdvisoryImageService
+from backend.app.services.advisory_semantic_service import AdvisorySemanticService
 from backend.app.services.advisory_service import AdvisoryService
 from backend.app.services.free_credits import FreeCreditService
 from backend.app.services.payments import PaymentService
@@ -401,6 +406,24 @@ async def put_advisory_record(
         record=payload.record,
     )
     return AdvisoryRecordResponse(case_id=case_id, record=record)
+
+
+@router.post(
+    "/advisory/cases/{case_id}/semantic-search",
+    response_model=AdvisorySemanticSearchResponse,
+)
+async def search_advisory_memory(
+    case_id: str,
+    payload: AdvisorySemanticSearchRequest,
+    user: AuthenticatedUser = Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdvisorySemanticService(db).search_reports_and_queries(
+        user_id=user.id,
+        case_id=case_id,
+        query=payload.query,
+        max_results=payload.max_results,
+    )
 
 
 @router.post("/advisory/cases/{case_id}/images", response_model=AdvisoryImageUploadResponse)

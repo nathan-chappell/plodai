@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict
 from backend.app.agents.context import AdvisoryAgentContext
 from backend.app.chatkit.metadata import merge_chat_metadata
 from backend.app.schemas.advisory import AdvisoryRecordPayload
+from backend.app.services.advisory_image_service import AdvisoryImageService
+from backend.app.services.advisory_semantic_service import AdvisorySemanticService
 from backend.app.services.advisory_service import AdvisoryService
 
 ChatKitToolContext = ToolContext[ChatKitAgentContext[AdvisoryAgentContext]]
@@ -25,6 +27,8 @@ class SaveAdvisoryRecordArgs(BaseModel):
 
 def build_plodai_tools(context: AdvisoryAgentContext) -> list[Tool]:
     advisory_service = AdvisoryService(context.db)
+    image_service = AdvisoryImageService(context.db)
+    semantic_service = AdvisorySemanticService(context.db, advisory_service=advisory_service)
 
     @function_tool(name_override="name_current_thread")
     async def name_current_thread_tool(
@@ -98,9 +102,72 @@ def build_plodai_tools(context: AdvisoryAgentContext) -> list[Tool]:
             "record": saved_record.model_dump(mode="json"),
         }
 
+    @function_tool(name_override="search_advisory_memory")
+    async def search_advisory_memory_tool(
+        ctx: ChatKitToolContext,
+        query: str,
+        max_results: int = 6,
+    ) -> dict[str, Any]:
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            raise ValueError("query must be a non-empty string")
+        request_context = ctx.context.request_context
+        response = await semantic_service.search_reports_and_queries(
+            user_id=request_context.user_id,
+            case_id=request_context.case_id,
+            query=cleaned_query,
+            max_results=max(1, min(max_results, 12)),
+        )
+        return response.model_dump(mode="json")
+
+    @function_tool(name_override="save_advisory_image_observation")
+    async def save_advisory_image_observation_tool(
+        ctx: ChatKitToolContext,
+        image_id: str,
+        detailed_description: str,
+        location_label: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> dict[str, Any]:
+        cleaned_image_id = image_id.strip()
+        if not cleaned_image_id:
+            raise ValueError("image_id must be a non-empty string")
+        cleaned_description = detailed_description.strip()
+        if not cleaned_description:
+            raise ValueError("detailed_description must be a non-empty string")
+
+        request_context = ctx.context.request_context
+        image = await image_service.save_image_observation(
+            user_id=request_context.user_id,
+            case_id=request_context.case_id,
+            image_id=cleaned_image_id,
+            detailed_description=cleaned_description,
+            location_label=location_label,
+            latitude=latitude,
+            longitude=longitude,
+        )
+        await ctx.context.stream(
+            ProgressUpdateEvent(text=f"Saved image evidence metadata for {image.name}.")
+        )
+        await ctx.context.stream(
+            ClientEffectEvent(
+                name="advisory_images_updated",
+                data={
+                    "case_id": request_context.case_id,
+                    "image_id": image.id,
+                },
+            )
+        )
+        return {
+            "case_id": request_context.case_id,
+            "image": image.model_dump(mode="json"),
+        }
+
     return [
         name_current_thread_tool,
         get_advisory_record_tool,
         save_advisory_record_tool,
+        search_advisory_memory_tool,
+        save_advisory_image_observation_tool,
         WebSearchTool(search_context_size="medium"),
     ]

@@ -158,6 +158,10 @@ class AdvisoryImageSummary(AdvisorySchemaBase):
     byte_size: int = Field(ge=0)
     width: int = Field(ge=0)
     height: int = Field(ge=0)
+    detailed_description: str | None = None
+    location_label: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     preview_url: str | None = None
     created_at: str
     updated_at: str

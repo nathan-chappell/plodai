@@ -22,6 +22,7 @@ import type {
   AdvisoryRecordPayload,
   AdvisoryRecordResponse,
   AdvisoryCaseSummary,
+  AdvisorySemanticSearchResponse,
 } from "../types/advisory";
 
 const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL ?? "/api");
@@ -190,6 +191,23 @@ export async function searchPlodaiEntities(params: {
       method: "POST",
       body: JSON.stringify({
         query: params.query,
+      }),
+    },
+  );
+}
+
+export async function searchAdvisoryMemory(params: {
+  caseId: string;
+  query: string;
+  maxResults?: number;
+}): Promise<AdvisorySemanticSearchResponse> {
+  return apiRequest<AdvisorySemanticSearchResponse>(
+    `/advisory/cases/${encodeURIComponent(params.caseId)}/semantic-search`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        query: params.query,
+        max_results: params.maxResults ?? 8,
       }),
     },
   );
