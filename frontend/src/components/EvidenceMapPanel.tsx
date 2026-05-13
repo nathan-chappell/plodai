@@ -71,7 +71,7 @@ export function EvidenceMapPanel({ caseId, images }: EvidenceMapPanelProps) {
   }
 
   return (
-    <EvidenceSection>
+    <EvidenceSection data-testid="evidence-map-panel">
       <EvidenceHeader>
         <div>
           <EvidenceEyebrow>Field evidence</EvidenceEyebrow>

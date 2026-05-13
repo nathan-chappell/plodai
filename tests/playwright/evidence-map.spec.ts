@@ -63,4 +63,11 @@ test("renders walnut photo markers and highlights matching image evidence", asyn
     "data-highlighted",
     "true",
   );
+  await expect(page.getByTestId("evidence-map-panel")).toHaveScreenshot(
+    "evidence-map-walnut-highlighted.png",
+    {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.02,
+    },
+  );
 });
