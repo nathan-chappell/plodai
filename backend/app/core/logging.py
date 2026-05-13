@@ -8,10 +8,10 @@ from typing import Any
 from backend.app.core.config import get_settings
 from colorlog import ColoredFormatter
 
-APP_LOGGER_NAME = "report_foundry"
-EVENT_NAME_ATTR = "report_foundry_event_name"
-EVENT_FIELDS_ATTR = "report_foundry_event_fields"
-EVENT_BODY_ATTR = "report_foundry_event_body"
+APP_LOGGER_NAME = "plodai"
+EVENT_NAME_ATTR = "plodai_event_name"
+EVENT_FIELDS_ATTR = "plodai_event_fields"
+EVENT_BODY_ATTR = "plodai_event_body"
 COMPILE_LOG_DEDUPE_WINDOW_SECONDS = 300.0
 
 _dedupe_lock = Lock()

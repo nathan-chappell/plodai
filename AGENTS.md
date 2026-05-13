@@ -1,13 +1,13 @@
-# report-foundry
+# plodai
 
 ## Current product
-This repo is primarily a demo of frontend agents being exposed to the runtime in a conventional, reusable way. The main idea is that a useful TypeScript or frontend agent module can be packaged cleanly, made available to one agent quickly, and then reused by other agents with minimal ceremony.
+This repo is an agriculture assistant and information-gathering application. The main product flow helps users collect field evidence, ask agricultural questions, report production problems, and preserve useful context as structured advisory data.
 
 ## Current architecture
 - Keep the frontend and shared tooling at the repo root.
 - Keep Python application code under `backend/`.
 - Even with separate frontend and backend subdirectories, treat the repository root as the working root for both toolchains, e.g. run `npm install` and `python -m venv .venv` from the repo root.
-- Treat the frontend agent-module structure as a core architectural feature of the project.
+- Treat the frontend advisory workspace and agent-module structure as core architectural features of the project.
 - Define frontend agents in a conventional shape so they are easy to wire into agent specs, demo scenarios, and frontend-to-agent exposure.
 - Keep the backend straightforward: expose the frontend-provided agents to the runtime, handle the necessary plumbing, and do a small amount of bookkeeping.
 - Use FastAPI, ChatKit, the OpenAI Agents SDK, and the Conversations API for the interactive runtime.
@@ -17,7 +17,7 @@ This repo is primarily a demo of frontend agents being exposed to the runtime in
 - The Python baseline for this repo is `python3.14` or newer.
 
 ## Backend posture
-- Keep the backend light. This is intentionally a portfolio project with minimal infrastructure.
+- Keep the backend light. This is intentionally a compact product with minimal infrastructure.
 - The most important backend responsibility is correctly wiring the Agents SDK, ChatKit, and Conversations API together - it provides the agentic engine, the frontend declares the agents and provides callbacks for tool calls.
 - Changes in this area must be made in consultation with the actual code, including checking the installed SDK code in the local venv when behavior is unclear.
 
