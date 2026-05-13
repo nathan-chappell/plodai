@@ -88,6 +88,7 @@ def test_build_plodai_agent_supports_english_output_preference() -> None:
 def test_base_instructions_describe_tools_and_eager_record_updates() -> None:
     assert "`get_advisory_record`" in BASE_INSTRUCTIONS
     assert "`save_advisory_record`" in BASE_INSTRUCTIONS
+    assert "`search_advisory_memory`" in BASE_INSTRUCTIONS
     assert "`name_current_thread`" in BASE_INSTRUCTIONS
     assert "farmer support and field intelligence assistant" in BASE_INSTRUCTIONS
     assert "digital AKIS-style workspace" in BASE_INSTRUCTIONS
@@ -138,6 +139,9 @@ def test_build_plodai_agent_exposes_hosted_web_search_tool() -> None:
     agent = build_plodai_agent(context, model="gpt-5.4-mini")
 
     assert any(isinstance(tool, WebSearchTool) for tool in agent.tools)
+    assert "search_advisory_memory" in {
+        getattr(tool, "name", None) for tool in agent.tools
+    }
 
 
 def test_build_model_settings_requests_web_search_sources() -> None:

@@ -14,6 +14,7 @@ def import_models() -> tuple[type[Base], ...]:
         AdvisoryChatEntry,
         AdvisoryImage,
         AdvisoryRecord,
+        AdvisorySemanticSource,
     )
     from backend.app.models.payment_attempt import PaymentAttempt
 
@@ -25,6 +26,7 @@ def import_models() -> tuple[type[Base], ...]:
         FreeCreditRequest,
         AdvisoryCase,
         AdvisoryRecord,
+        AdvisorySemanticSource,
         AdvisoryImage,
         AdvisoryChat,
         AdvisoryChatEntry,

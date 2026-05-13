@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.session import Base
@@ -36,6 +36,42 @@ class AdvisoryRecord(Base, kw_only=True):
         primary_key=True,
     )
     payload_json: Mapped[dict] = mapped_column(JSON, default_factory=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        init=False,
+        default_factory=lambda: datetime.now(UTC),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        init=False,
+        default_factory=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class AdvisorySemanticSource(Base, kw_only=True):
+    __tablename__ = "advisory_semantic_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id",
+            "item_type",
+            "item_id",
+            name="uq_advisory_semantic_sources_item",
+        ),
+        {"schema": APP_SCHEMA_KEY},
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(Text, index=True)
+    case_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{APP_SCHEMA_KEY}.advisory_cases.id"),
+        index=True,
+    )
+    item_type: Mapped[str] = mapped_column(Text, index=True)
+    item_id: Mapped[str] = mapped_column(Text, index=True)
+    source_id: Mapped[str] = mapped_column(Text, index=True)
+    content_hash: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         init=False,

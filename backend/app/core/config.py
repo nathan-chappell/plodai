@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     database_shared_schema: str = "public"
     database_startup_retry_attempts: int = Field(default=5, ge=1)
     database_startup_retry_delay_seconds: float = Field(default=1.0, ge=0.0)
+    semantic_search_enabled: bool = True
+    semantic_vectorstore_database_url: str = "sqlite+aiosqlite:///./.local/plodai-vectorstore2.db"
+    semantic_vectorstore_database_schema_mode: Literal["create_all", "migrations"] = "create_all"
+    semantic_vectorstore_postgres_schema: str | None = "plodai_vectorstore2"
+    semantic_vectorstore_storage_dir: str = ".local/plodai-vectorstore2-storage"
+    semantic_vectorstore_log_file_path: str | None = ".local/logs/plodai-vectorstore2.log"
     static_dir: str = "./dist"
     openai_max_retries: int = 5
     plodai_chat_attachment_max_bytes: int = 10 * 1024 * 1024

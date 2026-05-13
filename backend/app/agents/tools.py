@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from backend.app.agents.context import AdvisoryAgentContext
 from backend.app.chatkit.metadata import merge_chat_metadata
 from backend.app.schemas.advisory import AdvisoryRecordPayload
+from backend.app.services.advisory_semantic_service import AdvisorySemanticService
 from backend.app.services.advisory_service import AdvisoryService
 
 ChatKitToolContext = ToolContext[ChatKitAgentContext[AdvisoryAgentContext]]
@@ -25,6 +26,7 @@ class SaveAdvisoryRecordArgs(BaseModel):
 
 def build_plodai_tools(context: AdvisoryAgentContext) -> list[Tool]:
     advisory_service = AdvisoryService(context.db)
+    semantic_service = AdvisorySemanticService(context.db, advisory_service=advisory_service)
 
     @function_tool(name_override="name_current_thread")
     async def name_current_thread_tool(
@@ -98,9 +100,28 @@ def build_plodai_tools(context: AdvisoryAgentContext) -> list[Tool]:
             "record": saved_record.model_dump(mode="json"),
         }
 
+    @function_tool(name_override="search_advisory_memory")
+    async def search_advisory_memory_tool(
+        ctx: ChatKitToolContext,
+        query: str,
+        max_results: int = 6,
+    ) -> dict[str, Any]:
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            raise ValueError("query must be a non-empty string")
+        request_context = ctx.context.request_context
+        response = await semantic_service.search_reports_and_queries(
+            user_id=request_context.user_id,
+            case_id=request_context.case_id,
+            query=cleaned_query,
+            max_results=max(1, min(max_results, 12)),
+        )
+        return response.model_dump(mode="json")
+
     return [
         name_current_thread_tool,
         get_advisory_record_tool,
         save_advisory_record_tool,
+        search_advisory_memory_tool,
         WebSearchTool(search_context_size="medium"),
     ]
